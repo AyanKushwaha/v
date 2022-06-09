@@ -1,0 +1,183 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   Definitions for standby handling used in the tracking ruleset
+ *
+ * Sections:
+ *   1. Basic definitions for standby-duties
+ *   2. Convert to standby
+ *   3. Use standby
+ *   4. Calculations for determining callout and duty-time
+ *
+ * Created by:
+ *   David Lennartsson, 9-June-2006
+ *
+ * Major changes:
+ *
+ */
+
+module standby_cct inherits standby
+
+import fundamental;
+import levels;
+import crew;
+import trip;
+import duty;
+import leg;
+import task;
+import crg_basic;
+import rescheduling;
+
+import attributes;
+
+/****************************************************************
+ * Section 1: Basic definitions for standby-duties
+ ***************************************************************/
+
+/* The duty is a home or hotel (NOT airport) standby callout.
+*  Note that there may be a duty-level break (>5h) between the standby leg and
+*  the callout activity; in this case, the variable will be true for BOTH duties.
+*  (In fact, currently (20Apr2009) this will be a *trip* break.)
+*/ 
+redefine export %duty_is_standby_callout% =
+  first(leg(duty), %leg_is_standby_callout%
+                   or %leg_is_callout_from_standby%);
+
+export %duty_is_standby_callout_to_check_in_same_day% =
+  first(leg(duty),(%leg_is_standby_callout% and not is_last(leg(duty))) or
+                  (%leg_is_callout_from_standby% and
+                   prev(leg(chain),round_down(leg.%start_hb%,24:00)) = duty.%start_day%));
+
+/* The duty is an airport standby callout.
+*  Note: Both %duty_is_standby_callout% and %duty_is_airport_callout%
+*        can be true on the same duty.
+*/
+redefine export %duty_is_airport_callout% =
+  any(leg(duty), %leg_is_airport_callout%
+                 or %leg_is_callout_from_airport%);
+
+/* When performing a callout via Studio, a "CALLOUT" attribute is set on the
+*  standby leg. We can use this to detect duty-level break callouts.
+*/
+redefine export %leg_is_standby_callout% =
+  leg.%is_standby_with_rest%
+  and (%_this_standby_is_callout_according_to_duty%
+       or %_this_standby_is_callout_according_to_attribute%);
+
+redefine export %leg_is_airport_callout% =
+  leg.%is_standby_at_airport%
+  and (%_this_standby_is_callout_according_to_duty%
+       or %_this_standby_is_callout_according_to_attribute%);
+  
+redefine export %leg_is_callout_from_standby% =
+  default(prev(leg(chain), %leg_is_standby_callout%), false);
+  
+redefine export %leg_is_callout_from_airport% =
+  default(prev(leg(chain), %leg_is_airport_callout%), false);
+
+%_this_standby_is_callout_according_to_duty% =
+  default(next(leg(duty), %_leg_can_be_called_out_to%), false);
+%_this_standby_is_callout_according_to_attribute% =
+  (not void(%callout_transport_time%))
+  and default(next(leg(chain), %_leg_can_be_called_out_to%), false);
+  
+%_leg_can_be_called_out_to% =
+  leg.%is_on_duty%
+  and not leg.%is_standby_with_rest%
+  and not leg.%is_blank_day%;
+
+redefine export %callout_time% =
+  if %leg_is_standby_callout%
+  then leg.%end_utc%
+  else void_abstime;
+
+redefine export %airport_callout_time% =
+  if %leg_is_airport_callout%
+  then leg.%end_utc%
+  else void_abstime;
+  
+%callout_transport_time% =
+  if fundamental.%rave_evaluation_publish_type% = "LATEST"
+  then %callout_transport_time_latest%
+  else if fundamental.%rave_evaluation_publish_type% = "PUBLISHED"
+       or fundamental.%rave_evaluation_publish_type% = "INFORMED"
+       or fundamental.%rave_evaluation_publish_type% = "DELIVERED"
+       then %callout_transport_time_published%
+  else if fundamental.%rave_evaluation_publish_type% = "SCHEDULED"
+       then void_reltime
+  else %callout_transport_time_latest%;
+  
+%callout_transport_time_latest% =
+  attributes.%assignment_attr_rel%("CALLOUT");
+  
+%callout_transport_time_published% =
+  attributes.%assignment_attr_int%("CALLOUT") * 0:01;
+
+/****************************************************************
+ * Section 2: Convert to Standby
+ ***************************************************************/
+
+/* Currently no codes are needed for convert to SBY, possibly place
+   some logic here when need arises */
+
+/****************************************************************
+ * Section 3: Use Standby's
+              These definitions are also used from python
+              AssignmentCustomization.py and
+              carmusr/tracking/Standby.py
+ ***************************************************************/
+
+redefine export %local_transport_time% = 
+  default(%callout_transport_time%, %default_local_transport_time%);
+
+%default_callout_time% = 
+  leg.%ci_start_uptodate_utc% - %default_local_transport_time%;
+  
+/* The same variables are needed in python function Standby.convertToReserve
+   at a stage before the function is assigned
+*/
+export %local_transport_time_func%(String station, Abstime check_time, Bool is_long_haul) = 
+  if fundamental.%station2base%(station) = crew.%base_at_date%(check_time) then
+    default(%special_transport_time_func%(check_time),
+            %home_transport_time_func%(station, check_time, is_long_haul))
+  else 
+    %hotel_transport_time%(station);
+
+/* Definition used in CustomMenuStates.py to determine whether the
+* "Restore Standby" menu item is to be enabled for a leg or not.
+*/
+%can_restore_standby% =
+  default(%leg_is_standby_callout% or %leg_is_airport_callout%, False);
+  
+%_leg_is_callout% =
+  %leg_is_callout_from_standby% or %leg_is_callout_from_airport%;
+  
+/* Identifies the first leg in the called-out-to duty when the current leg is
+*  a standby with callout. That duty can be removed at "Restore Standby".
+*/
+%callout_leg_identifier% =
+  default(next(leg(chain), if %_leg_is_callout%
+                           then format_int(leg_identifier, "%d") else "")
+         ,"");
+
+/* The last day (hb) of the called-out-to trip.
+*/  
+%callout_trip_end_day% =
+  default(next(leg(chain), if %_leg_is_callout%
+                           then trip.%end_day% else void_abstime)
+         ,trip.%end_day%);
+
+/* The current leg is assumed to be a standby with callout. Here, we get the
+*  new end-time to use at a "Restore Standby" operation. The value depends on
+*  whether there is an INFORMED standby on the current standby day or not.
+*/
+%leg_standby_restore_end_utc% =
+  if rescheduling.%leg_inf_is_standby%
+     or rescheduling.%leg_inf_is_airport_standby%
+  then default(crew.%utc_time%(rescheduling.%leg_inf_checkout%), leg.%end_utc%)
+  else leg.%end_utc%;
+
+
+/* End of file */

@@ -1,0 +1,168 @@
+/* -*- crc -*-
+ *
+ * Purpose:
+ *   This module contains cabin crew specific absence definitions
+ *   used in absence refresher rules, costs and select filters.
+ *
+ * Sections:
+ *   1. Functions
+ *
+ * Created by:
+ *   Henrik Albertson, 30apr2007
+ *
+ * Major changes:
+ */
+
+module absence_cc inherits absence
+
+/****************************************************************
+ * Section 1: Functions
+ ***************************************************************/
+/*
+** General functions only applicable to cabin crew
+*/
+
+/*
+** Redefinitions of functions in parent module
+*/
+redefine %type_at_date%(String ac_qual, Abstime date) =
+  if %_type_at_date%(date) ="ac" then ac_qual 
+  else "all";
+    
+%_type_at_date%(Abstime date) =
+  if %all_ac_qual_at_date%(date) then "all"
+  else "ac";
+
+/* The absence limit "all 91d-6m" only exists for crew with 3 quals */
+export %all_ac_qual_at_date%(Abstime date) =
+  let last_flown = %last_flown_ac%("", date);
+  (%days_since%(date, last_flown) > 90 and %_had_3_quals%(last_flown))
+  or 
+  add_months(round_up_month(last_flown),6) < date;
+  
+%_had_3_quals%(Abstime date) =
+  crew.%max_iter%("ACQUAL", date) > 2;
+  
+%last_flown_ac%(String ac_qual, Abstime date) =
+  let last_flown = recency.%last_flown_ac_qual%(ac_qual, date);
+  if last_flown = 1Jan1986 then
+    /* New qual, lets count from qual start */
+    crew.%qln_entry_date%("ACQUAL", ac_qual, date)
+  else
+    last_flown;
+    
+%_last_flown_ac%(String ac_qual, Abstime date) =
+  if %_type_at_date%(date) = "ac" then %last_flown_ac%(ac_qual, date)
+  else %last_flown_ac%("", date);
+  
+redefine export %reqd_training_str_at_date%(String ac_qual, Abstime date) =
+  concat(%reqd_gnd_training_str_at_date%(ac_qual, date),
+         " and 2 RELEASE");
+  
+redefine %reqd_gnd_training_str_at_date%(String ac_qual, Abstime date) =
+  concat(%_req_training_str_at_date%(ac_qual, date), %_req_str%(ac_qual, date));
+
+redefine %reqd_flt_training_str_at_date%(String ac_qual, Abstime date) =
+  concat(%_req_training_str_at_date%(ac_qual, date), "2 RELEASE");
+
+%_req_training_str_at_date%(String ac_qual, Abstime date) =
+  concat("Absence ", 
+         if %all_ac_qual_at_date%(date) then "all"
+         else ac_qual,
+         ", ",
+         %_level_str%(ac_qual, date),
+         format_time(%_start%(ac_qual, date), " since %02d%02b%Y"),
+         ", needs ");
+
+table absence_level(String ac_qual, Abstime date) =
+  alias last_flown = round_up(%_last_flown_ac%(ac_qual, date),24:00),
+        last_month = round_up_month(%_last_flown_ac%(ac_qual, date));
+  %all_ac_qual_at_date%(date),
+  %_had_3_quals%(%last_flown_ac%("", date)),
+  add_months(last_month, 60) < date,
+  add_months(last_month, 12) < date,
+  add_months(last_month, 6) < date,
+  %days_since%(date, last_flown) > 90
+      ->    %_level%,
+            export %_start%,
+            %_level_str%,
+            %_req_str%,
+            %_req_gnd_type%,
+            export %crew_warning%;
+            
+  /* Absence all */
+  y, -, y, -, -, -  -> 60, add_months(last_month, 60), "5y", "INITIAL", false, "f1";
+  y, -, n, y, -, -  -> 12, add_months(last_month, 12), "12m-5y", "CRB", training.%conv_refrB%(ac_qual), "f1";
+  y, -, n, n, y, -  -> 6,  add_months(last_month, 6), "6m-12m", "CRA", training.%conv_refrA%(ac_qual), "f1";
+  y, y, n, n, n, y  -> 3, last_flown + 91*24:00, "91d-6m", %_91d_6m_need%(ac_qual, date), %_91d_6m_valid_training%(ac_qual, date), "f2";
+  
+  /* Absence actype */
+  n, -, -, y, -, -  -> 12, add_months(last_month, 12), ">12m", "CONV", training.%conversion%(ac_qual), "a1";
+  n, n, -, n, y, -  -> 6,  add_months(last_month, 6), "6m-12m", "REF", training.%refresher%(ac_qual), "a2";
+  n, y, -, n, -, y  -> 3, last_flown + 91*24:00, "91d-12m", "REF", training.%refresher%(ac_qual), "a2";
+  
+  -, -, -, -, -, -  -> 0,1jan1986, "", "", false, "";
+end
+
+export %crew_is_absent_on_leg% =
+  training.%logged_qual_start%(leg.%start_utc%, leg.%qual%) and
+  %_level%(leg.%qual%, leg.%start_utc%) > 0;
+
+export %crew_is_absent_all%(Abstime date) =
+  %all_ac_qual_at_date%(date) and
+  %_level%("", date) > 0;
+
+/* Crew might be absent all for these variables, but that should be handled
+   when using them (e.g. crew warnings hierarchy) */
+export %crew_is_absent_ac%(String ac_qual, Abstime date) =
+  %_level%(ac_qual, date) > 0;
+
+table all_91d_6m_special(String ac_qual, Abstime date) =
+  %valid_recurrent%(date) -> %_91d_6m_need%, %_91d_6m_valid_training%;
+  true                    -> "REF", training.%refresher%(ac_qual);
+  false                   -> "CRA", training.%conv_refrA%(ac_qual);
+end
+ 
+%valid_recurrent%(Abstime date) =
+  round_down_year(date) <= round_down_year(training.%recurrent_type_expiry_date_incl_performed%("REC", %any_ac_qual%, date, false)-0:01);
+  
+/* It is the absence level at time of course that defines required course, in
+   the case where an absence level is passed between course and flights */
+redefine %_ground_training_date%(String ac_qual, Abstime date) =
+  if ac_qual <> "---" then
+    %_gnd_training_date%(ac_qual, date)
+  else
+    max(times(crew.%ac_qln_max_iter_at_date%(date)), 
+              %_gnd_training_date%(crew.%ac_qln_at_date_ix%(date, %times_index_0%), date));
+  
+%_gnd_training_date%(String ac_qual, Abstime date) =
+  prev(leg(roster), leg.%end_hb%)
+  where (duty.%is_ground_duty% and
+         %_req_gnd_type%(ac_qual, leg.%start_date%));
+  
+/* Leg dependent */
+redefine %_nr_flight_training_legs%(String ac_qual, Abstime date) =
+  let aoc = recency.%aoc_for_ac_qln%(ac_qual),
+      stop = %ground_training_date_leg_start% + 14 * 24:00;
+  count(leg(roster))
+  from (current) forwards
+  while (leg.%start_date% <= stop and
+         /* Special case for CC SKN AL: No other active flights after training than A3A4 *
+         /* Not allowed to mix legs belonging to different aoc's during training */
+         %aoc% = aoc and
+         not (leg.%is_blank_day% or leg.%is_standby%) and
+         (leg.%is_release% or
+         not leg.%is_flight_duty% or 
+         leg.%is_deadhead% or
+         not %_check_qual%(ac_qual)))
+  where (leg.%is_active_flight% and
+         %_check_qual%(ac_qual));
+  
+redefine %_reqd_flight_training_legs%(String ac_qual, Abstime date) = 2;
+redefine %_reqd_flight_training_type%(String ac_qual, Abstime date) = false;
+
+/* Cached */
+%any_ac_qual% = training.%any_ac_qual%;
+
+/* end of file */
+

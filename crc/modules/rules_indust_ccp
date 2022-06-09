@@ -1,0 +1,1160 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains industrial rules used in Carmen Crew Pairing and as studio only
+ *   in Carmen Crew Rostering and Carmen Crew Tracking respectively.
+ *
+ * Sections:
+ *   1. Connection rules (minimum connection)
+ *   2. Duty rules (duty pass, 1x24, 3x24, 7x24)
+ *   3. Rest rules
+ *
+ * Created by:
+ *   Henrik Albertson, 19-Dec-2005
+ *
+ * Major changes:
+ *  Stefan Hansson, 09Oct2007:
+ *      Changed rule ind_min_connection_time_ALL, so that the failobject points
+ *      to next(leg). This is the way trackers want violations presented:
+ *      The problem shall be indicated where it can be solved, namely by doing
+ *      something with the leg after the connection.
+ *      I preferred to do it this way instead of evaluating the rule
+ *      on the leg after the connection, since it's a pairing optimization rule,
+ *      and I'm not sure how the optimizer is affected by moving the legality
+ *      check from one point to another.
+ *   Hasse Eliasson, 2009May6:
+ *     Meal Rules were moved to rules_meal_ccp, so that they
+ *     could be redefined for Tracking, in a sub module using inheritance.
+ *
+ */
+
+root module rules_indust_ccp
+import fundamental;
+import levels;
+import base_product;
+import leg;
+import duty;
+import trip;
+import connection;
+import rest;
+import duty_time;
+import rule_exceptions;
+import base_break;
+import soft_locks;
+import rules;
+import system_db_parameters;
+import parameters;
+import duty_period;
+import fdp;
+import oma16;
+
+/****************************************************************
+ * Section 1: Connection rules
+ ***************************************************************/
+
+/*
+** Rule: 
+**    Minimum connection time
+** 
+** Description:
+**    The rule checks the connection time to the maximum value of 
+**    %min_connection_coterminals% or %min_connection%.
+**
+** Agreement:
+**    ??
+**
+** Valid for:
+**    All
+**
+** CR: 
+**   ??
+*/
+export rule ind_min_connection_time_ALL =
+  valid %ind_min_connection_time_valid%;
+
+    %min_connection_value% >= 
+    %minimum_connection_time% - 
+    rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%) + 
+    soft_locks.%cxn_buffer%;
+    
+  startdate = leg.%activity_scheduled_start_time_UTC%; /* NOTE: The failobject is next(leg)! */
+  severity = %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = next(leg(duty), leg.%failobject_departure%);
+  failtext(Reltime value, Reltime limit) =
+    rules.%failtext_rel%(concat("Coll: Cnx ", leg.%flight_name%," - ",
+           next(leg(duty), leg.%flight_name%)),
+           value, limit);
+  remark "Coll. Min connection time between activities",
+  planner "The rule checks that the minimum allowed connection"
+	        " is satisified. The minimum connection times can be"
+          " changed in a table.";
+end
+
+export %ind_min_connection_time_valid% =
+    trip.%check_rules% and 
+    duty.%in_pp_extended% and
+    duty.%has_flight_duty% and
+    connection.%normal_connection% and 
+    not %valid_training_connection% and
+    (%is_flight_duty_connection% or
+     %is_gnd_flight_duty_connection%);
+
+/* Redefined in rules_indust_ccp_fc_calibration_lookback and rules_indust_ccp_cc_calibration_lookback */
+export %min_connection_value% = connection.%connection_time%;
+
+export %is_flight_duty_connection% =
+  (leg.%is_flight_duty%) and
+   next(leg(duty), leg.%is_flight_duty%);
+  
+%is_gnd_flight_duty_connection% =
+  %cabin_crew% and
+  leg.%is_ground_duty% and (not leg.%is_standby%) and
+  next(leg(duty), leg.%is_active_flight%);
+
+export %minimum_connection_time% = 
+  if %is_gnd_flight_duty_connection% then
+    next(leg(duty), leg.%check_in_default_cc_flight%)
+  else if leg.%arrival_airport_name% = next(leg(duty), leg.%departure_airport_name%) then
+    connection.%min_time_connection%
+  else
+    nmax(connection.%min_time_when_coterminals%, connection.%min_time_connection%);
+
+  
+/* For critical connection in teaming the minimum connection time can only depend
+   on the connection itself (not the full chain), therefore another version of
+   employer code is used. This version does not work for DH or ground tasks,
+   but critical connections isn't used for these anyway so that is ok.
+*/
+export %leg_scoped_minimum_connection_time% =
+if leg.%arrival_airport_name% = next(leg(duty), leg.%departure_airport_name%) then
+  connection.%leg_scoped_min_time_connection%
+else
+  nmax(connection.%min_time_when_coterminals%, connection.%leg_scoped_min_time_connection%);
+
+
+/*
+** Rule: 
+**    Training connection
+** 
+** Description:
+**    The rule checks that the minimum connection time to and from
+**    training activities is satisfied. 
+**    Activites that will be checked are (Initial) Line Check and 
+**    simulator or recurrent training (default assumed in STO).
+**
+** Agreement:
+**    ??
+*/
+
+rule ind_min_training_connection_ALL =
+  valid trip.%check_rules% and
+        duty.%in_pp_extended% and
+        (duty.%is_simulator% or
+         duty.%is_recurrent% or 
+         (duty.%has_any_pilot_on_lc_or_ilc% and not duty.%is_ski%)) and 
+        %valid_training_connection% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+        
+  connection.%connection_time% >=
+    %min_training_connection_time%;
+  startdate = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = next(leg(trip), leg.%failobject_departure%);
+  failtext(Reltime value, Reltime limit) =
+    rules.%failtext_rel%(concat("Coll: Training cnx ", leg.%flight_name%," - ",
+           next(leg(duty), leg.%flight_name%)),
+           value, limit);
+  remark "Coll: Min connection time to/from training activities",
+  planner "The rule checks that the minimum connection time to" 
+          "and from training activities (LC, ILC, STO SIM, STO REC) is"
+          "not exceeded";
+end
+
+%connection_type% =
+  /* Act or pass to LC */
+  if not leg.%is_any_pilot_on_lc_or_ilc% and leg.%is_flight_duty% and 
+     next(leg(duty), leg.%is_any_pilot_on_lc_or_ilc%) then
+    "TOLC"
+  /* LC to Pass */
+  else if leg.%is_any_pilot_on_lc_or_ilc% and 
+          next(leg(duty), leg.%is_active_flight% and
+                          not leg.%is_any_pilot_on_lc_or_ilc%) then
+    "LCTOACT"
+  else if leg.%is_any_pilot_on_lc_or_ilc% and
+          next(leg(duty), leg.%is_deadhead%) then
+    "LCTOPASS"
+  else if leg.%is_deadhead% and
+          next(leg(duty), leg.%is_simulator% or leg.%is_recurrent%) then
+    "PASSTOSIM"
+  else if (leg.%is_simulator% or leg.%is_recurrent%) and
+          next(leg(duty), leg.%is_deadhead%) then
+    "SIMTOPASS"
+  else
+    "UNKNOWN";
+         
+table training_connection_table =
+  %connection_type%,
+  leg.%end_station%
+                   -> %valid_training_connection%,
+                      %min_training_connection_time%;
+                      
+  "PASSTOSIM", "TXL"   -> true, 1:30;
+  "SIMTOPASS", "TXL"   -> true, 1:30;
+&
+  "TOLC"     ,   -     -> true, 1:15;
+  "LCTOPASS" ,   -     -> true, 1:30;
+  "LCTOACT"  ,   -     -> true, 1:45;
+  "PASSTOSIM",   -     -> true, 0:30;
+  "SIMTOPASS",   -     -> true, 0:45;
+
+       -     ,   -     -> false, 99:00;
+end
+/*
+** Rule: 
+**    Plausible connection
+** 
+** Description:
+**    The rule checks if the departure station is the same as arrival
+**    station or if it is a connection between co-terminals.
+**
+** Agreement:
+**    ??
+*/
+export rule ind_plausible_connection_ALL =
+  valid trip.%check_rules% and
+        leg.%in_pp_extended% and
+	    rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+  %plausible_connection%;
+  startdate = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = next(leg(chain), leg.%failobject_departure%);
+  failtext concat("Cnx ", leg.%end_station%," - ",
+                  next(leg(chain),leg.%start_station%), " not allowed");
+  remark "Func: Connect only legs with plausible connections",
+  planner "The rule checks that only legs starting from the same"
+	        " station as the end station or from a co-terminal are"
+          " connected. Co-terminals can be changed in a table.";
+end
+
+%plausible_connection% =
+  default(leg.%end_station% = next(leg(chain),leg.%start_station%),
+          true) or
+  connection.%is_btw_coterminals% or
+  (is_last(leg(trip)) and
+   (base_break.%duty_break_ends_trip% or
+    next(duty(chain),base_break.%duty_break_starts_trip%))) or
+  base_break.%leg_break_continues_trip% or
+  connection.%starting_or_ending_stationing_at_another_base%;
+
+/****************************************************************
+ * Section 2: Duty rules
+ ***************************************************************/
+
+/*
+** Rule: 
+**    Maximum duty time in a duty
+** 
+** Description:
+**    The rule checks that the duty time with or without night upgrade in 
+**    a duty pass is less than the maximum allowed. The limit is depending
+**    on a number of cases, see module duty_time.
+**    A duty period is separated by minimum rest.
+**
+** Agreement:
+**    FC 13:49 3.c
+**    CAU C.1.2, D.1.2, L.1.2a
+**    NKF/SBK 1.3.1, 1.3.2
+**    SKJ
+**
+**    4ExNG CC - no longer applies
+**               still valid for fc
+*/
+export rule ind_max_duty_time_in_duty_period_ALL =
+  valid trip.%check_rules% and
+        not duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and
+        %r_valid_duty_time_in_duty_period% and
+        duty.%start_hb% >= %pp_start% and
+        rest.%duty_followed_by_minimum_scheduled_rest%(duty.union);
+
+  %duty_time_in_duty_period% <= duty_time.%max_in_duty_period% + 
+  	rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+  
+  startdate  = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_duty_time_in_duty_period_all_failoject%;
+  failtext(Reltime value, Reltime limit) =
+    %ind_max_duty_time_in_duty_period_ALL_failtext%(value,limit);
+  remark "Coll: Max duty time in duty period or (SKI K12) FDP",
+  planner "The rule checks that the maximum duty time in a duty period"
+          " is not exceeded. A duty period is surrounded by minimum rest."
+          " For SKI K12, the rule checks the FDP, not the duty period!"
+          " The rule is valid for FC SKI (when 2 active pilots),"
+          " CC SKD, CC SKN (SH) and CC SKS (SH).";
+end
+
+%ind_max_duty_time_in_duty_period_all_failoject% =
+  let duty_period_start = rest.%duty_period_start_UTC%(duty.union),
+      overshoot = rule_exceptions.%overshoot_rel%(duty.%start_UTC%) ;
+  first(leg(trip), leg.%failobject_departure%)
+  where(leg.%start_utc% >= duty_period_start and
+        (%leg_duty_time_until_now% >
+          duty_time.%max_in_duty_period% - 
+          duty_time.%passive_extension%(
+            duty_time.%_is_long_haul_or_charter_or_has_long_leg%) + 
+          overshoot 
+          or
+          %leg_duty_time_until_now% > duty_time.%max_in_duty_period% + overshoot));
+  
+%ind_max_duty_time_in_duty_period_ALL_failtext%(reltime value,reltime limit) =
+  let cc_skn_text =
+    if %cabin_crew% and duty.%is_skn% and
+       parameters.%k12_skn_cc_sp4_1_valid%(duty.%start_day%) and
+       duty_time.%max_in_duty_period_sh_skn_prev_duty_long% > 0:00 then
+      " after long duty day before"
+    else
+      "",
+   period_text =
+     if parameters.%k12_fc_sp4_2_valid%(duty.%start_hb%) and
+        %flight_crew% and duty.%is_SKI% then
+       "FDP"
+     else
+       "duty period";
+       
+  rules.%failtext_rel%(concat("Coll: Duty time in ",period_text,cc_skn_text),
+                       value, limit);
+
+  
+/* Defined in child modules, because of different duty limits and validity for CC and FC. */
+%r_valid_duty_time_in_duty_period% = Bool;
+%duty_time_in_duty_period% = Reltime;
+%leg_duty_time_until_now% = Reltime;
+
+ /*
+** Rule:
+**   Maximum duty time in 7 calendar days start day  
+**
+** Description:
+**    Check duty time in 7 calendar days backwards from the day on which a
+**    duty starts, using Subpart Q duty time calculation.     
+**
+** Agreement:
+**   4ExNG CC 6.3.1.1.A.
+**   4ExNG FC 6.1.5
+*/
+
+rule ind_max_duty_time_in_7_days_start_day_ALL =
+  valid trip.%check_rules% and
+        not %is_roster% and
+        (duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) or
+         parameters.%k4exng_fc_sp5_1_valid%(duty.%start_day%)) and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and 
+        duty_period.%is_last_duty_period_on_start_day% and
+        duty_period.%is_first_duty_in_duty_period%;
+
+  duty_time.%7_days_start_day% <= %max_duty_time_in_7_days% +
+                rule_exceptions.%overshoot_rel_on_off%(duty.%start_UTC%);
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_duty_in_7_days_start_day_ALL_failobject%;
+  failtext(Reltime value, Reltime limit) =
+    %ind_max_duty_in_7_days_start_day_ALL_failtext%(value, limit);
+  remark "(CCP) Coll: Max duty time in 7 days from duty start day",
+  planner "The rule checks that the total duty time in 7 calendar days"
+          " backwards from the day on which the duty starts is less than"
+          " maximum allowed.";
+end
+
+%ind_max_duty_in_7_days_start_day_ALL_failobject% =
+  let start_7_days = duty_period.%last_7_days_start_day_start%,
+      end_7_days = duty_period.%last_7_days_start_day_end%,
+      overshoot = default(rule_exceptions.%overshoot_rel%(duty.%start_UTC%), 0:00);
+  last(leg(duty),
+       prev(leg(chain),next(leg(chain),leg.%failobject_departure%)) where
+        (oma16.%duty_time_in_interval_indust%( start_7_days, leg.%co_end_utc%) <=
+         %max_duty_time_in_7_days% + overshoot))
+    where (leg.%start_UTC% <= end_7_days);
+  
+%ind_max_duty_in_7_days_start_day_ALL_failtext%(Reltime value, Reltime limit) =
+  rules.%failtext_rel%(concat("Coll: Duty time in 7 days ",
+                              format_time( duty_period.%last_7_days_start_day_start% +
+                                          duty.%homebase_tz_corrector%,"%d%b"),
+                              "-",
+                              format_time( duty_period.%last_7_days_start_day_end% +
+                                          duty.%homebase_tz_corrector% - 24:00,
+                                          "%d%b")),
+                        value, limit);
+
+%max_duty_time_in_7_days% =
+  if not duty.%is_ac_employer_qa% then
+     %max_duty_time_in_7_days_normal% -
+     %p_buffer_max_duty_time_7_days% /* SK flights */
+  else
+     if fundamental.%flight_crew% then
+        if parameters.%K15_qa_FD_feb16_valid%(duty.%start_utc%) then
+          900:00  /* After FEB16 this rule shall not be valid for qa FD */
+        else
+          %max_duty_time_in_7_days_normal% -
+          %p_buffer_max_duty_time_7_days%
+     else
+       900:00; /* From now this rule shall not be valid for qa CC crew */
+   
+%max_duty_time_in_7_days_normal% =
+  parameter 47:30
+  remark "Max duty time 7 days normal production";
+
+%p_buffer_max_duty_time_7_days% = 
+  parameter 0:00
+  remark "Max duty time 7 days buffer";
+
+/*
+** Rule:
+**   Maximum duty time in 7 calendar days end day  
+**
+** Description:
+**    Check duty time in 7 calendar days backwards from the day on which a
+**    duty ends.     
+**
+** Agreement:
+**   4ExNG CC 6.3.1.1.A.
+**   4ExNG FC 6.1.5
+*/
+
+rule ind_max_duty_time_in_7_days_end_day_ALL =
+  valid trip.%check_rules% and
+        not %is_roster% and
+        (duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) or
+         parameters.%k4exng_fc_sp5_1_valid%(duty.%start_day%)) and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and
+        duty_period.%is_last_duty_period_on_start_day% and
+        duty_period.%is_last_duty_in_duty_period% and
+        duty_time.%ends_on_day_after_start_hb%;
+  duty_time.%7_days_end_day% <= %max_duty_time_in_7_days% +
+                rule_exceptions.%overshoot_rel_on_off%(duty.%start_UTC%);
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_duty_in_7_days_end_day_ALL_failboject%;
+  failtext(Reltime value, Reltime limit) =
+    %ind_max_duty_in_7_days_end_day_ALL_failtext%(value, limit);
+  remark "(CCP) Coll: Max duty time in 7 days from duty end day",
+  planner "The rule checks that the total duty time in 7 calendar days"
+          " backwards from the day on which the duty ends, when it ends on the"
+          " day after it started and there is no duty starting on that day, is"
+          " less than maximum allowed.";
+end
+
+%ind_max_duty_in_7_days_end_day_ALL_failboject% =
+  let start_7_days = duty_period.%last_7_days_start_day_start% + 24:00,
+      end_7_days = duty_period.%last_7_days_start_day_end% + 24:00,
+      overshoot = default(rule_exceptions.%overshoot_rel%(duty.%start_UTC%), 0:00);
+  last(leg(duty),
+       prev(leg(chain),next(leg(chain),leg.%failobject_departure%)) where
+        (oma16.%duty_time_in_interval_indust%( start_7_days, leg.%co_end_utc%) <=
+         %max_duty_time_in_7_days% + overshoot))
+    where (leg.%start_utc% < end_7_days);
+
+%ind_max_duty_in_7_days_end_day_ALL_failtext%(Reltime value, Reltime limit) =
+  rules.%failtext_rel%(concat("Coll: Duty time in 7 days ",
+                              format_time( duty_period.%last_7_days_start_day_start% +
+                                          duty.%homebase_tz_corrector% + 24:00,
+                                          "%d%b"),
+                              "-",
+                              format_time( duty_period.%last_7_days_start_day_end% +
+                                          duty.%homebase_tz_corrector%,"%d%b")),
+                       value, limit);
+
+/*
+** Rule: 
+**    Maximum number of calendar days in trip
+**
+** Description:
+**    Check that the maximum number of work days for a trip is not
+**    exceeded. The limits can be found implicitly in the paragraphs
+**    below.
+**
+**    NB! Two implementations are done. One in CCR checking working period length
+**    and this one in CCR checking trip length.
+**
+** Agreement:
+**    FC 1:18 2.5b
+**    CAU J.1.1, J.2.1.3
+**    NKF ???
+**    SCCA H.1 H.2.3
+*/
+export rule ind_max_working_days_in_trip_ALL =
+  valid trip.%check_rules% and
+        trip.%in_pp_extended% and
+        trip.%is_on_duty% and
+        not trip.%is_standby_line% and
+        not trip.%is_gnd% and
+        not trip.%is_cmp% and
+        %is_rule_applied%;
+  trip.%days_excl_bought% <= %max_days_in_trip% + 
+  		 rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+  startdate = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_working_days_in_trip_ALL_failobject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("Coll: Days in trip", value, limit);
+  remark "(CCP) Coll: Max working days in trip",
+  planner "The rule checks that the maximum allowed working days are"
+	        " not exceeded. The limits are 5 days (SH) and 12 days (LH)";
+end
+
+%ind_max_working_days_in_trip_ALL_failobject% =
+  first(duty(trip), duty.%failobject_start%)
+  where(not duty.%is_bought% and 
+        (((duty.%end_day% - trip.%start_day%+24:00)/24:00) - 
+        last(leg(duty),%bought_days_until_now%) > 
+        %max_days_in_trip% + rule_exceptions.%overshoot_int%(trip.%start_UTC%)));
+
+%bought_days_until_now% = count(leg(trip)) from(first) to(current)
+                          where(leg.%is_bought% and 
+                          default(leg.%start_date_utc% <> 
+                          prev(leg(trip), leg.%start_date%) 
+                          where(leg.%is_bought%),true));
+  
+%max_days_in_trip% = Int;
+%is_rule_applied% = True;
+
+/* Both long and short haul limits for CAU and SCCA was found in the agreements,
+ * Only short haul limit was found in the FC agreement. Neither was found for NKF. */
+export %max_days_in_trip_sh% = 
+    parameter 5
+    remark "Max days in trip for short haul";
+    
+/*
+** Rule: 
+**    Maximum number of night duties in a trip
+**
+** Description:
+**    Check that maximum number of night duties between time-off period,
+**    (for CCP = inside trip) as well as number of consecutive night 
+**    duties (not for CCNO) is not exceeded. Night duty is defined as any duty 
+**    touching the time interval 0000-0500 (FCSH, CCDK), 0200-0400 (CCNO).
+**
+**    NB! Two implementations are done. One in Pairing checking
+**    inside trips and one in Rostering checking inside working period.
+**
+** Agreement:
+**    FC 1:17 2.3Ac
+**    CAU K06 C.1.1.4
+**    NKF/SBK 8.2
+**
+**    4ExNG - no longer applies
+*/
+export rule ind_max_night_duties_in_trip_FC_SKD_SKN_SKL =
+  valid trip.%check_rules% and
+        not duty.%k4exng_cc_sp5_1_valid%(trip.%start_day%) and
+        duty.%in_pp_extended% and
+        %r_valid_max_night_duties_in_trip% and
+        not duty.%is_long_haul% and
+        duty.%is_night_duty% and
+        rule_exceptions.%rule_on%(duty.%start_UTC%);
+        
+  trip.%night_duties% - %trip_bought_night_duties% <= %max_night_duties% and
+  (not %check_consecutive_nights% or
+  %nr_consecutive_night_duties% <= %max_consecutive_night_duties%);
+  
+  startdate  = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_night_duties_in_trip_FC_SKD_SKN_SKL_failobject%;
+  failtext %max_night_duties_failtext%;
+  remark "(CCP) Coll: Max night duties in trip",
+  planner "The rule checks that the maximum number of, as well as the"
+	        " maximum consecutive night duties is not exceeded (only for FC)."
+          " A duty is at night if it touches the interval FC/CC SKD: (00:00,05:00),"
+          " CC SKN: (02:00, 04:00). The rule is valid for FC and CC SKD/SKN, with"
+          " limits: max 3 nights total and max 2 consecutive for FC/CC SKD and"
+          " max 2 nights total for CC SKN (no limit on number of consecutive).";
+end
+
+%trip_bought_night_duties% =
+  count(duty(trip)) where(duty.%is_night_duty% and duty.%is_bought%);
+
+%ind_max_night_duties_in_trip_FC_SKD_SKN_SKL_failobject% =
+  first(duty(trip), duty.%failobject_start%)
+  where(%night_duties_until_now% > %max_night_duties% or
+  (%check_consecutive_nights% and
+  %nr_consecutive_night_duties% > %max_consecutive_night_duties%));
+
+%night_duties_until_now% =
+  count(duty(trip))
+  from(first)
+  to(current)
+  where(duty.%is_night_duty%);
+  
+  
+/* Redefined in child module due to different limits and validity */
+%r_valid_max_night_duties_in_trip% = Bool;
+%check_consecutive_nights% = Bool;
+%max_night_duties% = Int;
+%max_consecutive_night_duties% = Int;
+%max_night_duties_failtext% =
+  if(trip.%night_duties% > %max_night_duties%) then
+    rules.%failtext_int%("Coll: Night duties", trip.%night_duties%, %max_night_duties%)
+  else
+    rules.%failtext_int%("Coll: Cons night duties", %nr_consecutive_night_duties%, %max_consecutive_night_duties%);
+
+%nr_consecutive_night_duties% =
+  count(duty(trip))
+  from (current) backwards
+  while (%valid_night_duty%);
+
+%valid_night_duty% =
+  not duty.%is_long_haul% and
+  duty.%is_night_duty% and 
+  not duty.%is_bought%;
+
+
+/*
+** Rule: 
+**    No duty same day when check out later than 0200
+**
+** Descritption:
+**    Check that crew does not check in for early duty if the check out from
+**    previous duty is later than 0200 local time and at homebase.
+**
+** Agreement:
+**    
+**    4ExNG CC - no longer applies
+*/
+export rule ind_early_duty_day_after_late_check_out_FC_ALL =
+  valid not %is_roster% and
+        not duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and
+        duty.%is_on_duty% and
+        prev(duty(trip), duty.%arrives_at_homebase%) and
+        prev(duty(wop), duty.%has_late_co%) and
+        rule_exceptions.%rule_on%(duty.%start_UTC%);
+        
+  duty.%start_scheduled_hb% >= prev(duty(wop), duty.%end_day%) + 24:00 
+  + %p_check_in_time_limit_after_night_duty_fc_all%;
+  
+  startdate  = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext "Coll: Early C/I day after late C/O";
+  remark "(CCP) Coll: No early check in for duty day after late check out",
+  planner "The rule checks that if there is a new trip assigned the day after"
+          " the previous trip ends, check out for that trip is not later than"
+          " 02:00. The rule is valid for all regions short haul.";
+end
+
+%p_check_in_time_limit_after_night_duty_fc_all% = parameter 07:00 remark "(CCP) Earliest check-in day after night duty.";
+
+
+
+/*
+** Rule:
+**    Long haul duty must be followed by freedays
+**
+** Description:
+**    Check that a long haul duty is followed by freedays,
+**    i.e. check that the trip is terminated when arriving
+**    to homebase after a long haul duty.
+**
+**    NB! Two implementations of this rule is done, One in CCP,
+**    checking last in trip and one in CCR checking last in wop.
+**
+** Agreement:
+**    FC G.1.11d
+**    CAU H.2.1.5
+**    NKF ???
+**    SCCA D.1.2
+*/
+export rule ind_long_haul_returning_duty_last_in_trip_ALL =
+  valid trip.%check_rules% and
+        crr_is_closed_last and
+        duty.%in_pp_extended% and
+        duty.%is_long_haul% and
+        leg.%is_long_haul% and
+        leg.%arrival_is_interscand% and
+        is_last(leg(trip)) where (leg.%is_long_haul%) and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+  %long_haul_leg_arrival_ok%;
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext "Coll: Must arrive/passive to hb";
+  remark "(CCP) Coll: Long haul trip must end at first arrival to homebase",
+  planner "Check that a long haul duty departing from an intercont airport is"
+          " either arriving at homebase or followed by passive transfer to homebase,"
+          " and followed by freedays, i.e. the trip must be terminated.";
+end
+
+/* For the pairing optimizer, we only allow a single deadhead as ending
+* alternative. Otherwise, we also allow base breaks and multi-deadheads.
+*/
+
+%long_haul_leg_arrival_ok% =
+  if %is_pairing%
+  then %_long_haul_leg_arrival_ok_CCP%
+  else %_long_haul_leg_arrival_ok_CCR_CCT%;
+ 
+
+%_long_haul_leg_arrival_ok_CCP% =
+  (leg.%arrives_at_homebase% and is_last(leg(trip))) or
+  default(next(leg(trip), leg.%is_deadhead% and
+                          leg.%arrives_at_homebase% and
+                          is_last(leg(trip))),
+  false);
+
+%_long_haul_leg_arrival_ok_CCR_CCT% =
+  let longhaul_end_utc = leg.%end_utc%;
+  (leg.%arrives_at_homebase% and is_last(leg(trip)))
+  or base_break.%duty_break_ends_trip%
+  or (last(leg(trip), leg.%arrives_at_homebase%)
+      and all(leg(trip), leg.%is_deadhead%)
+          where(leg.%start_utc% >= longhaul_end_utc));
+
+
+/*
+** Rule: 
+**    No duty same day when check out later than 0200
+**
+** Descritption:
+**    Check that crew does not check in for duty if the check out from previous
+**    duty is later than 0200 local time and at homebase.
+**
+** Agreement:
+**    FC 1:17 2.3Ad
+**    SCCA praxis
+**
+**    4ExNG CC - no longer applies
+**               still valid for fc
+*/
+export rule ind_no_duty_same_day_when_late_check_out_FC_SKD_SKS =
+  valid not duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and
+        %valid_ind_no_duty_same_day_when_late_check_out_FC_SKD_SKS%;
+  
+  prev(duty(trip), duty.%end_scheduled_od%) <= %latest_co_for_duty_next_day%;
+  
+  startdate  = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext "Coll: C/I same day as late C/O";
+  remark "(CCP) Coll: No check in for duty same day when late check out",
+  planner "The rule checks that if there is a new trip assigned the same day as"
+          " the previous trip ends, check out for that trip is not later than"
+          " 02:00. The rule is valid for FCSH and SH crew in SKD & SKS.";
+end
+
+%valid_ind_no_duty_same_day_when_late_check_out_FC_SKD_SKS% =
+    %is_trip% and
+    %r_valid_no_duty_same_day_if_late_co% and
+    trip.%in_pp_extended% and
+    trip.%is_on_duty% and
+    duty.%departs_from_homebase% and 
+    not is_first(duty(trip)) and
+    prev(duty(trip), duty.%start_scheduled_day% <> duty.%end_scheduled_day%) and
+    duty.%start_day% = %prev_duty_end_scheduled_day% and
+    not prev(duty(trip), duty.%is_standby%) and   /* Added these two rows to handle  */
+    not duty.%is_standby% and                    /* standbys. Should probably be changed. Why? */
+    not first(duty(trip),duty.%is_bought%) and
+    not last(duty(trip),duty.%is_bought%) and
+    rule_exceptions.%rule_on%(duty.%start_UTC%);
+
+%prev_duty_end_scheduled_day% = prev(duty(trip), duty.%end_scheduled_day%);
+%latest_co_for_duty_next_day% = 02:00;
+
+/* Defined in child modules due to different validity for CC and FC. */
+%r_valid_no_duty_same_day_if_late_co% = Bool;
+
+/*
+** Rule:
+**   Maximum nr of active legs in a FDP with extension. 
+**
+** Description:
+**   Check the maximum number of active legs in a FDP with Subpart Q extension
+**
+** Agreement:
+**   4ExNG 6.3.1.1.B
+**   4ExNG contd.....  This rule no longer applies for FC - their old rule
+**                     counting active + passive legs applies again!
+*/
+
+rule ind_max_active_legs_in_FDP_with_extension_ALL =
+  valid trip.%check_rules% and
+        duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and
+        duty.%in_pp_extended% and
+        duty.%is_short_haul% and
+        duty_period.%is_on_duty% and
+        oma16.%is_extended_fdp% and
+        not (trip.%is_ac_employer_qa% and %cabin_crew% and parameters.%K15_qa_cc_mar16_valid%(trip.%start_day%)) /* SKCMS-581 */
+        and not (trip.%is_ac_employer_qa% and %flight_crew% and parameters.%k15qa_feb16_valid%(trip.%start_day%)) /* SKCMS-581 */; 
+  %nr_of_active_legs_in_duty% <=
+        %ind_max_active_legs_in_fdp_with_extension% +
+                rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_active_legs_in_duty_ALL_failobject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%(concat("Coll: Max active legs in FDP with extension ",
+                                format_time(duty.%start_hb%,"%d%b")),
+                         value,limit);
+  remark "Coll: Max nr of active legs in FDP with extension",
+  planner "The rule checks that the active number of legs in a FDP with",
+          " extension is not more than maximum allowed";
+end
+
+
+%nr_of_active_legs_in_duty% = 
+  duty.%num_active_legs% +
+  %_nr_of_active_legs_in_prev_duty%;
+
+%_nr_of_active_legs_in_prev_duty% = 
+  if default(prev(duty(trip), duty_period.%is_split% and duty_period.%is_first_duty_in_duty_period%), false) then
+    prev(duty(trip), duty.%num_active_legs%)
+  else
+    0;
+
+%ind_max_active_legs_in_fdp_with_extension% = 3;
+
+%ind_max_active_legs_in_duty_ALL_failobject% =
+  first(leg(trip), leg.%failobject_departure%)
+  where(%nr_of_active_legs_in_duty_until_now%
+        > %ind_max_active_legs_in_fdp_with_extension% + 
+        rule_exceptions.%overshoot_int%(duty.%start_UTC%));
+
+%nr_of_active_legs_in_duty_until_now% = 
+    count(leg(duty)) from(first) to(current) 
+    where(leg.%is_active_flight%) + 
+    %_nr_of_active_legs_in_prev_duty%; 
+  
+
+
+/* New Rules in K15 SKCMS-582
+/*
+** Rule: 
+**    Checks the number of split duties in a trip.
+**    Valid for CC QA and FD QA  
+**                               
+*/
+
+
+rule (on) ind_max_split_duty_in_trip_qa =
+    valid trip.%check_rules%
+         and (if fundamental.%flight_crew% then
+                parameters.%K15_qa_FD_feb16_valid%(trip.%start_UTC%) and
+                trip.%is_ac_employer_qa%
+              else
+                 parameters.%K15_qa_cc_mar16_valid%(trip.%start_UTC%) and
+                 trip.%is_ac_employer_qa%)
+        and trip.%start_utc% >= %pp_start%
+        and trip.%start_utc% <= %pp_end%
+        and duty_period.%trip_has_split_duty%;
+	
+        duty_period.%trip_count_split_duties% <= %max_number_of_split_duties_in_trip_qa% +
+	    rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+  	
+    startdate = trip.%start_UTC%;
+	severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%, %duty_lh_region%));
+	failobject =  %ind_max_split_duty_in_trip_qa_failobject%;
+	failtext(Int value, Int limit) = 
+        rules.%failtext_int%("Coll: Max 2 split duties in trip", value, limit);
+	remark "(CCP) Coll: Max 2 split duties in trip",
+    planner "this rule is for Cimber CC and FD. It checks that there are"
+            "  max 2 split duties in a trip"
+            " Agreement Cimber FD and CC 2014.";
+end	
+ 
+%max_number_of_split_duties_in_trip_qa% = 2;
+
+
+%ind_max_split_duty_in_trip_qa_failobject% =
+first(duty(trip),duty.%failobject_start%)
+where (duty_period.%is_split%
+   and duty_period.%is_first_duty_in_duty_period%
+   and duty.%start_utc% >= %_next_split_duty_in_trip%(%_next_split_duty_in_trip%(trip.%start_utc%))); 
+
+%_next_split_duty_in_trip%(Abstime start)=
+first(duty(trip),duty.%start_utc%) where
+(duty_period.%is_split% and
+ duty_period.%is_first_duty_in_duty_period% and
+ duty.%start_utc% > start);
+
+
+/****************************************************************
+ * Section 3: Rest rules
+ ***************************************************************/
+
+/*
+** Rule: 
+**    Minimum rest after duty pass
+** 
+** Description:
+**    The rule checks that the rest time at station, both short haul and
+**    long haul is greater than the minimum rest time. If the night stop at station
+**    is less than min required it is defined as a short stop and there are other rules
+**    limit the production after the short stop. A short stop can only occur in 
+**    short haul production
+**
+**    It is unnecessary to check the rest time at homebase when building trips.
+**    This is instead checked in CCR.
+**
+**    Due to the duty level definition, this rule must be checked on leg level.
+**
+**    NB! Two implementations of this rule is done. One in CCP, checking rest at
+**    stations and one in CCR checking rest at homebase.
+**
+** Agreement:
+**    FC 1:10 F.1, 1:18 2.4a
+**    CAU H.2.1.1, H.2.1.2
+**    NKF 7
+**    SCCA G.1.1, G.2.3
+**    NB! Not valid for FC SKN (CR 221)
+**    NB! K11 FC - no longer applies for SKD/SKN/SKS when active flight duty follows.
+**    NB! 4ExNG - no longer applies for scandinavian crew when active flight duty follows.
+*/
+export rule ind_min_rest_after_duty_period_ALL =
+  valid %valid_ind_min_rest_after_duty_period_ALL% and
+        not leg.%is_bought%;
+  
+  %ind_min_rest_after_duty_period__rest_time_incl_bought% >= rest.%minimum_time_plan% - 
+  	             rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%);
+  
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = default(next(leg(chain), leg.%failobject_departure%),
+                       leg.%failobject_departure%); 
+  failtext(Reltime value, Reltime limit) = %min_rest_failtext%(value, limit);
+  remark "(CCP). Coll Min rest after duty period",
+  planner "The rule checks that the rest after a duty period is satisfied. The rule "
+          "is only checked inside trips, rest between trips is checked in CCR. "
+          "The rule is not checked if it a short stop. There are other rules " 
+          "to limit production regarding short stops.";
+end
+
+/* Redefined in rules_indust_ccp_?c_calibration_lookback */
+export %ind_min_rest_after_duty_period__rest_time_incl_bought% = 
+  if %cabin_crew% and leg.%is_sks% then
+    leg.%rest_time_incl_bought_scheduled%
+  else
+    leg.%rest_time_incl_bought%;
+
+%valid_ind_min_rest_after_duty_period_ALL% =
+  trip.%check_rules% and
+  trip.%in_pp_extended% and
+  duty.%is_on_duty% and
+  not leg.%is_rest% and
+  leg.%is_last_in_duty% and
+  not is_last(leg(trip)) and
+  /* Short stop at homebase allowed for sby call-outs */
+  not leg.%is_standby_callout% and
+  not leg.%is_sby_manual_duty_break% and
+  (
+      if %cabin_crew% then
+         %valid_ind_min_rest_after_duty_period_4exng%
+      else if trip.%is_ski% then
+         not (rest.%is_short% and not leg.%arrives_at_homebase%)
+      else
+         %valid_ind_min_rest_after_duty_period_fc_k11%
+  );
+
+%valid_ind_min_rest_after_duty_period_4exng% =
+  duty.%is_long_haul% or
+  leg.%arrives_at_homebase% or
+  (not next(duty(trip),duty.%has_active_flight% or
+                       duty.%is_deadhead%));
+ 
+%valid_ind_min_rest_after_duty_period_fc_k11% =
+  not next(duty(trip),duty.%has_active_flight%) and
+  not rest.%is_short%;
+ 
+/* Redefined in CCT submodule */  
+%leg_is_standby_callout% = false;
+
+%r_valid_min_rest_after_duty_pass% = Bool;
+%is_first_short_stop_in_trip% =
+  is_first(leg(trip)) where (rest.%is_short%);
+
+%min_rest_failtext%(Reltime value, Reltime limit) =
+  if (leg.%is_flight_duty% or leg.%is_ground_transport%) and
+     not rest.%short_haul_rest% then
+    rules.%failtext_rel%("Coll: Slipping", value, limit)
+  else
+    rules.%failtext_rel%("Coll: Rest time", value, limit);
+
+/*
+** Rule: 
+**    Rest in 24hrs from c/i
+**
+** Description:
+**    The rule checks that rest in 24hrs from duty check-in is greater than
+**    limit. A 24hr period is considered "isolated" if it is preceded and followed
+**    by at least 24hrs rest. The rule is checked if the following is true:
+**    - FCSH: -"-, but not if the duty has a short stop
+**    - CCSH SCCA: -"-, -"-
+**    - CCLH CAU: non-isolated 24hr period
+**
+** Agreement:
+**    FC 1:10 2.2, 2.4
+**    CAU H.1.1
+**    SCCA G.2.2
+**    NB! Not valid for FC SKN (CR 221)
+**    NB! Not valid for 4ExNG CC
+*/
+
+export rule ind_min_rest_in_24hrs_from_ci_FC_SKD_SKS =
+  valid trip.%check_rules% and
+        trip.%in_pp_extended% and
+        not duty.%k4exng_cc_sp5_1_valid%(trip.%start_day%) and
+        not (%flight_crew% and
+             (parameters.%k11_fc_sp3_2_valid%(trip.%start_day%) or
+              trip.%is_skn% or trip.%is_sks%)) and
+        leg.%is_last_in_duty% and
+        trip.%is_on_duty% and
+        not trip.%has_no_duty_time_contribution% and
+        %r_valid_rest_in_24hrs_from_ci% and
+        not leg.%is_bought%;
+  rest.%in_24hrs% >= rest.%min_time_in_24hrs% - 
+  		     rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%);
+  startdate = leg.%activity_scheduled_start_time_UTC%;
+  deadline = prev(leg(chain), leg.%end_UTC%);
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = next(leg(wop), leg.%failobject_departure%);
+  failtext(Reltime value, Reltime limit) =
+    rules.%failtext_rel%("Coll: Rest in 24h from C/I", value, limit);
+  remark "(CCP) Coll: Min rest in 24hrs from check-in",
+  planner "The rule checks that rest in 24hrs from duty check-in is satisfied."
+          " A 24hr period is considered isolated if it is preceded and followed"
+          " by at least 24hrs rest. The rule is checked if the following is true:"
+          " - FCSH: same, but not if the duty has a short stop"
+          " - CCSH SCCA: same as FCSH"
+          " - CCLH CAU: non-isolated 24hr period";
+end
+
+/* Defined in child modules due to different validity and limits for FC and CC. */
+%r_valid_rest_in_24hrs_from_ci% = Bool;
+
+/*
+** Rule:
+**    Night rest required before/after short stop
+**
+** Description:
+**    The rule checks that night rest before and after a short stop is fulfilled.
+**    A valid night rest is defined as min night rest (defined as min rest (8:00) 
+**    plus 1 * local transport) must be in the interval [20:00, 09:00] local time
+**    at station.
+**
+**    In CCP, this is basically the same as only allowing 1 short stop in trip.
+**
+**    NB! Two implementations of this rule is done. One in CCP, checking rest btw
+**    duties and one in CCR checking rest btw trips (if the trip starts or ends
+**    with a short stop).
+**
+** Agreement:
+**    FC 1:18 2.4b
+**    CAU H.1.2
+**    SCCA G.1.2
+**
+**    4ExNG CC - no longer applies
+*/
+export rule ind_night_rest_surrounding_short_stop_FC_SKD_SKS =
+  valid trip.%check_rules% and
+        trip.%in_pp_extended% and
+        not duty.%k4exng_cc_sp5_1_valid%(trip.%start_day%) and
+        %r_valid_night_rest_surrounding_short_stop% and
+        trip.%is_short_haul% and
+        not is_last(duty(trip)) and
+        (rest.%is_short_in_duty_period% or rest.%is_short_in_next_duty_period%) and
+        rest.%duty_is_last_in_duty_period%(duty.union);
+  rest.%duty_night_rest% >= rest.%duty_min_time_at_night% - 
+  			    rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = next(duty(trip), duty.%failobject_start%);
+  failtext(Reltime value, Reltime limit) =
+    rules.%failtext_rel%(concat("Night rest ",
+                         (if rest.%is_short_in_duty_period% then "after " else "before ")),
+                         value, limit);
+  remark "(CCP) Coll: Min night rest surrounding short stop",
+  planner "The rule checks that if the duty pass is preceded or followed by"
+          " a short stop, the rest time at night (20:00, 09:00) is satisified."
+          " The rule is valid for FC and CC SKD & SKS.";
+end
+
+/* Defined in child modules due to different validity for FC and CC. */
+%r_valid_night_rest_surrounding_short_stop% = Bool;
+
+
+/*
+** Rule:
+**    Duty restrictions after short stop
+**
+** Description:
+**    This rule states that max 1 check-in is allowed per day between 03.00-02.59 for SKD FD, SKS FD
+**    and Cimber FD and CC. During day of operation it is allowed for crew to have an duty break in
+**    case of a delay with a new check-in to the next flight on the same day. Ref. Cimber FD and Cimber CC
+**    union agreement as of 01mar2014 and SPF, DPF, SNF and NSF union agreement 2015.
+**
+**   note LW: it's not good design to trigger on the first duty in a pair to be checked, and then fail on the second.
+**     I find it more understandable to trigger on any duty and look backward if it is the second in such a pair
+
+
+**  
+** Agreement:
+**
+**
+**      K15
+**
+*/
+
+%checkin_duty_condition% =
+  duty.%is_on_duty_not_rest%;
+
+export rule ind_max_number_checkin_per_day =
+    valid 
+        trip.%check_rules% and
+        %ind_max_number_checkin_per_day_agmt_valid% and 
+        %checkin_duty_condition% and
+        duty.%is_on_duty% and
+        duty_period.%is_first_duty_in_duty_period%;
+
+    %duties_per_day% <= %duties_per_day_limit% + rule_exceptions.%overshoot_int%(duty.%start_hb%);
+
+    startdate  = duty.%start_UTC%;
+    failobject = %_next_duty_failobject%;
+
+    failtext "Coll: Max 1 check-in per day between 03.00-02.59";
+    remark "(CCP) Coll: Max 1 check-in per day between 03.00-02.59",
+    planner "This rule states that max 1 check-in is allowed per day between"
+        " 03.00-02.59 for SKD FD, SKS FD and Cimber FD and CC. During day of"
+        " operation it is allowed for crew to have an duty break in case of a"
+        " delay with a new check-in to the next flight on the same day. Ref."
+        " Cimber FD and Cimber CC union agreement as of 01mar2014 and SPF, DPF,"
+        " SNF and NSF union agreement 2015.";
+end
+
+%ind_max_number_checkin_per_day_agmt_valid% =
+    void_bool; /* redefined for fd/cc */
+
+/* simplified solution */
+%duties_per_day% =
+  if (%_next_duty_ci% - 24:00) >= %_this_duty_ci% then 1  
+  else 2; /* actually, >=2 */
+
+%duties_per_day_limit% = 1;
+ 
+%_next_duty_ci% = 
+  let cur_end = duty.%end_hb%;
+  default(
+                    round_down(
+                      (next(duty(chain) where (%checkin_duty_condition% and duty_period.%is_first_duty_in_duty_period% and duty.%start_hb%-cur_end>=%duty_split_limit%), duty.%start_hb%) - 3:00),
+                      24:00), 
+                    duty.%start_hb% + 99:00);
+
+%_this_duty_ci% = round_down((duty.%start_hb% - 3:00), 24:00);
+
+%duty_split_limit% = 5:00; /* duties occuring within this limit are counted together with their previous */
+
+%_next_duty_failobject% =
+  let cur_end = duty.%end_hb%;
+  next(duty(chain) where (%checkin_duty_condition% and duty_period.%is_first_duty_in_duty_period% and duty.%start_hb%-cur_end>=%duty_split_limit%),duty.%failobject_start%);
+
+
+/* end of file */
+

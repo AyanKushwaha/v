@@ -1,0 +1,92 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   Definitions for annotations, used for annotation rudobs
+ *
+ * Sections:
+ *   1. Annotation table definitions
+ *   2. Annotation table lookups
+ *
+ * Created by:
+ *   Markus Kollind, 12-May-2006
+ *
+ * Major changes:
+ *
+ */
+
+module annotations_cct inherits annotations
+
+/****************************************************************
+ * Section 2: Annotation table lookups
+ ****************************************************************/
+redefine %search_start% = fundamental.%now_date%;
+redefine %search_end% = add_months(fundamental.%now_date%, 1);
+
+%code_FX% = locate("NS", %current_codes%) = 0 and locate("FX", %current_codes%) > 0;
+
+/* Table lookup for each annotation on the current crew. The annotation must be
+   valid (current or future). This lookup with seq.nr. can return more entries than
+   returned by the two tables above. */
+table valid_annotations_table(Int nr) = 
+  crew.%id%, nr, %search_start% -> 
+    String %code_in_interv%, 
+    String %descript_in_interv%, 
+    Abstime %period_start%, 
+    Abstime %_period_end%,
+    Int %property%;    
+  external %annot_table%;
+  "crew", match_number, <="validto" -> "code", "text", "validfrom", "validto", "property";
+  -, -, - -> void_string, void_string, void_abstime, void_abstime, void_int;
+end
+
+%period_end%(Int nr) =
+  %_period_end%(nr) - 24:00;
+
+/****************************************************************
+ * Section 4: Variables for generating a string for the dynamic 
+ *            crew report. 
+ ****************************************************************/
+redefine export %info_string% =
+  concat(if length(%current_codes%) > 0 then %current_codes% else "No current", 
+         if length(%future_codes%) > 0 then 
+           concat(". Coming: ", %future_codes%, ".")
+         else ". No coming in 30 days.");
+
+/* Creates a string with all annotation codes with a valid period touching the
+   current time. */
+%current_codes% = 
+  cat(times(1000), %current_code_string%(%times_index_0%), ", ")
+  where(%period_start%(%times_index_0%) <= fundamental.%now_date%)
+  while(not void(%code_in_interv%(%times_index_0%)));
+  
+%current_code_string%(Int nr) = 
+  let p_start = %period_start%(nr), p_end = %period_end%(nr);
+  concat(%code_in_interv%(nr), 
+         %code_ST_info%(nr),
+         if p_end > add_months(fundamental.%now_date%, 1) then ""
+         else if p_start = p_end then "(d)" 
+         else format_time(p_end, "(-%d%b)"));
+  
+/* Creates a string with all annotation codes starting after the current date 
+   but within the coming 30 days. */
+%future_codes% = 
+  cat(times(1000), %future_code_string%(%times_index_0%), ", ")
+  where(%period_start%(%times_index_0%) > fundamental.%now_date% and
+        %period_start%(%times_index_0%) < add_months(fundamental.%now_date%, 1))
+  while(not void(%code_in_interv%(%times_index_0%)));
+  
+%future_code_string%(Int nr) = 
+  concat(%code_in_interv%(nr), %code_ST_info%(nr), format_time(%period_start%(nr), "(%d%b"), 
+         if %period_start%(nr) <> %period_end%(nr) then "-)" else ")");  
+		 
+%code_ST_info%(Int nr) =
+  if %code_in_interv%(nr) = "ST"
+     then concat(format_int(%property%(nr),"(%d"),
+              if length(%descript_in_interv%(nr)) > 0
+                 then concat(":", substr(%descript_in_interv%(nr),1,5))
+                 else "",
+              ")")
+     else "";
+
+/* end of file */
+

@@ -1,0 +1,272 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This studio-only module contains crew warnings functionality used to alert 
+ *   the planner of potential rostering problems during the planning period.
+ *   Apart from the warning definitions themselves there are GUI support 
+ *   consisting of warning codes in the crew header window and the info
+ *   window (when pointing at crew) and a report with more details on the 
+ *   the warnings and where they come from.
+ *
+ *   The submodules crew_warnings_cc and crew_warnings_fc contain the warning
+ *   definitions for flight crew and cabin crew respectively.
+ *
+ * Sections:
+ *   1. Basic definitions
+ *   2. Warning definitions
+ *   3. Report
+ *   4. Crew header window
+ *   5. Info window
+ *
+ * Created by:
+ *   Jonas Carlsson, April 2007
+ *
+ * Major changes:
+ *
+ */
+ 
+root module crew_warnings
+
+import fundamental;
+import crew;
+import recency;
+import accumulators;
+import training;
+import levels;
+import trip;
+import crg_date;
+import duty;
+import absence;
+import leg;
+
+/****************************************************************
+ * Section 1: Basic definitions
+ ***************************************************************/
+ 
+export %crew_has% = 
+  any(times(%crew_nr_warning_sections%),
+      %crew_has_warning_in_section%(%times_index_0%));
+  
+export %warnings_short% = 
+  /* Remove possible duplicate warning codes */
+  cat(times(length(%_warnings_short%)),
+      /* If the code is not found after then we return it else blank */
+      if locate(substr(%_warnings_short%, %times_index_0%, 1), 
+                %_warnings_short%, %times_index_0% + 1) > 0 then
+        ""
+      else
+        substr(%_warnings_short%, %times_index_0%, 1));
+
+%_warnings_short% = 
+    cat(times(%crew_nr_warning_sections%), 
+      %crew_section_code%(%times_index_0%));
+
+/* Used for warnings that should be triggered for the the entire planning period
+ * This is the plannig period as default, but could be changed to trigger warnings
+  * for other time period*/
+export %user_warning_period_start% = 
+  parameter 01Jan1986
+  remark "[Script] Start date for crew warnings. Set by Crew List report.";
+
+export %user_warning_period_end% = 
+  parameter 01Jan1986
+  remark "[Script] End date for crew warnings. Set by Crew List report.";
+  
+group warning_period = %user_warning_period_start%, %user_warning_period_end%;
+
+%use_period_params% =
+  %user_warning_period_start% > 1Jan1986 and
+  %user_warning_period_end% > 1Jan1986;
+  
+%warning_period_start% =
+  if %use_period_params% then
+    %user_warning_period_start%
+  else
+    round_down_month(%pp_start%);
+
+%warning_period_end% = 
+  if %use_period_params% then
+    %user_warning_period_end%
+  else
+    add_months(%warning_period_start%, 1);
+
+/* WPCCR 835 2008-09-04 Janne C.
+   Need for a check_performed_end.
+   A warning occurs if warning is valid somewhere in whole months interval,
+   but we need to check if if the warning is invalid (e.g. action is performed)
+   somewhere in the open period span,
+   (E.g. pp is 01Aug2008 - 15Sep2008, warning check from 01Aug2008 to 01Sep2008,
+                                      perform check from 01Aug2008 to 15Sep2008. */
+%warning_period_check_performed_end% =
+  if %use_period_params% then
+    %user_warning_period_end%
+  else
+    fundamental.%plan_end%;
+
+%a_month_after_warning_period% = 
+  add_months(%warning_period_end%, 1);
+
+export %crew_nr_warning_sections% = 
+  count(times(100))
+  while(not void(%section_priority_code%(%times_index_0%, 1)));
+
+export %crew_nr_section_priorities%(Int section) = 
+  count(times(100))
+  while(not void(%section_priority_code%(section, %times_index_0%)));
+
+export %crew_has_warning_in_section%(Int section) = 
+  any(times(%crew_nr_section_priorities%(section)), 
+      %section_priority_warning%(section, %times_index_0%));
+
+/* This is not necessarily defined if crew does not have a warning in the section,
+   only use if %crew_has_warning_in_section%(section) = true*/
+%crew_section_code%(Int section) = 
+  first(times(%crew_nr_section_priorities%(section)), 
+        %section_priority_code%(section, %times_index_0%))
+  where(%section_priority_warning%(section, %times_index_0%));
+
+/* This is not necessarily defined if crew does not have a warning in the section,
+   only use if %crew_has_warning_in_section%(section) = true*/
+   
+%crew_section_descr%(Int section) = 
+  first(times(%crew_nr_section_priorities%(section)), 
+        %section_priority_descr%(section, %times_index_0%))
+  where(%section_priority_warning%(section, %times_index_0%));
+
+/* Warnings can be divided into higher level groups */
+export %crew_section_group%(Int section) = 
+  first(times(%crew_nr_section_priorities%(section)), 
+        %section_group%(section, %times_index_0%))
+  where(%section_priority_warning%(section, %times_index_0%));
+  
+table warnings(Int section, Int priority) = 
+  section, 
+  priority -> 
+    /* To be redefined by submodules */
+    export String %section_group%,
+    export Bool %section_priority_warning%,  
+    export String %section_priority_code%,    
+    export String %section_priority_descr%; 
+  
+  /* Default match used for counting the number of rows */
+  -, - -> void_string, void_bool, void_string, void_string;
+end
+
+
+/*
+** Definitions used for absence warnings
+** Cache variables at pp_start and pp_end
+*/
+
+/* ac qualifications */
+%crew_ac_qln1_pp_end% = crew.%ac_qln_at_date_ix%(%warning_period_end%, 1);
+%crew_ac_qln2_pp_end% = crew.%ac_qln_at_date_ix%(%warning_period_end%, 2);
+%crew_ac_qln3_pp_end% = crew.%ac_qln_at_date_ix%(%warning_period_end%, 3);
+%crew_has_ac_qln1_pp_end% = %crew_ac_qln1_pp_end% <> "";
+%crew_has_ac_qln2_pp_end% = %crew_ac_qln2_pp_end% <> "";
+%crew_has_ac_qln3_pp_end% = %crew_ac_qln3_pp_end% <> "";
+
+/****************************************************************
+ * Section 1: Warning definitions
+ *            To be able to select and filter on certain warnings
+ *            must be defined here and redefined in child modules
+ ***************************************************************/
+/*
+** FD
+*/
+%warning_s% = %warning_s1% or %warning_s2%;
+%warning_s1% = false;
+%warning_s2% = false;
+
+%warning_y% = %warning_y1% or %warning_y2%;
+%warning_y1% = false;
+%warning_y2% = false;
+
+/* Shared codes */
+%warning_c% = %warning_c1% or %warning_c2%;
+%warning_c1% = false;
+%warning_c2% = false;
+
+%warning_41% = false;
+
+
+%warning_t1% = false;
+%warning_d% = 
+  %warning_d1% or %warning_d2% or %warning_d1_fci% or %warning_d2_fci%;
+%warning_d1% = false;
+%warning_d2% = false;
+%warning_d1_fci% = false;
+%warning_d2_fci% = false;
+
+%warning_l% = %warning_l1% or %warning_l2%;
+%warning_l1% = false;
+%warning_l2% = false;
+
+%warning_v2% = false;
+%warning_r1% = false;
+
+/*
+** CC
+*/
+%warning_h1% = false;
+
+/* Shared code */
+%warning_f1% = false;
+%warning_f2% = false;
+
+/*
+** Shared (Codes, not logic)
+*/
+%warning_e% = %warning_e1% or %warning_e2%;
+%warning_e1% = false;
+%warning_e2% = false;
+
+%warning_a1% = false;
+%warning_a2% = false;
+
+/* Shared logic as well */
+/*
+** U: Missing planned training (crew_training_need)
+** Specified as 'U: Position change'
+*/
+
+%warning_u1% = 
+    training.%unplanned_training_in_pp%;
+
+%warning_u1_code% = "U";
+%warning_u1_description% = 
+  concat("Crew on training ", 
+         training.%first_unplanned_course_name_pp%,
+         ", missing ", 
+         format_int(training.%first_unplanned_course_req_flights_pp% -
+                    training.%first_unplanned_course_planned_flights_pp%, "%i "),
+         training.%first_unplanned_course_attribute_pp%,
+         if training.%first_unplanned_course_acqual_descr_pp% <> "" then
+            concat(" (", training.%first_unplanned_course_acqual_descr_pp%, ")")
+         else "");
+
+%_absence_descr%(String ac_qual) =
+  absence.%reqd_training_str_at_date%(ac_qual, %warning_period_end%-0:01);
+
+/****************************************************************
+ * Section 4: Report
+ ***************************************************************/
+ 
+/* Flight crew warnings are divided into groups in the report */
+%use_groups% = %flight_crew%;
+
+/****************************************************************
+ * Section 5: Crew header window
+ ***************************************************************/
+
+export %crew_header_string% = %warnings_short%;
+
+/****************************************************************
+ * Section 6: Info window
+ ***************************************************************/
+ 
+ 
+/* end of file */
+

@@ -1,0 +1,209 @@
+/* -*- crc -*- */
+root module crg_trip
+import fundamental;
+import levels;
+import duty;
+import trip;
+import leg;
+import iterators;
+import crg_basic;
+import crg_date;
+import crew_pos;
+
+/* Report parameters */
+%show_violated_rules% =
+  parameter TRUE
+  remark "Show violated rules in the trip report";
+
+/* Config Item */
+/*%time_mode% = timemode_LT;*/
+%time_mode% =
+  parameter timemode_LT
+  remark "Set time base used in trip reports";
+  
+/* Default is LT. Change above to set time mode to UTC or HB */
+table time_mode_conversion_table =
+  %time_mode% -> export %leg_start%, export %leg_end%, 
+                 export %duty_start%, export %duty_end%,
+                 export %trip_start%, export %trip_end%;
+                 
+  timemode_UTC -> leg.%start_utc%, leg.%end_utc%,
+                  duty.%start_utc%, duty.%end_utc%,
+                  trip.%start_utc%, trip.%end_utc%;
+                  
+  timemode_LT  -> leg.%start_lt%, leg.%end_lt%,
+                  duty.%start_lt%, duty.%end_lt%,
+                  trip.%start_lt%, trip.%end_lt%;
+                  
+  timemode_HB  -> leg.%start_hb%, leg.%end_hb%,
+                  duty.%start_hb%, duty.%end_hb%,
+                  trip.%start_hb%, trip.%end_hb%;
+end
+
+/* Replaced by table above */
+/*%leg_start% = if %time_mode% = timemode_UTC then leg.%start_utc%
+              else leg.%start_lt%;
+%leg_end% =   if %time_mode% = timemode_UTC then leg.%end_utc%
+              else leg.%end_lt%;
+export %duty_start% = if %time_mode% = timemode_UTC then duty.%start_utc%
+              else duty.%start_lt%;
+%duty_end% =   if %time_mode% = timemode_UTC then duty.%end_utc%
+              else duty.%end_lt%;
+export %trip_start% = if %time_mode% = timemode_UTC then trip.%start_utc%
+              else trip.%start_lt%;
+%trip_end% = if %time_mode% = timemode_UTC then trip.%end_utc%
+              else trip.%end_lt%;*/              
+%trip_start_od% = time_of_day(%trip_start%);
+%trip_start_day% = round_down(%trip_start%, 24:00);
+%trip_end_day% = round_down(%trip_end%-0:01, 24:00);
+
+%trip_days_safe% = (%trip_end_day_safe% - %trip_start_day_safe% + 24:00) / 24:00;
+%trip_start_day_safe% = 
+  default(%trip_start_day%, round_down(pp_start_time, 24:00));
+%trip_end_day_safe% = 
+  default(%trip_end_day%, round_down(pp_end_time, 24:00));
+  
+%duty_time_is_void% = void(duty.%duty_time%(duty.union, True));
+  
+/* Period start and stop in dated mode */
+%first_trip_start% = min(trip_set, crg_trip.%trip_start%); 
+%last_trip_start% = max(trip_set, crg_trip.%trip_start%); 
+
+%last_trip_end_day_safe% = max(trip_set, %trip_end_day_safe%) where (trip.%starts_in_pp%);
+
+%count_trips% = count(trip_set);
+%only_one_trip% = count(trip_set) = 1;
+%above_only_one_trip% = sum(above(1),count(trip_set)) = 1;
+
+%frequency% = 
+  cat(times(7), 
+    if any(trip_set, %trip_weekday% = %times_index_0%)
+    then format_int(%times_index_0%,"%i")
+    else ".");
+
+%trip_weekday% =
+  (crg_trip.%trip_start% - round_down_week(crg_trip.%trip_start%))/24:00 + 1;
+
+%unique_weekday% =
+  not crg_basic.%is_daily_plan% and
+  min(trip_set,%trip_weekday%) = max(trip_set,%trip_weekday%);
+
+%weekday_info% =
+  if %unique_weekday% then crg_date.%print_weekday%(crg_trip.%leg_start%)
+  else "  ";
+
+%weekday% =
+  crg_date.%print_weekday%(crg_trip.%leg_start%);
+  
+%leg_day_number% = 
+  1 + ((round_down(crg_trip.%leg_start%, 24:00) -
+  round_down(crg_trip.%trip_start%, 24:00)) / 24:00);
+  
+/* Definitions used by the Production Move Conflict report (FD LH) */
+/* Note: Possibly move these definitions to trip module et.c.*/
+iterator production_conflict_trip_set = 
+  partition(trip)
+  by(%is_base_variant_in_pp%,
+     %first_active_arrival_station%,
+     %first_active_departure_date%,
+     %first_active_assigned_func%,
+     trip.%days%);
+  end
+
+%is_base_variant_in_pp% = 
+  first(leg(trip), leg.%is_deadhead%) 
+  and last(leg(trip), leg.%is_deadhead%)
+  and trip.%in_pp%;
+  
+%trip_set_can_have_production_conflict% = 
+  count(trip_set) > 1;
+ 
+%first_active_arrival_station% = 
+  first(leg(trip), leg.%end_station%) where (leg.%is_active_flight%);
+
+%first_active_departure_station% = 
+  first(leg(trip), leg.%start_station%) where (leg.%is_active_flight%);
+  
+%first_active_departure_date% = 
+  first(leg(trip), leg.%start_date%) where (leg.%is_active_flight%);
+
+%first_active_assigned_func% = 
+  first(leg(trip), crew_pos.%assigned_function%) where (leg.%is_active_flight%);
+
+%first_active_flight_no% = 
+  first(leg(trip), leg.%flight_name%) where (leg.%is_active_flight%);
+
+%first_active_ac_type% = 
+  first(leg(trip), leg.%ac_type%) where (leg.%is_active_flight%);
+  
+%last_active_ac_type% = 
+  last(leg(trip), leg.%ac_type%) where (leg.%is_active_flight%);
+  
+ /* Used in 3-2-2 script */ 
+export %long_haul_flight_id% = 
+  first(duty(trip), first(leg(duty),leg.%flight_nr%) where (not leg.%is_deadhead%))
+  where (duty.%is_long_haul%);
+export %long_haul_ac_type% =   first(duty(trip), first(leg(duty),  leg.%ac_type%) where (not leg.%is_deadhead%)) 
+  where (duty.%is_long_haul%);
+export %long_haul_start_week_day% =  first(duty(trip), first(leg(duty), leg.%start_weekday%) where (not leg.%is_deadhead%))
+  where (duty.%is_long_haul%);
+export %long_haul_trip_base% =    
+  if homebase = "STO" then 0
+  else if homebase = "OSL" then 1
+  else if homebase = "CPH" then 2
+  else -1;
+  
+export %long_haul_year% = 
+  format_time(%long_haul_date%, "%Y");
+export %long_haul_month% = 
+  format_time(%long_haul_date%, "%02m"); 
+export %long_haul_day% = 
+  format_time(%long_haul_date%, "%02d"); 
+%long_haul_date% = 
+  first(duty(trip), first(leg(duty), leg.%start_hb%) where (not leg.%is_deadhead%)) 
+  where (duty.%is_long_haul%);
+
+/*  NOP to OAG script */
+%day_diff% = 
+  (round_down(leg.%end_UTC%,24:00) - round_down(leg.%start_UTC%,24:00))/24:00;
+
+
+/* Selection of positions */
+%_leg_for_fc_fc% =
+  assigned_crew_position_1 > 0;
+%_leg_for_fc_fp% =
+  assigned_crew_position_2 > 0;
+%_leg_for_fc_fr% =
+  assigned_crew_position_3 > 0;
+%_leg_for_cc_ap% =
+  assigned_crew_position_5 > 0;
+%_leg_for_cc_as% =
+  assigned_crew_position_6 > 0;
+%_leg_for_cc_ah% =
+  assigned_crew_position_7 > 0;
+
+%_leg_for_fc% = 
+  assigned_crew_position_1 +
+  assigned_crew_position_2 +
+  assigned_crew_position_3 +
+  assigned_crew_position_4 > 0;
+
+%_leg_for_cc% =
+  assigned_crew_position_5 +
+  assigned_crew_position_6 +
+  assigned_crew_position_7 +
+  assigned_crew_position_8 > 0;
+
+%trip_for_fc% = any(leg(trip), %_leg_for_fc%);
+%trip_for_fc_fc% = any(leg(trip), %_leg_for_fc_fc%);
+%trip_for_fc_fp% = any(leg(trip), %_leg_for_fc_fp%);
+%trip_for_fc_fr% = any(leg(trip), %_leg_for_fc_fr%);
+
+%trip_for_cc% = any(leg(trip), %_leg_for_cc%);
+%trip_for_cc_ap% = any(leg(trip), %_leg_for_cc_ap%);
+%trip_for_cc_as% = any(leg(trip), %_leg_for_cc_as%);
+%trip_for_cc_ah% = any(leg(trip), %_leg_for_cc_ah%);
+
+%next_fltnr_in_trip% = (next(leg(trip), leg.%flight_name%));
+
+/* End of file */

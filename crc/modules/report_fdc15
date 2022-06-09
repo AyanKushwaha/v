@@ -1,0 +1,203 @@
+/* -*- crc -*-
+ *
+ * Support module for FDC15. How many blankdays.
+ * 
+ *
+ */
+
+module report_fdc15
+
+import base_utils;
+import base_calendar;
+import fundamental;
+import theme_prod;
+import freedays;
+import training;
+import crew;
+import model_crew;
+import model_freedays;
+import wop;
+import duty;
+import duty_time;
+import accumulators;
+import levels;
+
+/*
+** Number of contract period in planning month. 
+** Normally 1 period, but may be 0 if no contract, or >1 if 
+** contract has changed in the month
+*/
+export %contract_period_count% = 
+  default(model_crew.%crew_chg_agreement_count%(crew.%id%, %pp_start%, round_up_month(%pp_start%+0:01)),0);
+
+/*
+** Start date of contract period in planning month. void if no contract 
+*/
+export %contract_period_start%(Int seq) =
+  model_crew.%crew_chg_agreement_from%(crew.%id%, seq, %pp_start%, round_up_month(%pp_start%+0:01));
+
+/*
+** End date of contract period in planning month. Void if no contract.
+** Data is given as end exclusive = the first midnight after the period (1st of next month).
+*/
+export %contract_period_end%(Int seq) =
+  model_crew.%crew_chg_agreement_to%(crew.%id%, seq, %pp_start%, round_up_month(%pp_start%+0:01));
+
+export %contract_period_index%(Abstime d) =
+  max(times(%contract_period_count%), %times_index_0%)
+  where (d>=%contract_period_start%(%times_index_0%) and d<%contract_period_end%(%times_index_0%));
+
+/*
+** Number of days in contract period in planning month.
+*/
+export %contract_period_days%(Int seq) =
+  default((%contract_period_end%(seq) - %contract_period_start%(seq)) / 24:00, 0); 
+
+/*
+** short descriptive string regarding what rule is used for fdc15 calculation.
+** Typically "fd-se/no" or "cc-snk". Void if no fdc15 calculation
+*/
+export %contract_period_rule%(Int seq) =
+  model_freedays.%crew_fdc15_rule%(crew.%id%, %contract_period_start%(seq),%contract_period_end%(seq));
+  
+export %parttime_percentage%(Int seq) = default(freedays.%part_time_factor_string%(%pp_start%, True),"");
+
+/*
+** Check if contract period follows fdc15 
+*/
+export %contract_period_is_fdc15%(Int seq) =
+  not void (%contract_period_rule%(seq));
+ 
+
+export %current_year_entitled_basic% = 
+  default(
+    if %contract_period_count%=1 then model_freedays.%crew_year_entitled_basic%(crew.%id%, %contract_period_start%(1), %contract_period_end%(1))
+    else 0,
+    0);
+  
+export %freedays_acc_year_entitled% = default(freedays.%acc_fdc15_year_entitled_per_month%(%pp_start%), 0);
+
+/*
+export %freedays_acc_year_target% =
+  %freedays_acc_year_entitled%;
+*/
+
+export %freedays_fdc_days% = freedays.%crew_month_fdc_days%(%pp_start%, round_up_month(%pp_start% + 0:01));
+
+export %freedays_year_target% = default(freedays.%crew_year_target%(%pp_start%, round_up_month(%pp_start% + 0:01)), 0);
+
+export %freedays_acc_balance% = default(freedays.%acc_fdc15_balance%(%pp_start%),0);
+
+export %freedays_year_bl_target% = 100 * %freedays_calendar_month_scheduled% - %freedays_year_target%;
+
+export %freedays_acc_year_scheduled% = default(freedays.%acc_fdc15_possibly_scheduled%(%pp_start%), 0);
+   
+export %freedays_calendar_month_entitled% = default(freedays.%crew_month_entitled%(%pp_start%,round_up_month(%pp_start%+0:01)), 0);
+
+export %freedays_calendar_month_scheduled% = default(freedays.%crew_month_possibly_scheduled%(%pp_start%,round_up_month(%pp_start%+0:01)),0);
+
+export %freedays_twin_month_entitled% =
+  default(freedays.%twin_month_fdc15_entitled%(%pp_start%),0);  
+
+export %freedays_twin_month_scheduled% =
+  default(freedays.%twin_month_fdc15_scheduled%(%pp_start%),0);
+
+export %freedays_reducing_days% =
+  freedays.%crew_month_reducing_fdc_days%(%pp_start%, round_up_month(%pp_start%+0:01));
+
+%round_req%(Int val, Abstime s, Abstime e) =
+  let tot = freedays.%crew_month_fdc_days%(round_down_month(s), round_up_month(e));
+  if val>0 then (val * ((e-s)/24:00) + tot/2)/tot
+  else (val * ((e-s)/24:00) - tot/2)/tot;
+  
+%contract_period_fdc15_blank_days_req_old%(Abstime s, Abstime e) =
+  let month_val = freedays.%crew_month_possibly_scheduled%(s,e) - freedays.%acc_fdc15_year_target_per_month%(s); /* if freedays+empty > target, blank days can be assigned */
+  if s=round_down_month(s) and e = round_up_month(e) then nmin(%count_empty%(s,e), month_val) /* same contract whole month */
+  else nmin(%count_empty%(s, e), %round_req%(month_val, s, e)); /* distribute days in proportion to interval lengths */
+
+%contract_period_fdc15_blank_days_req%(Abstime s, Abstime e) =
+  let month_val = freedays.%crew_month_possibly_scheduled%(s,e) - freedays.%crew_year_target%(s, e)/100; /* if freedays+empty > target, blank days can be assigned */
+  if s=round_down_month(s) and e = round_up_month(e) then nmin(%count_empty%(s,e), month_val) /* same contract whole month */
+  else nmin(%count_empty%(s, e), %round_req%(month_val, s, e)); /* distribute days in proportion to interval lengths */
+
+%contract_period_fdc15_blank_days_req_new_x%(Abstime s, Abstime e) =
+   let month_val = 100 * freedays.%crew_month_possibly_scheduled%(s,e) - freedays.%crew_year_target%(s, e); /* if freedays+empty > target, blank days can be assigned */
+  if s=round_down_month(s) and e = round_up_month(e) then month_val /* same contract whole month */
+  else %round_req%(month_val, s, e); /* distribute days in proportion to interval lengths */
+
+/*
+** assignment strategy. Combine single letter flags:
+** S = Prioritize single freedays on holidays on saturdays
+** s = Prioritize filling blankdays to all gaps
+**
+*/
+export %contract_period_prio%(Int seq) =
+  let d = %contract_period_start%(seq);
+  if crew.%has_agmt_group_qa_at_date%(d) or crew.%has_agmt_qual_fd_crj%(d) then "s" 
+  else "S"; /* for SAS prefer single freedays (on saturdays and holidays)
+
+/* handling of single day holes in wops */
+export %wop_on_duty% =
+  wop.%in_pp% and not void(wop.%start_day%) and not void(wop.%end_day%) and wop.%is_on_duty%;
+
+export %wop_start_day% =
+  wop.%start_day%;
+
+export %wop_end_day% =
+  wop.%end_day%;
+
+export %wop_hole1_date% =
+  wop.%hole_1_date%;
+
+export %wop_hole2_date% =
+  wop.%hole_2_date%;
+
+export %wop_hole1_allowed_singlef% =
+  freedays.%wop_singlef_hole1_allowed_pp%;
+
+export %wop_hole2_allowed_singlef% =
+  freedays.%wop_singlef_hole2_allowed_pp%; 
+
+/*
+** Number of requested blank days for period
+** If period is not fdc15, as many as possible (=empty days) are tried; legality will probably limit
+** If several periods of fdc15 in one month, a total fdc15 request is calculated, and proportionally distrib
+*/
+export %contract_period_blank_days_req%(Int seq) =
+  let s = %contract_period_start%(seq),
+      e = %contract_period_end%(seq);
+  if %contract_period_is_fdc15%(seq) then 
+    %contract_period_fdc15_blank_days_req%(s, e)
+  else %count_empty%(s,e); /* as much as possible */
+    
+/* Summarize per crew, to avoid working with crew that don't need blankdays */
+export %max_blankdays_to_assign% =
+  sum(times(model_crew.%crew_chg_agm_max_index%), nmax(%contract_period_blank_days_req%(%times_index_0%),0))
+    where (not void(%contract_period_start%(%times_index_0%)));
+
+export %has_potential_prio_blankdays% =
+  any(wop(chain),  %wop_on_duty% and %wop_hole1_date% > base_utils.%abstimemin%);
+
+%count_empty%(Abstime s, Abstime e) =
+  duty.%days_with_selection_possible%(duty.%duty_sel_noone%, s, e);
+
+/*
+export %lw_rule_1% = 
+  %contract_period_rule%(1);
+
+export %lw_test% =
+  %count_empty%(%pp_start%,duty.%start_hb%);
+
+export %lw_rule_2% = 
+  %contract_period_rule%(2);
+
+  export %lw_rule_3% = 
+  %contract_period_rule%(3);
+
+export %lw_test_req% =
+  %contract_period_blank_days_req%(1);
+  
+export %lw_days% = 
+  freedays.%crew_month_fdc_days%(1aug2015,1sep2015);
+*/
+/* eof */

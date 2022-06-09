@@ -1,0 +1,524 @@
+
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains government rules from the Civil Avaiation
+ *   Authority to be used in tracking
+ * 
+ * Sections:
+ *   1. SCC qualification
+ *
+ * Created by:
+ *   Peter Jonsson, 20-Mar-2006
+ *
+ * Major changes:
+ *
+ */
+
+root module rules_caa_cct
+import fundamental;
+import time_utils;
+import levels;
+import duty;
+import trip;
+import leg;
+import crew;
+import crew_pos;
+import rule_exceptions;
+import roster;
+import oma16;
+import oma16_defs;
+import duty_period;
+import rules;
+import rescheduling;
+import standby;
+import wop;
+
+/*
+** Rule:
+**    Forbidden to assign flight deck above rank
+**
+** Description:
+**    Checks if crew on active flight or simulator is assigned above rank.
+**
+** Functional rule:
+**    WP280 CCT
+*/
+
+export rule caa_comp_not_assign_FP_as_FC =
+  valid roster.%check_rules% and
+        not crew.%is_leased_duty_start% and
+        %flight_crew% and
+        leg.%in_pp_extended% and
+        (leg.%is_simulator% or
+         leg.%is_active_flight%) and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_utc%);
+  
+  not crew_pos.%higher_rank%;
+  startdate  = leg.%activity_scheduled_start_time_utc%;
+  severity =  %severity_filter_int%(leg.%start_utc%, %duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext concat("OMA: FD above rank ", crew_pos.%assigned_function%, "(", crew_pos.%current_function%, ")");
+  remark "(CCT) OMA: FD above rank";
+end
+
+
+/*
+** Rule:
+**  OMA16 - maximum combined duration of airport standby and FDP 
+**
+** Description:
+**    Checks that the combined duration of airport standby and
+**    assigned FDP is no more than 16 hours
+**    In-flight rest excluded
+**
+** Agreement:
+**   CS FTL.1.225 */
+rule caa_oma16_max_airport_callout_ALL =
+  valid 
+        trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%is_first_duty_in_duty_period% and
+        duty_period.%has_airport_callout% and
+        not oma16.%rest_on_board_allowed%;
+        
+  duty_period.%time_until_block_on% <= oma16_defs.%max_airport_standby_and_fdp_duration%;
+   
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(reltime value, reltime limit) = 
+    rules.%failtext_rel%("CAA: OMA16 max combined duration of airport standby and FDP",
+                         value, limit);
+  remark "CAA: OMA16 max combined duration of airport standby and FDP",
+  planner "The rule checks that the combined duration of airport standby and"
+          " assigned FDP is no more than 16 hours";
+end
+
+
+/*
+** Rule:
+**  Soft OMA16 - maximum combined duration of airport standby and FDP 
+**
+** Description:
+**    Checks that the combined duration of airport standby and
+**    assigned FDP is no more than 15 hours
+**    In-flight rest excluded
+**
+** Agreement:
+**   CS FTL.1.225 */
+rule soft_oma16_max_airport_callout_ALL =
+  valid 
+        trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%is_first_duty_in_duty_period% and
+        duty_period.%has_airport_callout% and
+        not oma16.%rest_on_board_allowed% and        
+        duty_period.%time% <= oma16_defs.%max_airport_standby_and_fdp_duration%;
+        
+        duty_period.%time_until_block_on% <= (oma16_defs.%max_airport_standby_and_fdp_duration% -1:00) +
+            rule_exceptions.%overshoot_rel_on_off%(wop.%start_UTC%);
+        
+   
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(reltime value, reltime limit) = 
+    rules.%failtext_rel%("Soft: OMA16 max combined duration of airport standby and FDP",
+                         value, limit);
+  remark "Soft: OMA16 max combined duration of airport standby and FDP",
+  planner "This soft rule checks that the combined duration of airport standby and"
+          " assigned FDP is no more than 15 hours";
+end
+
+
+
+
+/*
+** Rule:
+**  OMA16 - maximum combined duration of home/hotel standby and FDP 
+**
+** Description:
+**    Checks that the combined duration of home/hotel standby and
+**    assigned FDP is no more than 18 hours.
+**    Does not apply to split duties or duties with in-flight rest.
+**
+** Agreement:
+**   CS FTL.1.225 */
+rule caa_oma16_max_standby_callout_ALL =
+  valid 
+        trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%has_standby_callout% and
+        not duty_period.%is_split% and
+        not oma16.%rest_on_board_allowed% and
+        (not duty.%is_single_leg_standby_callout%
+         or next(duty(chain), not duty_period.%is_split% and
+                              not oma16.%rest_on_board_allowed%)
+        );
+        
+  %standby_and_fdp_time% <= oma16_defs.%max_standby_with_rest_and_fdp_duration%;
+   
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(reltime value, reltime limit) = 
+    rules.%failtext_rel%("CAA: OMA16 max combined duration of home/hotel standby and FDP",
+                         value, limit);
+  remark "CAA: OMA16 max combined duration of home/hotel standby and FDP",
+  planner "The rule checks that the combined duration of home/hotel standby and"
+          " assigned FDP is no more than 18 hours";
+end
+
+/* This is necessary because standby and FDP are sometimes separated into two duties */
+%standby_and_fdp_time% =
+  if duty.%is_single_leg_standby_callout%
+  then next(duty(chain), duty.%last_active_scheduled_block_on%) - duty.%start_utc%
+  else duty_period.%time_until_block_on%;
+
+
+
+/*
+** Rule:
+**  Soft OMA16 - maximum combined duration of home/hotel standby and FDP 
+**
+** Description:
+**    Checks that the combined duration of home/hotel standby and
+**    assigned FDP is no more than 17 hours.
+**    Does not apply to split duties or duties with in-flight rest.
+**
+** Agreement:
+**   CS FTL.1.225 */
+rule soft_oma16_max_standby_callout_ALL =
+  valid 
+        trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%has_standby_callout% and
+        not duty_period.%is_split% and
+        not oma16.%rest_on_board_allowed% and
+        (not duty.%is_single_leg_standby_callout%
+         or next(duty(chain), not duty_period.%is_split% and
+                              not oma16.%rest_on_board_allowed%)) and
+        %standby_and_fdp_time% <= oma16_defs.%max_standby_with_rest_and_fdp_duration%;
+   
+        %standby_and_fdp_time% <= (oma16_defs.%max_standby_with_rest_and_fdp_duration% - 1:00) +
+            rule_exceptions.%overshoot_rel_on_off%(wop.%start_UTC%);
+        
+   
+   
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(reltime value, reltime limit) = 
+    rules.%failtext_rel%("Soft: OMA16 max combined duration of home/hotel standby and FDP",
+                         value, limit);
+  remark "Soft: OMA16 max combined duration of home/hotel standby and FDP",
+  planner "This soft rule checks that the combined duration of home/hotel standby and"
+          " assigned FDP is no more than 17 hours";
+end
+
+
+
+
+
+/*
+** Rule:
+**  OMA16 - maximum combined duration of home/hotel standby and FDP
+**
+** Description:
+**    Checks that the combined duration of home/hotel standby and
+**    assigned FDP up until earliest possible(FD)/scheduled (CC)
+**    in-flight rest is no more than 18 hours.
+**
+** Agreement:
+**   Additional requirement from the CAA Marts/April 2017 */
+rule caa_oma16_max_standby_callout_rob_ALL =
+  valid
+        trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%has_standby_callout% and
+        not duty_period.%is_split% and
+        (oma16.%rest_on_board_allowed% or
+        (duty.%is_single_leg_standby_callout% and next(duty(chain), oma16.%rest_on_board_allowed%)) );
+
+  %standby_and_fdp_time_rob% <= oma16_defs.%max_standby_with_rest_and_fdp_duration%;
+
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(reltime value, reltime limit) =
+    rules.%failtext_rel%("CAA: OMA16 max combined duration of home/hotel sby & FDP w. in-flight rest",
+                         value, limit);
+  remark "CAA: OMA16 max combined duration of home/hotel sby & FDP w. in-flight rest",
+  planner "The rule checks that the combined duration of home/hotel standby and"
+          " assigned FDP up until in-flight rest is no more than 18 hours";
+end
+
+/*
+** For cabin the time period to consider is from standby start to the scheduled amount of hours after ETD
+** For flight deck the time period to consider is from standby start to the earliest possible time (45min) after ETD
+** Single leg standby call-out is necessary to consider since standby and FDP are sometimes separated into two duties
+*/
+%standby_and_fdp_time_rob% =
+  if duty.%is_single_leg_standby_callout%
+  then default(%_rob_est_start%, (next(duty(chain), duty.%end_utc%))) - duty.%start_utc%
+  else default(%_rob_est_start%, duty_period.%end_utc%) - duty_period.%start_utc%;
+
+%_rob_est_start% =
+   if crew.%is_cabin%
+   then %_rob_sch_start_cc_est%
+   else %_rob_start_fd_est%;
+
+%_rob_sch_start_first_in_duty_cc_est% =
+   first(leg(duty), (oma16.%sched_rob_start% + %_delay_sch_to_est%) )
+      where (not void(oma16.%sched_rob_start%));
+
+%_rob_sch_start_cc_est% =
+  if duty.%is_single_leg_standby_callout%
+  then next(duty(chain), %_rob_sch_start_first_in_duty_cc_est%)
+  else %_rob_sch_start_first_in_duty_cc_est%;
+
+%_delay_sch_to_est% = nmax(leg.%delay_sch_to_est_sign%, 0:00);
+
+%_rob_start_fd_est% =
+  if duty.%is_single_leg_standby_callout%
+  then next(duty(chain), %_rob_start_fd_est_duty%)
+  else %_rob_start_fd_est_duty%;
+
+%_rob_start_fd_est_duty% =
+   first(leg(duty), (leg.%start_UTC_estimated_or_scheduled% + oma16_defs.%inflight_rest_start_fc%) )
+      where (leg.%is_long_haul% and oma16.%rest_on_board_allowed%);
+      
+      
+
+
+/*
+** Rule:
+**  Soft OMA16 - maximum combined duration of home/hotel standby and FDP
+**
+** Description:
+**    Checks that the combined duration of home/hotel standby and
+**    assigned FDP up until earliest possible(FD)/scheduled (CC)
+**    in-flight rest is no more than 17 hours.
+**
+** Agreement:
+**   Additional requirement from the CAA Marts/April 2017 */
+rule soft_oma16_max_standby_callout_rob_ALL =
+  valid
+        trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%has_standby_callout% and
+        not duty_period.%is_split% and
+        (oma16.%rest_on_board_allowed% or
+        (duty.%is_single_leg_standby_callout% and next(duty(chain), oma16.%rest_on_board_allowed%)) ) and
+        %standby_and_fdp_time_rob% <= oma16_defs.%max_standby_with_rest_and_fdp_duration%;
+
+        %standby_and_fdp_time_rob% <= (oma16_defs.%max_standby_with_rest_and_fdp_duration% -1:00) +
+            rule_exceptions.%overshoot_rel_on_off%(wop.%start_UTC%);
+        
+ 
+
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(reltime value, reltime limit) =
+    rules.%failtext_rel%("Soft: OMA16 max combined duration of home/hotel sby & FDP w. in-flight rest",
+                         value, limit);
+  remark "Soft: OMA16 max combined duration of home/hotel sby & FDP w. in-flight rest",
+  planner "This rule checks that the combined duration of home/hotel standby and"
+          " assigned FDP up until in-flight rest is no more than 17 hours";
+end
+
+
+
+
+
+/*
+** Rule:
+**  OMA16 - maximum combined duration of airport standby and FDP
+**
+** Description:
+**    Checks that the combined duration of airport standby and
+**    assigned FDP up until earliest possible(FD)/scheduled (CC)
+**    in-flight rest is no more than 16 hours
+**
+** Agreement:
+**   Additional requirement from the CAA Marts/April 2017 */
+rule caa_oma16_max_airport_callout_rob_ALL =
+  valid
+        trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%is_first_duty_in_duty_period% and
+        duty_period.%has_airport_callout% and
+        (oma16.%rest_on_board_allowed% or
+        (duty.%is_single_leg_standby_callout% and next(duty(chain), oma16.%rest_on_board_allowed%)) );
+
+  %standby_and_fdp_time_rob% <= oma16_defs.%max_airport_standby_and_fdp_duration%;
+
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(reltime value, reltime limit) =
+    rules.%failtext_rel%("CAA: OMA16 max combined duration of a-sby & FDP w. in-flight rest",
+                         value, limit);
+  remark "CAA: OMA16 max combined duration of airport standby and FDP with in-flight rest",
+  planner "The rule checks that the combined duration of airport standby and"
+          " assigned FDP up until in-flight rest begins is no more than 16 hours";
+end
+
+
+
+/*
+** Rule:
+**  Soft OMA16 - maximum combined duration of airport standby and FDP
+**
+** Description:
+**    Checks that the combined duration of airport standby and
+**    assigned FDP up until earliest possible(FD)/scheduled (CC)
+**    in-flight rest is no more than 15 hours
+**
+** Agreement:
+**   Additional requirement from the CAA Marts/April 2017 */
+rule soft_oma16_max_airport_callout_rob_ALL =
+  valid
+        trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%is_first_duty_in_duty_period% and
+        duty_period.%has_airport_callout% and
+        (oma16.%rest_on_board_allowed% or
+        (duty.%is_single_leg_standby_callout% and next(duty(chain), oma16.%rest_on_board_allowed%)) ) and
+        %standby_and_fdp_time_rob% <= oma16_defs.%max_airport_standby_and_fdp_duration%;
+
+
+        %standby_and_fdp_time_rob% <= (oma16_defs.%max_airport_standby_and_fdp_duration% - 1:00) +
+            rule_exceptions.%overshoot_rel_on_off%(wop.%start_UTC%);
+        
+
+
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(reltime value, reltime limit) =
+    rules.%failtext_rel%("Soft: OMA16 max combined duration of a-sby & FDP w. in-flight rest",
+                         value, limit);
+  remark "Soft: OMA16 max combined duration of airport standby and FDP with in-flight rest",
+  planner "This rule checks that the combined duration of airport standby and"
+          " assigned FDP up until in-flight rest begins is no more than 15 hours";
+end
+
+
+
+
+
+/*
+** Rule:
+**  OMA16 - maximum combined duration of home/hotel standby and FDP with split duty
+**
+** Description:
+**    Checks that the combined duration of home/hotel standby and
+**    assigned FDP up until split duty break start is no more than 18 hours.
+**
+** Agreement:
+**   Additional requirement from the CAA Marts/April 2017 */
+rule caa_oma16_max_standby_callout_split_duty_ALL =
+  valid
+        trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%has_standby_callout% and
+        (duty_period.%is_split% or
+        (duty.%is_single_leg_standby_callout% and next(duty(chain), duty_period.%is_split%)))
+        and not oma16.%rest_on_board_allowed%;
+
+  %standby_and_fdp_time_split_duty% <= oma16_defs.%max_standby_with_rest_and_fdp_duration%;
+
+  startdate = duty_period.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(reltime value, reltime limit) =
+    rules.%failtext_rel%("CAA: OMA16 max combined duration of home/hotel standby and FDP with split duty",
+                         value, limit);
+  remark "CAA: OMA16 max combined duration of home/hotel standby and FDP with split duty",
+  planner "The rule checks that the combined duration of home/hotel standby and"
+          " assigned FDP up until split duty break start is no more than 18 hours";
+end
+
+%standby_and_fdp_time_split_duty% =
+  if duty.%is_single_leg_standby_callout%
+  then
+     next(duty(chain), duty_period.%split_duty_break_start_utc%) - duty.%start_utc%
+  else
+      duty_period.%split_duty_break_start_utc% - duty_period.%start_utc%;
+
+
+/*
+** Rule:
+**  OMA16 - C/I before standby end
+**
+** Description:
+**    Checks that C/I is earlier than standby end
+**
+** Agreement:
+**   Additional requirement from the CAA June 2017
+**
+*/
+
+rule caa_oma16_ci_not_after_standby_end_ALL =
+  valid %is_roster%
+        and (leg.%is_standby_at_airport% and standby.%duty_is_airport_callout%)
+        and not %_excluded_standby%
+        and duty.%in_pp_extended%
+        and (leg.%is_first_in_duty% or leg.%is_waiting_at_airport_type_W%);
+
+  next(leg(wop), leg.%ci_start_uptodate_hb%) <=
+        default(%_standby_end%, rescheduling.%dt_inf_checkout%(leg.%start_hb%));
+
+  startdate = leg.%activity_scheduled_start_time_utc%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = next(leg(wop),leg.%failobject_departure%);
+  failtext(Abstime value, Abstime limit) =
+    rules.%failtext_abs%("CAA: OMA16 SBY: C/I not after airport standby end", value,limit);
+  remark "OMA16 SBY: No checkin after airport sby end",
+  planner "Not allowed to check-in after sby end.";
+end
+
+set excluded_standby_codes = "AC","AO","WP","WO";
+%_excluded_standby% =
+  leg.%code% in excluded_standby_codes;
+
+rule caa_oma16_max_time_btw_standby_end_and_check_in = 
+   valid %is_roster%
+        and ((leg.%is_standby_at_home% or leg.%is_standby_at_hotel%) and standby.%duty_is_standby_callout%)
+        and not %_excluded_standby%
+        and duty.%in_pp_extended%
+        and (leg.%is_first_in_duty%);
+
+  next(leg(wop), leg.%ci_start_uptodate_hb%) <=
+        default(%_standby_end_and_transport_time%, %_dt_inf_checkout_and_transport_time%);
+
+  startdate = leg.%activity_scheduled_start_time_utc%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = next(leg(wop),leg.%failobject_departure%);
+  failtext(Abstime value, Abstime limit) =
+    rules.%failtext_abs%("CAA: OMA16: C/I after standby end and transport time", value,limit);
+  remark "CAA: OMA16 SBY: C/I after standby end plus local transport time.",
+  planner "Not allowed to check-in after sby end plus local transport time.";
+end
+
+/* Need to transform the answer from %sby_end% to hb since it uses/returns utc time, while rest of func uses hb-time */
+%_standby_end% = time_utils.%utc2hb%(rescheduling.%sby_end%(crew.%id%, leg.%co_end_utc%));
+/* Calculate standby end time and transport time */
+%_standby_end_and_transport_time% = %_standby_end% + %_home_or_hotel_transport_time%;
+/* Calculate standby end time and transport time for backup alternative*/
+%_dt_inf_checkout_and_transport_time% = rescheduling.%dt_inf_checkout%(leg.%start_hb%) + %_home_or_hotel_transport_time%;
+
+/* Decide if crew is at home or in a hotel */
+%_home_or_hotel_transport_time% = 
+  if leg.%is_standby_at_home% then 
+    standby.%home_transport_time%  
+  else if leg.%is_standby_at_hotel% then 
+    standby.%hotel_transport_time%("ANY")
+  else void_reltime;
+
+/* End of file */

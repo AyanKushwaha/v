@@ -1,0 +1,453 @@
+/* -*- crc -*- */
+/*******************************************************
+
+Use:
+  The attribute package allows to set extra attributes on most 'planning 
+  objects' such as flight legs, ground tasks, personal activities etc.
+  These attributes are defined in tables whose names end with '_attr',
+  e.g. crew_activity_attr.
+  An attribute consists a tag name and a reference to the object.
+  See also $CARMUSR/lib/python/Attribute.py
+
+Documentation:
+
+--------------------------------------------------------
+Created:  23Jan2008
+By:	  Erik Gustafsson
+*******************************************************/
+
+module attributes_ccr inherits attributes
+import leg;
+import trip;
+import crew;
+import fundamental;
+import keywords;
+import crew_pos;
+/*
+ * Section 1
+ * Table definitions. We allow changing the tables with data, but not the config
+ * tables 
+ */
+%crew_table_p% =
+  parameter "crew_attr"
+  remark "ETAB: Crew attributes";
+  
+%crew_flight_table_p% = 
+  parameter "crew_flight_duty_attr"
+  remark "ETAB: Crew flight duty attributes";
+
+
+%crew_ground_table_p% =
+  parameter "crew_ground_duty_attr"
+  remark  "ETAB: Crew ground duty attributes";
+
+  
+%crew_activity_table_p% =
+  parameter "crew_activity_attr"
+  remark "ETAB: Crew activity attributes";
+
+%roster_attribute_table_p% =
+  parameter "roster_attr"
+  remark "ETAB: Roster attributes";
+
+
+/* Section 3
+ * Table lookups
+ */
+
+table crew_attr(String attr, Abstime a) =
+  crew.%id%, a, attr  -> 
+    String %crew_attr%,
+    RelTime %crew_rel%,
+    AbsTime %crew_abs%,
+    Int %crew_int%,
+    String %crew_str%,
+    String %crew_si%;
+  external %crew_table_p%;
+  crew, (validfrom, validto(, attr -> 
+    attr, value_rel, value_abs, value_int, value_str, si;
+  -,-,- -> 
+    "", void_RelTime, void_AbsTime, void_Int, void_String, void_String;
+end
+
+export %crew_has_attr_at_time%(string attr, abstime a) =
+    default(%crew_attr%(attr, a) = attr, false);
+
+table crew_flight_duty_attr(String attr) =
+  leg.%udor%, leg.%flight_descriptor%, leg.%start_station%, crew.%id%, attr  -> 
+    String %cfd_attr%,
+    export RelTime %cfd_rel%,
+    export AbsTime %cfd_abs%,
+    export Int %cfd_int%,
+    String %cfd_str%,
+    String %cfd_si%;
+  external %crew_flight_table_p%;
+  cfd_leg_udor, cfd_leg_fd, cfd_leg_adep, cfd_crew, attr -> 
+    attr, value_rel, value_abs, value_int, value_str, si;
+  -,-,-,-,- -> 
+    "", void_RelTime, void_AbsTime, void_Int, void_String, void_String;
+end
+
+%cfd_has_attr%(String attr) =
+    default(%cfd_attr%(attr) = attr, false);
+    
+/* Table to enable equal_legs independent lookup for attribute on any crew on 
+   leg. To be used for instructor lookups. /EKG 080419 */
+table cfd_attr2(String attr, String attr_str) =
+  leg.%udor%, leg.%flight_descriptor%, leg.%start_station%, attr, attr_str -> 
+    String %_cfd_attr_str_any_crew%;
+  external %crew_flight_table_p%;
+  cfd_leg_udor, cfd_leg_fd, cfd_leg_adep, attr, value_str -> cfd_crew;
+  -,-,-,-,- -> void_string;
+end
+
+table cfd_attr3(String attr) =
+  leg.%udor%, leg.%flight_descriptor%, leg.%start_station%, attr -> 
+    String %_cfd_attr_any_crew%;
+  external %crew_flight_table_p%;
+  cfd_leg_udor, cfd_leg_fd, cfd_leg_adep, attr -> attr;
+  -,-,-,- -> void_string;
+end
+
+table cfd_attr_str_any_crew(String attr) =
+  leg.%udor%, leg.%flight_descriptor%, leg.%start_station%, attr -> 
+    export String %cfd_attr_str_value_any_crew%;
+  external %crew_flight_table_p%;
+  cfd_leg_udor, cfd_leg_fd, cfd_leg_adep, attr -> value_str;
+  -,-,-,- -> void_string;
+end
+
+/* This is to check if table match exists. For full correctness we should do
+   equal_legs */
+%_cfd_has_attr_any_crew%(String attr, String attr_str) =
+    if attr_str = "" then 
+        not void(%_cfd_attr_any_crew%(attr))
+    else
+        not void(%_cfd_attr_str_any_crew%(attr, attr_str));
+
+export %cfd_crewid_with_attr%(String attr, String attr_str) =
+    default(%_cfd_attr_str_any_crew%(attr, attr_str), "-");
+    
+table crew_ground_duty_attr(String attr) =
+  leg.%udor%, leg.%uuid_crew%, crew.%id%, attr  -> 
+    String %cgd_attr%,
+    RelTime %cgd_rel%,
+    AbsTime %cgd_abs%,
+    Int %cgd_int%,
+    String %cgd_str%,
+    String %cgd_si%;
+  external %crew_ground_table_p%;
+  cgd_task_udor, cgd_task_id, cgd_crew, attr -> 
+    attr, value_rel, value_abs, value_int, value_str, si;
+  -,-,-,- -> 
+    "", void_RelTime, void_AbsTime, void_Int, void_String, void_String;
+end
+
+%cgd_has_attr%(String attr) =
+    default(%cgd_attr%(attr) = attr, false);
+
+export %cgd_has_attr_str%(String attr, String value) =
+    default(%cgd_str%(attr) = value, false);
+
+table cgd_attr2(String attr, String attr_str) =
+  leg.%udor%, leg.%uuid_crew%, attr, attr_str -> 
+    String %_cgd_has_attr_str_any_crew%;
+  external %crew_ground_table_p%;
+  cgd_task_udor, cgd_task_id, attr, value_str -> cgd_crew;
+  -,-,-,- -> void_string;
+end
+
+/* For cfd we handle attr_str = "", but that lookup isn't used for cgd, so this
+   is ok. If that changes we will need to add a lookup without attr_str */
+%_cgd_has_attr_any_crew%(String attr, String attr_str) =
+    not void(%_cgd_has_attr_str_any_crew%(attr, attr_str));
+    
+%activity_typecode% =
+  if keywords.%ground_transport%
+  then keywords.%flight_carrier%
+  else keywords.%activity_type%;
+
+table crew_activity_attr(String attr) =
+  leg.%start_utc%, crew.%id%, %activity_typecode%, attr  -> 
+    export String %ca_attr%,
+    RelTime %ca_rel%,
+    AbsTime %ca_abs%,
+    Int %ca_int%,
+    String %ca_str%,
+    String %ca_si%;
+  external %crew_activity_table_p%;
+  ca_st, ca_crew, ca_activity, attr -> 
+    attr, value_rel, value_abs, value_int, value_str, si;
+  -,-,-,- -> 
+    "", void_RelTime, void_AbsTime, void_Int, void_String, void_String;
+end
+
+export %ca_has_attr%(String attr) =
+    default(%ca_attr%(attr) = attr, false);
+
+/* Unified access to leg attributes 
+table attr(String attr) =
+  flight_duty, ground_activity, personal_activity -> 
+    %_leg_has_attr%, %_leg_attr_rel%, %_leg_attr_abs%, 
+    %_leg_attr_int%, %_leg_attr_str%, %_leg_attr_si%;
+  True, False, False -> default(%flight_leg_attr%(attr) = attr, false), 
+                        %flight_leg_rel%(attr),
+                        %flight_leg_abs%(attr),
+                        %flight_leg_int%(attr),
+                        %flight_leg_str%(attr),
+                        %flight_leg_si%(attr);
+  False, True, False ->  default(%ground_task_attr%(attr) = attr, false), 
+                        %ground_task_rel%(attr),
+                        %ground_task_abs%(attr),
+                        %ground_task_int%(attr),
+                        %ground_task_str%(attr),
+                        %ground_task_si%(attr);
+  -,     -,    -     -> 
+    False, void_RelTime, void_AbsTime, void_Int, void_String, void_String;
+end*/
+
+/* Unified access to assignment attributes */
+table assignment_attr(String attr) =
+  keywords.%flight_duty% and not keywords.%ground_transport%,
+  keywords.%ground_activity%,
+  keywords.%personal_activity% or keywords.%ground_transport% -> 
+    export bool %assignment_has_attr%,
+    export reltime %assignment_attr_rel%,
+    export abstime %assignment_attr_abs%,
+    export int %assignment_attr_int%,
+    export string %assignment_attr_str%,
+    export string %assignment_attr_si%;
+  True, False, False ->  %cfd_has_attr%(attr),
+                         %cfd_rel%(attr),
+                         %cfd_abs%(attr),
+                         %cfd_int%(attr),
+                         %cfd_str%(attr),
+                         %cfd_si%(attr);
+  False, True, False ->  %cgd_has_attr%(attr), 
+                         %cgd_rel%(attr),
+                         %cgd_abs%(attr),
+                         %cgd_int%(attr),
+                         %cgd_str%(attr),
+                         %cgd_si%(attr);
+  False, False, True ->  %ca_has_attr%(attr),
+                         %ca_rel%(attr),
+                         %ca_abs%(attr),
+                         %ca_int%(attr),
+                         %ca_str%(attr),
+                         %ca_si%(attr);
+  -,     -,    -     ->  
+    False, void_RelTime, void_AbsTime, void_Int, void_String, void_String;
+end
+
+export %all_assignment_attributes% =
+  cat(times(%nr_of_assignment_attr%), %assignment_attr_str%(%attr_id%(%times_index_0%)), ",")
+  where (not (%attr_id%(%times_index_0%) in attr_to_no_show)
+         and
+         %assignment_has_attr%(%attr_id%(%times_index_0%)));
+  
+/* Attributes for internal functionality, not to be shown in GUI */
+set attr_to_no_show =
+  "RECURRENT", "SBY", "INSTRUCTOR", "PRIVATE";
+
+export %assignment_has_any_attr% =
+  %all_assignment_attributes% <> "";
+  
+/* Redefined in attributes_gpc for Studio use */
+export %assignment_has_attr_any_crew%(String attr, String attr_str) =
+    (%_cfd_has_attr_any_crew%(attr, attr_str) or 
+     %_cgd_has_attr_any_crew%(attr, attr_str));
+    
+/* Section 4
+ * Training related definitions.
+ * This is mainly to easify the migration from old crew_flight_attr impl. to 
+ * new attributes impl.
+ */
+
+export %leg_training_code% =
+    if leg.%can_have_attribute% then %_leg_training_code%
+    else void_string;
+
+%_leg_training_code% = %assignment_attr_str%("TRAINING");
+
+redefine export %is_leg_training_code_FLT_INSTR_OL% =
+   default(%_is_leg_training_code_FLT_INSTR_OL%, False);
+
+%_is_leg_training_code_FLT_INSTR_OL% =
+   (%leg_training_code% = "FLT INSTR OL");
+
+export %leg_instructor_code% = %assignment_attr_str%("INSTRUCTOR");
+
+export %leg_training_prev_pos% = default(%assignment_attr_int%("TRAINING"),-1);
+export %leg_instructor_prev_pos% = default(%assignment_attr_int%("INSTRUCTOR"),-1);
+
+export %leg_has_training_code% =
+  not void(%leg_training_code%);
+
+/* This is used for the AttributesForm script to enable listing only 
+   appropriate attributes, without requiring numerous categories for 
+   attributes.
+   /EKG */
+%leg_can_have_attribute%(String attribute) =
+  let set_var = %set_var%;
+    leg.%can_have_attribute% and 
+    %_leg_can_have_attribute%(attribute, set_var);
+  
+%_leg_can_have_attribute%(String attribute, String set_var) =  
+    if attribute="NONE" then 
+        true
+    else if set_var = "attributes.training_codes_fc" then
+        attribute in training_codes_fc
+    else if set_var = "attributes.training_codes_cc" then
+        attribute in training_codes_cc
+    else if set_var = "attributes.pc_opc_codes" then 
+        attribute in pc_opc_codes
+    else if set_var = "attributes.ffs_codes" then 
+        attribute in ffs_codes
+    else if set_var = "attributes.asf_codes" then 
+        attribute in asf_codes
+    else if set_var = "attributes.ast_codes" then 
+        attribute in ast_codes
+    else if set_var = "attributes.sim_codes" then 
+        attribute in sim_codes
+    else if set_var = "attributes.supcrm_codes" then
+        attribute in supcrm_codes
+    else if set_var = "attributes.supcc_codes" then
+        attribute in supcc_codes
+    else if set_var = "attributes.cc_inst_candidate" then
+        attribute in cc_inst_candidate
+    else 
+        false;
+     
+%set_var% =
+    if crew.%is_pilot% then
+        if leg.%is_pc_or_opc% then 
+            "attributes.pc_opc_codes"
+        else if leg.%is_ffs% then 
+            "attributes.ffs_codes"
+        else if leg.%is_asf% then 
+            "attributes.asf_codes"
+        else if leg.%is_ast% then 
+            "attributes.ast_codes"
+        else if leg.%is_simulator% then 
+            "attributes.sim_codes"
+        else if leg.%is_flight_duty% then 
+            "attributes.training_codes_fc"
+        else if (leg.%is_ol456% or
+                 leg.%is_olcrm456%) then
+            "attributes.supcrm_codes"
+        else 
+            "attributes.no_code"
+    else if leg.%is_flight_duty% then 
+        "attributes.training_codes_cc"
+    else if leg.%is_ol123% then
+        "attributes.supcc_codes"
+    else if leg.%is_cc_inst_activity_ntc17% then
+        "attributes.cc_inst_candidate"
+    else 
+        "attributes.no_code";
+
+export %crew_last_published% = 
+    default(%crew_abs%("PUBLISHED", 1Jan1986), 1Jan1986);
+
+export %crew_last_published_info% =
+    default(%crew_si%("PUBLISHED", 1Jan1986), "NA");
+
+/* For Overtime (salary), see CR 435 */
+export %crew_is_convertible%(abstime a) =
+    default(%crew_has_attr_at_time%("CONVERTIBLE_OVERTIME", a), false);
+
+/* Section 5 Crew rest */
+export %crew_bunks_attr_1_fc% = "FCBUNKS_CLASS_1";
+export %crew_bunks_attr_2_fc% = "FCBUNKS_CLASS_2";
+export %crew_bunks_attr_3_fc% = "FCBUNKS_CLASS_3";
+export %crew_bunks_attr_1_cc% = "CCBUNKS_CLASS_1";
+export %crew_bunks_attr_2_cc% = "CCBUNKS_CLASS_2";
+export %crew_bunks_attr_3_cc% = "CCBUNKS_CLASS_3";
+
+export %leg_crew_bunks_1_fc% = %flight_leg_int%(%crew_bunks_attr_1_fc%);
+export %leg_crew_bunks_2_fc% = %flight_leg_int%(%crew_bunks_attr_2_fc%);
+export %leg_crew_bunks_3_fc% = %flight_leg_int%(%crew_bunks_attr_3_fc%);
+    
+export %leg_crew_bunks_1_cc% = %flight_leg_int%(%crew_bunks_attr_1_cc%);
+export %leg_crew_bunks_2_cc% = %flight_leg_int%(%crew_bunks_attr_2_cc%);
+export %leg_crew_bunks_3_cc% = %flight_leg_int%(%crew_bunks_attr_3_cc%);    
+ 
+/* Section 6, Manual duty break */
+
+export %duty_break_attribute% = "DUTY_BREAK";
+export %leg_duty_break_attribute% = 
+  default(attributes.%assignment_attr_str%(%duty_break_attribute%),"");
+  
+export %leg_has_duty_break_attribute% =
+  %leg_duty_break_attribute% = "DUTY_BREAK";
+
+export %leg_has_duty_merge_attribute% =
+  %leg_duty_break_attribute% = "DUTY_MERGE";
+    
+/* Roster attributes */
+/* Outside own schedule for overtime due to rescheduling and a later checkout was introduced in 
+** SASCMS-3248 and then removed again in SASCMS-6018. Some code has been left behind to preserve
+** historical calculations, should the need arise.
+*/
+
+/* matching values found in DB table "roster_attr_set". */
+export %roster_outsideown% = "OUTSIDEOWN";
+export %roster_privatelytraded% = "PRIVATELYTRADED";
+export %roster_donotpublish% = "NOPUBLISH"; /* Not currently used */
+
+
+table roster_attributes_table(String attr_name, String crew_id, AbsTime check_time) =
+  attr_name, crew_id,
+  check_time -> export AbsTime %roster_start%,
+                export AbsTime %roster_end%,
+                export RelTime %roster_rel%,
+                export AbsTime %roster_abs%,
+                export Int %roster_int%,
+                export String %roster_str%,
+                export Bool %roster_bool%,
+                export String %roster_si%;
+    external %roster_attribute_table_p%;
+  "attr", "crew",
+  ("start_time","end_time"( -> "start_time", "end_time", "value_rel", 
+                               "value_abs", "value_int", "value_str", 
+                               "value_bool", "si";
+  -, -, - -> void_abstime, void_abstime, void_reltime, void_abstime,
+             void_int, void_string, void_bool, void_string;
+end
+  
+table roster_attributes_enum_table(String attr_name, String crew_id, Int idx) =
+  attr_name, crew_id, %loaded_data_period_start%, idx -> export AbsTime %roster_start_by_idx%;
+  external %roster_attribute_table_p%;
+  "attr", "crew", <"end_time", "match_number" -> "start_time";
+  -, -, -, -                                  -> void_abstime;
+end
+
+export %roster_attr_start%(String attr_name, Int idx) =
+  %roster_start_by_idx%(attr_name, crew.%id%, idx);
+  
+export %roster_attr_end%(String attr_name, Int idx) =
+  let st = %roster_start_by_idx%(attr_name, crew.%id%, idx);
+  if void(st) then
+    void_abstime
+  else
+    %roster_end%(attr_name, crew.%id%, st);
+    
+export %leg_has_roster_attr%(String attr_name) = 
+  not void(%roster_start%(attr_name, crew.%id%, leg.%start_utc%));
+
+export %roster_has_attr_at_date%(String attr_name, Abstime date) =
+  not void(%roster_start%(attr_name, crew.%id%, date));
+
+export %is_production_before_private_trade_at_date%(AbsTime date) =
+	%roster_str%(%roster_privatelytraded%, crew.%id%, date) = "Production";
+
+export %is_triptrade_private_trade_at_date%(AbsTime date) =
+	default(%roster_si%(%roster_privatelytraded%, crew.%id%, date), "") = "TripTrade";
+
+
+redefine export %is_in_charge% = %cfd_attr%("IN_CHARGE") = "IN_CHARGE";
+
+export %is_inner_rotationsferie_before_private_trade_at_date%(AbsTime date) =
+	%roster_str%(%roster_privatelytraded%, crew.%id%, date) = "Freeday Rotationsferie";
+
+/* end of file */

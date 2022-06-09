@@ -1,0 +1,634 @@
+/* -*- crc -*-
+ *
+ * Purpose:
+ *   BID logic, customization of BIDS part.
+ *   All bid customization should ideally be done here.
+ *
+ * Sections:
+ *   1. Cost and general properties
+ *   2. Roster bid properties
+ *   3. Trip bid is valid
+ *   4. Trip bis is granted
+ *   5. Report definitions
+ *   6. Other lookups
+ *
+ * Created by:
+ *
+ * Major changes:
+ *
+ */
+module bid_customization inherits bid
+
+import crew;
+import crew_pos;
+import fundamental;
+import iterators;
+import keywords;
+import leg;
+import pp;
+import rest;
+import trip;
+import wop;
+
+/****************************************************************
+ * Section 1: Cost and general properties
+ ***************************************************************/
+
+redefine export %cost% =
+  - %roster_points%;
+
+%is_weekly_crew%(String crew_id, Int no) =
+  let r1 = %rel1_tab_crew%(crew_id, no, 0),
+      r2 = %rel2_tab_crew%(crew_id, no, 0),
+      t = %type_tab_crew%(crew_id, no, 0);
+  not (t = "CreditRange") and
+  not ((r1 = 0:00 and r2 = 0:00) or (r1 = 0:00 and r2 = 168:00));
+
+/*
+** All bids except ConsecutiveOff and ConsecutiveWork bids can be dated.
+** A trip bid is dated if it spans less than 2 days and is not weekly.
+** A roster bid (TimeOff, StringDaysOff) is dated if it is not weekly
+*/
+export %is_dated%(Int no) =
+  ((%abs2%(no, 0) - %abs1%(no, 0)) / 23:59 < 2) or
+  %is_roster_bid%(no);
+
+/* A general bid is any bid that is not dated and is not weekly */
+export %is_general%(Int no) =
+  not %is_dated%(no);
+
+export %is_not_general%(Int no) = not %is_general%(no);
+
+redefine %is_trip_bid%(Int no) =
+  %type%(no, 0) not in available_roster_bids;
+
+set available_roster_bids =
+    "TimeOff";
+
+%is_off_bid%(Int no) =
+  %type_of_bid%(no) = "TimeOff";
+
+%is_valid_off_bid%(Int no) = %is_valid%(no) and %is_off_bid%(no);
+
+%is_violated_valid_off_bid%(Int no) =
+  %is_valid_off_bid%(no) and
+  %non_granted_bid_in_roster%(no);
+
+%crew_has_valid_off_bid% =
+  any(times(%crew_num_bids%), %is_valid_off_bid%(%times_index_0%));
+
+%any_valid_off_bid_violated% =
+  any(times(%crew_num_bids%), %is_violated_valid_off_bid%(%times_index_0%));
+  /*any(trip(roster), %trip_violates_any_valid_off_bid%);*/
+
+%trip_violates_any_valid_off_bid% =
+  any(times(%crew_num_bids%), %trip_violates_valid_off_bid%(%times_index_0%));
+
+%trip_violates_valid_off_bid%(Int no) =
+  %is_valid_off_bid%(no) and
+  %get_trip_is_violating%(no);
+
+export %trip_violates_any_not_general% =
+  any(times(%crew_num_bids%),
+      not %is_general%(%times_index_0%) and
+      %get_trip_is_violating%(%times_index_0%));
+
+/* Return the bid number with the highest granted value */
+%trip_highest_granted_value% =
+  max(times(%crew_num_bids%), %trip_points_for_bid%(%times_index_0%));
+%trip_points_for_bid%(int no) =
+  %points%(no) * %get_trip_granted_times%(no);
+export %granting_highest_value% =
+  let top = %trip_highest_granted_value%;
+  first(times(%crew_num_bids%), %times_index_0%)
+    where (%trip_points_for_bid%(%times_index_0%) = top);
+
+/* Of all the non-general bids that violates this trip,
+   return the bid with the most bidpoints */
+%trip_highest_violated_bid_point% =
+  max(times(%crew_num_bids%), %points%(%times_index_0%))
+    where (%get_trip_is_violating%(%times_index_0%)
+           and not %is_general%(%times_index_0%));
+export %violating_highest_points% =
+  let top = %trip_highest_violated_bid_point%;
+  first(times(%crew_num_bids%), %times_index_0%)
+    where (%get_trip_is_violating%(%times_index_0%)
+           and not %is_general%(%times_index_0%)
+           and %points%(%times_index_0%) = top);
+
+%in_pp_with_co%(Int no) =
+  %overlaps_pp_with_co%(%abs1%(no, 0), %abs2%(no, 0));
+
+/*
+** A bid is generally valid if the bid period overlaps the
+** planning period and have positive bid points. (SAS do not use
+** award2avoid bids)
+*/
+export %crew_have_any_valid% = %crew_num_valid_bids% > 0;
+export %crew_num_valid_bids% =
+  count(times(%crew_num_bids%))
+    where(%is_valid%(%times_index_0%));
+
+export %is_valid%(Int no) =
+  %in_pp_with_co%(no) and %points%(no) > 0;
+
+export %is_valid_dated_bid%(Int no) =
+    %is_valid%(no) and %is_dated_bid%(no);
+
+%overlaps_pp_with_co%(AbsTime abs1, AbsTime abs2) =
+  overlap(abs1, abs2, %pp_start%, %publ_period_end% + %roster_bid_carry_out_window%) > 0:00;
+
+%interval_start%(Int no) =
+  let abs1 = %abs1%(no, 0);
+  if abs1 > %pp_start% then abs1 else %pp_start%;
+
+%interval_end%(Int no) =
+  let abs2 = %abs2%(no, 0);
+  if abs2 < %publ_period_end% then abs2 else %publ_period_end%;
+
+%interval_end_with_co%(Int no) =
+  let abs2 = %abs2%(no, 0);
+  if abs2 < %publ_period_end% + %roster_bid_carry_out_window% then
+    abs2
+  else
+    %publ_period_end% + %roster_bid_carry_out_window%;
+
+export %crew_nr_general_bids_of_type%(String type) =
+  count(times(%crew_num_bids%))
+    where (%matches_type%(%times_index_0%, type)
+           and %overlaps_pp_with_co%(%abs1%(%times_index_0%, 0), %abs2%(%times_index_0%, 0))
+           and %is_general%(%times_index_0%));
+
+export %crew_nr_dated_bids_of_type%(String type) =
+  count(times(%crew_num_bids%))
+    where (%matches_type%(%times_index_0%, type)
+           and %overlaps_pp_with_co%(%abs1%(%times_index_0%, 0), %abs2%(%times_index_0%, 0))
+           and %is_dated%(%times_index_0%));
+
+%matches_type%(Int no, String type) =
+  %type%(no, 0) = type;
+
+redefine export %points%(Int seq_no cache set(1,3)) =
+    %incoming_to_output_points%(%_points%(seq_no, 0));
+
+table points_table(Int incoming_points) =
+    incoming_points -> Int %incoming_to_output_points%;
+    1 -> %_low_points%;
+    2 -> %_medium_points%;
+    3 -> %_high_points%;
+    - -> void_int;
+end
+
+table points_to_text_table(Int no) =
+    %_points%(no, 0) -> export %points_text%;
+    1 -> "low";
+    2 -> "medium";
+    3 -> "high";
+    - -> void_string;
+end
+
+/* Tells how many times a lower-weight bid should be granted in order to match a
+   higher-weight bid. E.g. if 30, then a LOW layover bid has to be granted 30
+   times to match the points valie of a  MEDIUM bid that has been granted once
+  (or 31 times to beat it). */
+%_factor_between_weights% =
+    parameter 8
+    remark "Factor between weights";
+
+export %_low_points% = 1;
+
+/* Up to %_factor_between_weights%, LOW bid shall not beat MEDIUM bid */
+export %_medium_points% = %_factor_between_weights% * %_low_points%;
+
+/* Up to %_factor_between_weights%, MEDIUM bid shall not beat HIGH bid */
+export %_high_points% = %_factor_between_weights% * %_medium_points%;
+
+
+
+redefine export %crew_num_dated_bids% =
+  count(times(%_crew_num_bids%))
+  where (%is_dated_bid%(%times_index_0%));
+
+
+export %crew_num_dated_bids_in_period% =
+  count(times(%_crew_num_bids%))
+  where (%is_dated_bid%(%times_index_0%) and
+         bid.%is_valid%(%times_index_0%));
+
+export %crew_has_dated_bids% =
+    %crew_num_dated_bids% > 0;
+
+export %crew_has_dated_bids_in_period% =
+    %crew_num_dated_bids_in_period% > 0;
+
+export %crew_has_lifestyle_bid% =
+    any(times(%crew_num_bids%),
+        %is_lifestyle_bid%(%times_index_0%));
+/****************************************************************
+ * Section 2: Roster bid properties
+ ***************************************************************/
+
+redefine %roster_bid_granted_value%(Int no) =
+    %_roster_bid_granted_value%(no, %abs1%(No, 0), %abs2%(No, 0));
+
+table roster_bid_granted(Int no, Abstime abs1, Abstime abs2) =
+  alias str1 = %str1%(no,0),
+        int1 = %int1%(no,0), int2 = %int2%(no,0),
+        bool1 = %bool1%(no, 0);
+  %type%(no,0) -> %_roster_bid_granted_value%,
+                  redefine %_get_roster_bid_description%;
+  "TimeOff" ->
+    /* The time off bid must end within the period */
+    if %is_in_range_abs%(abs2, %pp_start%, %publ_period_end% + %roster_bid_carry_out_window%) and
+       /* If no on-duty trip overlaps the bid period the bid is granted */
+       not any(trip(roster), trip.%time_in_period%(abs1,abs2) > 0:00)
+             where (not trip.%is_planned_rest%)
+    then
+      1
+    else
+      0,
+    /* Description */
+    if time_of_day(abs1) = 00:00 and time_of_day(abs2) = 00:00 then
+      ""
+    else
+      concat(format_time(abs1, "%02d%b %02H:%02M-"),
+             format_time(abs2, "%02d%b %02H:%02M. "));
+    - -> void_int, void_string;
+end
+
+
+%wop_rest_days% =
+  (wop.%rest_end_day%-%wop_rest_start_day%) / 24:00;
+/* wop.%rest_start_day% does not check for on duty */
+%wop_rest_start_day% =
+  default(last(trip(wop),trip.%rest_start_day%) where (trip.%is_on_duty%),
+          first(trip(wop),trip.%rest_start_day%) where (not trip.%is_on_duty%));
+%wop_rest_days_in_period%(Abstime PStart, Abstime PEnd) =
+  if %wop_rest_start_day% >= PStart and wop.%rest_end_day% < PEnd then
+    %wop_rest_days%
+  else
+    overlap(%wop_rest_start_day%, wop.%rest_end_day%, PStart, PEnd) / 24:00;
+
+/* If no on-duty trip overlaps the specific number of days starting with abs1
+   then bid is granted */
+%string_days_off_granted_forward%(AbsTime abs1, Int days) =
+  not any(trip(roster), trip.%time_in_period%(abs1, abs1 + days*24:00) > 0:00)
+        /* Only on-duty trips ending after the start of the bid are relevant */
+        where (not trip.%is_planned_rest% and trip.%end_hb% > abs1);
+
+/* If no on-duty trip overlaps the specific number of days ending with abs1
+   then the bid is granted */
+%string_days_off_granted_backward%(AbsTime abs2, Int days) =
+  not any(trip(roster), trip.%time_in_period%(abs2 - days*24:00, abs2) > 0:00)
+        /* Only on-duty trips starting before the end of the bid are relevant */
+        where (not trip.%is_planned_rest% and trip.%start_hb% < abs2);
+
+
+/****************************************************************
+ * Section 3: Trip bid is valid
+ *
+ *   Is the trip valid for this bid. Ie. can it affect
+ *   the bid points, which is dependant of trip type and
+ *   validity period?
+ ***************************************************************/
+
+/* Trip validity periods for different bids */
+table trip_is_valid(Int no, Abstime abs1, Abstime abs2) =
+  alias bid_from = %interval_start%(no),
+        bid_to = %interval_end%(no);
+  %type%(no, 0) -> redefine %get_trip_is_valid_in_period%;
+
+  "Flight" ->
+    /* Trip must be a flight duty and not standby */
+    trip.%has_only_flight_duty% and not trip.%is_standby% and
+    /* There must be a duty in the trip that has a leg that is valid for the bid */
+    any(duty(trip), %duty_leg_valid_for_flight_id_bid%(bid_from, bid_to));
+
+  "Stop" ->
+    %trip_is_valid_for_stop_bid_in_period%(bid_from, bid_to);
+
+  "CheckIn" -> 
+    /* Trip must be a flight duty */
+    trip.%has_only_flight_duty% and
+    /* Trip must start in the relevant bid and pp interval */
+    %is_in_range_abs%(trip.%start_lt%, %interval_start%(no), %interval_end%(no));
+               
+  "CheckOut" ->
+    /* Trip must be a flight duty  */
+    trip.%has_only_flight_duty% and
+    /* Trip must end in the relevant bid and pp interval */
+    %is_in_range_abs%(trip.%end_lt%, %interval_start%(no), %interval_end%(no));
+
+
+  /*
+  Catch all the roster bids
+
+  Necessary, otherwise any trip could be seen as not granting
+  a dated roster bid and the trip bid rudob will be wrong
+  */
+  - -> trip.%time_in_period%(abs1, abs2) > 0:00;
+end
+
+/* Helper functions to make use check in/out times in the beginning and
+** end of duties
+*/
+export %trip_is_valid_for_stop_bid_in_period%(AbsTime bid_from, AbsTime bid_to) =
+    /* Trip must be a flight duty and not standby */
+    trip.%has_only_flight_duty% and not trip.%is_standby% and
+    /* Any rest within the trip must overlap the bid period */
+    any(duty(trip), %duty_leg_valid_for_stop_bid%(bid_from, bid_to));
+
+%leg_start_with_ci% =
+  if is_first(leg(duty)) then duty.%start_lt% else leg.%start_lt%;
+%leg_end_with_co% =
+  if is_last(leg(duty)) then duty.%end_lt% else leg.%end_lt%;
+%leg_time_from_co_to_ci% =
+  default(next(leg(trip), %leg_start_with_ci%) - %leg_end_with_co%, 0:00);
+
+/* Check that a leg in the duty is valid for a flight id bid */
+%duty_leg_valid_for_flight_id_bid%(AbsTime bid_from, AbsTime bid_to) =
+  any(leg(duty),
+      %is_in_range_abs%(%leg_start_with_ci%,
+                        bid_from, bid_to));
+
+/* Check that a leg in the duty is valid for a stop bid */
+%duty_leg_valid_for_stop_bid%(AbsTime bid_from, AbsTime bid_to) =
+  any(leg(duty), overlap (%leg_end_with_co%, next(leg(trip), %leg_start_with_ci%),
+                          bid_from, bid_to) > 0:00)
+    where (not is_last(leg(trip)));
+
+
+/****************************************************************
+ * Section 4: Trip bid is granted
+ *
+ *   Is the trip granting the bid, assuming it is a valid trip.
+ ***************************************************************/
+
+redefine export %trip_bid_granted%(Int no) =
+  if %is_trip_bid%(no) then
+      %trip_bid_granted_value%(no) > 0
+  else
+      false;
+
+export %is_production_trip% =
+  trip.%is_on_duty%;
+
+redefine export %is_first_trip_in_production% =
+  let limit = trip.%start_hb% - 24:00;
+  if crew.%in_fixed_group%(trip.%start_hb%) then
+    default(
+      prev(trip(chain),not %is_production_trip% and trip.%end_hb%>limit)
+    ,
+      false
+    )
+  else is_first(trip(wop));
+
+redefine export %is_last_trip_in_production% =
+  let limit = trip.%end_hb% + 24:00; /* if gap of 24h, new production may be added later */
+  if crew.%in_fixed_group%(trip.%start_hb%) then
+    default(
+      next(trip(chain),not %is_production_trip% and trip.%start_hb%<limit)
+    ,
+      false /* new production might be added later */
+    )
+  else is_last(trip(wop));
+
+table trip_bid_granted(Int no) =
+  %type%(no, 0) ->
+    /* Customization to facilitate trip bids that can be granted an arbitrary
+       number of times by a trip */
+    redefine export %trip_bid_granted_value%,
+    redefine %get_trip_bid_description%;
+
+  "Flight" ->
+    /* Regular flight bid, does not need to be active */
+    /* Count the number of legs in the trip that grant the bid */
+    sum(duty(trip), %duty_leg_grants_flight_bid%(no)),
+    /* Description */
+    %str1%(no, 0);
+
+  "Stop" ->
+    /* A leg in the trip must be followed by a stop that grants the bid */
+    /* Count the number of legs in the trip that grant the bid */
+    %trip_granted_value_for_stop_bid%(no),
+    /* Description */
+    concat("Stop",
+           (if %str1%(no, 0) = "" then "" else concat(" in ", %str1%(no, 0))));
+
+  "CheckIn" ->
+    if (
+        /* Check that bid is only granted for trips following days off */
+        (%is_first_trip_in_production%) and
+        /* Check in must be as specified in the bid */
+        %is_in_range_rel%(trip.%start_od_lt%, %rel1%(No, 0), %rel2%(No, 0)) and
+        /* Check in must be within validity period */
+        %is_in_range_abs%(trip.%start_lt%,
+                          %interval_start%(no),
+                          %interval_end%(no))
+        ) then 1 else 0,
+    /* Description */
+    concat(format_time(%rel1%(No, 0), "%02H:%02M-"), 
+           format_time(%rel2%(No, 0), "%02H:%02M"),
+           /*(if bool1 then "\nafter days off" else ""));*/
+           /* Line break does not work for rudobs */
+           (if %bool1%(no, 0) then " after days off. " else ". "));
+               
+  "CheckOut" ->
+    if (
+        /* Check that bid is only granted for trips followed by days off */
+        (%is_last_trip_in_production%) and
+        /* Check out must be as specified in the bid */
+        %is_in_range_rel%(trip.%end_od_lt%, %rel1%(No, 0), %rel2%(No, 0)) and
+        /* Check out must be within validity period */
+        %is_in_range_abs%(trip.%end_lt%,
+                          %interval_start%(no),
+                          %interval_end%(no))
+        ) then 1 else 0,
+    /* Description */
+    concat(format_time(%rel1%(No, 0), "%02H:%02M-"), 
+           format_time(%rel2%(No, 0), "%02H:%02M"),
+           /* Line break does not work for rudobs */
+           /*(if bool1 then "\nbefore days off" else ""));*/
+           (if %bool1%(no, 0) then " before days off. " else ". "));
+
+  - -> void_int, "";
+
+end
+
+/* Count how many legs in the duty that can fulfill a flight bid */
+%duty_leg_grants_flight_bid%(Int no) =
+  let str1 = %str1%(no, 0);
+  count(leg(duty))
+    where(
+      /* Leg must start in the relevant interval */
+      %is_in_range_abs%(%leg_start_with_ci%,
+                        %interval_start%(no),
+                        %interval_end%(no)) and
+      /* Flight number must match bid */
+      %flight_bid_match_key_for_leg% = str1);
+
+%flight_bid_match_key_for_leg% =
+    concat(keywords.%flight_carrier%, %int2str%(keywords.%flight_number%));
+
+export %bid_str1%(Int no) =
+    %str1%(no, 0);
+
+/* Stop bid calculations */
+export %trip_granted_value_for_stop_bid%(Int no) =
+    sum(duty(trip), %duty_leg_grants_stop_bid%(no));
+
+%duty_leg_grants_stop_bid%(Int no) =
+  let station = %bid_str1%(no);
+  count(leg(duty))
+    where(
+      /* The stop station must be correct */
+      (station = "" or station = arrival_airport_name or station = arrival_airport_city)
+      /* The stop bid must start within defined validity period  */
+      and %is_in_range_abs%(%leg_end_with_co%,
+                            %interval_start%(no),
+                            %interval_end%(no))
+      /* The last leg in a trip can not grant a stop bid*/
+      and not is_last(leg(trip))
+      and %leg_grants_stop_bid%(no));
+
+/* These two %report_ variables are used for the Summary part of the report */
+export %report_trip_granted_value_for_stop_bid%(String station) =
+    sum(duty(trip), %report_duty_leg_grants_stop_bid%(station));
+
+export %report_duty_leg_grants_stop_bid%(String station) =
+    count(leg(duty))
+        where(
+            /* The stop station must be correct */
+            (station = "" or station = arrival_airport_name or station = arrival_airport_city)
+            /* The last leg in a trip can not grant a stop bid*/
+            and not is_last(leg(trip))
+            /* Layover duration is N/A so count any legs ending a duty (excluding ending a trip) */
+            and is_last(leg(duty)));
+
+
+/* Rudob FOR GRANTED checkin checkout stop BID */
+export %leg_grants_high_stop_bid_color% = 
+  if count(times(%crew_num_bids%)
+    where(%is_stop_bid%(%times_index_0%) and 
+       ( %str1%(%times_index_0%,0) = arrival_airport_name or %str1%(%times_index_0%,0) = arrival_airport_city) and 
+      %leg_grants_stop_bid%(%times_index_0%) and
+      %_points%(%times_index_0%,0) = 3 
+      ) ) > 0 then 
+    1
+  else
+    0;
+
+export %leg_grants_stop_bid_color% = 
+  if count(times(%crew_num_bids%)
+    where(%is_stop_bid%(%times_index_0%) and 
+       ( %str1%(%times_index_0%,0) = arrival_airport_name or %str1%(%times_index_0%,0) = arrival_airport_city) and 
+      %leg_grants_stop_bid%(%times_index_0%) and
+      %_points%(%times_index_0%,0) <> 3 
+      ) ) > 0 then 
+    1
+  else
+    0;
+
+
+/*check in bid calculations */
+export %trip_granted_value_for_checkin_bid%(Int no) =
+    if %trip_bid_granted_value%(no)>0 and %is_checkin_bid%(no) then
+      true 
+    else 
+      false;
+
+export %trip_granted_value_for_checkout_bid%(Int no) =
+    if %trip_bid_granted_value%(no)>0  and %is_checkout_bid%(no)then
+      true 
+    else 
+      false;
+
+export %is_high_bid%(Int no) =
+   %_points%(no,0) = 3;
+
+export %is_medium_bid%(Int no) =
+   %_points%(no,0) = 2;
+
+export %is_low_bid%(Int no) =
+   %_points%(no,0) = 1;
+
+export %bid_points_in_table%(Int no)= 
+   %_points%(no,0);
+
+
+%attribute_in_rel_interval%(Reltime attribute, Reltime low, Reltime high) =
+    attribute >= low and (attribute < high or high = 0:00);
+
+%leg_grants_stop_bid%(Int no) =
+    is_last(leg(duty)) and
+    %attribute_in_rel_interval%(%leg_time_from_co_to_ci%,
+                                %rel1%(No, 0),
+                                %rel2%(No, 0));
+
+
+/****************************************************************
+ * Section 5: Report definitions
+ ***************************************************************/
+%crew_info% =
+   concat(format_int(crew.%seniority%, "System Seniority: %4d  "),
+          format_int(crew.%seniority_order%, "Base Seniority: %4d "));
+
+export %get_roster_granted_value_report%(int i) =
+  %get_roster_granted_value%(i);
+
+
+/****************************************************************
+ * Section 6: Other lookups
+ ***************************************************************/
+
+table bid_table_by_type_and_idx(String btype, String str1_value, Int idx) =
+  %crew_id%, btype, str1_value, idx ->
+    Int %line_by_type_idx%,
+    Int %points_by_type_idx%,
+    String %type_by_type_idx%,
+    Int %int1_by_type_idx%,
+    Int %int2_by_type_idx%,
+    Reltime %rel1_by_type_idx%,
+    Reltime %rel2_by_type_idx%,
+    Abstime %abs1_by_type_idx%,
+    Abstime %abs2_by_type_idx%,
+    export String  %str1_by_type_idx%,
+    Bool %bool1_by_type_idx%;
+  External %table%;
+  "EmpNo", "BidType", "Str1", match_number -> Seqno, Points, BidType, Int1, Int2, Rel1, Rel2,
+                            Abs1, Abs2, Str1, Bool1;
+  -, -, -, - -> void_int, void_int, void_string, void_int, void_int, void_reltime, void_reltime, void_abstime, void_abstime, void_string, void_bool;
+end
+
+export %timeoff_line%(Int idx) = %line_by_type_idx%("TimeOff", "", idx);
+export %timeoff_int1%(Int idx) = %int1_by_type_idx%("TimeOff", "", idx);
+export %timeoff_int2%(Int idx) = %int2_by_type_idx%("TimeOff", "", idx);
+export %timeoff_rel1%(Int idx) = %rel1_by_type_idx%("TimeOff", "", idx);
+export %timeoff_rel2%(Int idx) = %rel2_by_type_idx%("TimeOff", "", idx);
+export %timeoff_abs1%(Int idx) = %abs1_by_type_idx%("TimeOff", "", idx);
+export %timeoff_abs2%(Int idx) = %abs2_by_type_idx%("TimeOff", "", idx);
+export %timeoff_str1%(Int idx) = %str1_by_type_idx%("TimeOff", "", idx);
+
+
+
+
+table bid_table_by_type_and_idx_stop(String btype, Int idx) =
+  %crew_id%, btype , idx ->
+    Int %line_by_type_idx_stop%,
+    Int %points_by_type_idx_stop%,
+    String %type_by_type_idx_stop%,
+    Int %int1_by_type_idx_stop%,
+    Int %int2_by_type_idx_stop%,
+    Reltime %rel1_by_type_idx_stop%,
+    Reltime %rel2_by_type_idx_stop%,
+    Abstime %abs1_by_type_idx_stop%,
+    Abstime %abs2_by_type_idx_stop%,
+    export String  %str1_by_type_idx_stop%,
+    Bool %bool1_by_type_idx_stop%;
+  External %table%;
+  "EmpNo", "BidType", match_number -> Seqno, Points, BidType, Int1, Int2, Rel1, Rel2,
+                            Abs1, Abs2, Str1, Bool1;
+  -, -, - -> void_int, void_int, void_string, void_int, void_int, void_reltime, void_reltime, void_abstime, void_abstime, void_string, void_bool;
+end
+
+/* End of file */

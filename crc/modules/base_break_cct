@@ -1,0 +1,277 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   Definitions for detection and creation of base breaks.
+ *   Base breaks are only maintained in tracking. 
+ * Created by:
+ *   Stefan Hansson, April 2007
+ * Major changes:
+ *   stefanh, 19Sep2007:
+ *     - Allow breaks on non-flight legs.
+ *     - Legs can have breaks both before and after.
+ *   salvad, 05Jun2008:
+ *     - Allow breaks on non-deadhead related legs.
+ */
+
+module base_break_cct inherits base_break
+
+import levels;
+import crew;
+import leg;
+import task;
+
+/*
+** Variables are normally on leg level, and they are applied
+** on the leg with the base break (or the potential base break).
+*/
+  
+/*
+** Variables that operate on existing base breaks.
+*/
+
+/* Check if the leg on a roster has a base break.
+*  Also used for enabling/dimming menu entries (see CustomMenuStates.py) */
+redefine export %is_break_before% =
+  leg.%is_first_in_duty% and not void(%depstn_before%);  
+redefine export %is_break_after% =
+  leg.%is_last_in_duty% and not void(%arrstn_after%);
+
+/* The %duty_break_xx% variables are used in levels_cct */
+
+/* True if this duty starts/ends with a base break from/to home base.
+* Note that the crew homebase does not have to be checked,
+* since the table entry indicates homebase connection by itself.
+*/
+redefine export %duty_break_starts_trip% =
+  first(leg(duty), %break_starts_trip_no_check%);
+redefine export %duty_break_ends_trip% =
+  last(leg(duty), %break_ends_trip_no_check%);
+  
+/* True if this and the next duty are connected with a base break. */
+redefine export %duty_break_continues_trip% =
+  last(leg(duty), %break_continues_trip_after_no_check%) or
+  default(next(duty(chain), first(leg(duty), %break_continues_trip_before_no_check%)), false);
+  
+redefine export %leg_break_continues_trip% =
+  leg.%is_last_in_duty% and %break_continues_trip_after_no_check% or
+  default(next(leg(trip), leg.%is_first_in_duty% and %break_continues_trip_before_no_check%), false);
+
+/* The break occurs on first leg of a trip */
+%break_starts_trip% =
+  leg.%is_first_in_duty% and default(%depstn_before% = "(B)", false);
+  
+/* The break occurs on last leg of a trip */
+%break_ends_trip% =
+  leg.%is_last_in_duty% and default(%arrstn_after% = "(B)", false);
+
+/* In the following variables we are sure that we are in the first or last leg
+of the duty so no check is necessary - done due to performance reasons */
+
+/* The break occurs on first leg of a trip */
+%break_starts_trip_no_check% =
+  default(%depstn_before% = "(B)", false);
+
+/* The break occurs on last leg of a trip */
+%break_ends_trip_no_check% =
+  default(%arrstn_after% = "(B)", false);
+
+/* The break occurs embedded within a trip */
+%break_continues_trip_before_no_check% =
+  /*let break_stn_before = default(%depstn_before%, "-");*/
+  %break_stn_before% <> "-" and %break_stn_before% <> "(B)";
+%break_continues_trip_after_no_check% =
+  /*let break_stn_after = default(%arrstn_after%, "-");*/
+  %break_stn_after% <> "-" and %break_stn_after% <> "(B)";
+
+%break_stn_before% = default(%depstn_before%, "-");
+%break_stn_after% = default(%arrstn_after%, "-");
+
+/* DTable with existing base breaks.
+*    Managed by BaseBreak.py.
+*    Defined in data/config/models/sas_base_breaks.xml
+*/
+
+table crew_base_break_flt(Bool bef) =
+  crew.%id%,
+  %flight_carrier%,
+  %flight_nr%,
+/*  %origsuffix%, */
+  %st%,
+  %start_station%,
+  bef -> export String %break_flt_stn%;
+  external "crew_base_break";
+  crew, carrier, nr, st, adep, bfr -> remotestation;
+  -, -, -, -, -, - -> void_string;
+end
+
+table crew_base_break_task(Bool bef) =
+  crew.%id%,
+  %tcode%,
+  %st%,
+  %start_station%,
+  bef -> export String %break_task_stn%;
+  external "crew_base_break";
+  crew, activitycode, st, adep, bfr -> remotestation;
+  -, -, -, -, - -> void_string;
+end
+
+/* Variables used in the BaseBreak python script */
+%is_flight_duty% = leg.%is_flight_duty%;
+%flight_carrier% = leg.%flight_carrier%;
+%flight_nr% = leg.%flight_nr%;
+%tcode% = task.%code%;
+%origsuffix% =
+  if origsuffix = ""
+    then " "
+    else origsuffix;
+%st% = leg.%udor%;
+%start_station% = leg.%start_station%;
+
+%depstn_before% =
+  if %is_flight_duty% then
+    %break_flt_stn%(true)
+  else
+    %break_task_stn%(true);
+%arrstn_after% =
+  if %is_flight_duty% then
+    %break_flt_stn%(false)
+  else
+    %break_task_stn%(false);
+
+/*
+** Variables that are used when creating base breaks (BaseBreak.py).
+** Note that their evaluation depends on the existence of a deadhead
+** before or after the leg with the potential base break.
+*/
+
+/*  Used for enabling/dimming menu entries (see CustomMenuStates.py) */
+redefine export %can_break_before% =
+  not %is_break_before% and (%can_break_deadhead_before% or %can_break_other_before%);
+redefine export %can_break_after% =
+  not %is_break_after% and (%can_break_deadhead_after% or %can_break_other_after%);
+  
+/* The leg can mark a base break, removing a deadhead before or after. */
+export %can_break_deadhead_before% =
+  not void(crew.%id%) and %deadhead_before_break%;
+export %can_break_deadhead_after% =
+  not void(crew.%id%) and %deadhead_after_break%;
+  
+/* For any other leg that can mark a base break before or after. */
+%prev_leg_brk_stn% = prev(leg(chain), %break_stn_after%);
+%next_leg_brk_stn% = next(leg(chain), %break_stn_before%);
+export %can_break_other_before% =
+  not void(crew.%id%) and
+  %other_before_break% and
+  %break_stn_before% = "-" and
+  %prev_leg_brk_stn% <> leg.%start_station% and
+  %prev_leg_brk_stn% <> "(B)";
+export %can_break_other_after% =
+  not void(crew.%id%) and
+  %other_after_break% and
+  %break_stn_after% = "-" and
+  %next_leg_brk_stn% <> leg.%end_station% and
+  %next_leg_brk_stn% <> "(B)";
+  
+/* The deadhead to remove occurs before the break */
+%deadhead_before_break% =
+  if leg.%is_first_in_duty%
+  then default(prev(leg(trip), leg.%is_deadhead%), false)
+  else default(prev(leg(duty), leg.%is_first_in_duty% and leg.%is_deadhead%), false);
+  
+/* The deadhead to remove occurs after the break */
+%deadhead_after_break% =
+  if leg.%is_last_in_duty%
+  then default(next(leg(trip), leg.%is_deadhead%), false)
+  else default(next(leg(duty), leg.%is_last_in_duty% and leg.%is_deadhead%), false);
+  
+/* Previous arr stn not eq curr dep stn - before the break */
+%other_before_break% =
+  if is_first(leg(trip))
+    then default(leg.%start_station% <> prev(leg(chain), leg.%end_station%), false)
+    else if leg.%is_first_in_duty%
+          then default(leg.%start_station% <> prev(leg(trip), leg.%end_station%), false)
+          else false;
+  
+/* Next dep stn not eq curr arr stn - after the break */
+%other_after_break% =
+  if is_last(leg(trip))
+    then default(leg.%end_station% <> next(leg(chain), leg.%start_station%), false)
+    else if leg.%is_last_in_duty%
+      then default(leg.%end_station% <> next(leg(trip), leg.%start_station%), false)
+      else false;
+  
+/* The deadhead is first leg in a trip; ie the break will start the trip */
+%deadhead_is_first_in_trip% =
+  %deadhead_before_break% and prev(leg(trip), is_first(leg(trip)));
+  
+/* The deadhead is last leg of a trip; ie the break will end the trip */
+%deadhead_is_last_in_trip% =
+  %deadhead_after_break% and next(leg(trip), is_last(leg(trip)));
+
+/* leg_identifier used when removing the deadhead from a break-before */
+%deadhead_leg_identifier_before% =
+  if %deadhead_before_break%
+  then prev(leg(trip) ,leg_identifier)
+  else void_int;
+    
+/* leg_identifier used when removing the deadhead from a break-after */
+%deadhead_leg_identifier_after% =
+  if %deadhead_after_break%
+  then next(leg(trip), leg_identifier)
+  else void_int;
+
+/* 'remote_station' value, used when creating a break-before */
+%deadhead_depstn_before% =
+  if %deadhead_before_break%
+  then prev(leg(trip), if %departs_from_homebase%
+                       then "(B)"
+                       else departure_airport_name)
+  else void_string;
+    
+/* 'remote_station' value, used when creating a break-after */
+%deadhead_arrstn_after% =
+  if %deadhead_after_break%
+  then next(leg(trip), if %arrives_at_homebase%
+                       then "(B)"
+                       else arrival_airport_name)
+  else void_string;
+
+/* 'remote_station' value, used when creating a break-before */
+%other_arrstn_before% =
+  if %other_before_break%
+    then if is_first(leg(trip))
+           then prev(leg(chain), if %arrives_at_homebase%
+                       then "(B)"
+                       else arrival_airport_name)
+           else prev(leg(trip), if %arrives_at_homebase%
+                       then "(B)"
+                       else arrival_airport_name)
+    else void_string;
+    
+/* 'remote_station' value, used when creating a break-after */
+%other_depstn_after% =
+  if %other_after_break%
+    then if is_last(leg(trip))
+           then next(leg(chain), if %departs_from_homebase%
+                                   then "(B)"
+                                   else departure_airport_name)
+           else next(leg(trip), if %departs_from_homebase%
+                                  then "(B)"
+                                  else departure_airport_name)
+    else void_string;
+
+/* 'remote_station's as station code */
+export %depstn_code% = 
+  if %depstn_before% = "(B)" then
+    leg.%trip_start_home_airport%
+  else
+    %depstn_before%;
+
+export %arrstn_code% = 
+  if %arrstn_after% = "(B)" then
+    leg.%trip_start_home_airport%
+  else
+    %arrstn_after%;
+
+%departs_from_homebase% = leg.%departure_airport_base% = crew.%homebase%;
+%arrives_at_homebase% = leg.%arrival_airport_base% = crew.%homebase%;

@@ -1,0 +1,372 @@
+/* -*- crc -*-
+
+Definitions for retiming only needed in Studio. 
+
+Created by Stefan Hammar in Nov 2010 as a part of the Retiming project. 
+
+Added to SAS CARMUSR in March 2012. 
+
+Note: This module should only be included in Pairing rule sets.
+
+******************************************************************/
+module studio_retiming
+
+import levels;
+import retiming_leg;
+import retiming;
+import leg;
+import apc_pac;
+
+
+export iterator ret_alt_set = 
+  partition(leg)
+  by(retiming.%retiming_alternatives%);
+end
+
+
+/*
+ * Retiming alternatives rudob
+ */ 
+
+%retiming_alternatives_show_rudobs% = parameter True
+  remark "Show rudob for legs with possible retiming alternatives";
+
+export %retiming_rudob_possible_len% =
+  if %retiming_alternatives_show_rudobs% and retiming.%has_possible_retiming% then
+	arrival - departure
+  else
+	0:00;
+
+export %retiming_rudob_possible_start% = departure;
+export %retiming_rudob_possible_color% = 
+  parameter "BrightGreen"
+  remark "Color of retiming alternatives rudob";
+   
+export %retiming_rudob_possible_top% = 100;
+export %retiming_rudob_possible_bottom% = 85;
+export %retiming_rudob_possible_info% =
+  concat("Retiming alternatives:\n   ",
+         retiming.%retiming_alternatives%,
+         %_part2%);
+       
+%_part2% = 
+  if retiming.%has_retiming% then
+    concat("\nRetimed:\n   ", retiming.%retiming_as_string%)
+  else
+    "";
+       
+%___visualization_header% =
+  parameter ""
+  remark "Legs with retiming alternatives #HEADER#";
+group visualization =
+  %___visualization_header%,
+  %retiming_alternatives_show_rudobs%,
+  %retiming_rudob_possible_color%;
+
+/********************************************
+ * Retiming rudob
+ ********************************************/
+ 
+export %retiming_rudob_info% = 
+  concat(departure_airport_name, " - ", arrival_airport_name, "  ", 
+         flight_carrier,
+         format_int(flight_number, " %03d"),
+         if leg_number > 1 then format_int(leg_number, "-%d") else "  ",
+         "\nRetimed: ",
+         retiming.%retiming_as_string%,
+         "\nU.T.C.  Now: ", 
+         format_time(leg.%start_utc%, "%02H%02M"), 
+         " - ", 
+         format_time(leg.%end_utc%, "%02H%02M"),
+         "  Org: ",
+         format_time(retiming_leg.%scheduled_start_utc%, "%02H%02M"), 
+         " - ", 
+         format_time(retiming_leg.%scheduled_end_utc%, "%02H%02M"),
+         "\n Local  Now: ", 
+         format_time(leg.%start_lt%, "%02H%02M"), 
+         " - ",
+         format_time(leg.%end_lt%, "%02H%02M"),
+         "  Org: ",
+         format_time(retiming_leg.%scheduled_start_lc%, "%02H%02M"), 
+         " - ",
+         format_time(retiming_leg.%scheduled_end_lc%, "%02H%02M"));
+  
+%retiming_rudob_delimiter% = true;
+
+/****************************************
+ * Retiming rudob in local plan
+ ****************************************/
+ 
+%amount_retimed_start_sp% = 
+  default(min(equal_legs, retiming_leg.%amount_retimed_start%), 0:00);
+%amount_retimed_end_sp% = 
+  default(max(equal_legs, retiming_leg.%amount_retimed_end%), 0:00);
+  
+export %lp_retiming_rudob_start% = 
+  departure + %amount_retimed_start_sp%;
+
+export %lp_retiming_rudob_len% = 
+  if %amount_retimed_start_sp% = 0:00 and %amount_retimed_start_sp% = 0:00 then 
+     0:00
+  else 
+     (arrival +  %amount_retimed_end_sp%) - %lp_retiming_rudob_start%;
+     
+export %lp_retiming_rudob_top% = 25;
+export %lp_retiming_rudob_bottom% = 0;
+export %lp_retiming_rudob_color% = "Slate";
+export %lp_retiming_rudob_delimiter% = true;
+export %lp_retiming_rudob_info% = 
+  max(equal_legs, %retiming_rudob_info%);
+   
+/***************************************************
+ * For selections etc.
+ ***************************************************/
+
+%len_connection_after_in_ac_without_retiming% = 
+  max(ac_rotations_ref, 
+      next(leg(chain),departure) - arrival);
+
+%len_connection_after_in_ac_with_retiming% =
+  max(ac_rotations_ref, 
+      next(leg(chain), departure + %amount_retimed_start_sp%) - (arrival + %amount_retimed_end_sp%));
+
+%ac_connection_illegal_because_of_retiming% = 
+  default(%len_connection_after_in_ac_with_retiming% 
+          < 
+          nmin(%len_connection_after_in_ac_without_retiming%,
+               max(ac_rotations_ref, retiming.%min_ac_cxn%)),
+          false);           
+
+/**********************************/ 
+ 
+%impossible_to_retime_because_of_hard_lock% =
+  next_locked and
+  (retiming.%has_possible_retiming% or 
+   default(next(leg(chain), retiming.%has_possible_retiming%), false));
+   
+/*****/        
+
+%overlap_after_without_retiming% = 
+  default((next(leg(chain), retiming_leg.%scheduled_start_utc%) - 
+           retiming_leg.%scheduled_end_utc%) < 0:00, 
+          false);
+
+/*************************************************/ 
+
+%num_of_retiming_alternatives% =
+  %_num_of_items% - %_num_pair_starts_before%(%_num_of_items%);
+
+%has_this_retiming_alternative%(string value) =
+  any(times(%_num_of_items%), value = %retiming_alternative%(times_index(0)));
+  
+%retiming_alternative%(int num) =
+  let itn = %_value2item_number%(num);
+  if substr(%_retiming_alternatives_item%(itn), 1, 1) = "(" then 
+     concat(%_retiming_alternatives_item%(itn),
+            ",",
+            %_retiming_alternatives_item%(itn + 1))
+  else
+    %_retiming_alternatives_item%(itn);
+  
+%retiming_alternatives_selection_safe% = 
+  cat(times(%_num_of_items%), %_retiming_alternatives_item%(times_index(0)), "_");
+
+/* 
+ * Below you find low level definitions needed for the ones above. 
+ */
+ 
+%_num_sep_before_pos%(int pos) =
+  count(times(pos)) 
+    where (substr(retiming.%retiming_alternatives%,times_index(0), 1) = ",");
+  
+%_it_sep_pos%(int num cache set(1, 15)) =
+  first(times(length(retiming.%retiming_alternatives%)), times_index(0)) 
+    where (%_num_sep_before_pos%(times_index(0)) = num);
+
+%_num_of_items% = 
+  if retiming.%retiming_alternatives% = "" then 
+    0
+  else 
+    %_num_sep_before_pos%(length(retiming.%retiming_alternatives%)) + 1;
+
+%_it_start%(int item) = 
+  if item > %_num_of_items% then 
+    void_int
+  else if item = 1 then 
+    1
+  else 
+    %_it_sep_pos%(item - 1) + 1;
+
+%_it_len%(int item) =
+  if item > %_num_of_items% then 
+     void_int
+  else
+     default(%_it_sep_pos%(item), 1000) - %_it_start%(item); 
+
+%_retiming_alternatives_item%(int num) =
+  if num > %_num_of_items% then 
+    void_string
+  else 
+    substr(retiming.%retiming_alternatives%, %_it_start%(num), %_it_len%(num));    
+    
+%_num_pair_starts_before%(int num) =
+  if num = 1 then 
+    0
+  else 
+    count(times(num - 1)) 
+      where (substr(%_retiming_alternatives_item%(times_index(0)), 1, 1) = "(");
+
+%_item2value_number%(int num) = 
+  num - %_num_pair_starts_before%(num);
+                                 
+%_value2item_number%(int num cache set(1, 15)) = 
+  first(times(%_num_of_items%), times_index(0)) 
+    where (%_item2value_number%(times_index(0)) = num);
+    
+    
+/***********************************************************
+ * Studio rules for retiming "rules" which are GLCs in APC.
+ ***********************************************************/
+/*
+** Rule: 
+**    Ac rotation with retimed legs must be legal
+**
+** Description:
+**    Rule checking that the connections in the aircraft 
+**    rotations are legal for all legs in the trip. 
+**    The rule is only present in Studio when a Pairing rule set 
+**    is loaded. In APC this this is controlled with (built in) 
+**    global constraints. 
+** 
+** Agreement:
+**    -
+*/  
+rule (on) gpc_ac_rotation_is_legal = 
+  not %ac_connection_illegal_because_of_retiming%;
+  remark "Ac rotation with retimed legs must be legal (Studio rule)",
+  planner "";
+end
+
+%legal_ac_connections_header% =
+  parameter ""
+  remark "Legal A/C Turnaround#HEADER#";
+group legal_ac_connections =
+  %legal_ac_connections_header%,
+  apc_pac.%legal_ac_follower_violation_cost%,
+  retiming.eur_line_stations_with_short_ac_con_p,
+  gpc_ac_rotation_is_legal;
+  
+  
+/*
+** Rule: 
+**    Retiming must be consistent
+**
+** Description:
+**    Rule checking that retiming of a leg in consistent in the sub-plan. 
+**    The rule is only present in Studio when a Pairing rule set 
+**    is loaded. In APC this this is controlled with (built in) 
+**    global constraints. 
+** 
+** Agreement:
+**    -
+*/   
+  
+rule (on) gpc_retiming_is_inconsistent =
+  max(equal_legs, retiming_leg.%amount_retimed_start%) = 
+  min(equal_legs, retiming_leg.%amount_retimed_start%)
+  and
+  max(equal_legs, retiming_leg.%amount_retimed_end%) = 
+  min(equal_legs, retiming_leg.%amount_retimed_end%);
+  remark "Retiming must be consistent (Studio rule)",
+  planner "";
+end      
+
+%__rule_title% = parameter "" remark "Consistent Retiming #HEADER#";
+
+group consistent = 
+   %__rule_title%,
+   gpc_retiming_is_inconsistent;
+  
+/*************************************************************
+ * Some varibles for marking legs.
+ *************************************************************/
+
+set no_retiming_airports = 
+  "BRU", "LHR", "FRA", "CDG";
+
+%leg_touch_forbidden_retiming_airport% = 
+  arrival_airport_name in no_retiming_airports or
+  departure_airport_name in no_retiming_airports;
+
+%charter_to_spain% = 
+  leg.%is_charter% and 
+  (arrival_airport_country = "ES" or 
+   departure_airport_country = "ES");
+
+set no_retiming_when_charter_on_day_6_airports = 
+  "INN", "SZG", "GVA";
+  
+set no_retiming_when_charter_on_day_7_airports = 
+  "GVA";
+
+%charter_to_critical_station_on_critical_day% = 
+  leg.%is_charter% 
+  and 
+  (arrival_airport_name in no_retiming_when_charter_on_day_6_airports and
+   retiming_leg.%scheduled_end_wd_lc% = 6
+   or
+   departure_airport_name in no_retiming_when_charter_on_day_6_airports and
+   retiming_leg.%scheduled_start_wd_lc% = 6 
+   or
+   arrival_airport_name in no_retiming_when_charter_on_day_7_airports and
+   retiming_leg.%scheduled_end_wd_lc% = 7 
+   or
+   departure_airport_name in no_retiming_when_charter_on_day_7_airports and
+   retiming_leg.%scheduled_start_wd_lc% = 7);
+  
+%retiming_forbidden% = 
+  %leg_touch_forbidden_retiming_airport% or
+  %charter_to_spain% or
+  %charter_to_critical_station_on_critical_day%;
+  
+%retimimg_5_minutes_ok% =
+  not deadhead and 
+  not %retiming_forbidden%;
+    
+%leg_time_in_in_peak% = 
+  scale_time(retiming_leg.%scheduled_start_lc%,
+             retiming_leg.%scheduled_end_lc%, 0,
+             05:00, 07:59, 1,
+             15:00, 17:59, 1);
+  
+%retiming_2_hours_ok% =
+  %retimimg_5_minutes_ok% and
+  leg.%is_charter%;
+  
+%retimimg_10_minutes_ok% =
+  %retiming_2_hours_ok% or
+  %retimimg_5_minutes_ok% and
+  %leg_time_in_in_peak% = 0:00;
+  
+%leg_is_at_night% =
+  scale_time(retiming_leg.%scheduled_start_lc%,
+             retiming_leg.%scheduled_end_lc%, 0,
+             18:00, 04:59, 1) = 
+  retiming_leg.%scheduled_end_lc% - retiming_leg.%scheduled_start_lc%;
+  
+%leg_is_at_early_morning% =
+  scale_time(retiming_leg.%scheduled_start_lc%,
+             retiming_leg.%scheduled_end_lc%, 0,
+             00:00, 04:59, 1) = 
+  retiming_leg.%scheduled_end_lc% - retiming_leg.%scheduled_start_lc%;
+  
+%retimimg_20_minutes_ok% =
+  %retiming_2_hours_ok% or
+  %retimimg_10_minutes_ok% and
+  %leg_is_at_night%;
+  
+%retimimg_30_minutes_ok% = 
+  %retiming_2_hours_ok% or
+  %retimimg_20_minutes_ok% and
+  %leg_is_at_early_morning%;
+  

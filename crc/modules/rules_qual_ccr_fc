@@ -1,0 +1,714 @@
+ /* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains qualification rules for flight crew 
+ *   used in Carmen Crew Rostering and as studio only Carmen Crew Tracking.
+ *
+ * Sections:
+ *   1. Airport qualifications
+ *   2. Recurrent training rules
+ *
+ * Created by:
+ *   Henrik Albertson, 19-Dec-2005
+ *
+ * Major changes:
+ *
+ */
+
+module rules_qual_ccr_fc inherits rules_qual_ccr
+import crew;
+import crew_pos;
+import accumulators;
+import training;
+import system_db_parameters;
+
+/****************************************************************
+ * Section 1: Airport qualification
+ ***************************************************************/
+/*
+ * Rule:
+ *   Airport qualification
+ *
+ * Description:
+ *   The rule checks that crew has valid airport qualifications, i.e.
+ *     1. Recency, fly each restricted airport each 12 months (6 months for FNC)
+ *     2. Appropriate training has been performed
+ *          Simulator training and qualification flight is still to be defined
+ *     3. No forbidden airports for certain crew positions
+ *
+ * Agreement:
+ *   OM-A 5.2.11 table 4 (12 months)
+ *   OM-C OP 7.1-7.2
+ *   OM-A 4.2.5 table 3
+ * SKCMS -966: Chenged rule so it triggers on leg level. However in the
+*    rule only arrival airport of leg is checked.
+ */
+
+/* SKCMS-966 */
+export rule qln_arr_airport_ok_FC =
+  valid roster.%check_rules% and
+	leg.%starts_in_pp% and
+        leg.%is_considered_as_flight_duty% and
+	not leg.%is_deadhead% and
+        crew.%rank_leg_start% <> "FR" and
+        not crew.%is_leased%(leg.%start_hb%) and
+        /* Only check if airport with special requirements */        
+        (qualification.%arr_airport_is_restricted%  or
+         qualification.%leg_additionally_restricted_airport%(leg.%end_station%)) and 
+        rule_exceptions.%rule_on%(leg.%end_UTC%);
+    qualification.%airport_is_valid_for_crew_restriction%(leg.%end_station%);
+
+  startdate  = leg.%end_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%end_hb%,%duty_lh_region%));
+  failobject = %qln_arr_airport_ok_FC_failobject%;
+  failtext %qln_airport_failtext%(leg.%end_station%,leg.%end_hb%,"Arr");
+  remark "(CCR) OMA: Crew must have valid arrival airport qualification",
+  planner "";
+end
+
+%qln_arr_airport_ok_FC_failobject% =
+  leg.%failobject_arrival%;
+
+
+%qln_airport_failtext%(String station, Abstime t_hb, String arr_dep) =
+  if not qualification.%airport_allowed_for_crew_qual_restriction%(qualification.%leg_station%(station),crew.%restriction_table%) then
+    concat("OMA: ", arr_dep," airp ", qualification.%leg_station%(station),
+           " disallowed")
+  else
+    if any(times(crew.%nr_restrictions_leg_start%),
+           crew.%restriction_type_ix%(t_hb, %times_index_0%) = "NEW") then
+         concat("OMA: ",arr_dep,"  airp not allowed for NEW crew")
+    else if any(times(crew.%nr_restrictions_leg_start%),
+           crew.%restriction_subtype_ix%(t_hb, %times_index_0%) = "DCT")  then
+      concat("OMA: ",arr_dep," airp not allowed for DCT crew")
+    else
+        concat("OMA: Airp license ", station, " expired ",
+           format_time(crew.%airport_qual_validto_max%(qualification.%place%(station),
+                                                       leg.%end_hb%), 
+                       "%02d%b%Y "),
+		      %required_training%(station));
+
+/* SKCMS-966*/
+    
+export rule qln_dep_airport_ok_FC =
+  valid roster.%check_rules% and
+	leg.%starts_in_pp% and
+        leg.%is_considered_as_flight_duty% and
+	not leg.%is_deadhead% and
+        crew.%rank_leg_start% <> "FR" and
+        not crew.%is_leased%(leg.%start_hb%) and
+        /* Only check if airport with special requirements */        
+        (qualification.%dep_airport_is_restricted%  or
+         qualification.%leg_additionally_restricted_airport%(leg.%start_station%)) and 
+        rule_exceptions.%rule_on%(leg.%start_UTC%);
+    qualification.%airport_is_valid_for_crew_restriction%(leg.%start_station%);
+
+  startdate  = leg.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %qln_airport_ok_FC_failobject%;
+  failtext %qln_airport_failtext%(leg.%start_station%,leg.%start_hb%,"Dep");
+  remark "(CCR) OMA: Crew must have valid departure airport qualification",
+  planner "";
+end
+
+%qln_airport_ok_FC_failobject% =
+  leg.%failobject_departure%;
+
+
+ 
+%required_training%(String station) =
+  if qualification.%absence_requires_self_briefing%(station) then
+    "[self-briefing]"
+  else if qualification.%absence_requires_sim_training%(station) and
+          not qualification.%airport_sim_training_performed%(station) then
+    "[SIM]"
+  else if qualification.%absence_requires_qln_flight%(station) then
+    "[RELEASE]"
+  else "";
+ 
+
+/* SKCMS-2555 */
+export rule alf_forbidden_for_skd_sks_fp =
+  valid roster.%check_rules% and
+        leg.%end_station% = "ALF" and
+        system_db_parameters.%alf_forbidden_for_skd_sks_fp%(leg.%end_hb%) and
+        (crew.%is_sks% or crew.%is_skd%) and
+	leg.%starts_in_pp% and
+        leg.%is_considered_as_flight_duty% and
+	not leg.%is_deadhead% and
+        crew_pos.%assigned_pos% = 2 and
+        rule_exceptions.%rule_on%(leg.%end_UTC%);
+  %alf_forbidden_for_skd_sks_fp_ok%;
+
+  startdate  = leg.%end_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%end_hb%,%duty_lh_region%));
+  failobject = %alf_forbidden_for_skd_sks_fp_failobject%;
+  failtext %alf_forbidden_for_skd_sks_fp_failtext%;
+  remark "OMA: ALF forbidden destination for SKD/SKS FP",
+  planner "FP flying to/from ALF are required to have performed an ALF circling in the simulator. This training is only given to SKN crew. ALF is therefore a forbidden destination for SKD/SKS FP. Ref OM-C SAI 2.2.";
+end
+
+/* This returns true when flying to ALF is allowed for crew */
+%alf_forbidden_for_skd_sks_fp_ok% =
+  let station = "ALF";
+
+  crew.%rank_trip_start% = "FC" and
+  (crew.%airport_qual_validto_max%(qualification.%place%(station), leg.%end_hb%) >= leg.%end_hb%  or
+   qualification.%planned_requalifying_activity%(station, crew.%restriction_table%));
+
+%alf_forbidden_for_skd_sks_fp_failobject% =
+  leg.%failobject_arrival%;
+
+
+%alf_forbidden_for_skd_sks_fp_failtext% = "OMA: ALF is forbidden destination for SKD/SKS FP";
+
+/* SKCMS-2555*/
+
+ 
+
+/* SKCMS-699 */
+/*
+ * Rule:
+ *   Airport qualification 2
+ *
+ * Description:
+ *   The rule checks that if crew has restriction
+*    NEW+ACTYPE  the airport should not have NEW+ACTYPE for that qual
+ */
+export rule qln_actype_airport_ok_FC =
+  valid  roster.%check_rules%
+     and leg.%starts_in_pp%
+     and leg.%is_flight_duty%
+     and not leg.%is_deadhead%
+     and not crew.%is_leased_trip_start%
+     and crew.%has_qual_restr_new_actype%(leg.%start_utc%,leg.%qual%)
+     and (qualification.%leg_any_apt_restricted_airport%  or
+         qualification.%leg_any_apt_additionally_restricted_airport%) 
+     and   rule_exceptions.%rule_on%(leg.%start_UTC%);
+  qualification.%leg_between_valid_airports_crew_qual_restr%(crew.%restr_acqual_table%);
+  startdate  = leg.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %crew_qual_restr_airport_failobject%;
+  failtext %crew_qual_restr_airport_failtext_leg%;
+  remark "(CCR) OMA: Crew must have valid actype qualification for airport",
+  planner "The rule checks that if crew has restriction"
+           "NEW+ACTYPE  the airport should not have NEW+ACTYPE for that qual";
+end
+
+%crew_qual_restr_airport_failobject% =
+  if not qualification.%station_valid_for_crew_qual_restr%(leg.%start_station%,crew.%restr_acqual_table%) then
+    leg.%failobject_departure%
+ else
+    leg.%failobject_arrival%;
+
+%crew_qual_restr_airport_failtext_leg% =
+  if not qualification.%station_valid_for_crew_qual_restr%(leg.%start_station%,crew.%restr_acqual_table%) then
+     concat("OMA: Departure Airp ", leg.%start_station%, " disallowed")
+ else
+     concat("OMA: Arrival Airp ", leg.%end_station%, " disallowed");
+
+
+/*
+** Rule:
+**   Airport qualification - SFO
+**
+** Description:
+**   The rule checks that before flying to SFO, commanders and co-pilots have
+**    performed one of
+**
+**     AST since 01nov2012
+**     OPC since 01jan2013
+**     PC  since 01jan2013
+**
+** Agreement:
+**   Fleet Chief Pilot
+*/
+export rule (off) qln_airport_SFO_ok_FC =
+  valid roster.%check_rules% and
+	    trip.%starts_in_pp% and
+        trip.%has_flight_duty% and
+        %trip_for_fc_or_fp_includes_SFO% and      
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+        
+  %has_apt_qual_requirement_SFO%;
+  
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %qln_airport_SFO_ok_FC_failobject%;
+  failtext "FC/FP must perform required OPC/PC/AST before SFO";
+  remark "(CCR) OMA: FC/FP must perform OPC/PC/AST before SFO",
+  planner "The rule checks that before flying to SFO, commanders and co-pilots"
+          " have performed one of AST since 01nov2012, OPC since 01jan2013,"
+          " PC  since 01jan2013.";
+end
+
+%qln_airport_SFO_ok_FC_failobject% =
+  first(leg(trip),leg.%failobject_departure%)
+    where (qualification.%leg_end_station% = "SFO");
+
+%trip_for_fc_or_fp_includes_SFO% =
+  any(leg(trip),crew_pos.%assigned_function% <> "FR")
+    where ((qualification.%leg_end_station% = "SFO" or leg.%start_station% = "SFO") and
+           leg.%is_active_flight%);
+
+%has_apt_qual_requirement_SFO% =
+  training.%last_simulator_date_of_type%("OPC",trip.%start_day%, "A3") >= 01jan13 or
+  training.%last_simulator_date_of_type%("OPC",trip.%start_day%, "A4") >= 01jan13 or
+  training.%last_simulator_date_of_type%("PC",trip.%start_day%, "A3") >= 01jan13 or
+  training.%last_simulator_date_of_type%("PC",trip.%start_day%, "A4") >= 01jan13 or
+  training.%last_simulator_date_of_type%("AST",trip.%start_day%, "A3") >= 01nov12 or
+  training.%last_simulator_date_of_type%("AST",trip.%start_day%, "A4") >= 01nov12;
+
+/****************************************************************
+ * Section 2: Recurrent training rules
+ ***************************************************************/
+/*
+** Rule:
+**    Aircraft types qualifications for Simulators
+**
+** Description:
+**    The rule checks that crew has valid aircraft qualification for
+**    the assigned simulator.
+** 
+** Agreement:
+**   OM-A x.x.x (Recency)
+*/
+export rule qln_sim_type_ok_FC =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        trip.%is_simulator% and
+        not rule_exceptions.%rule_off%(trip.%start_UTC%);
+  %qln_sim_type_ok_FC_trigger%;
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %qln_sim_type_ok_FC_failobject%;
+  failtext %qln_sim_type_ok_FC_failtext%;
+  remark "(CCR) OMA: Crew must have valid qualification for simulator";
+end
+
+%qln_sim_type_ok_FC_trigger% =
+    all(leg(trip), training.%simulator_ok_qual%)
+    where (leg.%is_simulator%);
+    
+%qln_sim_type_ok_FC_failtext% =
+  first(leg(trip), 
+    if leg.%is_sim_instr% or leg.%is_sim_instr_supervis% then
+      concat("OMA: Instructor not qualified [",
+             training.%simulator_qual_str%,"; ",
+             leg.%qual%,"]")
+    else
+      concat("OMA: Missing ac-qual [",leg.%qual%,"]"))
+  where(leg.%is_simulator% and not training.%simulator_ok_qual%);
+  
+%qln_sim_type_ok_FC_failobject% =
+  first(leg(trip),leg.%failobject_departure%) where
+    (leg.%is_simulator% and not training.%simulator_ok_qual%);
+    
+/*
+** Rule:
+**    PC/OPC intended for FC
+**
+** Description:
+**    Check that if PC/OPC is intended for Flight Captain, crew's rank is FC
+**
+** Agreement:
+**    Functional
+*/
+rule qln_pc_opc_intended_for_fc_FC =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        trip.%is_pc_or_opc% and
+        training.%sim_trip_assigned_to_student% and
+        not crew.%is_leased_trip_start% and
+        not trip.%is_skill_test% and
+        training.%pc_opc_trip_intended_for_two_fc% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+  crew.%rank_trip_start% = "FC";
+  startdate  = trip.%start_utc%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject =  %qln_pc_opc_intended_for_fc_FC_failobject%;
+  failtext "FC PC/OPC only for FC";
+  remark "(CCR) OMA: Assign PC/OPC intended for FC on FC only",
+  planner "";
+end
+
+%qln_pc_opc_intended_for_fc_FC_failobject% =
+  first(leg(trip),leg.%failobject_departure%) where 
+    (leg.%is_pc_or_opc% and leg.%pc_opc_intended_for_two_fc% and
+     not (crew.%rank_leg_start% = "FC"));
+
+/*
+** Rule:
+**    Crew allowed lower on OPC
+**
+** Description:
+**    Check if crew is assigned lower, he/she must perform OPC and be
+**    allowed to perform lower OPC's
+**
+** Agreement:
+**    Functional
+*/
+rule qln_crew_allowed_lower_on_opc_FC =
+  valid roster.%check_rules% and
+        leg.%in_pp_extended% and
+        (leg.%is_pc% or leg.%is_opc%) and
+        not crew.%is_leased%(leg.%start_utc%) and
+        crew_pos.%lower_rank% and
+        rule_exceptions.%rule_on%(leg.%start_UTC%);
+  training.%leg_is_opc% and %fbr_opc_leg_ok%;
+  startdate  = leg.%start_utc%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = leg.%failobject_departure%;
+  failtext "OMA: Lower rank on OPC";
+  remark "OMA: Crew not allowed lower rank on OPC";
+end
+        
+%fbr_opc_leg_ok% =
+    let fbr_req = leg.%lower_rank_allowed%;
+    training.%leg_is_opc% and
+    fbr_req <> "NONE" and
+    (fbr_req = "ALL" or
+     fbr_req = "INSTR" and crew.%is_instructor_leg_start%);
+
+/*
+** Rule:
+**    Max OPC's assigned lower rank in period
+**
+** Description:
+**    Check if crew is assigned lower, he/she must not have performed the
+**    previous OPC lower. The evaulation is done by checking that previous
+**    OPC is without attribut "LOWER".
+**
+** Agreement:
+*/
+rule qln_max_opc_assigned_lower_rank_in_period_FC =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        trip.%is_opc% and
+        not crew.%is_leased_trip_start% and
+        crew_pos.%trip_lower_rank% and
+        rule_exceptions.%rule_on%(trip.%start_utc%);
+        
+  not training.%last_logged_opc_perfomed_lower%;
+
+  startdate  = trip.%start_utc%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %qln_max_opc_assigned_lower_rank_in_period_FC_failobject%;
+  failtext "OMA: Previous OPC performed LOWER";
+  remark "OMA: Max lower rank OPC's in period";
+end
+
+%qln_max_opc_assigned_lower_rank_in_period_FC_failobject% =
+  first(leg(trip),leg.%failobject_departure%) where 
+    (leg.%is_opc% and crew_pos.%lower_rank%);
+    
+/*
+** Rule:
+**    Min/Max number of days between PC/OPC and ASF
+**
+** Description:
+**
+** Agreement:
+**    Functional
+*/
+rule (off) qln_min_days_btw_pc_opc_and_asf_FC =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        (trip.%is_pc_or_opc% or trip.%is_asf%) and
+        not crew.%is_leased_trip_start%;
+  %days_since%(trip.%start_utc%, %last_performed_pc_opc_or_asf%)
+    >= %min_days_btw_pc_opc_and_asf_p% - 
+       rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+  startdate  = trip.%start_utc%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %qln_min_days_btw_pc_opc_and_asf_FC_failobject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("Days btw PC/OPC and ASF",value,limit);
+  remark "(CCR) Func: Min nr of days between PC/OPC and ASF",
+  planner "";
+end
+
+%qln_min_days_btw_pc_opc_and_asf_FC_failobject% =
+  first(leg(trip),leg.%failobject_departure%) where
+    (%days_since%(leg.%start_UTC%,%last_performed_pc_opc_or_asf%) 
+     < %min_days_btw_pc_opc_and_asf_p% and
+     (task.%is_asf%(leg.%code%) or leg.%is_pc_or_opc%));
+
+%last_performed_pc_opc_or_asf% =
+  nmin(training.%last_perf_date_for_act_of_type%("PC", trip.%start_utc%),
+       training.%last_perf_date_for_act_of_type%("OPC", trip.%start_utc%),
+       training.%last_perf_date_for_act_of_type%("ASF", trip.%start_utc%));
+
+rule (off) qln_max_days_btw_pc_opc_and_asf_FC =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        (trip.%is_pc_or_opc% or trip.%is_asf%) and
+        not crew.%is_leased_trip_start%;
+  %days_since%(trip.%start_utc%, %last_performed_pc_opc_or_asf%)
+    <= %max_days_btw_pc_opc_and_asf_p% + 
+       rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+  startdate  = trip.%start_utc%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %qln_max_days_btw_pc_opc_and_asf_FC_failobject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("Days btw PC/OPC and ASF",value,limit);
+  remark "(CCR) Func: Max nr of days between PC/OPC and ASF",
+  planner "";
+end
+
+%qln_max_days_btw_pc_opc_and_asf_FC_failobject% =
+  first(leg(trip),leg.%failobject_departure%) where
+    (%days_since%(leg.%start_UTC%,%last_performed_pc_opc_or_asf%) > 
+     %max_days_btw_pc_opc_and_asf_p% and
+     (leg.%is_asf% or leg.%is_pc_or_opc%));
+
+%min_days_btw_pc_opc_and_asf_p% = parameter 60
+  remark "Min days between PC/OPC and ASF";
+%max_days_btw_pc_opc_and_asf_p% = parameter 90
+  remark "Max days between PC/OPC and ASF";
+
+  
+/* 
+** Rule:
+**    Fly below rank not allowed
+**
+** Description:
+**    The rule checks that no normal production flights below rank are
+**    assigned for crew with NEW+ACTYPE, NEW+RANK, NEW+NEW restrictions.
+**
+** Agreement:
+**    OM-A 5.2.3.5
+*/
+
+/* Moved from rules_training_ccr_fc*/
+
+
+export rule trng_fly_below_rank_not_allowed_FC =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        not crew.%is_leased_trip_start% and
+        %crew_has_restr_not_allowed_for_below_rank% and
+        trip.%has_active_flight% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+  not crew_pos.%trip_lower_rank%;
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %trng_fly_below_rank_not_allowed_FC_failobject%;
+  failtext "OMA: Fly below rank (NEW)";
+  remark "OMA: Fly below rank not allowed during NEW restriction",
+  planner "The rule checks that crew isn't scheduled lower rank during"
+          " NEW+ACTYPE, NEW+RANK, NEW+NEW restriction"
+          " See OM-A 4.1 for more information.";
+end
+
+%trng_fly_below_rank_not_allowed_FC_failobject% =
+  first(leg(trip),leg.%failobject_departure%)
+  where (crew_pos.%lower_rank%);
+
+%crew_has_restr_not_allowed_for_below_rank% = 
+    crew.%has_qual_restr_new_actype%(trip.%start_hb%, trip.%qual%) or
+    crew.%has_restr_new_rank%(trip.%start_hb%) or
+    crew.%has_restr_new_new%(trip.%start_hb%);
+
+/*
+** Rule:
+**    Too early FC not allowed
+**
+** Description:
+**    The rule checks that line check isn't planned too early
+**    for FC. The rule allows overshoot of the 3 month grace period.
+**
+**    Special case with %next_expiring_multi_qual_is_not_leg_qual% kept in
+**    original rule since it shouldn't be possible to rule except.
+**
+** Broken out of rule qln_recurrent_training_must_not_be_planned_too_early_ALL
+**
+** JIRA: SKCMS-1974
+**
+*/
+
+export rule lc_must_not_be_planned_too_early_fc =
+  valid roster.%check_rules% and
+        leg.%in_pp_extended% and
+        leg.%is_lc% and not /* Checks that crew is FC */
+        %next_expiring_multi_qual_is_not_leg_qual% and
+        training.%recurrent_must_not_be_planned_too_early% and
+        not training.%recurrent_type_has_expired% and
+        %recurrent_required% and
+        not %rec_trip_updated_document% and
+        %r_valid_rec_planned_too_early% and
+        %first_rec_of_type%;
+    nmax(training.%earliest_date_for_planned_recurrent% - leg.%start_date%, 0:00) +
+    nmax(leg.%start_date% - %rec_type_expiry_date%, 0:00)
+    - rule_exceptions.%overshoot_rel%(leg.%start_utc%) = 0:00;
+  startdate  = leg.%start_UTC%;
+  severity =  %severity_filter_int%(leg.%start_hb%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %rec_planned_too_early_failtext%;
+  remark "(CCR) OMA: Line check too early for FC",
+  planner "Check that line check is not planned too early, i.e."
+          " earlier than 3 months from due date.";
+end
+
+
+/*
+** Rule:
+**    Crew must have performed LC after FAM FLT
+**
+** Description:
+**    Check that crew has performed LC after FAM FLT before due date.
+*/
+export rule qln_lc_after_fam_performed_FD =
+  valid roster.%check_rules% and
+        trip.%has_production% and
+        trip.%in_pp% and
+        trip.%end_utc% > training.%lc_after_fam_date% + rule_exceptions.%overshoot_rel%(trip.%start_utc%);
+
+   trip.%end_utc% <= training.%lc_after_fam_date% + rule_exceptions.%overshoot_rel%(trip.%start_utc%);
+
+  startdate  = trip.%start_utc%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %qln_lc_after_fam_FD_failobject%;
+  failtext %missed_lc_after_fam_failtext%;
+  remark "OMA: Crew must perform LC latest 6 months after FAM FLT",
+  planner "Check that crew perform LC training latest 6 months after FAM FLT"
+          " i.e. the due date has not been passed"
+          " or that an LC activity exists earlier in the plan.";
+end
+
+%lc_after_fam_performed_trip% =
+  default(training.%lc_after_fam_date%, 31DEC2035) >= trip.%end_utc%;
+
+%qln_lc_after_fam_FD_failobject% =
+  default(
+          first(leg(trip), 
+                first(leg(chain), leg.%failobject_departure%) from (current)
+                where(leg.%is_flt_sby_or_bl% and
+                      not %lc_after_fam_performed_trip% and
+                      leg.%start_utc% >= %now%)), trip.%failobject_start%);
+
+%missed_lc_after_fam_failtext% =
+  "OMA: LC after FAM FLT expiry date passed.";
+
+
+/*
+** Rule:
+**    Mixed Fleet Flying (MFF) pilots shall not operate to certain airports defined in the parameters used in this rule
+**    
+** Description:
+**
+*/
+export rule mff_airports_not_allowed_fc =
+  valid roster.%check_rules%
+        and duty.%in_pp%
+        and duty.%has_production%
+        and crew.%is_mff%
+        and %crew_is_a2a3_or_a2a5_qualified_at_date%;
+        
+        ((crew.%is_a2a3_qualified_at_date%(duty.%start_hb%) and not %a2a3_duty_touches_airport_not_allowed%)
+                or (crew.%is_a2a5_qualified_at_date%(duty.%start_hb%) and not %a2a5_duty_touches_airport_not_allowed%));               
+        
+  startdate  = duty.%start_hb%;
+  severity = %severity_filter_int%(duty.%start_hb%,%duty_lh_region%);
+  failobject = duty.%failobject_start%;
+  failtext %mff_airports_not_allowed_failtext%;
+  remark "OMA: MFF pilots may not operate to certain airports",
+  planner "According to CB-OMA-139a and CB-OMA-143a MFF pilots may not operate to certain airports defined in the parameters used in this rule" ;
+end    
+
+%crew_is_a2a3_or_a2a5_qualified_at_date% =
+(crew.%is_a2a3_qualified_at_date%(duty.%start_hb%) or crew.%is_a2a5_qualified_at_date%(duty.%start_hb%));
+
+%a2a3_duty_touches_airport_not_allowed% =
+any(leg(duty),%leg_touches_a2a3_airports_not_allowed%);
+    
+%a2a5_duty_touches_airport_not_allowed% =
+any(leg(duty),%leg_touches_a2a5_airports_not_allowed%);   
+
+%leg_touches_a2a3_airports_not_allowed% =
+(leg.%start_station% in mff_a2a3_airports_not_allowed_set
+ or leg.%end_station% in mff_a2a3_airports_not_allowed_set);
+%leg_touches_a2a5_airports_not_allowed% =
+(leg.%start_station% in mff_a2a5_airports_not_allowed_set
+ or leg.%end_station% in mff_a2a5_airports_not_allowed_set);
+
+set mff_a2a3_airports_not_allowed_set = 
+
+parameter "ALF", "KKN", "LYR", "BDU", "EVE", "LKL", "TOS", "SZG", "JKH", "SMI", "THU", "FLR"   
+remark  "Airports not allowed to operate for A2A3 MFF crew";
+
+set mff_a2a5_airports_not_allowed_set = 
+
+parameter "ALF", "KKN", "LYR", "BDU", "EVE", "LKL", "TOS", "SZG", "JKH", "SMI", "THU", "FLR"   
+remark  "Airports not allowed to operate for A2A5 MFF crew";
+
+%mff_airports_not_allowed_failtext% =
+  let value = if crew.%is_a2a3_qualified_at_date%(duty.%start_hb%) 
+                then
+                    first(leg(trip), leg.%end_station%)
+                    where (%leg_touches_a2a3_airports_not_allowed%)
+                 else
+                 first(leg(trip), leg.%end_station%)
+                    where (%leg_touches_a2a5_airports_not_allowed%);
+  concat("OMA: MFF pilots may not operate to ", value, "");
+
+
+/*
+** Rule:
+**    Mixed Fleet Flying (MFF) pilots may only operate one aircraft type per working period
+**    Rule handles A2A3 and A2A5 qualified pilots separate if restriction is eased on one of the types.
+** Description:
+**
+*/
+export rule mff_not_mixed_actypes_in_wop_fc =
+  valid roster.%check_rules%
+        and wop.%in_pp%
+        and wop.%has_production%
+        and crew.%is_mff%
+        and ( 
+             (crew.%is_a2a3_qualified_at_date%(wop.%start_hb%) and  system_db_parameters.%a2a3_mixed_ac_types_wop_valid%(wop.%start_hb%))
+                or (crew.%is_a2a5_qualified_at_date%(wop.%start_hb%) and system_db_parameters.%a2a5_mixed_ac_types_wop_valid%(wop.%start_hb%))
+                    );               
+      not wop.%is_mixed_ac_types%;  
+  
+  startdate  = wop.%start_hb%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = wop.%failobject_start%;
+  failtext "OMA: MFF crew shall not mix aircraft types in same working period";
+  remark "OMA: MFF crew shall not mix aircraft types in same working period",
+  planner "According to CB-OMA-139a and CB-OMA-143a MFF crew is not allowed to mix aircraft types within same working period";
+end
+
+
+/*
+** Rule:
+**    Mixed Fleet Flying (MFF) pilots not fly below rank. E.g FC is not allowed to operate in FP or FR position
+**    
+** Description:
+**
+*/
+export rule mff_not_below_rank_fc =
+  valid roster.%check_rules%
+        and trip.%in_pp%
+        and trip.%has_production%
+        and crew.%is_mff%
+        and crew.%rank_at_date%(trip.%start_hb%) = "FC"
+        and ( 
+             (crew.%is_a2a3_qualified_at_date%(trip.%start_hb%) and  system_db_parameters.%a2a3_mff_not_below_rank_valid%(trip.%start_hb%))
+                or (crew.%is_a2a5_qualified_at_date%(trip.%start_hb%) and system_db_parameters.%a2a5_mff_not_below_rank_valid%(trip.%start_hb%))
+                    );               
+      not crew_pos.%trip_lower_rank%;  
+  
+  startdate  = trip.%start_hb%;
+  severity = %severity_filter_int%(trip.%start_hb%,%duty_lh_region%);
+  failobject = trip.%failobject_start%;
+  failtext "OMA: MFF pilots (FC) may not fly below rank";
+  remark "OMA: MFF pilots (FC) may not fly below rank",
+  planner "According to CB-OMA-139a and CB-OMA-143a MFF pilots may not fly below rank, i.e. FC may not operate as FP or FR" ;
+end  
+  
+  
+/* end of file */

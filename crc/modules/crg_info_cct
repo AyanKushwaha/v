@@ -1,0 +1,219 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains definitions used in the info window reports that are
+ *   specific for CCT.
+ *   It is important to remember that att variables used in an info window
+ *   report should wrapped in an default statement to avoid any void values.
+ *
+ * Created by:
+ *   Markus Kollind, 20 Sep 2006
+ * 
+ * Sections:
+ *   1. show_info_crew report
+ *   2. show_info_flight report
+ *
+ * Major changes:
+ * 10-May-2007: 
+ * Created variables for everything to be used in dynamic report. 
+ * Rebuilt reports according to spec. /Erik Gustafsson
+ *
+ */
+
+module crg_info_cct inherits crg_info_ccr
+
+import report_crewlists;
+import report_common;
+
+redefine %crg_now% = %now_hb%;
+
+/*********************************************************************
+ * 1. show_info_crew
+ *    - Definitions used in the report file crg/hidden/show_info_crew
+ *********************************************************************/
+ 
+redefine export %fdays_phone% = concat("Phone: ", %phone%);
+
+%phone% = default(
+  concat(crew.%phone_primary%, ",", crew.%phone_secondary%),
+  concat(default(crew.%phone_primary%, ""), 
+    default(crew.%phone_secondary%, "")));
+
+
+/*********************************************************************
+ * 2. show_info_flight/ground/pact
+ *    - Definitions used in the report files:
+ *        crg/hidden/show_info_flight.output
+ *        crg/hidden/show_info_ground.output
+ *        crg/hidden/show_info_pact.output
+ *********************************************************************/
+ 
+redefine export %time_h1%   = "Sched:";
+redefine export %time_1%    = %sched_time%;
+redefine export %time_h2%   = if %leg_is_flight% then "Est:" else "";
+redefine export %time_2%    = if %leg_is_flight%
+                              then %est_time% else %long_duration_date_span%;
+redefine export %changes_h% = if %leg_is_flight% then "Act:" else "";
+redefine export %changes%   = if %leg_is_flight% then %act_time% else "";
+
+redefine export %duty_is_privately_traded% = duty.%is_privately_traded%;
+
+redefine export %privately_traded_leg_text% =
+	let base_text =
+        if leg.%is_freeday%
+        then "Day off, private trade, J3P F"
+        else if attributes.%is_production_before_private_trade_at_date%(leg.%ci_start_utc%)
+        then "Private trade, J3P"
+        else "Private trade, was day off, J3F";
+
+    if attributes.%is_triptrade_private_trade_at_date%(leg.%ci_start_utc%)
+        then concat(base_text, "; TripTrade")
+        else base_text;
+
+%leg_is_flight% =
+  leg.%is_flight_duty% and not leg.%is_ground_transport%;
+
+%sched_time% = default(%time_str%(leg.%activity_scheduled_start_time_utc%, leg.%activity_scheduled_end_time_utc%), "");
+%est_time% = default(%time_or_blank_str%(leg.%activity_estimated_start_time_utc%, leg.%activity_estimated_end_time_utc%), "");
+%act_time% = default(%time_or_blank_str%(leg.%activity_actual_start_time_utc%, leg.%activity_actual_end_time_utc%), "");
+
+%long_duration_date_span% =
+  if leg.%time% > 24:00
+  then concat(format_time(leg.%activity_scheduled_start_time_utc%, %format_date_no_year%),
+              " ",
+              format_time(leg.%activity_scheduled_end_time_utc%,   %format_date_no_year%))
+  else "";
+  
+redefine export %trip_co% = 
+  if not is_acrot then
+    default(format_time(time_of_day(trip.%end_utc%), %format_time_point%), "N/A")
+  else
+    "N/A";
+
+redefine export %rc_line2% = 
+  if ground_transport
+  then %task_descr%
+  else concat(" JAR: ", %jar_str%, " ");
+redefine export %rc_line3% = 
+  if ground_transport then " " else concat("SRVC: ", %man_str%, " ");
+redefine export %rc_line4% =
+  if ground_transport then " " else concat("Jar Need:", %jar_need_str%,
+                                           " S.Need:", %service_str%);
+
+%man_str% =
+  if %_man_str% = "" then
+    "Complete"
+  else
+    substr(%_man_str%, 1, length(%_man_str%)-2);
+  
+%_man_str% =
+  cat(times(10), %man_diff_str%(%times_index_0%));
+  
+%man_diff%(Int pos) =
+  if crew_pos.%need_in_pos%(pos) < 99 then /* 99 = unspec need */
+    default(crew_pos.%leg_rostered_pos%(pos), 0) 
+    - default(crew_pos.%need_in_pos%(pos), 0)
+  else
+    0;
+  
+%man_diff_str%(Int pos) =
+  let diff = %man_diff%(pos);
+  if diff > 0 then
+    concat("+", format_int(diff, "%d"), " ", crew_pos.%pos2func%(pos), ", ")
+  else if diff < 0 then
+    concat(format_int(diff, "%d"), " ", crew_pos.%pos2func%(pos), ", ")
+  else "";
+
+%jar_str% =
+  if %_jar_str% = "" then
+    "Complete"
+  else
+    substr(%_jar_str%, 1, length(%_jar_str%)-2);
+  
+%_jar_str% =
+  cat(times(10), %jar_diff_str%(%times_index_0%));
+  
+export %jar_diff%(Int pos) =
+  if crew_pos.%jar_need_in_pos%(pos) < 99 then
+    default(crew_pos.%leg_rostered_pos%(pos), 0) 
+    - default(crew_pos.%jar_need_in_pos%(pos), 0)
+  else
+    0;
+  
+%jar_diff_str%(Int pos) =
+  let diff = %jar_diff%(pos);
+  if diff > 0 then
+    concat("+", format_int(diff, "%d"), " ", crew_pos.%pos2func%(pos), ", ")
+  else if diff < 0 then
+    concat(format_int(diff, "%d"), " ", crew_pos.%pos2func%(pos), ", ")
+  else "";
+
+%jar_need_str% = 
+  default(
+          concat(
+                 format_int(%total_flight_crew_jar_need%, "%d"),
+                 "/",
+                 format_int(%total_cabin_crew_jar_need%, "%d"),
+                 if leg.%is_ground_duty%
+                    then concat("/", format_int(%total_train_crew_jar_need%, "%d"))
+                    else ""
+                 ), "N/A");
+
+%total_flight_crew_jar_need% = /* 99 = unspec need */
+  (if crew_pos.%jar_need_in_pos%(1) >= 99 then 0 else crew_pos.%jar_need_in_pos%(1)) +
+  (if crew_pos.%jar_need_in_pos%(2) >= 99 then 0 else crew_pos.%jar_need_in_pos%(2)) +
+  (if crew_pos.%jar_need_in_pos%(3) >= 99 then 0 else crew_pos.%jar_need_in_pos%(3)) +
+  (if crew_pos.%jar_need_in_pos%(4) >= 99 then 0 else crew_pos.%jar_need_in_pos%(4));
+
+%total_cabin_crew_jar_need% = /* 99 = unspec need */
+  (if crew_pos.%jar_need_in_pos%(5) >= 99 then 0 else crew_pos.%jar_need_in_pos%(5)) +
+  (if crew_pos.%jar_need_in_pos%(6) >= 99 then 0 else crew_pos.%jar_need_in_pos%(6)) +
+  (if crew_pos.%jar_need_in_pos%(7) >= 99 then 0 else crew_pos.%jar_need_in_pos%(7));
+ 
+%total_train_crew_jar_need% = /* 99 = unspec need */
+  (if crew_pos.%jar_need_in_pos%(9) >= 99 then 0 else crew_pos.%jar_need_in_pos%(9)) +
+  (if crew_pos.%jar_need_in_pos%(10) >= 99 then 0 else crew_pos.%jar_need_in_pos%(10));
+ 
+%service_str% = 
+  default(
+          concat(
+                 format_int(%total_flight_crew_need%, "%d"),
+                 "/",
+                 format_int(%total_cabin_crew_need%, "%d"),
+                 if leg.%is_ground_duty%
+                    then concat("/", format_int(%total_train_crew_need%, "%d"))
+                    else "" /* %cabin_need_exception_str% */
+                 ), "N/A");
+    
+%total_flight_crew_need% = /* 99 = unspec need */
+  (if crew_pos.%need_in_pos%(1) >= 99 then 0 else crew_pos.%need_in_pos%(1)) +
+  (if crew_pos.%need_in_pos%(2) >= 99 then 0 else crew_pos.%need_in_pos%(2)) +
+  (if crew_pos.%need_in_pos%(3) >= 99 then 0 else crew_pos.%need_in_pos%(3)) +
+  (if crew_pos.%need_in_pos%(4) >= 99 then 0 else crew_pos.%need_in_pos%(4));
+
+%total_cabin_crew_need% = /* 99 = unspec need */
+  (if crew_pos.%need_in_pos%(5) >= 99 then 0 else crew_pos.%need_in_pos%(5)) +
+  (if crew_pos.%need_in_pos%(6) >= 99 then 0 else crew_pos.%need_in_pos%(6)) +
+  (if crew_pos.%need_in_pos%(7) >= 99 then 0 else crew_pos.%need_in_pos%(7));
+
+%cabin_need_exception_str% = /* Not enabled. ("-1+1", "+0-3", ...) */
+  if crew_pos.%service_need_exception_in_pos6% >= 0
+  or crew_pos.%service_need_exception_in_pos7% >= 0
+  then concat(format_int(crew_pos.%service_need_in_pos6% - crew_pos.%service_need_raw_in_pos6%, "%+d"),
+              format_int(crew_pos.%service_need_in_pos7% - crew_pos.%service_need_raw_in_pos7%, "%+d"))
+  else "";
+  
+%total_train_crew_need% = /* 99 = unspec need */
+  (if crew_pos.%need_in_pos%(9) >= 99 then 0 else crew_pos.%need_in_pos%(9)) +
+  (if crew_pos.%need_in_pos%(10) >= 99 then 0 else crew_pos.%need_in_pos%(10));
+  
+%block_time_in_previous_28_days% = default(format_time(report_common.%block_time_in_previous_28_days%, %format_time_span%), "");
+%block_time_in_following_28_days% = default(format_time(report_common.%block_time_in_following_28_days%, %format_time_span%), "");
+%duty_time_in_current_month% = default(format_time(report_common.%duty_time_in_current_month%, %format_time_span%), "");
+%block_time_in_full_calendar_year% = default(format_time(report_common.%block_time_in_full_calendar_year%, %format_time_span%), "");
+%aircraft_qlns% = report_common.%aircraft_qlns%;
+
+/* end of file */
+

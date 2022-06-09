@@ -1,0 +1,158 @@
+ /* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains qualification rules for flight crew 
+ *   used in Carmen Crew Rostering and as studio only Carmen Crew Tracking.
+ *   
+ *   This sub modules fixes a dependency to training_log module, which is not present in matador
+ *
+ * Sections:
+ *   1. Airport qualifications
+ *   2. Recurrent training rules
+ *
+ * Created by:
+ *   Lars Westerlind 2016-11-16
+ *
+ *
+ */
+
+module rules_qual_ccr_fc_gpc inherits rules_qual_ccr_fc
+
+
+/*
+** Rule:
+**    First date for web training (WTAx, WTBx, previously also WBTx) before PC/OPC
+**
+** Description:
+**    This rule should not be active in matador, as WTxx activies are not present until after
+**
+** Agreement:
+**    Functional
+*/
+rule qln_min_days_btw_pc_opc_and_web_trg_FC =
+  valid roster.%check_rules% and
+        system_db_parameters.%wt_with_PC_16_1_valid%(leg.%start_hb%) and
+        %within_training_eval_period% and
+        leg.%in_pp_extended% and
+        training.%leg_is_pc_opc_not_Z% and
+        not crew.%is_leased_duty_start% and
+        not (training.%leg_is_pc% and training.%wt_completed_in_extended_window%) and /* CORONA SKCMS-2461: Remove this condition after delayed PC activities are completed.  */
+        training.%wt_earliest_date% < leg.%start_hb% and /* if not, document has already been updated. */
+        not %_is_assigned_instr%; /* assigned position TL (TR I) */
+
+  %last_wt_any_performed% >= training.%wt_earliest_date% /* wbtr must not be earlier than recurrent may be */
+       - rule_exceptions.%overshoot_rel%(leg.%start_UTC%);
+
+  startdate  = leg.%start_utc%;
+  severity = %severity_filter_int%(leg.%start_hb%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext(Abstime value, Abstime limit) =
+    rules.%failtext_absdate%("Last web training too early for PC/OPC",value,limit);
+  remark "(CCR) Func: Last web training course too early for PC/OPC",
+  planner "PC/OPC requires a web training course before, and earliest",
+          "within 3 month up to document expiry, or limit set by parameter";
+end
+
+%last_wt_any_performed% =
+  default(
+    training.%wt_last_performed_any%(training.%wt_earliest_date%, leg.%start_hb%),
+    1jan1986);
+
+%_is_assigned_instr% =
+  crew_pos.%assigned_pos% = 10;
+
+%first_valid_time_for_spring_training_day% = training.%first_valid_time_for_spring_training_day%;
+%last_valid_time_for_spring_training_day% = training.%last_valid_time_for_spring_training_day%;
+%first_valid_time_for_autumn_training_day% = training.%first_valid_time_for_autumn_training_day%;
+%last_valid_time_for_autumn_training_day% = training.%last_valid_time_for_autumn_training_day%;
+
+%within_spring_training_eval_period% =
+  if (%first_valid_time_for_spring_training_day% > %last_valid_time_for_spring_training_day%) then
+     (%first_valid_time_for_spring_training_day% <= %leg_day_of_year% or
+            %leg_day_of_year% <= %last_valid_time_for_spring_training_day%)
+  else
+    (%first_valid_time_for_spring_training_day% <= %leg_day_of_year% and
+       %leg_day_of_year% <= %last_valid_time_for_spring_training_day%);
+
+%within_autumn_training_eval_period% =
+  if (%first_valid_time_for_autumn_training_day% > %last_valid_time_for_autumn_training_day%) then
+     (%first_valid_time_for_autumn_training_day% <= %leg_day_of_year% or
+            %leg_day_of_year% <= %last_valid_time_for_autumn_training_day%)
+  else
+    (%first_valid_time_for_autumn_training_day% <= %leg_day_of_year% and
+       %leg_day_of_year% <= %last_valid_time_for_autumn_training_day%);
+
+%leg_day_of_year% =
+    format_time(leg.%start_utc%, "%03j");
+
+export %within_training_eval_period% =
+  %within_spring_training_eval_period% or %within_autumn_training_eval_period%;
+
+/*
+** Rule:
+**    Duplicate WTAx/WTBx should be avoided
+**
+** Description:
+**    This rule need not be active in matador, as WTxx activies are not present until after
+**
+** Agreement:
+**    Functional
+*/
+rule qln_web_trg_not_duplicated_FC =
+  valid roster.%check_rules% and
+        leg.%in_pp_extended% and
+        training.%is_any_wt_leg% and
+        not crew.%is_leased_trip_start% and
+        training.%wt_earliest_date% < leg.%start_hb%; /* if not, document has already been updated. */
+
+  %last_wtxx_performed%(task.%code%) <= training.%wt_earliest_date% /* wbtr must not be present before current */
+       + rule_exceptions.%overshoot_rel%(leg.%start_UTC%);
+  startdate  = leg.%start_utc%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = leg.%failobject_departure%;
+  failtext(Abstime value, Abstime limit) =
+    rules.%failtext_absdate%("Another web training exist before current: ",value,limit);
+  remark "(CCR) Func: Two web training courses with same code may not exist",
+  planner "PC/OPC requires ONE web training course before, and earliest",
+          "within 3 month up to document expiry, or limit set by parameter. ",
+          "In rare situations several courses may occur but then with different codes";
+end
+
+%last_wtxx_performed%(String code) =
+  default(
+    training.%wt_last_performed%(training.%wt_earliest_date%, trip.%start_hb%, code),
+    1jan1986);
+
+/*
+ * Check if seasonal web training is scheduled in correct season, either spring or autumn season.
+ * Seasons are defined by parameters in the training module.
+*/
+rule qln_correct_season_for_web_training_FC =
+  valid roster.%check_rules% and
+  rule_exceptions.%rule_on%(leg.%start_utc%) and
+  leg.%in_pp_extended% and
+  training.%is_any_wt_leg% and
+  not crew.%is_leased_trip_start%
+  and training.%is_seasonal_web_training%(task.%code%);
+
+    %web_training_in_correct_period%;
+
+  startdate  = leg.%start_utc%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%, %duty_lh_region%));
+  failobject = leg.%failobject_departure%;
+  failtext concat("Incorrect season for web training code: ", task.%code%);
+  remark "Web training course code to be used in correct season",
+  planner "Web training course code to be used in correct season";
+end
+
+%web_training_in_correct_period% =
+  if training.%is_spring_web_training%(task.%code%) then
+    %within_spring_training_eval_period%
+  else if training.%is_autumn_web_training%(task.%code%) then
+    %within_autumn_training_eval_period%
+  else
+    void_bool;
+
+/* eof */

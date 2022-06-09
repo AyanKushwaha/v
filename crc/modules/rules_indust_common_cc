@@ -1,0 +1,177 @@
+/* -*- crc -*- 
+ *
+ *
+ * Purpose:
+ *   The module contains industrial rules common to CC pairing and rostering.
+ *
+ * Major changes:
+ *
+ */
+
+module rules_indust_common_cc inherits rules_indust_common
+
+import duty;
+import rule_exceptions;
+import fundamental;
+import levels;
+import oma16;
+import leg;
+import system_db_parameters;
+import base_product;
+
+/*
+** Rule:
+**    No extended FDP before long haul for CC SKS
+**
+** Description:
+**      Check if there is no extended leg in last two days before a long haul production
+**
+** Agreement:
+**    SCCA
+**
+*/
+export rule (on) ind_no_extension_before_lh_cc =
+  valid duty.%has_active_flight% and
+        (duty.%is_regarded_sks_agmt% or
+           (duty.%is_regarded_skd_agmt% and system_db_parameters.%cau1412_skd_16_valid%(duty.%start_hb%))) and
+        not duty.%is_long_haul% and
+        oma16.%is_extended_fdp%;
+  %_first_long_haul_after_fdp% >= %_long_haul_after_extended_fdp_limit% - rule_exceptions.%overshoot_rel%(duty.%start_hb%);
+  startdate = duty.%start_hb%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %_no_extension_before_lh_cc_fail_object%;
+  failtext "Coll: No extended FDP before LH";
+  remark "Coll: No extension before LH duty for CC SKS & SKD",
+  planner "This rule is valid for CC SKS as per SCCA agreement 2015-03-13,"
+          "and CC SKD mid 2016"
+          "The rule declares that no extension is allowed before long haul production for CC SKS & SKD";
+end
+
+%_no_extension_before_lh_cc_fail_object% = duty.%failobject_end%;
+
+
+%_first_long_haul_after_fdp% =
+  let this_duty_end = duty.%end_hb%;
+  next(duty(chain),duty.%start_hb%)
+    where(duty.%has_active_long_haul% or duty.%start_hb% > this_duty_end + 72:00);
+
+%_long_haul_after_extended_fdp_limit% =
+  round_up(duty.%end_UTC%-0:01, 24:00) + 48:00;
+
+/*
+** Rule: Maximum duty time in 1x24 hrs
+*/
+redefine %r_valid_duty_time_in_1x24_hrs% =
+  /* No limit in Tracking for long haul acc to CAU D.1.2 */
+  (duty.%is_SKD% and
+  (duty.%is_short_haul% or not base_product.%is_tracking%));
+
+redefine export %duty_time_1x24_hrs% =
+  if  (duty.%is_SKD% and
+       duty.%is_long_haul% and
+       duty.%num_active_legs% = 1)
+  then
+    /* Agreement: CAU D.1.2.a */
+    duty_time.%1x24_hrs_no_night_upg%
+  else
+    duty_time.%1x24_hrs%;  
+
+redefine export %duty_time_1x24_hrs_fwd% =
+  if  (duty.%is_SKD% and
+       duty.%is_long_haul% and
+       duty.%num_active_legs% = 1)
+  then
+    /* Agreement: CAU D.1.2.a */
+    duty_time.%1x24_hrs_fwd_no_night_upg%
+  else
+    duty_time.%1x24_hrs_fwd%;
+    
+redefine export %duty_time_1x24_hrs_bwd% =
+  if  (duty.%is_SKD% and
+       duty.%is_long_haul% and
+       duty.%num_active_legs% = 1)
+  then
+    /* Agreement: CAU D.1.2.a */
+    duty_time.%1x24_hrs_bwd_no_night_upg%
+  else
+    duty_time.%1x24_hrs_bwd%;
+
+redefine %leg_duty_time_1x24hrs_until_now% =
+  if  (duty.%is_SKD% and
+       duty.%is_long_haul% and
+       duty.%num_active_legs% = 1) then
+    /* Agreement: CAU D.1.2.a */
+    trip.%duty_time_in_period%((leg.%co_end_utc% - 1*24:00), leg.%co_end_utc%, false, duty.union)
+  else
+    trip.%duty_time_in_period%((leg.%co_end_utc% - 1*24:00), leg.%co_end_utc%, true, duty.union);
+    
+/*
+** Rule: Duty restricitions after a short stop
+*/
+redefine %r_valid_duty_restrictions_after_short_stop% =
+  trip.%is_SKD% and
+  not duty.%k4exng_cc_sp5_1_valid%(trip.%start_day%);
+
+/*
+** Rule:
+**    CBA16 - NKF/SNK Max 9h DP in flight duty on day after extension
+**
+** Description:
+**
+** Agreement:
+**    CBA16
+**
+*/
+export rule (on) ind_max_dp_after_extension_skn_cc =
+  valid trip.%check_rules%
+        and duty.%in_pp_extended%
+        and system_db_parameters.%cba16_nov_valid%(duty.%start_hb%)
+        and duty.%is_regarded_skn_agmt%
+        and duty.%has_active_flight%
+        and not duty.%is_long_haul%
+        and duty_period.%is_first_duty_in_duty_period%
+        and oma16.%preceded_by_extended_fdp%;
+
+  duty_period.%time_reducing_sb_w_rest% <= 9:00 + rule_exceptions.%overshoot_rel%(duty.%start_hb%);
+        
+  startdate = duty.%start_hb%;
+  severity = %severity_filter_int%(duty.%start_hb%,%duty_lh_region%);
+  failobject = %_no_extension_before_lh_cc_fail_object%;
+  failtext " Coll: Too long DP for a flightduty on the day after Extension";
+  remark "Coll: Too long DP for a flightduty on the day after Extension",
+  planner "CBA16: CC SNK & NKF 3.1.1 - The rule states that the max DP limit for a flight duty"
+          "on the day after an extension is 9h. The rule is valid in JCP, JCR and JCT and will"
+          "only trigger if there is a flight duty";
+end
+
+
+/*
+** Rule:
+**   Rest after duty period >12h
+**
+** Description:
+**
+*/
+rule ind_min_rest_after_fdp_12h_more =
+  valid system_db_parameters.%cba16_oct_valid%(duty.%start_hb%) and
+        duty.%is_regarded_skn_agmt% and
+        trip.%check_rules% and
+        (duty.%in_pp% or duty.%rest_ends_in_pp%) and
+        duty_period.%is_on_duty% and
+        duty_period.%is_last_duty_in_duty_period% and
+        not duty.%is_single_leg_standby_callout% and
+        %fdp_12h_more% and
+        is_last(leg(duty));
+
+  duty_period.%rest_time_after% >= %_minimum_time_cc_with_extra% - rule_exceptions.%overshoot_rel%(duty.%start_utc%);
+
+  startdate = duty.%scheduled_block_off_utc%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = next(duty(chain), duty.%failobject_start%) where (duty_period.%is_first_duty_in_duty_period% and duty_period.%is_on_duty%);
+  failtext(Reltime value, Reltime limit) =
+    %ind_min_rest_after_fdp_12h_more_failtext%(value, limit);
+  remark "Coll: Min rest after FDP>12h for SKN_CC_AG ",
+  planner "This rule regulates the min rest after FDP>12h for SKN_CC_AG";
+end
+
+

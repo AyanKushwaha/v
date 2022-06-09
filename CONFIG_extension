@@ -1,0 +1,335 @@
+#!/bin/sh
+#
+# This file is sourced from the CARMSYS upon startup of all applications
+#
+BRANCH=Air
+CUSTOMER=SK
+TIMESTAMP=`date +'%Y%m%d%H%M%S'`
+
+# CMS2 Debug logging
+#CMS2_DEBUG_LOG=1
+#export CMS2_DEBUG_LOG
+
+# Turn on additional performance logging by uncommenting below line
+# export PERFORMANCE_TRACE=10
+
+# MDLRPSRV-121
+export REPORT_SERVER_EXIT_ON_CRASH=1
+
+# SASCMS-4415 (STUDIO-15271)
+#export TRACE_XMLRPC=1
+
+export BRANCH CUSTOMER TIMESTAMP
+
+if [ -z "$CARM_PRE_PYTHONPATH" ]; then
+	CARM_PRE_PYTHONPATH=$PYTHONPATH
+	export CARM_PRE_PYTHONPATH
+else
+	PYTHONPATH=$CARM_PRE_PYTHONPATH
+	export PYTHONPATH
+fi
+
+if [ -z "$CARM_PRE_PATH" ]; then
+	CARM_PRE_PATH=$PATH
+	export CARM_PRE_PATH
+else
+	PATH=$CARM_PRE_PATH
+	export PATH
+fi
+
+if [ -z "$CARM_PRE_LD_LIBRARY_PATH" ]; then
+	CARM_PRE_LD_LIBRARY_PATH=$LD_LIBRARY_PATH
+	export CARM_PRE_LD_LIBRARY_PATH
+else
+	LD_LIBRARY_PATH=$CARM_PRE_LD_LIBRARY_PATH
+	export LD_LIBRARY_PATH
+fi
+
+# Setting umask
+umask 2
+if [ -z "$CARMDATA" ]; then
+    echo 'A CARMUSR based on the std concepts needs the'
+    echo 'environment variable $CARMDATA to find subplans, etables etc.'
+    exit 1
+fi
+
+if [ -z "$CARMSTD" ]; then
+    CARMSTD=$CARMUSR
+    export CARMSTD
+fi
+
+if [ -z "$CARMGROUP" ]; then 
+    CARMGROUP=Default
+    export CARMGROUP
+fi
+
+LINUX_DEFAULT_GROUP=`id --name --group`
+
+# Environment used by Manpower
+DEBUG=${DEBUG:-0}
+
+LANG=en_US
+LC_ALL=en_US
+
+TZ=UTC
+export LANG LC_ALL TZ
+
+# Add contrib libraries to PYTHONPATH
+PYTHONPATH=$PYTHONPATH:$CARMUSR/lib/python/contrib
+export PYTHONPATH
+
+# Add path to CARMSTD
+appendPATH $CARMSTD/bin
+LD_LIBRARY_PATH=$CARMUSR/lib/$ARCH:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH
+
+if [ X`domainname` = "Xypcarmen" ]; then
+  # Specific settings in Jeppesens main network
+  _SITE=Jeppesen
+elif [ X`domainname` = "Xypsupport" ]; then
+   SITE=Jeppesen
+elif [ X`domainname` = "Xtestnet" ]; then
+  # Specific settings in Jeppesens test network
+  _SITE=Testnet
+else
+  # Specific settings at SAS
+  _SITE=SAS
+
+  #
+  # Batch Viewer Settings, used by CCP and CCR 
+  #
+  PYBATCHSYS=/opt/Carmen/batch/CARMSYS
+  PYBATCHLIB=$PYBATCHSYS/lib/python/
+  PYBATCHTMP=/opt/Carmen/batch/tmp
+  export PYBATCHSYS PYBATCHLIB PYBATCHTMP
+
+fi
+
+#
+# Enable C14 CMS API
+# The following two lines are used by a file ClockHandling.py which is called during Studion startup
+CMS=1
+export CMS
+
+#
+# Source CARMUSR config functions
+#
+. $CARMUSR/etc/scripts/config_functions
+
+#
+# Database settings
+#
+CARM_ORACLE_INIT=optional
+export CARM_ORACLE_INIT
+NLS_LANG=American_America.WE8ISO8859P1
+export NLS_LANG
+
+if [ X"$CARMSYSTEMNAME" = "X" ]; then
+    CARMSYSTEMNAME=`getProperty $CARMUSR/etc/config.xml carmsystemname` || CARMSYSTEMNAME=GOT_development
+fi
+export CARMSYSTEMNAME
+
+if [ X"$DB_URL" = "X" ]; then
+    DB_URL=`getMandatoryProperty $CARMUSR/etc/config.xml db/dave/live/url` || exit $?
+fi
+
+if [ X"$DB_SCHEMA" = "X" ]; then
+    DB_SCHEMA=`getMandatoryProperty $CARMUSR/etc/config.xml db/dave/live/schema` || exit $?
+fi
+
+if [ X"$DB_ADM_URL" = "X" ]; then
+    DB_ADM_URL=`getMandatoryProperty $CARMUSR/etc/config.xml db/dave/admin_live/url` || exit $?
+fi
+
+if [ X"$DB_URL_HISTORY" = "X" ]; then
+    DB_URL_HISTORY=`getMandatoryProperty $CARMUSR/etc/config.xml db/dave/history/url` || exit $?
+fi
+
+if [ X"$DB_SCHEMA_HISTORY" = "X" ]; then
+    DB_SCHEMA_HISTORY=`getMandatoryProperty $CARMUSR/etc/config.xml db/dave/history/schema` || exit $?
+fi
+
+if [ X"$DB_ADM_URL_HISTORY" = "X" ]; then
+    DB_ADM_URL_HISTORY=`getMandatoryProperty $CARMUSR/etc/config.xml db/dave/admin_history/url` || exit $?
+fi
+
+if [ X"$DB_CP_URL" = "X" ]; then
+    DB_CP_URL=`getMandatoryProperty $CARMUSR/etc/config.xml db/dave/interbids/url` || exit $?
+fi
+
+export DB_URL DB_ADM_URL DB_SCHEMA DB_URL_HISTORY DB_ADM_URL_HISTORY DB_SCHEMA_HISTORY DB_CP_URL
+
+# Calibration
+if [ X"$_CARM_CALIB_DB_NAME" = "X" ]; then
+    _CARM_CALIB_DB_NAME=`getProperty $CARMUSR/etc/config.xml calibration/database/name` || exit $?
+fi
+
+if [ X"$_CARM_CALIB_DB_USER" = "X" ]; then
+    _CARM_CALIB_DB_USER=`getProperty $CARMUSR/etc/config.xml calibration/database/user` || exit $?
+fi
+
+if [ X"$_CARM_CALIB_DB_PASSWORD" = "X" ]; then
+    _CARM_CALIB_DB_PASSWORD=`getProperty $CARMUSR/etc/config.xml calibration/database/password` || exit $?
+fi
+
+if [ X"$_CARM_CALIB_DB_HOST" = "X" ]; then
+    _CARM_CALIB_DB_HOST=`getProperty $CARMUSR/etc/config.xml calibration/database/host` || exit $?
+fi
+
+if [ X"$_CARM_CALIB_QLIK_QRS_URL" = "X" ]; then
+    _CARM_CALIB_QLIK_QRS_URL=`getProperty $CARMUSR/etc/config.xml calibration/qlik/qrs_url` || exit $?
+fi
+
+if [ X"$_CARM_CALIB_QLIK_CERT" = "X" ]; then
+    _CARM_CALIB_QLIK_CERT=`getProperty $CARMUSR/etc/config.xml calibration/qlik/qlik_cert` || exit $?
+fi
+
+
+export _CARM_CALIB_DB_NAME _CARM_CALIB_DB_USER _CARM_CALIB_DB_PASSWORD _CARM_CALIB_DB_HOST _CARM_CALIB_QLIK_QRS_URL _CARM_CALIB_QLIK_CERT
+
+DATABASE=${DATABASE:-$DB_URL}
+export DATABASE
+
+# Manpower CARMSYS uses environment SCHEMA in python code including TextTest
+SCHEMA=${SCHEMA:-$DB_SCHEMA}
+export SCHEMA
+
+STYLE=DnD
+export STYLE
+
+CARMWEB_DEBUG=1
+export CARMWEB_DEBUG
+
+# UUID generation lockfile dir
+# This variable overrides the default location in $CARMTMP and is set as the
+# UUID generation causes problems when generated on an NFS mounted disk
+CARMUUID_LOCKFILES_DIR=/tmp/carmuuid
+export CARMUUID_LOCKFILES_DIR
+
+# Temporary resource-storage, 
+# By setting $CARMUSECRSTEMPFILE to non-null the last Crs-source will
+# be a temporary file, empty at startup. Should be used by batch-jobs
+# and processes where preferences and changed resources shouldn't be saved
+TMPCRSPATH=$CARMTMP/CarmResources/`hostname`$$.etab
+export TMPCRSPATH
+if [ ! -d $CARMTMP/CarmResources ];then
+   mkdir  $CARMTMP/CarmResources
+fi
+if [ -z "$CARMUSECRSTMPFILE" ];then
+   if [ -f $TMPCRSPATH ];then
+       rm $TMPCRSPATH
+   fi
+else
+   cp $CARMUSR/Resources/CarmResources/Empty.etab $TMPCRSPATH
+fi
+
+
+# Sets product from what application is started. The variable
+# SK_APP is also used for application dependent resources in 
+#   $CARMUSR/Resources/CarmResources/${SK_APP}.etab
+if [ -z "$SK_APP" ]; then 
+    SK_APP=Server
+    export SK_APP
+fi
+
+unset SCENARIO
+case $SK_APP in
+    Tracking)
+        PRODUCT=Cct
+        SCENARIO=1
+        export SCENARIO
+        ;;
+
+    DayOfOps)
+        PRODUCT=Cct
+        SCENARIO=1
+        export SCENARIO
+        ;;
+
+    PrePlanning)
+        PRODUCT=Cas
+        SCENARIO=1
+        export SCENARIO
+	;;
+
+    Planning)
+        PRODUCT=Cas
+        SCENARIO=1
+        export SCENARIO
+	;;
+
+    Manpower)
+        PRODUCT=Pac
+        ;;
+
+    Server)
+        PRODUCT=Cct
+        ;;
+
+    *)
+        echo "CONFIG_extension: ERROR: Environment variable '\$SK_APP' set to an unknown value: $SK_APP" 1>&2
+        exit 1 
+        ;;
+esac
+export PRODUCT
+
+# Enabling Dave Filter for all products.
+DAVE_FILTER=1
+export DAVE_FILTER
+
+# role dependent resources in
+#   $CARMUSR/data/config/CarmResources/Mode{CARMROLE}.etab
+if [ -n "$CCROLE" ]; then
+    CARMROLE=$CCROLE
+    export CARMROLE
+else
+    if [ -z "$CARMROLE" ]; then
+        CARMROLE=`getMandatoryProperty users/${USER}/role` || exit $?
+        export CARMROLE
+	CCROLE=$CARMROLE
+	export CCROLE
+    fi
+fi
+
+## TRACKING SETTINGS
+NO_AUTO_REFRESH=yes
+export NO_AUTO_REFRESH
+
+# Look for a user-specific CONFIG file
+if [ -f $HOME/CONFIG_extension ]; then
+    . $HOME/CONFIG_extension
+fi
+
+
+# Adding DWS pydev to PYTHONPATH - 2014-06-03 - HiQ - mikaella
+# 
+if [ -n "${CARMDWSSYS}" ]
+then
+	DWS_PYTHON_PATH=`find ${CARMDWSSYS} -name pysrc`
+elif [ -r ${CARMUSR}/current_carmdwssys ] 
+then
+	DWS_PYTHON_PATH=`find -L ${CARMUSR}/current_carmdwssys -name pysrc`
+fi
+
+if [ -n "${DWS_PYTHON_PATH}" ]
+then
+    PYTHONPATH=${DWS_PYTHON_PATH}:${PYTHONPATH}
+    export PYTHONPATH
+fi
+
+#Adding pythonpath to DWS
+CARMDWSEXTRAPYTHONPATH=${PYTHONPATH}
+export CARMDWSEXTRAPYTHONPATH
+
+
+#JMP3 & JMP4 switch
+SCHEMA_USED="JMP4"
+export SCHEMA_USED
+
+#Optimization KPI
+if [ "$PRODUCT" = "Cas" ]; then
+ MATADOR_POST_RUN_COMMAND='python /opt/Carmen/OPT_KPI/lib/python/optimization_xml_analytics/rosteropt_send_analytics.py --returncode $? $ARGUMENTS --kpi environment "$CARMSYSTEMNAME" --directory /opt/Carmen/CARMUSR/LIVEFEED/current_carmdata/Optimizer/monitoring/opt_kpi/ --fileprefix SAS_"$CARMSYSTEMNAME"_'
+else
+ MATADOR_POST_RUN_COMMAND=''
+fi
+

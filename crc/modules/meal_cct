@@ -1,0 +1,249 @@
+/* -*- crc -*-
+ *
+ * Purpose:
+ *   This module adds/redefines variables for Tracking.
+ *
+ * Sections:
+ *  1: Meal stop redefines / additions
+ *  2: Meal stop attributes
+ *  3: Meal break times based on actual values
+ *  4: Meal break redefines / additions
+ *  5: Best meal break redefines / additions
+ *
+ * Created by:
+ *   Hasse Eliasson, 15May2009
+ *
+ * Major changes:
+ * Date   Name             Comment
+*/
+
+module meal_cct inherits meal
+
+import report_meal;
+import attributes;
+import crew;
+
+/****************************************************************
+ * Section 1: Meal stop redefines / additions
+ ***************************************************************/
+redefine export %stop% =
+  if %leg_is_past_operation% then
+    %stop_attribute_val%
+  else if %stop_is_overridden_by_attribute% then
+    %stop_attribute_val%
+  else
+    /*Below is same as original we redefine*/
+    leg.%is_flight_duty% and
+    not leg.%is_not_operating% and
+    %meal_stop_allowed% and
+    %allowed_station_for_meal_stop% and
+    not leg.%is_last_in_duty% and
+    default(%leg_cnx_time% >= %meal_stop_req_connection_time%,
+            false) and
+    %restaurant_is_open%;
+
+export %meal_stop_req_connection_time_relaxed% =
+    nmax(%meal_stop_min_duration_relaxed%,
+         default(%meal_stop_min_cnx_for_station%, 0:00));
+
+
+/****************************************************************
+ * Section 2: Meal stop attributes
+ ***************************************************************/
+%stop_attribute_val% =
+  if not %is_meal_break_attr% then
+    False
+  else if %is_manual_set% then
+    True
+  else if %is_manual_prevent% then
+    False
+  else if locate("X", attributes.%assignment_attr_str%("MEAL_BREAK")) > 0 then
+    True
+  else
+    False;
+
+%stop_is_overridden_by_attribute% = %is_manual_set% or %is_manual_prevent%;
+
+redefine export %is_manual_set% =
+  %is_meal_break_attr% and 
+  attributes.%assignment_attr_str%("MEAL_BREAK") = "X+";
+
+redefine export %is_manual_prevent% =
+  %is_meal_break_attr% and 
+  attributes.%assignment_attr_str%("MEAL_BREAK") = "X-";  
+
+redefine export %meal_attr_changed% =
+  if %is_assigned_meal_stop% then
+    not %is_meal_break_attr%
+  else
+    %is_meal_break_attr% and
+    not %is_manual_prevent%;
+
+redefine export %is_meal_break_attr% =
+  attributes.%assignment_has_attr%("MEAL_BREAK");
+
+/****************************************************************
+ * Section 3: Meal break times based on actual values
+ ***************************************************************/
+table meal_duty_period_definition_act_times =
+  crew.%k4exng_cc_sp5_1_valid%(duty.%start_day%),
+  %flight_crew%, %legality_region% ->
+    redefine export %duty_period_start_act%,
+    redefine export %duty_period_end_act%;
+  
+  /* 4ExNG */
+  true ,   -  ,   -     -> %duty_check_in_act% , %duty_block_on_act%;
+
+  /* Flight crew */
+  false, true , "SKD"   -> %duty_check_in_act% , %duty_block_on_act%;
+  false, true , "SKN"   -> %duty_check_in_act% , %duty_block_on_act%;
+  false, true , "SKS"   -> %duty_check_in_act% , %duty_block_on_act%;
+  false, true , "SVS"   -> %duty_check_in_act% , %duty_block_on_act%;
+
+  /* Cabin crew - DK */
+  false, false, "SKD"   -> %duty_check_in_act% , %duty_block_on_act%;
+  
+  /* Cabin crew - NO */
+  false, false, "SKN"   -> %duty_check_in_act% , %duty_block_on_act%;
+
+  /* Cabin Crew - SVS */
+  false, false, "SVS"   -> %duty_check_in_act% , %duty_block_on_act%;
+
+  /* Cabin crew - SE, Default */
+  -    ,-    , -       -> %duty_block_off_act%, %duty_block_on_act%;
+end
+
+/* Modifications for standbys effect on start/end times of duty. */
+%duty_check_in_act% = %duty_check_in%;
+  
+%duty_check_out_act% = 
+  last(leg(duty), leg.%co_end_utc%)
+  where (not %is_standby%);
+  
+%duty_block_off_act% = 
+  first(leg(duty), leg.%start_UTC%)
+  where (not %is_standby%);
+  
+%duty_block_on_act% = 
+  last(leg(duty), leg.%end_UTC%)
+  where (not %is_standby%);
+
+table two_required_meals_duty_period_act_definition =
+  crew.%k4exng_cc_sp5_1_valid%(duty.%start_day%),
+  %flight_crew%, %legality_region% ->
+    redefine export %two_required_meals_duty_time_act%;
+  
+  /* 4ExNG */
+  true ,   -  ,   -       -> %duty_block_on_act% - %duty_block_off_act%;
+ 
+  /* Cabin crew - NO */
+  false, false, "SKN"     -> %duty_check_out_act% - %duty_check_in_act%;
+  /* Cabin crew - SE */
+  false, false, "SKS"     -> %duty_block_on_act%  - %duty_block_off_act%;
+  /* Flight crew - All regions */
+  false, true,    -       -> %duty_block_on_act%  - %duty_block_off_act%;
+  /* Default */
+  -    , -    , -         -> void_reltime;
+end
+
+redefine export %max_time_to_meal_break% =
+  if default(prev(leg(duty), True) where (meal.%is_a_meal_break%),
+             false)
+  then %max_time_btw_meal_breaks%
+  else %max_time_to_first_meal_break%;
+
+export %time_act_to_meal_break% = 
+  %break_start_act% -
+  default(prev(leg(duty), %break_end_act%) where (%is_meal_break_ok%),
+          %duty_period_start_act%);
+
+%break_start_act% =
+  if %is_assigned_meal_during_flight% then
+    %flight_meal_start_act%
+  else
+    %ground_meal_start_act%;
+
+/* Start with checking if meal on ground */
+%break_end_act% =
+  if %is_assigned_meal_on_ground% then
+    %ground_meal_end_act%
+  else
+    %flight_meal_end_act%;
+
+%ground_meal_start_act% = leg.%end_UTC%;
+%flight_meal_start_act% = leg.%start_UTC% + 
+                             %meal_during_flight_start_time_shift%;
+%ground_meal_end_act%   = 
+  default(next(leg(duty), leg.%start_UTC%),
+          leg.%start_UTC%);
+%flight_meal_end_act%   = leg.%end_UTC% -
+                             %meal_landing_limitation%;
+
+/****************************************************************
+ * Section 4: Meal break redefines / additions
+ ***************************************************************/
+
+/* Agreement: CAU K06 K.1d */
+  /* NOTE: In tracking the condition on nr of assigned crew is relaxed
+           This is because very often assignments are changed after
+           the order has been sent, and it is simply less expensive to
+           always order meal regardless of nr of crew. CR 314 */
+redefine %_meal_load_exception% = %leg_time% >= 2:00;
+
+/****************************************************************
+ * Section 5: Best meal break redefines / additions
+ ***************************************************************/
+redefine %any_manual_override%(AbsTime start) =
+  default(any(leg(duty), (%is_manual_set% and 
+                          %ground_meal_start% - start >= 0:00)),
+          false);
+
+redefine %is_manual_override%(AbsTime start) =
+  default(is_first(leg(duty)) where (%is_manual_set% and 
+                                     %ground_meal_start% - start >= 0:00),
+          false);
+
+redefine %is_best_meal_stop%(AbsTime start, Int break_nr)=
+  if %any_manual_override_in_interval%(start, break_nr) then
+    %is_meal_stop_by_override%(start, break_nr)
+  else if break_nr = 1 and
+     %duty_requires_two_meal_breaks% and
+     %nr_meal_breaks% >= 2 then
+    if %nr_meal_breaks% = 2 then
+      default(is_first(leg(duty)) where (%stop% and
+                                         %is_in_interval_ground%(start,
+                                                                 break_nr)),
+              false)
+    else
+      default(is_last(leg(duty))
+                where (%stop% and
+                       %is_in_interval_ground%(start,break_nr) and
+                       not %is_last_best_meal_stop%(start,break_nr)),
+              %is_last_best_meal_stop%(start,break_nr))              
+  else
+    %is_last_best_meal_stop%(start,break_nr);
+      
+%any_manual_override_in_interval%(AbsTime start, Int break_nr) =
+  default(any(leg(duty), (%is_manual_set% and 
+                          %is_in_interval_ground%(start, break_nr))),
+          false);
+
+%is_meal_stop_by_override%(AbsTime start, Int break_nr)=
+  default(is_first(leg(duty)) where (%is_manual_set% and
+                                    %is_in_interval_ground%(start,
+                                                            break_nr)),
+          false);
+
+
+/* Helper functions*/
+
+export %leg_is_in_dayofop% =
+  duty.%start_day% < fundamental.%now% or
+  leg.%start_UTC% - %meal_min_ahead_time_limit_for_in_dayofop% < fundamental.%now%;
+
+redefine export %leg_is_past_operation% = leg.%start_UTC% < fundamental.%now%;
+
+%meal_min_ahead_time_limit_for_in_dayofop% = parameter 03:00
+  remark "Meal: Min time ahead limit for when rules must be activated,regardless if in day of operation";
+
+/* end of file */

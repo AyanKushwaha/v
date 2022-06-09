@@ -1,0 +1,307 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   This file contains general per diem definitions used in several levels.
+ *
+ * Created by:
+ *   Leo Wentzel, 19-Jan-2006
+ *
+ * Major changes:
+ *
+ */
+ 
+module per_diem
+
+import fundamental;
+
+/* Unit to avoid rounding problems. */
+export %per_diem_price_unit% = 100;
+
+/* Unit to avoid negative values with calculations using large exchange units */
+table decimal_cut_unit(Int exchange_unit) = 
+    exchange_unit -> %decimal_cut_unit%;
+    (1, 10000) -> 1;
+    100000 -> 100;
+    1000000 -> 1000;
+    10000000 -> 10000;
+    100000000 -> 100000;
+    1000000000 -> 1000000;
+ end
+
+/* Breakfast reduction in percent 15% */
+export %per_diem_breakfast_reduction% = 15;
+
+/* The currency that all prices are converted to. */
+export %default_currency% = "SEK";
+
+/* Default country for currency */
+export %default_country% = "SE";
+
+/* Department table name */
+export %per_diem_department_table% = "per_diem_department";
+
+/* Calculates the amount of Per diem in 1/4 for a given time period. */
+export %per_diem_amount%(reltime per_diem_time, bool cabin_crew, bool is_SKN, Abstime date) =
+  %per_diem_regular%(per_diem_time) + %per_diem_additional%(per_diem_time, cabin_crew, is_SKN, date);
+
+/* Whole part of Per diem in 1/4. */
+%per_diem_regular%(reltime per_diem_time) =
+  (per_diem_time / 24:00) * 4;
+
+/* Remainder part of Per diem in 1/4. */
+table per_diem_additional(reltime per_diem_time, bool cabin_crew, bool is_SKN, Abstime date) =
+  per_diem_time mod 24:00, cabin_crew and is_SKN and date >= 01Apr2013 -> export int %per_diem_additional%;
+  
+  (3:00, 6:00(, - -> 1;
+  (6:00, 9:00(, True -> 2;
+  (9:00, 12:00(, True -> 3;
+  (6:00, 12:00(, False -> 2;             
+  >= 12:00, - -> 4;
+  -, - -> 0;
+end 
+
+/* Extra Per Diem in 1/4 
+    Special rules apply to Norwegian cabin crew, 3/4 per diem for 9-12 hours
+    on PH*/
+    table per_diem_extra(reltime per_diem_time, bool is_SKN, bool is_pilot) =
+    per_diem_time, is_SKN, is_pilot -> export int %per_diem_extra%;
+  
+    (3:00, 6:00(, -, - -> 1;
+    (6:00, 12:00(, False, - -> 2;
+    (6:00, 12:00(, True, True -> 2;
+    (6:00, 9:00(, True, False -> 2;
+    (9:00, 12:00(, True, False -> 3;
+    >= 12:00, -, - -> 4;
+    -, -, - -> 0;
+  end
+/* SKCMS-2594 
+    SKN CC will not get extra perdiem on PH */
+table per_diem_extra_nh(reltime per_diem_time, bool is_SKN, bool is_pilot) =
+  per_diem_time, is_SKN, is_pilot -> export int %per_diem_extra_nh%;
+
+  (3:00, 6:00(, True, True -> 1;
+  (3:00, 6:00(, False, - -> 1;
+  (6:00, 12:00(, False, - -> 2;
+  (6:00, 12:00(, True, True -> 2;
+   >= 12:00, True, True -> 4;
+   >= 12:00, False, - -> 4;
+  -, -, - -> 0;
+end
+
+export %per_diem_extended_duty% = 2;
+
+/*
+** The per diem compensation for a city at one specific time.
+** The compensation is converted to default currency and to a price unit.
+** In default currency.
+*/
+export %per_diem_compensation_converted%(string stop_country,
+                                         abstime trip_month,
+                                         bool is_flight) =
+  let exchange_unit = 
+  %per_diem_exchange_unit%(stop_country, %default_country%, trip_month); 
+  if is_flight then
+    %per_diem_stop_compensation%(stop_country, %default_country%, trip_month)
+    * (%per_diem_exchange_rate%(stop_country, %default_country%, trip_month) / %decimal_cut_unit%(exchange_unit))
+    / (exchange_unit/ %decimal_cut_unit%(exchange_unit))
+  else
+    /*Course per diem with breakfast reduction for course per diem.*/
+    %per_diem_tax_deduct%(stop_country, %default_country%, trip_month)
+    * %per_diem_exchange_rate%(stop_country, %default_country%, trip_month)
+    * %per_diem_price_unit%
+    * (100 - %per_diem_breakfast_reduction%) / 100
+    / exchange_unit;
+
+/*
+** The per diem compensation for a city at one specific time.
+** The compensation is converted to default currency and to a price unit.
+** Without currency conversion.
+*/
+export %per_diem_compensation%(string stop_country,
+                               string home_country,
+                               abstime trip_month,
+                               bool is_flight) =
+  if is_flight then
+    %per_diem_stop_compensation%(stop_country, home_country, trip_month)
+    * %per_diem_price_unit%
+  else
+    /*Course per diem with breakfast reduction for course per diem.*/
+    %per_diem_tax_deduct%(stop_country, home_country, trip_month)
+    * %per_diem_price_unit%
+    * (100 - %per_diem_breakfast_reduction%) / 100;
+
+export %per_diem_compensation_svs%(string stop_country,
+                                   string home_country,
+                                   abstime trip_month) =
+  %per_diem_tax_deduct%(stop_country, home_country, trip_month)
+  * %per_diem_price_unit%;
+
+%per_diem_compensation_table% = "per_diem_compensation";
+
+/* The per diem compensation amount for a country at one specific time. */
+export %per_diem_stop_compensation%(string stop_country,
+                                    string home_country,
+                                    abstime trip_month) =
+  default(%stop_compensation%(stop_country, home_country, trip_month), 
+          %default_stop_compensation%(home_country, trip_month));
+
+/* The per diem currency for a country at one specific time. */
+export %per_diem_stop_currency%(string stop_country,
+                                string home_country,
+                                abstime trip_month) =
+  default(%stop_currency%(stop_country, home_country, trip_month),
+          %default_stop_currency%(home_country, trip_month));
+
+/* The per diem compensation amount for a country at one specific time. */
+table per_diem_data(string stop_country,
+                    string home_country,
+                    abstime trip_month) =
+  stop_country,
+  home_country,
+  fundamental.%main_cat%,
+  trip_month ->
+    int %stop_compensation%,
+    string %stop_currency%;
+  external %per_diem_compensation_table%;
+  stop_country, home_country, maincat, (validfrom, validto)
+    -> compensation, currency;
+  -, -, -, -
+    -> %default_stop_compensation%(home_country, trip_month),
+       %default_stop_currency%(home_country, trip_month);
+end
+
+/* The default per diem compensation amount for a country at one specific time. */
+table per_diem_default(string home_country, abstime trip_month) =
+  "*",
+  home_country,
+  fundamental.%main_cat%,
+  trip_month ->
+    int %default_stop_compensation%,
+    string %default_stop_currency%;
+  external %per_diem_compensation_table%;
+  stop_country, home_country, maincat, (validfrom,validto)
+    -> compensation, currency;
+  -, -, -, -
+    -> 0, %default_currency%;
+end
+
+export %meal_reduction_amount%(string stop_country, string home_country, Abstime trip_month) =
+  default(%meal_reduction%(stop_country, home_country, trip_month) * %per_diem_price_unit%, 0);
+
+/* Help function to retrieve meal reduction exchange rate. */
+export %meal_reduction_exchange_rate%(string stop_country, string home_country, abstime trip_month) =
+  default(%rate%(%currency%(home_country),
+                 %meal_reduction_currency%(stop_country, home_country, trip_month), 
+                 trip_month),
+          1);
+         
+/* Help function to retrieve meal reduction exchange unit. */
+export %meal_reduction_exchange_unit%(string stop_country, string home_country, abstime trip_month) =
+  default(%unit%(%currency%(home_country),
+                 %meal_reduction_currency%(stop_country, home_country, trip_month),
+                 trip_month),
+          1);
+
+/* Meal reduction table */
+table per_diem_meal_reduction(string stop_country, string home_country, abstime trip_month) =
+  stop_country,
+  home_country,
+  fundamental.%main_cat%,
+  trip_month ->
+    int %meal_reduction%,
+    string %meal_reduction_currency%;
+  external %per_diem_compensation_table%;
+  stop_country, home_country, maincat, (validfrom,validto)
+    -> compensation, currency;
+  -, -, -, -
+    -> 0, %default_currency%;
+end
+
+/* Help function to retrieve exchange rate. */
+export %per_diem_exchange_rate%(string stop_country,
+                                string home_country,
+                                abstime trip_month) =
+  default(%rate%(%currency%(home_country),
+                 %per_diem_stop_currency%(stop_country, home_country, trip_month),
+                 trip_month),
+          1);
+         
+/* Help function to retrieve exchange unit. */
+export %per_diem_exchange_unit%(string stop_country,
+                                string home_country,
+                                abstime trip_month) =
+  default(%unit%(%currency%(home_country),
+                 %per_diem_stop_currency%(stop_country, home_country, trip_month),
+                 trip_month),
+          1);
+
+/* Currency mapping for standard countries. */
+table currency_table(string country) =
+  country -> string %currency%;
+  "DK" -> "DKK";
+  "NO" -> "NOK";
+  "SE" -> "SEK";
+  -    -> "DKK";
+end
+
+%exchange_rate_table% = "exchange_rate";
+
+export %currency_in_country%(String country) = %currency%(country);
+
+table per_diem_exchange_rate(string ref_currency,
+                             string current_currency,
+                             abstime trip_month) =
+  current_currency,
+  ref_currency,
+  trip_month ->
+    int %rate%,
+    int %unit%;
+  external %exchange_rate_table%;
+  cur, reference, (validfrom, validto) -> rate, unit;
+  -, -, - -> 1, 1;
+end
+
+export %per_diem_tax_deduct%(string stop_country,
+                              string home_country,
+                              abstime trip_month) =
+  default(%per_diem_deduct%(stop_country, home_country, trip_month),
+          %default_per_diem_deduct%(home_country, trip_month));
+
+%tax_deduct_table% = "per_diem_tax";
+
+/* Retrieves tax deduction amount from table. */
+table per_diem_tax_deduct_table(string stop_country,
+                                string home_country,
+                                abstime trip_month) =
+  stop_country,
+  home_country,
+  trip_month ->
+    export int %per_diem_deduct%;
+  external %tax_deduct_table%;
+  stop_country, home_country, (validfrom, validto) -> rate;
+   -, -, - -> %default_per_diem_deduct%(home_country, trip_month);
+end
+
+/* Domestic per diem tax reduction */
+export %per_diem_tax_deduct_domestic%(string home_country, abstime trip_month) = per_diem.%per_diem_deduct%(home_country, home_country, trip_month);
+/* E.g. full day per diem tax reduction Used in SKN region */
+export %per_diem_tax_deduct_domestic_1%(string home_country, abstime trip_month) = per_diem.%per_diem_deduct%("/1", home_country, trip_month);
+/* E.g. day per diem tax reduction. Used in SKN region */
+export %per_diem_tax_deduct_domestic_2%(string home_country, abstime trip_month) = per_diem.%per_diem_deduct%("/2", home_country, trip_month);
+/* E.g. short day diem tax reduction. Used in SKN region */
+export %per_diem_tax_deduct_domestic_3%(string home_country, abstime trip_month) = per_diem.%per_diem_deduct%("/3", home_country, trip_month);
+
+table per_diem_tax_deduct_default(string home_country,
+                                  abstime trip_month) =
+  "*",
+  home_country,
+  trip_month ->
+    export int %default_per_diem_deduct%;
+  external %tax_deduct_table%;
+  stop_country, home_country, (validfrom, validto) -> rate;
+   -, -, - -> 0;
+end
+
+/* extra pay for SKN during public holiday  */
+export %k20_skn_cc_no_ph_extra_pay% = 1500;
+/* end of file */

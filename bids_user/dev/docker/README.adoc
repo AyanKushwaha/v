@@ -1,0 +1,100 @@
+= run everything (Oracle XE 11g and JBOSS EAP 6.4.x) in docker
+
+== docker-compose
+
+.widows shell
+[sources,powershell]
+----
+@rem cli:
+docker-compose -f .\dev\docker\docker-compose.yaml up -V --build --force-recreate --always-recreate-deps --remove-orphans
+docker-compose -f .\dev\docker\docker-compose.yaml logs -f -t --tail=10
+docker-compose -f .\dev\docker\docker-compose.yaml down -v
+
+@rem maven wrapper:
+mvnw -f .\dev\docker\pom.xml
+docker-compose -f .\dev\docker\docker-compose.yaml logs -f -t --tail=10
+mvnw -f .\dev\docker\pom.xml -Pdown
+----
+
+.unix shell
+[sources,bash]
+----
+# cli:
+docker-compose -f ./dev/docker/docker-compose.yaml up -V --build --force-recreate --always-recreate-deps --remove-orphans
+docker-compose -f ./dev/docker/docker-compose.yaml logs -f -t --tail=10
+docker-compose -f ./dev/docker/docker-compose.yaml down -v # --rmi local
+
+# maven wrapper
+./mvnw -f ./dev/docker/pom.xml -P up
+docker-compose -f ./dev/docker/docker-compose.yaml logs -f -t --tail=10
+./mvnw -f ./dev/docker/pom.xml -P down
+----
+
+== Docker
+
+.do not forget copy and configure crewweb.properties
+[source,bash]
+----
+cp -Rf dev/docker/jboss/config/jeppesen-config/crewweb.properties-default dev/docker/jboss/config/jeppesen-config/crewweb.properties
+----
+
+.1) build project
+[source,bash]
+----
+# build SAS.bid & Sas.user-directory-import
+./mvnw clean install -s dev/settings/.m2/settings.xml -U -DskipTests
+----
+
+.2) create user network for Sas containers: JBOSS server and Oracle database
+----
+docker network create --driver bridge crewportal-ora.got.jeppesensystems.com
+----
+
+.3) run oracle database:
+[source,bash]
+----
+docker run -d
+           --name crewportal-ora \
+           --network crewportal-ora.got.jeppesensystems.com \
+           -e ORACLE_PWD=password \
+           --shm-size=1g \
+           -p 1521:1521 \
+           docker.service.cloud.jeppesensystems.com/crew-buddies/ib6-sas/oracle
+----
+.4) build docker image
+[source,bash]
+----
+
+# default(docker version)
+docker build --force-rm --no-cache -f docker/Dockerfile -t sas .
+
+# build docker file with another version of standalone.xml(network Oracle db)
+docker build --force-rm --no-cache --build-arg STANDALONE=crewportal-ora.got.jeppesensystems.com.xml \
+-f docker/Dockerfile -t sas .
+
+----
+
+.5) run image container
+[source,bash]
+----
+# to work with Oracle db in docker
+docker run --rm --network crewportal-ora.got.jeppesensystems.com \
+  -p 5005:5005 \
+  -p 8080:8080 \
+  -p 9990:9990 \
+  sas
+
+# to work with network Oracle db
+docker run --rm \
+  -p 5005:5005 \
+  -p 8080:8080 \
+  -p 9990:9990 \
+  sas
+----
+
+TIP: Cleanup
+[source,bash]
+----
+# whole image repository
+docker system prune -af --volumes
+----

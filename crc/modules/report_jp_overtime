@@ -1,0 +1,61 @@
+root module report_jp_overtime
+
+import attributes;
+import crew;
+import leg;
+import duty;
+import keywords;
+import levels;
+import standby;
+
+%crew_name% = default(concat(crew.%surname%, " ", crew.%firstname%), crew.%id%);
+%crew_employee_number% = crew.%employee_number%;
+%crew_group% = "NRTOK";
+%crew_is_jp% = crew.%is_homebase_skj%;
+
+%leg_date% = format_time(leg.%udor%, "%02d-%b-%Y");
+%leg_fd% = concat(leg.%flight_carrier%, format_int(leg.%flight_nr%, "%d"));
+%leg_ci% = time_of_day(leg.%ci_start_hb%);
+%leg_co% = time_of_day(leg.%co_end_hb%);
+
+%leg_ot_normal% = default(nmax(%leg_duty_time_for_ot% + %leg_standby_time_for_ot% - %overtime_limit%, 0:00), 0:00);
+
+%leg_duty_time_for_ot% =
+  if %leg_qualifies_for_ot% then
+    leg.%co_end_utc% - leg.%ci_start_utc%
+  else
+    0:00;
+
+%leg_qualifies_for_ot% = %has_overtime_limit% and
+                         (%leg_has_ot_attr% or not leg.%is_deadhead%);
+
+%leg_has_ot_attr% = attributes.%assignment_has_attr%("JP_OVERTIME");
+
+%leg_standby_time_for_ot% =
+  if standby.%leg_is_callout_from_standby% then
+    default(prev(leg(duty), leg.%end_utc% - leg.%start_utc%), 0:00)
+  else
+    0:00;
+
+%leg_nw_normal% =
+  if %leg_qualifies_for_ot% then
+    scale_time(leg.%ci_start_hb%, leg.%co_end_hb%, 0, 22:00, 5:00, 1)
+  else
+    0:00;
+
+%is_passive_flight% = leg.%is_deadhead%;
+
+%ot_none_deadhead_training% = if leg.%is_deadhead% and leg.%country_is_domestic%(leg.%end_country%) and %is_training_on_trip% then true else false;
+
+%ot_normal_passive_no_training% = if leg.%is_deadhead% and not %is_training_on_trip% then true else false;
+
+%is_training_on_trip% = (any(leg(trip), leg.%is_training%));
+
+%leg_ot_over_16_hours% = nmax(%leg_duty_time_for_ot% - 16:00, 0:00);
+
+table overtime_table=
+    %leg_fd% -> %overtime_limit%, %has_overtime_limit%;
+    "SK983"  -> 12:50, true;
+    "SK984"  -> 13:15, true;
+    -        -> void_reltime, false;
+end

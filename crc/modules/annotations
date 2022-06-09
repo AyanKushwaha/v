@@ -1,0 +1,269 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   Definitions for annotations, used for annotation rudobs in rostering.
+ *
+ * Notes:
+ *   - In lookups, the search period is assumed to be *inclusive*; the search
+ *     period [1Feb2009,1Feb2009] covers one day.
+ *     At the same time, in the stored [validfrom-validto] periods, 'validto'
+ *     is exclusive; for an annotation that is valid 1Feb2009 (one day), the
+ *     period is [1Feb2009,2Feb2009]. 
+ * 
+ * Created by:
+ *   Markus Kollind, 12-May-2006
+ *
+ * Major changes:
+ *
+ */
+ 
+root module annotations
+import fundamental;
+import base_utils;
+import crew;
+import base_product;
+import iterators;
+
+/****************************************************************
+ * Section 1: Annotation table definitions
+ ****************************************************************/
+/* Crew annotations table */
+%annot_table% = %etab_path%(%annot_table_p%);
+%annot_table_p% =
+  parameter "crew_annotations"
+  remark "ETAB: Table with crew annotations";
+  
+/* Annotations set table */
+%annot_set_table% = %etab_path%(%annot_set_table_p%);
+%annot_set_table_p% = 
+  parameter "annotation_set"
+  remark "ETAB: Table with the annotation codes";
+
+/****************************************************************
+ * Section 2: Annotation table lookups
+ ****************************************************************/
+%search_start% = fundamental.%pp_start%;
+%search_end% = fundamental.%pp_end%;
+
+/* Lookup for calculating the number of valid annotations within the
+   planning period. Only annotations with the isvisible field set to true is
+   counted. */
+export %_annotation_count% = 
+  count(times(500))
+  while(not void(%annotation_code%(%times_index_0%)));
+
+%annotation_count% = default(%_annotation_count%, 0);
+
+/* Matching lookup table to the count above */
+table crew_annotation_lookup_table(Int nr) = 
+  crew.%id%, %search_start%, %search_end%, true, nr -> 
+    String %annotation_code%, 
+    String %annotation_str%,
+    Int %_annotation_property%,
+    Abstime %annotation_period_start%, 
+    Abstime %annotation_period_end%;
+  
+  external %annot_table%;
+  "crew", <"validto", >="validfrom", "isvisible", "match_number" -> 
+    "code", "text", "property", "validfrom", "validto";
+  -, -, -, -, - -> void_string, void_string, void_int, void_abstime, void_abstime;
+end
+
+%report_annotation_period_end%(Int nr) = %annotation_period_end%(nr) - 24:00;
+
+%annotation_property%(Int nr) =
+  if %code_has_property%(%annotation_code%(nr)) then
+    %_annotation_property%(nr)
+  else
+    void_int;
+
+%annotation_descr%(Int nr) =
+  if void(%annotation_property%(nr)) then
+    %annotation_str%(nr)
+  else
+    concat(%annotation_str%(nr), 
+           format_int(%annotation_property%(nr), 
+           " (property: %i)"));
+          
+/* Table lookup for specific codes. Used in section 5 to return info about 
+   existance of codes and special properties. 
+   The whole given interval needs to be covered. */
+table annotation_code_info_table(String code, Abstime s_time, Abstime e_time) = 
+  crew.%id%, code, s_time, e_time -> String %_code%, Int %_property%;
+  external %annot_table%;
+  "crew", "code", >="validfrom", <"validto" -> "code",      "property";
+  -,      -,      -,             -          -> void_string, void_int;
+end
+
+/* Table lookup for annotations_set to detect what product the annotation code
+   is valid for. */
+table annotation_code_crr_table(String code) = 
+  code -> Bool %code_is_for_cct%, Bool %code_is_for_ccr%, 
+    Bool %code_has_property%, Bool %code_is_visible%;
+  external %annot_set_table%;
+  "code" -> "incct",   "inccr", "hasprop", "isvisible";
+  -      -> void_bool, void_bool, void_bool, void_bool;
+end
+
+/****************************************************************
+ * Section 3: Variables for detecting if annotations exists.
+ ****************************************************************/
+export %on_crew% = %annotation_count% > 0 and %annotation_active% > 0;
+%annotation_active% = 
+  count(times(%annotation_count%)) 
+    where(%code_is_for_product%(%annotation_code%(%times_index_0%)));
+    
+/* Find if crew has any annotations in the given period */
+table crew_annotation_count_in_period_table (Abstime search_start,
+                                             Abstime search_end ) = 
+  crew.%id%, search_start, search_end, true -> 
+    Int %_annotation_count_in_period%;
+  external %annot_table%;
+  "crew", <"validto", >="validfrom", "isvisible" -> count("row_number");
+end
+
+export %annotation_count_in_period%(Abstime search_start, Abstime search_end )  = 
+  default(%_annotation_count_in_period%(search_start,search_end), 0);    
+
+
+/****************************************************************
+ * Section 4: Variables for generating a string for the dynamic 
+ *            crew report.
+ * 
+ * This variable is redefined in cct to display annotation dates,
+ * and to distinguish between current and future annotations.
+ *
+ * To implement something similar here, the current/future thing
+ * needs to be defined in a useful way for planning.
+ ****************************************************************/
+export %info_string% =
+  if length(%pp_codes%) > 0 then %pp_codes% else "None";
+
+/* Creates a string with all annotation codes with a valid period touching the
+   current time. */
+%pp_codes% =
+  cat(times(%annotation_count%), %pp_code_string%(%times_index_0%), ", ")
+  where(%code_is_for_product%(%annotation_code%(%times_index_0%)));
+%pp_code_string%(Int nr) = 
+  let code = %annotation_code%(nr);
+  if %code_has_property%(code) then
+    concat(code, "[", %int2str%(%annotation_property%(nr)), "]")
+  else
+    code;
+
+/* Used in the show_crew_info report.  If more than two annotations are found,
+   display the first one and codes/times for the remaining annotations */
+%pp_cat_string%(Int meow) =
+  let delim = if meow = %annotation_active% then "." else ", ";
+
+  concat(%pp_code_string%(meow), 
+    format_time(%annotation_period_start%(meow), "(%02d%02b-)"), delim);
+
+%pp_codes_with_dates% =
+  cat(times(%annotation_active%-1), %pp_cat_string%(%times_index_0%+1))
+    where(%code_is_for_product%(%annotation_code%(%times_index_0%+1)));
+
+%annotation_code_1% = %annotation_code%(1);
+%annotation_str_1% = %annotation_str%(1);
+%annotation_code_2% = %annotation_code%(2);
+%annotation_str_2% = %annotation_str%(2);
+%anno_str_1_sub_1% = 
+  if default(%annotation_str_1%, "") <> "" then
+    if %annotation_code_1% = "--" then substr(%annotation_str_1%, 1, 37)
+    else concat(%annotation_code_1%,":",substr(%annotation_str_1%, 1, 37))
+  else
+    concat("No annotation description, code: ", %annotation_code_1%);
+
+%anno_str_2_sub_1% = 
+  if default(%annotation_str_2%, "") <> "" then
+    if %annotation_code_2% = "--" then substr(%annotation_str_2%, 1, 37)
+    else concat(%annotation_code_2%,":",substr(%annotation_str_2%, 1, 37))
+  else
+    concat("No annotation description, code: ", %annotation_code_2%);
+
+%anno_str_1_sub_2% = substr(%annotation_str_1%, 38, 40);
+%anno_str_2_sub_2% = substr(%annotation_str_2%, 38, 40);
+
+%smisk% = %annotation_count% <> %annotation_active%;
+
+/*******************************************************************
+ * Section 5: Function for retrieving information about a specific 
+ *            code.
+ *******************************************************************/ 
+
+/* Tests if a code is valid on the given time. */
+export %code_active_on_time%(String code, Abstime check_time) = 
+  %code_active_in_interv%(code, check_time, check_time);
+  
+/* Tests if a code is valid in the given time interval. */
+export %code_active_in_interv%(String code, Abstime start_time, Abstime end_time) = 
+  %code_is_for_product%(code) and 
+  not void(%_code%(code, start_time, end_time));
+
+/* Tests if any of the codes given in codes are valid in the given time interval. 
+   The codes list must be a string with two-letter codes separated with one char, 
+   e.g. "AA,BB,CC,DD,EE", "AA BB CC DD EE".*/
+export %any_code_active_in_interv%(String codes, Abstime start_time, Abstime end_time) = 
+  let code_count = (length(codes)-2)/3 + 1;
+  any(times(code_count), 
+      %code_active_in_interv%(substr(codes, 3*(%times_index_0%-1) + 1, 2), 
+                              start_time, end_time));
+    
+/* Tests if a code has a property on the given time. */
+export %property_on_time%(String code, Abstime check_time) = 
+  %property_in_interv%(code, check_time, check_time);
+
+/* Tests if a code has a property in the given time interval. */
+export %property_in_interv%(String code, Abstime start_time, Abstime end_time) = 
+  if %code_is_for_product%(code) then 
+    %_property%(code, start_time, end_time)
+  else void_int;
+  
+table code_product_test_table(String code) = 
+  %product% -> %code_is_for_product%;
+  
+  "CCT" -> %code_is_for_cct%(code);
+  "CCR" -> %code_is_for_ccr%(code);
+  "PRE" -> %code_is_for_ccr%(code);
+  "CCP" -> false;
+  -     -> false;
+end
+
+/*******************************************************************
+ * Section 6: Dummy calls to preload table 
+ *******************************************************************/ 
+
+%_crew_annotation_lookup_table_preload% =
+  if default(%_annotation_property%(1),0) > 0 then
+    1
+  else
+    0;
+
+%_annotation_code_info_table_preload% =
+  if default(%_property%("APA",%search_start%, %search_end%),0) > 0 then
+    1
+  else
+    0;
+  
+%_crew_annotation_count_in_period_table_preload% =
+  if default(%_annotation_count_in_period%(%search_start%, %search_end%),0) > 0 then
+    1
+  else
+    0;
+
+
+%roster_crew_annotation_preload% =
+    default(%_crew_annotation_lookup_table_preload% +
+            %_annotation_code_info_table_preload% +
+            %_crew_annotation_count_in_period_table_preload%, 0);
+  
+
+export %preload_crew_annotations_table% = 
+  if any(roster_set, %roster_crew_annotation_preload% >= 0) then 
+    "Crew annotations table preloaded." 
+  else "";
+
+
+
+/* end of file */
+

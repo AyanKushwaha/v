@@ -1,0 +1,645 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   List common variables used in reports.
+ *
+ * Created by:
+ *   Leo, 21-Feb-2007
+ *
+ * Major changes:
+ *
+ */
+ 
+module report_common_ccr inherits report_common
+ 
+import crew;
+import crew_contract;
+import model_crew;
+import freedays;
+import wop;
+import duty;
+import roster;
+import duty_code;
+import salary;
+import training;
+import attributes;
+import calendar;
+import crg_date;
+import crg_crew_pos;
+import iterators;
+import planning_area;
+import accumulators;
+
+%f7s_percentage_p% = 
+  parameter 2
+  remark "Percentage of FTE crew to assign F7S days";
+
+set add_codes_rec_rep =
+  parameter "TW*", "TN*"
+  remark "Additional activity codes to include in Recurrent Distribution.";
+
+/*******************************************************************
+**
+** Section 1: Common mappings
+**
+********************************************************************/
+
+export %leg_attribute% = 
+  if leg.%is_new% then 
+    "NEW"
+  else
+     default(leg.%training_code%, "-");
+    
+export %crew_id% = crew.%id_not_void%;
+export %crew_firstname% = default(crew.%firstname%,"");
+export %crew_surname% = crew.%surname_not_void%;
+export %crew_name% =  concat(%crew_surname%,", ",%crew_firstname%);
+export %crew_homebase% = crew.%homebase_not_void%;
+export %crew_rank% = crew.%rank_not_void%;
+export %crew_main_func% = default(crew.%main_func%,"");
+export %crew_is_full_time% = default(crew.%is_full_time%,False);
+export %crew_part_time_factor% = default(crew.%part_time_factor%, 0);
+export %employee_number% = default(crew.%employee_number%,"");
+export %crew_is_long_haul_pp_start% = default(crew.%is_long_haul_pp_start%,False);
+export %ac_quals% = crew.%aircraft_qlns%;
+export %seniority% = crew.%seniority%;
+export %special_qual_pp_start% = crew.%special_qual_pp_start%;
+export %crew_is_cabin% = crew.%is_cabin%;
+export %crew_has_agmt_group_qa% = crew.%has_agmt_group_qa%;
+export %crew_string% =
+  concat(%crew_surname%,", ",%crew_firstname%," (",%employee_number%,") ",%crew_rank%);
+
+export %crew_string_variant_1% =
+  concat(%employee_number%, " ", %crew_surname%,", ",%crew_firstname%, " ", %crew_rank%, " ", format_int(%seniority%, "%5d"));
+
+export %crew_string_variant_2% =
+  concat(%employee_number%, " ", %crew_surname%,", ",%crew_firstname%, " ", %crew_rank%);
+
+export %month_start% = calendar.%month_start%;
+export %month_end% = calendar.%month_end%;
+
+export %leg_is_any_cabin_training% =
+  crew.%is_cabin% and
+  (leg.%is_rec% or leg.%is_course%);
+
+/* Date dependent variables */
+export %crew_homebase_at_date%(Abstime lookuptime) =
+  default(crew.%base_at_date%(lookuptime),"");
+export %crew_rank_at_date%(Abstime lookuptime) =
+  default(crew.%rank_at_date%(lookuptime),"");
+export %crew_main_func_at_date%(Abstime lookuptime) =
+  default(crew.%main_func_at_date%(lookuptime),"");
+export %crew_is_full_time_at_date%(Abstime lookuptime) =
+  default(crew.%part_time_factor_at_date%(lookuptime) = 100,False);
+export %crew_part_time_factor_at_date%(Abstime lookuptime) =
+  crew.%part_time_factor_at_date%(lookuptime);
+export %employee_number_at_date%(Abstime lookuptime) =
+  default(crew.%extperkey_at_date%(lookuptime),crew.%id%);
+export %crew_is_long_haul_at_date%(Abstime lookuptime) =
+  default(crew.%is_long_haul%(lookuptime),False);
+export %ac_quals_at_date%(Abstime lookuptime) =
+  crew.%ac_qlns_at_date%(lookuptime);
+
+export %crew_string_at_date%(Abstime lookuptime) =
+  concat(%crew_surname%,", ",%crew_firstname%," (",%employee_number_at_date%(lookuptime),") ",%crew_rank_at_date%(lookuptime));
+
+redefine export %leg_code% =
+  default(training.%leg_code_redefined%, %_leg_code%);
+export %duty_code% = duty_code.%leg_code%;
+
+export %crew_agmt_group_id% = crew.%agmt_group_id%;
+export %crew_agmt_group_desc% = crew.%agmt_group_desc%;
+export %crew_agmt_group_match_str% = model_crew.%agmt_group_match_str%(crew.%agmt_group_id%);
+export %crew_contract_id% = 
+  model_crew.%agreement_at_date%(crew.%id%, crew.%available_start%);
+export %crew_contract_group_type% =
+  model_crew.%group_at_date%(crew.%id%, crew.%available_start%);
+export %crew_contract_part_time% =
+  model_crew.%crew_contract_part_time_factor_at_date%(crew.%id%,crew.%available_start%);
+export %crew_contract_desc_short% =
+  model_crew.%contract_desc_short%(crew.%id%,crew.%available_start%);
+export %crew_contract_desc_long% =
+  model_crew.%contract_desc_long%(crew.%id%,crew.%available_start%);
+
+
+export %agmt_group_id_by_seq%(Int seq) = model_crew.%ag_id_by_date_seq%(crew.%available_start%, seq);
+export %agmt_group_desc_by_seq%(Int seq) = model_crew.%agmt_group_desc%(%agmt_group_id_by_seq%(seq));
+export %agmt_group_match_str_by_seq%(Int seq) = model_crew.%agmt_group_match_str%(%agmt_group_id_by_seq%(seq));
+export %agmt_group_ext_desc_by_seq%(Int seq) = model_crew.%ag_desc_by_date_seq%(crew.%available_start%, seq);
+ 
+
+/*******************************************************************
+**
+** Section 2: Report specific
+**
+********************************************************************/  
+
+/* F7S Distribution */
+%crew_is_long_haul_ix% =
+  crew.%is_long_haul%(%date_ix%);
+  
+%crew_part_time_factor_ix% =
+  crew.%part_time_factor_at_date%(%date_ix%);
+
+/* FVG Info */
+%crew_pattern_daytype_ix% =
+  crew.%pattern_daytype_at_date%(%date_ix%);
+  
+/* Freedays Info */
+export %freedays_balance% = 
+  default (
+    if crew.%has_some_variable_group_in_publ% then
+      %freedays_in_month% - %req_freedays_in_month%
+    else
+      -1000
+    , 0);
+  
+export %freedays_in_month% =
+  default(
+    max(wop(roster), freedays.%nr_qualifying_in_1_month%)
+    where (wop.%starts_in_pp%)
+    , 0);
+  
+export %req_freedays_in_month% =
+  freedays.%req_freedays_in_month_incl_prev_by_month_start%(%pp_start%, true);
+
+/* Plan Statistics */
+%trip_is_sh_in_pp% = trip.%in_pp% and trip.%has_only_flight_duty% and trip.%is_short_haul%;
+%trip_is_lh_in_pp% = trip.%in_pp% and trip.%has_only_flight_duty% and trip.%is_long_haul%;
+
+export %crew_flight_days_LH% =
+  sum(trip(roster), trip.%pp_days%) where (%trip_is_lh_in_pp%);
+  
+export %crew_flight_days_SH% =
+  sum(trip(roster), trip.%pp_days%) where (%trip_is_sh_in_pp%);
+
+export %crew_block_time% =
+  pp.%block_time%;
+  
+export %crew_block_time_LH% = 
+  sum(trip(roster),trip.%pp_block_time%) where (%trip_is_lh_in_pp%);
+  
+export %crew_block_time_SH% = 
+  sum(trip(roster),trip.%pp_block_time%) where (%trip_is_sh_in_pp%);
+
+export %crew_deadheads% = pp.%deadheads%;
+
+export %crew_deadhead_block_time% =
+  sum(leg(roster), leg.%time%) where (leg.%in_pp% and leg.%is_deadhead%);
+  
+export %crew_duty_time% = pp.%duty_time%;
+
+export %crew_duty_time_no_night_upg% = pp.%duty_time_no_night_upg%;
+
+export %crew_layovers% = 
+  sum(trip(roster), trip.%num_all_layovers%) where (trip.%in_pp%);
+  
+export %crew_training_days% =
+  count(duty(roster)) where (duty.%in_pp% and duty.%is_training%);
+
+export %crew_vacation_days% =
+  sum(trip(roster), trip.%pp_days%) where (trip.%in_pp% and trip.%is_vacation%);
+
+export %crew_freedays% = 
+  sum(trip(roster), trip.%pp_days%) where (trip.%in_pp% and trip.%is_freeday%);
+
+export %crew_compdays% = 
+  sum(trip(roster), trip.%pp_days%) where (trip.%in_pp% and trip.%is_compensation_day%);
+   
+/* Group Statistics */
+
+%in_variable_group_pp_start% = crew.%in_variable_group_pp_start%;
+%pattern_pp_start% = crew.%pattern_pp_start%;
+%pattern_no_days%(int pattern) = crew.%pattern_no_of_days%(pattern);
+%part_time_factor_pp_start% = crew.%part_time_factor_pp_start%;
+%cycle_start_day_pp_start% = crew.%cycle_start_day_crew%(%pp_start%) + 1;
+ 
+%pattern_daytype%(Int pattern, Int ix) = crew.%pattern_daytype%(pattern, ix);
+%pattern_act_start%(int pattern, int ix) = crew.%pattern_act_start%(pattern, ix);
+%pattern_act_end%(int pattern, int ix) = crew.%pattern_act_end%(pattern, ix);
+
+/* List 9 */ 
+export %instr_qlns_at_date%(Abstime date) =
+  concat(%qlns_type_at_date%("INSTRUCTOR", date),
+         crew.%ac_instr_qlns_at_date%(date));
+export %qlns_type_at_date%(String type, Abstime date) =
+  crew.%qlns_type_at_date%(type, date);
+export %restrs_type_at_date%(String type, Abstime date) =
+  crew.%restrs_type_at_date%(type, date);
+
+/* Overtime, Per Diem, List 12 (salary month dependent reports) */
+/* Look at last day in salary period first, then first day. */
+
+export %roster_duty_time_in_period%(Abstime start_date, Abstime end_date) = 
+  roster.%duty_time_in_period%(start_date, end_date, fundamental.%night_upg%, duty.union);
+export %roster_duty_time_in_period_hb%(Abstime start_date, Abstime end_date) = 
+  roster.%duty_time_in_period%(start_date - first(duty(chain),duty.%start_hb% - duty.%start_UTC%), 
+                               end_date - first(duty(chain),duty.%start_hb% - duty.%start_UTC%), fundamental.%night_upg%, duty.union);
+
+export %leg_in_month% = 
+  leg.%end_utc% >= calendar.%month_start%
+  and leg.%end_utc% < calendar.%month_end%;
+export %duty_in_month% = 
+  duty.%end_utc% >= calendar.%month_start%
+  and duty.%start_utc% < calendar.%month_end%;
+export %wop_in_month% = 
+  wop.%end_utc% >= calendar.%month_start%
+  and wop.%start_utc% < calendar.%month_end%;
+  
+%last_day_salary_month% = round_down(salary.%salary_month_end% - 0:01, 24:00);
+export %crew_homebase_salary% =
+  default(salary.%crew_base%(%last_day_salary_month%),"");
+export %crew_rank_salary% =
+  default(crew.%rank_at_date%(%last_day_salary_month%),
+          default(crew.%rank_at_date%(salary.%salary_month_start%), ""));
+export %crew_main_func_salary% =
+  default(crew.%main_func_at_date%(%last_day_salary_month%),
+          default(crew.%rank_at_date%(salary.%salary_month_start%), ""));
+export %employee_number_salary% =
+  default(crew.%extperkey_at_date%(%last_day_salary_month%),
+          default(crew.%extperkey_at_date%(salary.%salary_month_start%), crew.%id%));
+export %ac_quals_salary% =
+  default(crew.%ac_qlns_at_date%(%last_day_salary_month%),
+          crew.%ac_qlns_at_date%(salary.%salary_month_start%));
+export %crew_string_salary% =
+  concat(%crew_surname%,", ",%crew_firstname%," (",%employee_number_at_date%(%last_day_salary_month%),") ",%crew_rank_at_date%(%last_day_salary_month%));
+export %crew_salary_system_salary% = 
+  default(salary.%salary_system%(%last_day_salary_month%),
+          default(salary.%salary_system%(salary.%salary_month_start%), ""));
+
+
+/* Training Info
+ * Variables for Training info report
+ */
+%crew_has_training_in_pp% =
+  training.%training_activities_in_pp% > 0 or
+  crew.%has_qual_restr_new_actype_in_pp%;
+
+%course_start_ix% = training.%course_start_by_match%(%pp_start%, %pp_end%, %py_index%);
+%course_index_ix% = training.%course_index_by_match%(%pp_start%, %pp_end%, %py_index%);
+
+%course_type_ix% = 
+  training.%course_name%(%course_start_ix%);
+%course_end_ix% = 
+  training.%course_end%(%course_start_ix%) - 0:01;
+%course_attribute_ix% = 
+  training.%course_attribute%(%course_start_ix%, %course_index_ix%);
+%course_ac_qual_ix% = 
+  training.%course_acqual%(%course_start_ix%, %course_index_ix%);
+%course_req_flights_ix% = 
+  training.%course_flights%(%course_start_ix%, %course_index_ix%);
+
+/*       course_start   BP1              BP2                   course_end
+ *  (x)..|==============|================|=====================|...
+ *       Performed        Published        Planned
+ * (x): Belongs to earlier training, not to be counted
+ */
+%_crew_published% = attributes.%crew_last_published%;
+%_break_point_1% =
+  nmin(nmax(%now%, %course_start_ix%), %course_end_ix%);
+%_break_point_2% =
+  nmin(nmax(%_crew_published%, %course_start_ix%,%now%), %course_end_ix%);
+%course_perf_flights_ix% = 
+  training.%nr_acts_of_type_and_code_in_ival%(%course_attribute_ix%, %course_ac_qual_ix%, 
+      %course_start_ix%, %_break_point_1%);
+%course_publ_flights_ix% =
+  training.%nr_acts_of_type_and_code_in_ival%(%course_attribute_ix%, %course_ac_qual_ix%,
+      %_break_point_1%, %_break_point_2%);
+%course_plan_flights_ix% =
+  training.%nr_acts_of_type_and_code_in_ival%(%course_attribute_ix%, %course_ac_qual_ix%, 
+      %_break_point_2%, %course_end_ix%);
+
+%course_maxdays_ix% = 
+  training.%course_days%(%course_start_ix%, %course_index_ix%);
+/* New restriction */
+%new_restr_perf_flights_ix% = 
+  training.%nr_acts_of_type_and_code_in_ival%("NEW", 
+                                              crew.%qrestr_qual_subtype%(%py_index%), 
+                                              crew.%qrestr_validfrom%(%py_index%),
+                                              %_restr_break_point_1%(%py_index%));
+%new_restr_publ_flights_ix% =
+  training.%nr_acts_of_type_and_code_in_ival%("NEW", 
+                                              crew.%qrestr_qual_subtype%(%py_index%), 
+                                              %_restr_break_point_1%(%py_index%),
+                                              %_restr_break_point_2%(%py_index%));
+%new_restr_plan_flights_ix% =
+  training.%nr_acts_of_type_and_code_in_ival%("NEW", 
+                                              crew.%qrestr_qual_subtype%(%py_index%), 
+                                              %_restr_break_point_2%(%py_index%),
+                                              crew.%qrestr_validto%(%py_index%));
+%_restr_break_point_1%(Int ix) =
+  nmin(nmax(%now%, crew.%qrestr_validfrom%(ix)),crew.%qrestr_validto%(ix));
+%_restr_break_point_2%(Int ix) =
+  nmin(nmax(%_crew_published%, crew.%qrestr_validfrom%(ix)),crew.%qrestr_validto%(ix));
+/* Bid Sim conflict */
+%trip_is_training% = trip.%is_training% or trip.%has_recurrent%;
+/* Since this is only evaluated on training trips,
+   the trip group code can be used directly */
+%trip_recurrent_type% = trip.%group_code%;
+ 
+/* Sim Dated Info */
+%sim_dated_info_start_date_p% =
+  parameter 1jan1986
+  remark "Start date of Sim Dated Info report";
+
+%sim_dated_info_end_date_p% =
+  parameter 1jan1986
+  remark "End date of Sim Dated Info report";
+  
+%sim_dated_info_start_date% =
+  if %sim_dated_info_start_date_p% = 1jan1986 then
+    %pp_start%
+  else
+    %sim_dated_info_start_date_p%;
+
+%sim_dated_info_end_date% =
+  if %sim_dated_info_end_date_p% = 1jan1986 then
+    %pp_end%
+  else
+    %sim_dated_info_end_date_p%;
+  
+%sim_dated_info_non_pp% =
+  %sim_dated_info_start_date_p% <> 1jan1986 or
+  %sim_dated_info_end_date_p% <> 1jan1986;
+  
+%simulator_for_report% =
+    leg.%is_simulator% and
+    not default(prev(leg(duty), leg.%is_simulator%), false);
+
+/* The following variables are defined so simulator trips
+   will get their data from the first actual simulator leg in the trip,
+   and not the deadheads that often precedes them. */
+%simulator_homebase% =
+  if duty.%is_simulator% then
+    first(leg(duty), leg.%departure_airport_name%)
+    where (leg.%is_simulator%)
+  else
+    "";
+%simulator_starttime% =
+  if duty.%is_simulator% then
+    first(leg(duty), leg.%activity_scheduled_start_time_lt%)
+    where (leg.%is_simulator%)
+  else
+    1jan1986;
+%simulator_start_day% =
+  round_down(%simulator_starttime%, 24:00);
+%simulator_starttime_str% =
+  crg_date.%print_time%(%simulator_starttime%);
+  
+%simulator_key% =
+  if duty.%is_simulator% then
+    first(leg(duty), leg.%uuid%)
+    where (leg.%is_simulator%)
+  else
+    "";
+
+%simulator_start_day_str% =
+  crg_date.%print_date%(%simulator_start_day%);
+
+%simulator_key_starttime_day% =
+  concat(%simulator_key%,%simulator_starttime_str%,%simulator_start_day_str%);
+    
+%simulator_code% =
+  first(leg(duty), %leg_code%)
+  where (leg.%is_simulator%);
+  
+%simulator_task_code% =
+  first(leg(duty), leg.%code%)
+  where (leg.%is_simulator%);
+  
+%simulator_duty_code% =
+  first(leg(duty), %duty_code%)
+  where (leg.%is_simulator%);
+  
+%simulator_pos% = 
+    if %is_roster% then %_simulator_pos%
+    else 10;
+    
+%_simulator_pos% =
+    let pos = first(leg(duty), crew_pos.%assigned_pos%)
+              where (leg.%is_simulator%);
+    if pos = 10 then 0 else pos;
+
+%simulator_emp_or_comp% =
+    if %is_roster% then 
+        %employee_number%
+    else 
+        %sim_remaining_comp%;
+
+%sim_remaining_comp% =
+    let str = %_sim_remaining_comp%;
+    substr(str,1,length(str)-2);
+    
+%_sim_remaining_comp% =
+    cat(times(10), 
+        concat(crew_pos.%pos2func%(%times_index_0%),": ", 
+               format_int(%rem_comp%(%times_index_0%), "%d, ")))
+    where (%rem_comp%(%times_index_0%) > 0);
+
+%rem_comp%(Int pos) =
+    first(leg(duty), %_rem_comp%(pos))
+    where (leg.%is_simulator%);
+
+%_rem_comp%(Int pos) =
+    sum(equal_legs, crew_pos.%leg_assigned_pos%(pos))
+    where (not %is_roster%);
+
+%pc_string%(Abstime date) = 
+  format_time(date-0:01, "%d %b");
+%opc_string%(Abstime date) = training.%rec_month_by_date%(date);
+
+%pc_opc_str_1% =
+  if training.%different_pc_opc_quals% then
+    concat("PC: ",%pc_string%(training.%pc_date_1%)," (", training.%pc_qual_1%,")")
+  else if crew.%is_double_qualified% then
+    concat("A3: PC: ",%pc_string%(training.%pc_date_1%),
+           ", OPC: ",%opc_string%(training.%opc_date_1%))
+  else
+    concat("PC: ",%pc_string%(training.%pc_date_1%),
+           ", OPC: ",%opc_string%(training.%opc_date_1%));
+%pc_opc_str_2% =
+  if crew.%is_double_qualified% then
+    concat("A4: PC: ",%pc_string%(training.%pc_date_2%),
+           ", OPC: ",%opc_string%(training.%opc_date_2%))
+  else if training.%different_pc_opc_quals% then
+    concat("OPC: ",%opc_string%(training.%opc_date_1%)," (", training.%opc_qual_1%,")")
+  else
+    void_string;
+    
+/*
+** Recurrent Distribution
+*/
+%trip_has_rec% = trip.%has_cc_rec_web%;
+
+%leg_is_rec% = leg.%is_cc_rec_web%;
+
+%_rec_leg_base% =
+  /* Handling of bad data */
+  if leg.%start_station% = "ARN" then "STO"
+  else if leg.%start_station% = "JSO" then crew.%homebase%
+  else leg.%start_station%;
+
+%rec_base% = %_rec_leg_base%;
+%rec_start% = leg.%start_date%;
+%rec_code% = %leg_code%;
+
+/* PGT REC Statistics */
+%pgt_rec_month% =
+  default(
+          if crew.%is_pilot% then
+            training.%pgt_month%
+          else
+            training.%rec_month%,
+            13);
+
+table hb_from_region =
+  crew.%region% -> %pgt_rec_base%;
+  "SKI"         -> crew.%homebase%;
+  "SKS"         -> "STO";
+  "SKN"         -> "OSL";
+  "SKD"         -> "CPH";
+end
+
+set quals_in_use = "36", "A2", "CJ", "F5";
+set fd_ranks = "FC", "FP", "FR";
+%pgt_rec_group% =
+  if crew.%is_cabin% then
+    %pgt_rec_base%
+  else
+    if crew.%rank% not in fd_ranks then
+      "-"
+    else if crew.%is_long_haul_pp_start% then
+      concat("A3/A4/A5 ", %pgt_rec_base%)
+    else if crew.%has_ac_qln%(%pp_start%, "37") or crew.%has_ac_qln%(%pp_start%, "38") then
+      "37/38"
+    else if crew.%has_ac_qln%(%pp_start%, "M8") then
+      concat("M8 ", %pgt_rec_base%)
+    else if crew.%ac_qln1% in quals_in_use then
+      crew.%ac_qln1%
+    else
+      "-";
+
+/* Assigne Activities Xmas Group by AssignActivities.py */
+export %x_xmas_group%(String crewid, String season, Abstime year) =
+    freedays.%r_xmas_group%(crewid, season, year);
+
+export %x_xmas_season_start_date%(String season, Abstime year) =
+    freedays.%r_season_start_date%(season, year);
+
+export %x_xmas_season_end_date%(String season, Abstime year) =
+    freedays.%r_season_end_date%(season, year);
+
+export %x_start_xmas_date%(String crewid, String crewregion, String season, Abstime year, Int match) =
+    freedays.%r_start_xmas_date%(crewid, crewregion, season, year, match);
+
+export %x_nbr_of_xmas_freedays%(Abstime date, String crewid, String crewregion, String season, Abstime year) =
+    freedays.%r_nbr_of_xmas_freedays%(date, crewid, crewregion, season, year);
+
+export %x_xmas_activity_type%(Abstime date, String crewid, String crewregion, String season, Abstime year) =
+    freedays.%r_activity_type%(date, crewid, crewregion, season, year);
+
+    
+%report_show_RL% =
+    parameter false
+    Remark "Show SB line in Standby Distribution report";
+    
+%report_show_SB% =
+    if %report_show_RL% then
+        duty.%is_standby%
+    else
+        duty.%is_standby% and not duty.%is_standby_line%; 
+
+/*
+** Block time in 28 days forwards 
+** NOTE :used only for duty calculations report
+*/
+export %block_time_28_days_fwd% =
+  accumulators.%block_time_in_period_caa_daily%(duty.%start_day%, 
+                                                %end_28_days_fwd%);
+
+export %end_28_days_fwd_day% = format_time(%end_28_days_fwd%, "%d%b");
+
+export %end_28_days_fwd% =
+  duty.%start_day% + 28*24:00;
+
+export %block_time_in_calendar_year% =
+accumulators.%block_time_in_period_caa%(round_down_year(duty.%start_hb%),
+                                        duty.%start_day% + 24:00);
+
+   redefine %duty_is_illness% =
+   fundamental.%is_roster% and (%duty_is_illness_overview_report% or duty.%is_child_illness%);
+
+%duty_is_illness_overview_report% =
+  first(leg(duty), %leg_is_illness_overview_report%);
+
+
+%leg_is_illness_overview_report% = leg.%is_illness% and not task.%is_freeday_illness%(leg.%code%);
+ 
+redefine %duty_is_standby_to_consider% =
+    fundamental.%is_roster% and (duty.%is_standby%);
+
+%duty_is_sh_standby_to_concider% =
+    %duty_is_standby_to_consider% and not duty.%is_standby_line% and %in_planning_area%;
+
+redefine %duty_is_resorce_pool_to_consider% =
+    fundamental.%is_roster% and crew.%is_resource_pool_pp_start_or_pp_end% and (%duty_is_freeto_use%);
+    
+%duty_is_freeto_use% =
+    duty.%is_freeday% and not duty.%is_locked%;
+
+redefine %sb_rank% =
+    let rank = crew.%rank%;
+    if rank = "AS" then
+        "AH"
+    else
+        rank;
+        
+redefine %roster_multi_sb_qual% =
+    let quals = crew.%ac_qln_sep_string%(duty.%start_hb%),
+    len = length(quals);
+    substr(quals, 1, len - 1);
+    
+redefine %in_planning_area% = 
+    if fundamental.%is_roster% then
+        planning_area.%crew_is_in_planning_area%
+    else
+        planning_area.%trip_is_in_planning_area%;
+        
+redefine %crew_has_upper_category% = crew.%rank% = fundamental.%upper_cat%;
+redefine %crew_has_lower_category% = crew.%rank% in fundamental.lower_cat_set;
+
+
+/******************************************************** 
+	Resource Pool Info 
+	*******************************************************/
+%skbu_resource_pool_months% = 
+	12;
+  /*let this_month = calendar.%month_number%(%pp_start%);
+  if this_month > 4 then 
+      this_month - 4
+  else
+      this_month + 8;*/
+
+%skbu_resource_pool_start_date% =
+	round_down_year(%pp_start%);
+  /*add_months(%pp_start%, 1 - %skbu_resource_pool_months%);*/
+
+%skbu_resource_pool_month_ix% = 
+  add_months(%skbu_resource_pool_start_date%, %py_index% - 1);
+  
+%skbu_resource_pool_month_str_ix% = 
+  format_time(%skbu_resource_pool_month_ix%, "%b");
+  
+%skbu_resource_pool_planned_ix% = 
+  %skbu_resource_pool_planned_in_month%(%skbu_resource_pool_month_ix%);
+
+%skbu_resource_pool_planned_in_month%(Abstime date) =
+  accumulators.%skbu_resource_planned_working_days_in_period%(date, add_months(date,1));
+
+%skbu_resource_pool_qualifying_ix% = 
+  %skbu_resource_pool_qualifying_in_month%(%skbu_resource_pool_month_ix%);
+
+%skbu_resource_pool_qualifying_in_month%(Abstime date) =
+  accumulators.%skbu_resource_qual_working_days_in_period%(date, add_months(date,1));
+
+/* end of file */

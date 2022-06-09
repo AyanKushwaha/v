@@ -1,0 +1,518 @@
+/* -*- crc -*-
+ *
+ *
+ *
+ * Purpose:
+ *   This module contains definitions used in the info window reports.
+ *   It is important to remember that att variables used in an info window
+ *   report should wrapped in an default statement to avoid any void values.
+ *
+ * Created by:
+ *   Joakim Oskarsson, 21-Dec-2005
+ *
+ * Sections:
+ *   1. show_info_crew report
+ *   2. show_info_flight report
+ *
+ * Major changes:
+ * 10-May-2007:
+ * Created variables for everything to be used in dynamic report.
+ * Rebuilt reports according to spec. /Erik Gustafsson
+ *
+ */
+
+module crg_info_ccr inherits crg_info
+import crew;
+import wop;
+import pp;
+import freedays;
+import levels;
+import fundamental;
+import base_utils;
+import annotations;
+import recency;
+import accumulators;
+import iterators;
+import training;
+import attributes;
+import compdays;
+import duty_time;
+import model_freedays;
+import model_crew;
+import system_db_parameters;
+
+
+
+
+/* Redefine times shown in info window for rostering*/
+redefine export %time_h1% = %base_header%;
+redefine export %time_1% = %base_time%;
+
+/*********************************************************************
+ * 1. show_info_crew
+ *    - Definitions used in the report file crg/hidden/show_info_crew
+ *********************************************************************/
+%year_start% = round_down_year(%pp_start%);
+%year_end% = round_up_year(%pp_start%);
+
+/* First row */
+redefine export %crew_name% = default(crew.%login_name%, "");
+redefine export %crew_surname% = crew.%surname_not_void%;
+
+/* We use extperkey instead of id since employee_number defaults to id
+   and we already show that anyway. */
+redefine export %empno% = default(crew.%extperkey%, "");
+redefine export %crew_id% = crew.%id_not_void%;
+
+redefine export %rank% = crew.%rank_not_void%;
+
+redefine export %part_time_factor% =
+  concat(%contract_part_time_factor%, " ", %spec_sched_part_time_factor%);
+
+%spec_sched_part_time_factor% =
+  default(format_int(crew.%_spec_sched_limit_int_to%("PartTime", %pp_start%), "(%d%%)"), "");
+
+%contract_part_time_factor% =
+  default(format_int(crew.%crew_contract_part_time_factor_at_date%(%pp_start%), "%3d%%"), "");
+
+redefine export %agmt_group% =
+  crew.%agmt_group_id%;
+
+redefine export %group% = crew.%group_detailed_pp_start%;
+
+redefine export %homebase% = crew.%homebase_not_void%;
+
+redefine export %seniority% = default(format_int(crew.%seniority%, "%d"), "");
+
+/*redefine export %duty_code% =
+  if not is_acrot then
+    default(%_duty_code%, "N/A")
+  else
+    "";*/
+
+/* This variable will ensure that something is displayed when a leg has an
+ * attribute, but not correctly assigned. */
+
+redefine %_duty_code% =
+    if leg.%is_release_and_not_tagged_release% then
+        concat(%__duty_code%, " [", training.%RELEASE_STR%, "]")
+    else if leg.%is_x_supernum_and_not_tagged_x_supernum% then
+         concat(%__duty_code%," [", training.%X_SUPERNUM_STR%, "]")
+    else
+        %__duty_code%;
+
+%__duty_code% =
+  if attributes.%assignment_has_any_attr% then
+    concat(default(duty_code.%leg_code%, ""), " [", attributes.%all_assignment_attributes%,"]")
+  else
+    duty_code.%leg_code%;
+
+/* Second row */
+redefine export %ac_quals% = default(crew.%ac_qln_pos_string%(%pp_start%), "");
+
+/* Redefined in crg_info_cct:
+   In Planning F-days are shown, in Tracking it should be phone number. */
+redefine export %fdays_phone% = concat("Freedays: ", %freedays%);
+
+%freedays% =
+    if crew.%in_variable_group_pp_start% then
+        concat(%freedays_prev_month%, " ", %freedays_this_month%)
+    else
+        "-";
+
+
+
+/* Get rid of wop dependency */
+
+%freedays_in_period1%(Abstime start_date, Abstime end_date) =
+  let k4exng_cc = crew.%k4exng_cc_sp5_1_valid%(start_date);
+  default(concat(format_time(start_date, "%b"), " ",
+                %int2str%(accumulators.%qual_freedays_in_period%(
+                                   crew.%variable_group_start%(start_date, end_date),
+                                   crew.%variable_group_end%(start_date, end_date)) +
+                                 (if not k4exng_cc then
+                                    freedays.%lh_non_qual_freedays_in_month_cc_skd%(start_date, end_date)
+                                  else
+                                    0))
+          ), "0");
+
+%freedays_prev_month% =
+   concat(%freedays_in_period1%(add_months(%pp_start%,-1), %pp_start%),",");
+
+%freedays_this_month% = %freedays_in_period% (%pp_start%, add_months(%pp_start%, 1));
+
+%freedays_in_month%(Abstime date) =
+  default(concat(format_time(date, "%b"), " ",
+         first(wop(chain),
+                concat(%int2str%(freedays.%nr_qualifying_in_1_month%),
+                       "(", %int2str%(freedays.%min_required_in_1_month%), ")" ))
+          where (wop.%start_hb% >= date)
+          ), "");
+
+%freedays_in_period%(Abstime start_date, Abstime end_date) =
+  let is_fdc15 = %is_fdc15%;
+  default(concat(format_time(start_date, "%b"), " ",
+                concat(%int2str%(if is_fdc15 then
+                                freedays.%crew_month_possibly_scheduled%(start_date, end_date)
+                                else freedays.%nr_qualifying_in_1_given_month%(start_date, end_date)
+                                  ),
+                       "(", %int2str%( if is_fdc15 then
+                                      freedays.%crew_month_entitled%(start_date, end_date)
+                                      else freedays.%min_required_in_1_given_month%(start_date, end_date)
+                                           ), ")" )
+          ), "0");  
+  
+export %is_fdc15% = not void(model_freedays.%crew_fdc15_rule%(crew.%id%, %pp_start%,%pp_start% + 24:00 ));
+
+export %freedays_year_target% = default(freedays.%crew_year_target%(%pp_start%, round_up_month(%pp_start% + 0:01)), 0);
+
+export %freedaysyeartarget_round% = (%round_int%(%freedays_year_target%, 100)) / 100;
+
+export %freeday_target_info% = concat("Freeday target: ",%int2str%(%freedaysyeartarget_round%));
+
+%prod_days_info_c% =
+    if crew.%in_variable_group_pp_start% then
+        concat("Prod_days: ",%int2str%(%prod_days_month_r%),
+               "(", %int2str%(%month_target_r%), ")")
+    else
+        "-";
+
+export %freedaytarget_proddays_info% =
+        if %is_fdc15% then
+                        %freeday_target_info%
+
+        else
+                      %prod_days_info_c%;
+
+
+
+
+%prod_days_month_r% = fundamental.%divide%(accumulators.%nr_p_days_in_year_skn%(pp.%start_month%, pp.%end_month%), 1000);
+
+%month_target_r% =
+  let month_target = fundamental.%divide%(%target_rep% - (%prod_days_sofar_rep% - %prod_days_month_rep%), 1000),
+      days_in_month = %days_touched%(pp.%start_month%, pp.%end_month%);
+
+  nmax(nmin(month_target, days_in_month), 0);
+
+/*The following variables have been redefined from rules_indust_ccr inorder to show Prod_days in crew_info*/
+
+%rul_cal_start_rep% = round_down_month(nmax(crew.%va_year_start_date%(pp.%start_month%),
+                                            default(crew.%prod_day_contract_start_date%(pp.%end_month%),
+                                                    crew.%va_year_start_date%(pp.%start_month%))));
+%rul_cal_end_rep% = round_down_month(nmax(crew.%va_year_end_date%(pp.%start_month%),
+                                            default(crew.%prod_day_contract_end_date%(pp.%end_month%),
+                                                    crew.%va_year_end_date%(pp.%start_month%))));
+
+export %target_rep% =
+  ((%avail_days_sofar_rep% - %va_days_pt_sofar_rep%) / 10) * (%max_limit_rep% / 10) / nmax(((%avail_days_rep% - %va_days_pt_sofar_rep%) / 100), 1);
+
+%avail_days_sofar_rep% = %days_pt_sofar_rep% - %loa_days_pt_sofar_rep%;
+
+%days_pt_sofar_rep% = %days_in_period_pt_rep%(%rul_cal_start_rep%, pp.%end_month%);
+
+%days_in_period_pt_rep%(Abstime start_date, Abstime end_date) =
+  sum(times(12), %report_days_in_month_pt_rep%(add_months(start_date, %times_index_0% - 1)))
+  where (add_months(start_date, %times_index_0% - 1) < end_date);
+
+%report_days_in_month_pt_rep%(Abstime date) =
+  let start_date = round_down_month(date),
+      end_date = round_up_month(start_date + 0:01);
+
+  if not crew.%part_time_change_in_period%(start_date, end_date) then
+    %days_touched%(start_date, end_date) *
+    crew.%service_grade_at_date%(start_date) * 10
+  else
+    %days_touched%(start_date, crew.%part_time_change_date_in_period%(start_date, end_date)) *
+    crew.%service_grade_at_date%(start_date) * 10 +
+    %days_touched%(crew.%part_time_change_date_in_period%(start_date, end_date), end_date) *
+    crew.%service_grade_at_date%(end_date) * 10;
+
+%loa_days_pt_sofar_rep% = accumulators.%nr_loa_days_pt_in_period%(%rul_cal_start_rep%, pp.%end_month%);
+
+%max_limit_rep% = %avail_factor_rep% * %max_production_days_in_va_year_rep% +
+                fundamental.%divide%(%avail_factor_rep% * %max_va_days_in_va_year_rep% - %va_days_sofar_rep%, 1000) *
+                %work_factor_rep%;
+
+%avail_factor_rep% = %avail_days_rep% / %days_in_va_year_rep%;
+%avail_days_rep% = %days_pt_rep% - %loa_days_pt_sofar_rep%;
+%days_in_va_year_rep% = %days_touched%(%va_year_start_rep%, %va_year_end_rep%);
+
+%va_year_start_rep% = crew.%va_year_start_date%(pp.%start_month%);
+%va_year_end_rep% = crew.%va_year_end_date%(pp.%start_month%);
+%days_pt_rep% = %days_in_period_pt_rep%(%rul_cal_start_rep%, %rul_cal_end_rep%);
+
+%max_production_days_in_va_year_rep% = crew.%max_production_days_in_va_year_fd_at_date%(pp.%end_month%);
+
+%max_va_days_in_va_year_rep% = crew.%max_va_days_in_va_year%;
+
+%work_factor_rep% = crew.%work_factor_at_date%(pp.%end_month%);
+
+%va_days_sofar_rep% = accumulators.%nr_va_days_in_period%(%rul_cal_start_rep%, pp.%end_month%);
+%va_days_pt_sofar_rep% = accumulators.%nr_va_days_pt_in_period%(%rul_cal_start_rep%, pp.%end_month%);
+
+
+%prod_days_sofar_rep% = accumulators.%nr_p_days_in_year_skn%(%rul_cal_start_rep%, pp.%end_month%);
+%prod_days_month_rep% = accumulators.%nr_p_days_in_year_skn%(pp.%start_month%, pp.%end_month%);
+
+
+/* Third row */
+
+redefine export %last_weekend% =
+  default(format_time(%_last_weekend_sunday%, "%d%b%02y"), "-");
+
+%_last_weekend_sunday% =
+  round_up_week(accumulators.%last_free_weekend%(%pp_start%)) - 0:01;
+
+redefine export %last_flown% = default(recency.%last_flown_string%, "");
+
+/* last standby line excl. period to be used in info window and sort func */
+export %last_standby_line% = accumulators.%prev_standby_line_date%(%pp_start%);
+
+redefine export %last_standby_line_str% =
+  if %last_standby_line% > 1Jan1986 0:00 then
+    concat(default(format_time(%last_standby_line%, "%d%b%02y"),""), " (RL),")
+  else
+    "";
+
+/* Fourth row */
+redefine export %annotations% = default(annotations.%info_string%, "");
+
+/* Training box */
+redefine export %training_row1% = default(%_training_row1%, "");
+
+%_training_row1% =
+  if crew.%is_pilot% then
+    concat("PGT: ", %t_date%("PGT"), " CRM: ", %t_date%("CRM"))
+  else if  crew.%is_cabin%  then
+    concat("REC: ", %t_date%("REC"), " CRMC: ", %t_date%("CRMC"))
+  else
+    concat("REC: ", %t_date%("REC"));
+
+redefine export %training_row2% = default(%_training_row2%, "");
+%_training_row2% =
+  if crew.%is_pilot% then
+    default(%pc_str%, "")
+  else if %two_rec_types% then
+    concat("REC: ", %t_date%("REC"), "(SK)")
+  else " ";
+
+%two_rec_types% =
+    training.%rec_type_required%("REC", %now%) and
+    training.%rec_type_required%("RECSKN", %now%);
+
+redefine export %training_row3% = default(%_training_row3%, "");
+%_training_row3% =
+  if crew.%is_pilot% then
+    default(%opc_str%, "")
+  else
+    concat("", default(%standby_days_str%, "SBY: "));
+
+redefine export %training_row4% = default(%_training_row4%, "");
+%_training_row4% =
+  if crew.%is_pilot% then %lc_str%
+  else
+    concat(" BL: ", default(%blank_days_str%, ""));
+
+export %t_date%(String type) =
+        default(
+           %expiry_month_inclusive%(crew.%document_expiry_date_subtype%("REC", type, crew.%any_ac_qual%, %now%)),
+           "-");
+
+%pc_str% =
+  if crew.%_is_a3a4_qualified_at_date%(%pp_end%) or
+     crew.%is_a2a3_qualified_at_date%(%pp_end%) or
+     crew.%is_a2a5_qualified_at_date%(%pp_end%)
+  then
+    concat(%_pc_str%, " (", default(training.%pc_qual_1%,"-"), "), ", %expiry_month_pc_2%, " (", default(training.%pc_qual_2%,"-"), ")")
+  else if crew.%is_skn_double_qualified_at_date%(%pp_end%) then
+    concat(%_pc_str%, " (", default(training.%pc_qual_1%,"-"),")")
+  else
+    %_pc_str%;
+
+%_pc_str% = concat(" PC: ", %expiry_month_pc_1%);
+
+%opc_str% =
+  if crew.%_is_a3a4_qualified_at_date%(%pp_end%) or
+     crew.%is_a2a3_qualified_at_date%(%pp_end%) or
+     crew.%is_a2a5_qualified_at_date%(%pp_end%)
+  then
+    concat(%_opc_str%, " (", default(training.%opc_qual_1%,"-"), "), ", %expiry_month_opc_2%, " (", default(training.%opc_qual_2%,"-"),  ")")
+  else if crew.%is_skn_double_qualified_at_date%(%pp_end%) then
+    concat(%_opc_str%, " (", default(training.%opc_qual_1%,"-"),")")
+  else
+    %_opc_str%;
+
+%_opc_str% = concat("OPC: ", %expiry_month_opc_1%);
+
+%expiry_month_pc_1% = training.%expiry_month_pc_1%;
+%expiry_month_pc_2% = training.%expiry_month_pc_2%;
+%expiry_month_opc_1% = training.%expiry_month_opc_1%;
+%expiry_month_opc_2% = training.%expiry_month_opc_2%;
+
+%lc_str% =
+    if crew.%is_a2a3_qualified_at_date%(%pp_end%) then
+      %lc_str_a2a3%
+    else if crew.%is_a2a5_qualified_at_date%(%pp_end%) then
+      %lc_str_a2a5%
+    else
+      concat(" LC: ",training.%expiry_month_lc%, " ",
+             /* For crew with multiple ac quals, show the qual of the upcoming LC */
+             if crew.%is_multi_qualified% then training.%lc_qual%
+             else "",
+         %lc_fam_str%);
+
+%lc_str_a2a3% =
+  concat(" LC: ",
+         training.%expiry_month_lc_for_acqual%("A2"), " (A2), ",
+         training.%expiry_month_lc_for_acqual%("A3"), " (A3)");
+
+%lc_str_a2a5% =
+  concat(" LC: ",
+         training.%expiry_month_lc_for_acqual%("A2"), " (A2), ",
+         training.%expiry_month_lc_for_acqual%("A5"), " (A5)");
+
+%lc_fam_str% = default(concat(" FAM: ", training.%expiry_date_lc_after_fam%, " (", training.%lc_qual_after_fam%, ")"), "");
+
+export %standby_days_str% =
+  concat("SBY: ",
+         format_int(%standby_days%, "%d"),
+         "/",
+         format_int(%scattered_standby_days%, "%d"),
+         %standby_line_days_str%,
+         format_time(%pp_start%, " (%Y)"));
+
+%standby_days% =
+  accumulators.%standby_days_in_period%(%year_start%, %year_end%);
+
+%scattered_standby_days% =
+  accumulators.%scattered_standby_days_in_period%(%year_start%, %year_end%);
+
+%standby_line_days_str% =
+  if (crew.%is_cabin%)
+  then
+    concat("/",format_int(accumulators.%standby_line_days_in_period%(%year_start%, %year_end%), "%d"),
+           "/",format_int(accumulators.%standby_lines_in_period%(%year_start%, %year_end%), "%d"))
+  else "";
+
+%blank_days_str% =
+  concat(
+         format_int(%blank_days%, "%d"),
+         format_time(%pp_start%, " (%Y)"));
+
+%blank_days% =
+  accumulators.%blank_days_in_period%(%year_start%, %year_end%);
+
+
+/*
+ * Show number of block hours since last check
+ * ILC for Flight Deck and RELEASE for Cabin Crew.
+ */
+redefine export %is_pilot% = crew.%is_pilot%;
+
+%training_start% = crew.%last_training_start_before_date%(%now%);
+%lifus_start_date% = training.%first_perf_date_for_lifus_after_date%(%training_start%);
+
+export %end_hb_for_last_ilc% = training.%end_hb_last_perf_act_of_type%("ILC", leg.%end_utc%);
+
+export %end_hb_for_last_ilc_last_year_2% =
+  if %end_hb_for_last_ilc% < add_years(%pp_start%, -1) then %abstimemin%
+  else %end_hb_for_last_ilc%;
+
+
+
+redefine export %block_hours_since_last_check_now% =
+  %block_hours_since_last_check%(%crg_now%);
+  
+redefine export %block_hours_since_last_check_leg_end% =
+  %block_hours_since_last_check_ilc%(leg.%end_hb%);
+
+%block_hours_since_last_check%(Abstime date) =
+  default(format_time(accumulators .%block_time_during_restriction%(%lifus_start_date%, date),
+                      %format_time_span%),
+           "N/A");
+           
+%block_hours_since_last_check_ilc%(Abstime date) =
+  default(format_time(accumulators .%block_time_during_restriction%(%end_hb_for_last_ilc_last_year_2%,date),
+                      %format_time_span%),
+           "N/A");
+%crg_now% = %pp_start%;
+
+/*redefine export %crew_region% = crew.%region%;*/
+redefine export %crew_planning_group% = crew.%planning_group%;
+
+redefine export %last_performed_sim% =
+    if %_last_performed_sim% = 1Jan1986 then
+        default(format_time(training.%ctl_time_limit%, "No sim after %d%b%02y"), "-")
+    else
+        default(format_time(%_last_performed_sim%, "Last sim: %d%b%02y"), "-");
+
+%_last_performed_sim% =
+  nmax(%_last_performed_of_type%("PC", %crg_now%),
+       %_last_performed_of_type%("OPC", %crg_now%),
+       %_last_performed_of_type%("ASF", %crg_now%));
+
+%_last_performed_of_type%(string act, abstime t) =
+  training.%last_perf_date_for_act_of_type%(act, t);
+
+%_last_performed_check%(abstime t) =
+  if crew.%is_pilot% then
+    %_last_performed_of_type%("ILC", t)
+  else
+    %_last_performed_of_type%("RELEASE", t);
+
+%_block_hours_since_last_check%(abstime t) =
+  accumulators.%block_time_in_period_caa%(%_last_performed_check%(t), t);
+
+redefine export %crew_is_new% =
+    default(crew.%has_qual_restr_new_actype%(%now%, leg.%qual%) and
+            crew.%has_qual_restr_new_actype%(leg.%start_hb%, leg.%qual%), false);
+
+/*********************************************************************
+ * 2. show_info_flight
+ *    - Definitions used in the report file crg/hidden/show_info_flight.output
+ *********************************************************************/
+redefine export %leg_code% =
+  default(
+          default(training.%leg_code_redefined%, leg.%code%), "?");
+redefine %top_level_rest_time% = default(trip.%rest_time%, wop.%rest_time%);
+redefine export %wop_time% =
+  if not is_acrot then
+    default(format_time(%_wop_time%, %format_time_span%), "N/A")
+  else
+    "N/A";
+
+
+
+/* CC SKS has duty time for F3, F35, F0, F7S */
+
+
+%use_compday_duty_time_leg% =
+  compdays.%use_compday_duty_time%(leg.%start_date%) and
+  compdays.%leg_is_compday_with_duty_time%;
+
+%use_compday_duty_time_duty% =
+  compdays.%use_compday_duty_time%(duty.%start_day%) and
+  compdays.%duty_is_compday_with_duty_time%;
+
+%use_compday_duty_time_trip% =
+  compdays.%use_compday_duty_time%(trip.%start_day%) and
+  compdays.%trip_is_compday_with_duty_time%;
+
+%use_compday_duty_time_wop% =
+  compdays.%use_compday_duty_time%(wop.%start_day%) and
+  compdays.%wop_has_compdays_with_duty_time%;
+
+%_wop_time% =
+   last(duty(wop), oma16.%duty_time_in_interval%(wop.%start_utc%, wop.%end_utc%));
+
+%_duty_time_no_night_upg% =
+  %_duty_time%;
+
+
+redefine %_leg_block_time% =
+     let compdays_time = if %use_compday_duty_time_leg%
+                         then duty_time.%compdays_duty_time_in_period%(leg.%start_utc%,leg.%end_utc%)
+                         else 00:00;
+     leg.%block_time%+compdays_time ;
+/* end of file */

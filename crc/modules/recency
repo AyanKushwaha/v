@@ -1,0 +1,310 @@
+/* -*- crc -*-
+ *
+ * Purpose:
+ *   This module contains common recency definitions for flight and cabin crew
+ *   used in qualification recency rules, costs and select filters.
+ *
+ * Sections:
+ *   1. Rule definitions and calculations
+ *   2. Accumulator lookups
+ *   3. Rudob definitions
+ *
+ * Created by:
+ *   Henrik Albertson, 04-Jul-2006
+ *
+ * Major changes:
+ *   HenrikA 08feb2007: Replaced all table lookups with accumulators
+ *   HenrikA 04may2007: Moved all absence variables to module absence
+ */
+
+root module recency
+import fundamental;
+import levels;
+import leg;
+import duty;
+import trip;
+import crew;
+import crew_pos;
+import accumulators;
+
+/****************************************************************
+ * Section 1: Rule definitions and calculations
+ ***************************************************************/
+/* Common constants, to be redefined in CC and FD modules */
+export %max_days% = void_int;
+
+/* Common recency variables */
+
+export %trip_is_recent% = all(duty(trip), %duty_is_recent%);
+%duty_is_recent% = all(leg(duty), %leg_is_recent%) where (leg.%is_active_flight%);
+
+
+/* Redefined in child modules, due to different definitions */
+export %leg_is_recent% = Bool;
+export %leg_qualifies_for_recency% = false; /* FC: active landing, CC: N/A */
+
+/* Used in failtext and crew warnings */
+/* NEW IMPLEMENTATION */
+%crew_is_recent%(Abstime date, String qual) =
+  %expiry_date%(date, qual) > round_down(date, 24:00);
+
+export %blank_or_standby_trip_is_recent% =
+  all(leg(trip), %blank_or_standby_leg_is_recent%);
+
+export %blank_or_standby_leg_is_recent% =
+  any(times(crew.%ac_qln_max_iter_leg_start%), /*Remove %ac_qln_max_iter_trip_start% */
+    %crew_is_recent%(leg.%start_lt%, crew.%ac_qln%(leg.%start_lt%, %times_index_0%))); /*remove  %ac_qln_trip_start_ix%*/
+
+%first_unrecent_ac_qual%(Abstime date, String qual) =
+  let nr_ac_qlns = crew.%ac_qln_max_iter_at_date%(date);
+  if qual <> "" then
+    qual
+  else if nr_ac_qlns > 1 then
+    %_first_unrecent_ac_qual%(date, nr_ac_qlns)
+  else
+    crew.%ac_qln%(date, 1);
+
+%_first_unrecent_ac_qual%(Abstime date, Int nr_ac_qlns) =
+  let oldest_last_flown_ac_qual =
+        min(times(nr_ac_qlns), %last_flown_ac_qual%(crew.%ac_qln%(date, %times_index_0%), date));
+  min(times(nr_ac_qlns), crew.%ac_qln%(date, %times_index_0%))
+  where (%last_flown_ac_qual%(crew.%ac_qln%(date, %times_index_0%), date) = oldest_last_flown_ac_qual);
+
+%recency_expired_ac_qual% = %first_unrecent_ac_qual%(leg.%start_utc%, leg.%qual%);
+
+/****************************************************************
+ * Section 2: Accumulator lookups
+ ***************************************************************/
+/* Find the last flown date by iterating through all crew qualifications */
+export %last_flown_leg_start% = %last_flown%(leg.%start_UTC%);
+export %last_flown%(Abstime date) = %last_flown_ac_qual%("", date);
+
+export %last_flown_ac_qual%(String ac_qual, Abstime date) =
+  if ac_qual = "---" or ac_qual = "" then
+    /* For some objects (e.g. BL, SBY) we only require to be recent on any of
+       crew's qualifications.
+       This call is also used to get the newest recency date. */
+    if crew.%ac_qln_max_iter_at_date%(date) = 1 and
+       crew.%ac_qln%(date, 1) = "FF" then
+      date
+    else
+      max(times(crew.%ac_qln_max_iter_at_date%(date)),
+          %_last_flown_ac_qual_at_date%(crew.%ac_qln%(date, %times_index_0%),date)
+    )
+  else if (ac_qual = "ALL" or ac_qual = "MIN") then
+    /* For some sorts etc. we want the oldest last flown date.
+       We need special handling of FF crew so they are separated from the rest.
+       */
+    min(times(crew.%ac_qln_max_iter_at_date%(date)),
+      if (ac_qual = "ALL" and crew.%ac_qln%(date, %times_index_0%) = "FF") then
+            31dec1985
+      else
+            %_last_flown_ac_qual_at_date%(crew.%ac_qln%(date, %times_index_0%),date)
+        )
+  else
+    /* The default case we find the last flown date for the specified qual */
+    %_last_flown_ac_qual_at_date%(ac_qual, date);
+
+/* Debug code */
+%debug_crew% =
+  parameter "00000"
+  remark "Test crew for last flown/absence";
+
+%debug_al% =
+  parameter 1jan1986
+  remark "Last flown AL";
+
+%debug_36% =
+  parameter 1jan1986
+  remark "Last flown 36";
+
+%debug_90% =
+  parameter 1jan1986
+  remark "Last flown 90";
+
+table test_ac(String ac_qual, Abstime date) =
+  ac_qual -> %debug_ac%;
+  "AL"    -> %debug_al%;
+  "36"    -> %debug_36%;
+  "90"    -> %debug_90%;
+  ""      -> nmax(%debug_al%, %debug_36%, %debug_90%);
+end
+
+set debug_quals = "AL", "36", "90";
+
+%_last_flown_ac_qual_at_date%(String ac_qual, Abstime date) =
+  if crew.%id% = %debug_crew% and ac_qual in debug_quals and
+    not default(any(leg(chain), leg.%qual% = ac_qual)
+                where (leg.%is_active_flight% and leg.%starts_in_pp% and leg.%start_utc% < date), false)
+  then
+    %debug_ac%(ac_qual, date)
+  else
+    %_last_flown_ac_family_at_date%(ac_qual, date);
+
+%_last_flown_ac_family_at_date%(String ac_qual, Abstime date) =
+    /* Last flown is only collected per ac family.
+       For qual AL all of families A330, A340 and A350 give flown */
+    if ac_qual = "AL" then
+        nmax(accumulators.%last_flown%("A330", date),
+             accumulators.%last_flown%("A340", date),
+             accumulators.%last_flown%("A350", date))
+    else
+        accumulators.%last_flown%(%ac_fam_str%(ac_qual), date);
+
+/* Redefined in recency_fc*/
+export %max_days_recency_limit_p% = void_int;
+export %days_since_recency_flight% = void_int;
+
+/* For use in reports etc. */
+export %last_flown_string% =
+  /* last_flown is only registered per ac family,and for SKN 737 crew this has a
+     strange effect */
+  if crew.%is_skn_double_qualified_at_date%(fundamental.%info_time%) then
+    if %last_flown_ac_qual%("37", fundamental.%info_time%) = 1jan1986 /*not found*/
+    then "- (37/38)"
+    else format_time(%last_flown_ac_qual%("37", fundamental.%info_time%), "%d%b%02y (37/38)")
+  else
+    cat(times(crew.%ac_qln_max_iter%),
+      concat(if %last_flown_ac_qual%(crew.%ac_qln%(fundamental.%info_time%, %times_index_0%),
+                                     fundamental.%info_time%) = 1jan1986
+             then "-"
+             else format_time(%last_flown_ac_qual%(crew.%ac_qln%(fundamental.%info_time%, %times_index_0%),
+                                                   fundamental.%info_time%), "%d%b%02y"),
+             " (", crew.%ac_qln%(fundamental.%info_time%, %times_index_0%), ")"), ", ");
+
+%ac_type_str%(String ac_qual_str) = String;
+
+table ac_type_ac_fam_map(String ac_qual_str) =
+  %ac_type_str%(ac_qual_str) -> String %ac_fam_str%;
+  external leg.%aircraft_types_table%;
+  "id" -> "maintype";
+  - -> "";
+end
+
+%has_expired%(Abstime date, String type) = default(%expiry_date_min%(date, type) < date, false);
+
+export %expiry_date%(Abstime date, String ac_qual) = void_int;
+
+/* Takes the recency with soonest expiry date */
+export %expiry_date_min%(Abstime date, String type) = void_int;
+
+export %expiry_date_leg_start% = %expiry_date%(leg.%start_utc%, leg.%qual%);
+
+export %recency_time%(bool total_landings, String leg_ac_qual, Abstime date) = void_int;
+export %extension_by_trip_for_ac_qln%(String ac_qln) = void_int;
+
+/***********************************************************************
+ ***********************************************************************
+ Rudobs for 3 ac-qual recency
+ ***********************************************************************
+ ***********************************************************************/
+
+/* Cache variables (used for select filters etc */
+export %has_expired_at_pp_start%      = %has_expired%(%pp_start%, "ALL");
+export %has_expired_at_pp_end%        = %has_expired%(%pp_end%, "ALL");
+export %has_expired_A2_at_pp_start%   = %has_expired%(%pp_start%, "A2");
+export %has_expired_A2_at_pp_end%     = %has_expired%(%pp_end%, "A2");
+export %has_expired_A3_at_pp_start%   = %has_expired%(%pp_start%, "A3");
+export %has_expired_A3_at_pp_end%     = %has_expired%(%pp_end%, "A3");
+export %has_expired_A5_at_pp_start%   = %has_expired%(%pp_start%, "A5");
+export %has_expired_A5_at_pp_end%     = %has_expired%(%pp_end%, "A5");
+export %has_expired_AL_at_pp_start%   = %has_expired%(%pp_start%, "AL");
+export %has_expired_AL_at_pp_end%     = %has_expired%(%pp_end%, "AL");
+export %has_expired_38_at_pp_start%   = %has_expired%(%pp_start%, "38");
+export %has_expired_38_at_pp_end%     = %has_expired%(%pp_end%, "38");
+
+
+
+/****************************************************************
+ * Section 3: Rudob definitions
+ ***************************************************************/
+%last_date% =
+  nmin(default(crew.%ac_qln1_validto%, 31dec2036),
+       default(crew.%ac_qln2_validto%, 31dec2036),
+       default(crew.%ac_qln3_validto%, 31dec2036))-24:00;
+
+%last_date_leg% =
+  nmin(default(crew.%qln_valid_to%("ACQUAL", leg.%start_date%, 1), 31dec2036),
+       default(crew.%qln_valid_to%("ACQUAL", leg.%start_date%, 2), 31dec2036),
+       default(crew.%qln_valid_to%("ACQUAL", leg.%start_date%, 3), 31dec2036))-24:00;
+
+export %all_quals_unrecent_at_date%(Abstime date) =
+    let acqual1 = default(crew.%ac_qln%(date,1),""),
+        acqual2 = default(crew.%ac_qln%(date,2),""),
+        acqual3 = default(crew.%ac_qln%(date,3),"");
+    (acqual1 = "" or date > %expiry_date_qln1%) and
+    (acqual2 = "" or date > %expiry_date_qln2%) and
+    (acqual3 = "" or date > %expiry_date_qln3%) and
+    concat(acqual1, acqual1, acqual1) <> ""; /* crew actually has quals*/
+
+export %expiry_date_qln1% = %expiry_date%(%last_date%, crew.%ac_qln1%);
+export %expiry_date_qln2% = %expiry_date%(%last_date%, crew.%ac_qln2%);
+export %expiry_date_qln3% = %expiry_date%(%last_date%, crew.%ac_qln3%);
+
+export %first_expiry_date% = %expiry_date_min%(%last_date%, "ALL");
+
+export %first_expiry_date_trip_start% = %expiry_date_min%(trip.%start_hb%, "ALL");
+
+export %first_expiry_date_pp_start% = %expiry_date_min%(%pp_start%, "ALL");
+
+export %first_expiry_date_publ_end% = %expiry_date_min%(fundamental.%publ_period_end%, "ALL");
+
+/* This variable is used to calculate the effect on recency that a trip has.
+   It will only perform as intended when applied on the last trip on the roster.
+   Used for cost function in roster_cost_training */
+
+%first_expiry_date_before_trip% = nmax(%expiry_date_min%(trip.%start_day%, "ALL"), %pp_start%);
+
+%first_expiry_date_after_trip% = %expiry_date_min%(trip.%start_day% + 24:00, "ALL");
+
+export %extension_by_trip% =
+  nmin((%first_expiry_date_after_trip% - %first_expiry_date_before_trip%)/24:00,
+       90);
+
+
+/****************************************************************
+ * Section 5: Aoc definitions
+ ***************************************************************/
+
+table aoc_table(String ac_fam) =
+  crew.%is_SKN%, ac_fam -> export %aoc_for_ac_fam%;
+  true, "A330" -> "SAS";
+  true, "A340" -> "SAS";
+  true, "A350" -> "SAS";
+  &
+  true, -      -> "BU";
+  &
+  false, -     -> "SAS";
+end
+table aoc_table2(String ac_qln) =
+  /* If SKN crew are long haul qualified and no specific ac_qln argument
+     is given then aoc is assumed to be SAS */
+  crew.%is_SKN%,
+  ac_qln in crew.long_haul_qlns_set,
+  ac_qln,
+  crew.%is_long_haul_pp_start% -> export %aoc_for_ac_qln%;
+
+  /** SKN **/
+  /* Long haul ac and SKN => SAS */
+  true,  true,  -,  -    -> "SAS";
+  /* ac_qln not in long haul set means one of two things:
+     Either ac_qln is a short haul qln or no qln was given.
+     If no qln was given and crew is long haul qualified
+     SAS is assumed to be aoc */
+  true,  false, "", true  -> "SAS";
+  &
+  /* For all other SKN cases aoc is BU */
+  true,  -, -,  -     -> "BU";
+  &
+  /** SKS, SKD **/
+  false, -, -, - -> "SAS";
+
+end
+
+/****************************************************************
+ * Section 6: For batch job that updates crew_landing /sic!/
+ ***************************************************************/
+
+export %active_landing_default% = false; /* redefined in recency_fc */
+
+/* end of file */

@@ -1,0 +1,339 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains cabin crew specific soft (quality) rules used 
+ *   in Carmen Crew Rostering and as studio only in Carmen Crew Tracking.
+ *
+ * Sections:
+ *    1. Duty rules
+ *    2. Blank day rules
+ *
+ * Created by:
+ *   Henrik Albertson, 17-Feb-2005
+ *
+ * Major changes:
+ *
+ */
+
+module rules_soft_ccr_cc inherits rules_soft_ccr
+import crew;
+import leg;
+import duty;
+import duty_time;
+import rules;
+
+group soft_rule_params_ccr_cc =
+  %max_num_of_working_days_with_duty_greater_than_10_30%,
+  %max_num_of_working_days_with_duty_greater_than_13_00%;
+
+/****************************************************************
+ * Section 1: Duty rules
+ ***************************************************************/
+
+/*
+** Rule:
+**    No charter before long haul production
+**
+** Description:
+**    Not allowed with charter production before a long haul trip.
+**
+**    NB! Two implementations are done. One in CCP checking
+**    when doing short-before-long planning and one in CCR.
+*/
+rule sft_no_charter_before_long_haul_trip_SKS =
+  valid roster.%check_rules% and
+	      crew.%is_SKS% and
+        crew.%is_long_haul_trip_start% and
+        trip.%has_charter% and
+        trip.%in_pp% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+  default(not next(trip(wop), trip.%is_long_haul%), true);
+  startdate = trip.%start_UTC%;
+  remark "(CCR) Soft: No charter before long haul production";
+end
+
+%max_num_of_working_days_with_duty_greater_than_10_30% =
+  parameter 4
+  remark "Max number of working days with duty >=10:30, per calendar month.(SKN=1-4)";
+
+%max_num_of_working_days_with_duty_greater_than_13_00% =
+  parameter 4
+  remark "Max number of working days with duty >13:00, per calendar month.(SKN=1-4)";
+
+/*
+** Rule:
+**    Max number of working days with long duty >=10:30, short legs
+**
+** Description:
+**    Check that there is no more than parameter,
+**    %max_num_of_working_days_with_duty_greater_than_10_30%
+**    duties per calendar month, for flight within 3 hours, blok off/block on
+**    Max allowed is 4.
+**
+** Agreement:
+**    NKF/SBK 1.3.1, SASCMS-3896
+*/
+rule (off) sft_max_num_of_working_days_with_long_duty_short_legs =
+  valid roster.%check_rules% and
+        not crew.%is_leased_trip_start% and
+        %r_valid_max_long_duties% and        
+        trip.%in_pp_extended% and
+        trip.%is_short_haul% and
+        not %trip_has_long_leg_in_duty% and
+        not trip.%is_bought% and
+        %last_trip_in_month_roster_short_leg%;
+
+  %nr_long_duties_in_month_short_leg% <=
+    %max_long_duties_in_month_short_leg% + 
+    rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %sft_max_num_of_working_days_with_long_duty_short_leg_failobject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%(concat("Coll: Max long duties in ", 
+                                format_time(trip.%start_month_start%, " %b")),
+                            value, limit);
+  remark "(CCR) Soft: Max number of long duties, >=10:30 in calendar month.(currently only SKN)",
+  planner "The rule checks that there is max long duties, >=10:30 in calendar month."
+          " An long duty is defined as: (SKN) a short haul duty"
+          " including legs with up to 3:00 hrs flying time, "
+          " Max allowed is 4, The rule is currently only valid for CC SKN.";
+end
+
+%sft_max_num_of_working_days_with_long_duty_short_leg_failobject% =
+  first(duty(trip), duty.%failobject_start%)
+  where (not %trip_has_long_leg_in_duty% and
+         %nr_long_duties_in_month_until_now_short_leg% >
+         %max_long_duties_in_month_short_leg% + 
+         rule_exceptions.%overshoot_int%(trip.%start_UTC%) and
+         not duty.%is_bought%);
+               
+table max_long_duties_in_month =
+  crew.%region% ->
+    %max_long_duties_in_month_short_leg%,
+    %max_long_duties_in_month_long_leg%;
+  "SKN" -> if %max_num_of_working_days_with_duty_greater_than_10_30% > 4
+           then 4 else  %max_num_of_working_days_with_duty_greater_than_10_30%,
+           if %max_num_of_working_days_with_duty_greater_than_13_00% > 4
+           then 4 else  %max_num_of_working_days_with_duty_greater_than_13_00%;
+  -  -> 0,0;
+end
+
+%last_trip_in_month_roster_short_leg% =
+  is_last(trip(roster))
+  where (trip.%start_hb% < %pp_end% and
+        trip.%is_short_haul% and
+        not %trip_has_long_leg_in_duty% and
+        not trip.%is_bought%);
+
+%nr_long_duties_in_month_short_leg% =
+  %nr_long_duties_in_period_bwd_from_date_short_leg%(trip.%start_month_start%,
+                                               trip.%start_month_end%);
+%nr_long_duties_in_month_until_now_short_leg% =
+  %nr_long_duties_in_period_bwd_from_date_short_leg%(trip.%start_month_start%,
+                                               duty.%end_utc%);
+
+/* The calculation is from current and backwards for performance reasons, i.e.
+ * the function must be used under certain contexts. */
+%nr_long_duties_in_period_bwd_from_date_short_leg%(Abstime start, Abstime stop) =
+  sum(trip(roster), if trip.%start_hb% >= start and trip.%end_hb% <= stop then
+                      %trip_nr_long_duties_short_leg%
+                    else
+                      %_trip_nr_long_duties_short_leg%(start, stop))
+  from (current) backwards
+  while (trip.%end_hb% > start)
+  where (trip.%has_active_flight% and
+         trip.%is_short_haul% and
+         not %trip_has_long_leg_in_duty% and
+         not trip.%is_bought%);
+
+%trip_nr_long_duties_short_leg% =
+  count(duty(trip)) 
+  where (%basic_duty_time_limit_extended_short_leg% and
+         not duty.%is_bought%);
+
+%_trip_nr_long_duties_short_leg%(Abstime start, Abstime stop) =
+  count(duty(trip))
+  where (%basic_duty_time_limit_extended_short_leg% and
+         duty.%start_hb% < stop and
+         duty.%end_hb% > start and
+         not duty.%is_bought%);
+
+%trip_has_long_leg_in_duty% =
+  any(duty(trip), duty_time.%long_leg_in_duty%);
+
+%basic_duty_time_limit_extended_short_leg% =
+  duty_time.%in_duty_period_scheduled%(duty.union,True) >= 10:30;
+
+%r_valid_max_long_duties% =
+   crew.%is_SKN%;
+
+/*
+** Rule:
+**    Max number of working days with long duty >13:00, long legs
+**
+** Description:
+**    Check that there is no more than parameter,
+**    %max_num_of_working_days_with_duty_greater_than_13_00%
+**    duties per calendar month, for flight with more than 3 hours, blok off/block on
+**    Max allowed is 4.
+**
+** Agreement:
+**    NKF/SBK 1.3.2, SASCMS-3896
+*/
+rule (off) sft_max_num_of_working_days_with_long_duty_long_legs =
+  valid roster.%check_rules% and
+        not crew.%is_leased_trip_start% and
+        %r_valid_max_long_duties% and        
+        trip.%in_pp_extended% and
+        trip.%is_short_haul% and
+        %trip_has_long_leg_in_duty% and
+        not trip.%is_bought% and
+        %last_trip_in_month_roster_long_leg%;
+
+  %nr_long_duties_in_month_long_leg% <=
+    %max_long_duties_in_month_long_leg% + 
+    rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %sft_max_num_of_working_days_with_long_duty_long_leg_failobject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%(concat("Coll: Max long duties in ", 
+                                format_time(trip.%start_month_start%, " %b")),
+                            value, limit);
+  remark "(CCR) Soft: Max number of long duties, >13:00 in calendar month.(currently only SKN)",
+  planner "The rule checks that there is max long duties, >=13:00 in calendar month."
+          " An long duty is defined as: (SKN) a short haul duty"
+          " including legs with more than 3:00 hrs flying time, "
+          " Max allowed is 4, The rule is currently only valid for CC SKN.";
+end
+
+%sft_max_num_of_working_days_with_long_duty_long_leg_failobject% =
+  first(duty(trip), duty.%failobject_start%)
+  where (%trip_has_long_leg_in_duty% and
+         %nr_long_duties_in_month_until_now_long_leg% >
+         %max_long_duties_in_month_long_leg% + 
+         rule_exceptions.%overshoot_int%(trip.%start_UTC%) and
+         not duty.%is_bought%);
+               
+%last_trip_in_month_roster_long_leg% =
+  is_last(trip(roster))
+  where (trip.%start_hb% < %pp_end% and
+        trip.%is_short_haul% and
+        %trip_has_long_leg_in_duty% and
+        not trip.%is_bought%);
+
+%nr_long_duties_in_month_long_leg% =
+  %nr_long_duties_in_period_bwd_from_date_long_leg%(trip.%start_month_start%,
+                                               trip.%start_month_end%);
+%nr_long_duties_in_month_until_now_long_leg% =
+  %nr_long_duties_in_period_bwd_from_date_long_leg%(trip.%start_month_start%,
+                                               duty.%end_utc%);
+
+/* The calculation is from current and backwards for performance reasons, i.e.
+ * the function must be used under certain contexts. */
+%nr_long_duties_in_period_bwd_from_date_long_leg%(Abstime start, Abstime stop) =
+  sum(trip(roster), if trip.%start_hb% >= start and trip.%end_hb% <= stop then
+                      %trip_nr_long_duties_long_leg%
+                    else
+                      %_trip_nr_long_duties_long_leg%(start, stop))
+  from (current) backwards
+  while (trip.%end_hb% > start)
+  where (trip.%has_active_flight% and
+         trip.%is_short_haul% and
+         %trip_has_long_leg_in_duty% and
+         not trip.%is_bought%);
+
+%trip_nr_long_duties_long_leg% =
+  count(duty(trip)) 
+  where (%basic_duty_time_limit_extended_long_leg% and
+         not duty.%is_bought%);
+
+%_trip_nr_long_duties_long_leg%(Abstime start, Abstime stop) =
+  count(duty(trip))
+  where (%basic_duty_time_limit_extended_long_leg% and
+         duty.%start_hb% < stop and
+         duty.%end_hb% > start and
+         not duty.%is_bought%);
+
+%basic_duty_time_limit_extended_long_leg% =
+  duty_time.%in_duty_period_scheduled%(duty.union,True) > 13:00;
+
+/*
+**    Removed leg-dependent rule for 
+**    duty time sh before lh, since it was 
+**    less tight as non leg-dependent rule (duty_time <= 10:30)
+*/
+
+
+/****************************************************************
+ * Section 2: Blank day rules
+ ***************************************************************/
+
+/*
+** Note: consider moving the Blank day rules to rules_studio to exclude 
+** them from optimization phase
+*/
+
+/*
+** Rule: 
+**    No BL-day for new entrant crew
+**
+** Description:
+**    Very inexperienced crew (i.e. newly employed) may not perform
+**    blank day duty. This is just a soft rule to guarantee as many
+**    flight hours as possible.
+**
+** Agreement:
+**    soft rule
+*/
+rule sft_no_bl_day_for_new_entrant_crew_ALL =
+  valid roster.%check_rules% and
+        trip.%in_pp% and
+        crew.%is_SKS% and
+        crew.%has_restr_new_new_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+  not trip.%is_blank_day%;
+  startdate  = trip.%start_UTC%;
+  failobject = trip.%failobject_start%;
+  failtext "(CCR) Soft: No BL day for NEW+NEW restricted crew";
+  remark "(CCR) Soft: No BL day for new entrant crew under restriction",
+  planner "Check that no BL day(s) are given to very new entrant crew."
+          " This is defined by the NEW+NEW restriction.";
+end
+
+/*
+** Rule: 
+**    No BL-day day before BBK trip
+**
+** Description:
+**    NO BL days is allowed the day before a BKK trip
+**    since production is already to heavy.
+**
+** Agreement:
+**    soft rule
+*/
+rule sft_no_bl_day_before_bkk_ALL =
+  valid roster.%check_rules% and
+        not crew.%is_SKN% and
+        trip.%in_pp% and
+        trip.%has_destination%("BKK") and
+        not is_first(trip(wop)) and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+  not %prev_trip_is_blank%;
+  startdate  = trip.%start_UTC%;
+  failobject = trip.%failobject_start%;
+  failtext "Soft: BKK trip must not be preceeded by BL day";
+  remark "(CCR) Soft: BKK trip must not be preceeded by BL day",
+  planner "(CCR) Check that no BKK trip is preceeded by a BL day.";
+end
+
+%prev_trip_is_blank% = 
+  prev(trip(wop), trip.%is_blank_day%) and
+  trip.%no_days_btw_trips_bwd%;
+
+/* end of file */

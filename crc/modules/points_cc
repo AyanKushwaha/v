@@ -1,0 +1,164 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   Calculation of cabin crew specific duty points 
+ *   Module defines CC specific logic to be used
+ *   in Pairing and Rostering
+ *
+ * Created by:
+ *   Henrik Mouritsen Initial, 15-Dec-2005
+ *
+ * Agreement:
+ *   Operations Manual - A OMA chapter 7. 15-Dec-2005
+ *
+ * Major changes:
+ *
+ */ 
+
+module points_cc inherits points
+
+/*
+** CC related rest on board 
+*/
+
+%points_rob_leg_start% = leg.%start_UTC% + %rob_duty_dep%;
+%points_rob_leg_end% = leg.%end_UTC% - %rob_duty_arr%;
+
+%rob_table% = %etab_path%(%rob_table_para%); 
+%rob_table_para% = 
+  parameter "rest_on_board_cc"
+  remark "ETAB: Rest on board table";
+
+redefine %rest_on_board_reduction_points_leg%(Abstime start, Abstime stop, Bool points_style) =
+  if not %aircraft_type_with_rest_on_board% and %rob% then
+    0
+  else if %points_rob_leg_start% >= start and %points_rob_leg_end% <= stop then
+    %rest_on_board_reduction_points_leg_full%
+  else
+    (((nmin(%points_rob_leg_end%, stop) - nmax(%points_rob_leg_start%, start)) * 100 / 
+      (%points_rob_leg_end% - %points_rob_leg_start%))) * %rest_on_board_reduction_points_leg_full% / 100;
+
+redefine export %rest_on_board_reduction_points_leg_full% =
+  if %aircraft_type_with_rest_on_board% and %rob% then
+    %reduction_points%
+  else 
+    0;
+
+%aircraft_type_with_rest_on_board% = leg.%crew_bunk_cabin_crew%;
+
+/*
+
+Comment copied from old code. This is the only place where the 
+algorithm is thouroughly documented. For this reason please Note
+that var names in description refers to variable names in the old code.
+
+Text:
+Rest on board for CA udregnes p‘ samme m‘de som for DC 10 piloter.
+Alle CA er aktive i en periode efter start og f÷r landing,
+Imellem disse perioder er kun et minimum antal CA aktive.
+Rest on board udregnes per leg.
+
+         C/I    p1         rest         p2      C/O
+        |---|---------|-------------|----------|---|
+ points  6|8   6|8        4             6|8     6|8
+
+
+Hvor 6|8 points betyder 6 points om dagen og 8 points
+om natten.
+Total antal points incl rest for en person udregnes som:
+
+T = (m * (C/I + p1 + rest + p2 + C/0) * 6|8 +
+     n * ((C/I + p1 + p2 + C/O) * 6|8 + rest * 4)) / (n+m)
+
+Hvor n er ekstra CA og m er minimum antal CA.
+totalt antal CA er n + m.
+Der bliver allerede foretaget normal point beregning P
+for hele perioden, derfor kan ovenst‘ende udregnes som
+
+T = P - R
+           
+Hvor P er points udregnet uden rest for hele perioden for en person.
+R er det points antal P skal reduceres med.
+
+Da P allerede bliver beregnet andet sted mangler vi blot at udregne R.
+R for en person udregnes ved:
+
+  R = P - T
+
+P = hele perioden * 6|8
+
+eller fordelt p‘ perioderne
+
+     P = (C/I + p1 + rest + p2 + C/O)*6|8
+=>   P = (n+m) * (C/I + p1 + rest + p2 + C/O)*6|8 / (n+m)
+=>   P =  m * (C/I + p1 + rest + p2 + C/O) * 6|8 / (n+m) + 
+          n * (C/I + p1 + rest + p2 + C/O) * 6|8 / (n+m)
+
+
+     T = (m * (C/I + p1 + rest + p2 + C/0) * 6|8 +
+          n * ((C/I + p1 + p2 + C/O) * 6|8 + rest * 4)) / (n+m)
+=>   T =  m * (C/I + p1 + rest + p2 + C/0) * 6|8 / (n+m) +
+          n * ((C/I + p1 + p2 + C/O) * 6|8 + rest * 4) / (n+m)
+
+
+ P - T =  n * (C/I + p1 + rest + p2 + C/O) * 6|8 / (n+m) -
+          n * ((C/I + p1 + p2 + C/O) * 6|8 + rest * 4) / (n+m)
+
+=>   R =  n * ((C/I + p1 + rest + p2 + C/O) * 6|8 -
+               (C/I + p1 + p2 + C/O) * 6|8 + rest * 4) / (n+m)
+
+=>   R =  n * ((C/I + p1 + p2 + C/O) * 6|8 + rest * 6|8 -
+               (C/I + p1 + p2 + C/O) * 6|8 + rest * 4) / (n+m)
+
+=>   R =  n * (rest * 6|8 - rest * 4) / (n+m)
+
+I efterf÷lgende beregning er
+  n = %ca_total% - %rob_ca_on_duty%
+  m = %rob_ca_on_duty%
+  n+m = %ca_total%
+  rest = perioden fra departure + %rob_ca_duty_dep% til
+                      arrival - %rob_ca_duty_arr%
+       = (arrival - %rob_ca_duty_arr%) - (departure + %rob_ca_duty_dep%)
+       = arrival - %rob_ca_duty_arr% - departure - %rob_ca_duty_dep%
+*/
+
+%reduction_points% =
+  let points = 
+    (if %time_zone_correction% then
+       %time_zone_corrected_points%(%points_rob_leg_start%, %points_rob_leg_end%) 
+     else if not duty.%is_school_duty% then
+	%ordinary_points%(%points_rob_leg_start%, %points_rob_leg_end%) 
+     else 0);
+
+  (%rob_total% - %rob_on_duty%) * 
+  (points - %rest_period% / 1:00 * %rest_points_per_hour%) / %rob_total%;
+
+%rest_period% =  %points_rob_leg_end% - %points_rob_leg_start%;
+%rob% = %_rob% <> -1:00;
+
+table rest_on_board =
+  leg.%flight_carrier%, leg.%flight_nr%,leg.%start_UTC%, 
+  leg.%start_station%, leg.%end_station%,  leg.%ac_family% 
+    -> reltime %_rob%, int %rob_on_duty%, int %rob_total%,
+       reltime %rob_duty_dep%, reltime %rob_duty_arr%, reltime %rob_rest%;
+
+  external %rob_table%;
+  
+  carrier, flightno,
+  (periodstartdate, periodenddate),
+  depairportname, arrairportname,
+  acfam	     	     
+    -> rest, cconduty, cctotal, dutydep, dutyarr, rest;
+  -, -, -, -, -, - 
+    -> -1:00,  0, 0, 0:00, 0:00, 0:00;
+end
+
+/*
+**  Landing points Cabin Crew
+*/
+
+redefine export %initial_free_landing_points% = 
+  (nmin(%initial_free_landings%, %landings%) * %landing_points_per_landing%) / 100;
+
+/* end of file */
+

@@ -1,0 +1,699 @@
+module leave_functions_sk inherits leave_functions
+
+/* Imports */
+import leave_basic;
+import leave_crewinfo;
+import leave_params;
+import leave_tables;
+import basic;
+
+
+/* ----------------------------------------------------------- */
+/* previous_free_days_within_summer_if_short_vacation - rule */
+export %previous_freedays_within_summer% =
+  let trail = %trailing_freedays%;
+  if ((%trip_end%-%trip_start%)/24:00+trail) >= 26 then True else
+    if (%trip_start%-24:00*trail)>= %trip_period_start_date% then True
+    else False;
+
+export %trailing_freedays%=
+  let pat = leave_crewinfo.%pattern%(%trip_start%);
+  sum(times(length(pat)),1) while (substr(pat,length(pat)-times_index(0)+1,1)="F");
+/*end previous free days*/
+
+
+export %legal_vacation_moves%(abstime firstdate,abstime lastdate) =
+    let vacdays = leave_basic.%no_days%(firstdate,lastdate)+1;
+    if leave_tables.%allow_vacation_bid_move%(firstdate) and not leave_params.%should_use_short_vacation%(vacdays,firstdate) then
+        leave_params.%legal_vacation_move%(firstdate)
+    else
+        "";
+
+
+export %get_next_vacation_end%(abstime end_date) =
+  let pattern_start = leave_crewinfo.%first_day_in_pattern_before%(end_date),
+    day_diff = (end_date - pattern_start) / 24:00,
+    next_end_day = %_get_next_end_day%(end_date, day_diff);
+  pattern_start + (next_end_day-1) * 24:00;
+
+export %get_nearest_production_start%(abstime start_date) =
+  let tmp_start_before = %get_prev_vacation_start%(start_date),
+  tmp_start_after = %get_next_vacation_start%(start_date);
+  if start_date - tmp_start_before >= tmp_start_after - start_date then
+    tmp_start_after
+  else
+    tmp_start_before;
+
+export %trip_within_one_season% =
+  %trip_start_season% = %trip_end_season%;
+
+export %trip_start_season% = %season%(%trip_start%);
+export %trip_end_season% = %season%(%trip_end% - 0:01);
+
+/* Used by rules.. */
+/* If part time fixed group crew has vacation adjescent to part time free days.. */
+export %no_of_loa_days_after_va_trip_end% =
+  let day_in_pattern = %vacation_start_pattern_offset%(%va_trip_end%) + 1,
+    loa_code = leave_crewinfo.%part_time_loa_code%(%va_trip_end%);
+  default(leave_tables.%no_of_parttimedays_related_to_day%(%va_trip_end%, day_in_pattern, loa_code),0);
+
+export %period_start_date_from_period%(string season, Int year) =
+  let default_date = leave_tables.%default_period_start_from_period%(season, year),
+    periodstart = default(
+      leave_tables.%_period_start_from_period%(default_date, season, year),
+        default_date),
+    offset = leave_params.%season_start_rotation_difference%(season, year)*24:00;
+  periodstart - offset;
+
+export %period_end_date_from_period%(string season, Int year) =
+  let default_date = leave_tables.%default_period_end_from_period%(season, year),
+    periodend = default(
+      leave_tables.%_period_end_from_period%(default_date, season, year),
+        default_date),
+      offset = leave_params.%season_end_rotation_difference%(season, year)*24:00;
+  periodend+offset;
+
+export %trip_is_in_period%(AbsTime start_date, AbsTime end_date) =
+  (%trip_start% >= start_date and %trip_start% < end_date);
+
+export %postponed_vacation_days_in_period%(abstime date) =
+  default(leave_tables.%nbr_of_days_in_other_bid%("POSTPONE",
+    %season%(date),
+    leave_tables.%planyear%(date),
+    true), 0);
+
+/* The ones we should use, gets possible start and end dates for vacations
+   forwards and backwards in time. */
+export %get_prev_vacation_start_trip% =
+  %get_prev_vacation_start%(%va_trip_start%);
+
+export %get_prev_vacation_start%(abstime start_date) =
+  let pattern_start = leave_crewinfo.%first_day_in_pattern_before%(start_date),
+    day_diff = (start_date - pattern_start) / 24:00 + 1,
+    prev_prod_start_day = %_get_prev_vacation_start_day%(start_date, day_diff);
+  pattern_start + (prev_prod_start_day -1) * 24:00;
+
+export %get_prev_vacation_end%(abstime end_date) =
+  let pattern_start = leave_crewinfo.%first_day_in_pattern_before%(end_date),
+    day_diff = (end_date - pattern_start) / 24:00,
+    next_end_day = %_get_next_end_day%(end_date, day_diff),
+    prev_end_day = %_get_prev_end_day%(end_date, next_end_day),
+    tmp_end_before = pattern_start + (prev_end_day-1) * 24:00;
+  tmp_end_before;
+
+export %get_next_vacation_start_trip% =
+  %get_next_vacation_start%(%va_trip_start%);
+
+export %get_next_vacation_start%(abstime start_date) =
+  let pattern_start = leave_crewinfo.%first_day_in_pattern_before%(start_date),
+    day_diff = (start_date - pattern_start) / 24:00 + 1,
+    prev_prod_start_day = %_get_prev_vacation_start_day%(start_date, day_diff),
+    next_prod_start_day = %_get_next_vacation_start_day%(start_date, prev_prod_start_day);
+  pattern_start + (next_prod_start_day -1) * 24:00;
+
+export %get_next_vacation_end_trip% =
+  %get_next_vacation_end%(%va_trip_end%);
+
+
+/*********************************************************************
+ *        The code that takes care about the fixed patterns          *
+ *         possible start and end dates for vacation                 *
+ *********************************************************************/
+
+/* The number of days from the start of the fixed pattern to the wanted date*/
+export %vacation_start_pattern_offset%(abstime start_date) =
+  ((( start_date - leave_crewinfo.%pattern_start_date%(start_date) ) / 24:00)
+    mod leave_crewinfo.%pattern_length%(start_date));
+
+/* --------- Seasons and periods start and end dates --------- */
+export %period_start_date%(abstime date) =
+  let season = %season%(date),
+    planyear = leave_tables.%planyear%(date);
+  %period_start_date_from_period%(season, planyear);
+
+export %trip_period_start_date% =
+  %period_start_date%(%trip_start%);
+
+export %period_end_date%(abstime date) =
+  let season = %season%(date),
+    year = leave_tables.%planyear%(date);
+  %period_end_date_from_period%(season, year);
+
+export %trip_period_end_date% =
+  %period_end_date%(%trip_start%);
+
+export %season%(Abstime date) =
+  leave_tables.%season%(date);
+
+export %summer_trip% =
+  %season%(%trip_start%) = leave_params.%seasonname%(%trip_start%, "SUMMER");
+
+/* -------------------- Internal stuff... -------------------- */
+export %pattern_ends_with_production%(abstime start_date) =
+  max(times(1000),  %pattern_end_pos%(start_date, "P", 0, 9999, times_index(0))) =
+  leave_crewinfo.%pattern_length%(start_date);
+
+export %get_prev_prod_start%(abstime start_date) =
+  if %pattern_ends_with_production%(start_date) then
+    max(times(1000),  %pattern_start_pos%(start_date, "P", 0, 9999, times_index(0))) - leave_crewinfo.%pattern_length%(start_date)
+  else
+    1;
+
+/*
+%_get_prev_vacation_start_day%(abstime start_date, int day_diff) =
+  default(max(times(100),  %pattern_start_pos%(start_date, "P", 2, day_diff, times_index(0)))
+          , %get_prev_prod_start%(start_date));*/
+%_get_prev_vacation_start_day%(abstime start_date, int day_diff) =
+  /* -1 lower than all possible tables values */
+  let rows = nmax(%nr_pattern_rows%(start_date,"P"),
+      %nr_pattern_rows%(start_date,"V")),
+    lookup = max(times(rows), nmax(default(%pattern_start_pos%(start_date, "P", 2, day_diff, times_index(0)),-1),
+      default(%pattern_start_pos%(start_date, "V", 2, day_diff, times_index(0)),-1)));
+  if not void(lookup) and lookup > -1 then lookup
+  else %get_prev_prod_start%(start_date);
+
+
+%__get_next_vacation_start_day%(abstime start_date, int prev_prod_start_day) =
+  default(min(times(1000),  %pattern_start_pos%(start_date, "P", prev_prod_start_day, 99999, times_index(0))),
+    leave_crewinfo. %pattern_length%(start_date) + min(times(1000),  %pattern_start_pos%(start_date, "P", 0, 99999, times_index(0))));
+
+%_get_next_vacation_start_day%(abstime start_date, int prev_prod_start_day) =
+  if prev_prod_start_day <=1 then
+    %__get_next_vacation_start_day%(start_date, 2)
+  else
+    %__get_next_vacation_start_day%(start_date, prev_prod_start_day);
+
+%__get_next_end_day%(abstime end_date, int day_diff) =
+  default(min(times(1000),  %pattern_start_pos%(end_date, "P", day_diff, 999999, times_index(0))),
+    min(times(1000), %pattern_start_pos%(end_date, "P", 0, 999999, times_index(0)) + leave_crewinfo.%pattern_length%(end_date)));
+
+%_get_next_end_day%(abstime end_date, int day_diff) =
+  let prev_prod_start_day = %get_prev_prod_start%(end_date);
+  if day_diff = 0 and  prev_prod_start_day <= 0 then
+    %__get_next_end_day%(end_date, day_diff + 1)
+  else
+    %__get_next_end_day%(end_date, day_diff);
+
+%_get_prev_end_day%(abstime end_date, int next_end_day) =
+  default(max(times(1000),  %pattern_start_pos%(end_date, "P", 1, next_end_day-1, times_index(0))), %get_prev_prod_start%(end_date));
+
+/* --- Vacation assignment for parttime crew in fixed group -- */
+export %get_next_vacation_end_parttime%(abstime date) =
+  let next_vac_end = %get_next_vacation_end%(date+24:00);
+  /* If crew changes contract on last day we need special treatment
+     to do the calculations on the old pattern. */
+  if leave_crewinfo.%crew_contract%(next_vac_end) <>
+    leave_crewinfo.%crew_contract%(next_vac_end-24:00)
+  then
+    next_vac_end-24:00*default(1+%parttime_to_deduct%(next_vac_end-24:00),0)
+  else
+    next_vac_end-24:00*default(%parttime_to_deduct%(next_vac_end),0);
+
+export %parttime_to_deduct%(abstime date) =
+/* If date is in connection with parttimedays, return days to deduct (incl 0).
+   Otherwise void. */
+  let pos_in_pattern =
+    if leave_crewinfo.%_trip_start_offset_from_pattern_start%(date) = 0 then
+      leave_crewinfo.%pattern_length%(date)
+    else
+      leave_crewinfo.%_trip_start_offset_from_pattern_start%(date);
+  nmax(pos_in_pattern+1-%_parttime_start_pos%(date, pos_in_pattern), 0);
+
+/*This variable almost duplicates the one above, but is needed to handle
+  contract change in %allowed_part_time_gap_before_vacation%*/
+export %parttime_to_deduct_on_contract_end%(abstime date) =
+  /* If date is in connection with parttimedays, return days to deduct (incl 0).
+     Otherwise void. */
+  let pos_in_pattern =
+    if leave_crewinfo.%_trip_start_offset_from_pattern_start%(date) = 0 then
+      leave_crewinfo.%pattern_length%(date)
+    else
+      leave_crewinfo.%_trip_start_offset_from_pattern_start%(date);
+  nmax(pos_in_pattern+1-%_parttime_start_pos%(date - 01:00, pos_in_pattern), 0);
+
+/* ----------------------------------------------------------- */
+
+
+/* Table Definitions 
+** LW: use base_calendar instead, (note: different offset) 
+*/
+table day_of_week_table(Abstime date)=
+  time_of_week(date)/24:00-> export string %day_of_week%;
+  0 ->  "Monday";
+  1 ->  "Tuesday";
+  2 ->  "Wednesday";
+  3 ->  "Thursday";
+  4 ->  "Friday";
+  5 ->  "Saturday";
+  6 ->  "Sunday";
+end
+
+table pattern_acts_table(abstime date, string dayType, int min_pos, int max_pos, int match)=
+  leave_crewinfo.%pattern_id%(date), dayType, min_pos, max_pos, match -> int %pattern_start_pos%;
+  external "pattern_acts";
+  pattern, daytype, <startpos, >=startpos, match_number -> startpos;
+  -, -, -, -, - -> void(int);
+end
+
+table pattern_acts_table2(abstime date, int pos)=
+  leave_crewinfo.%pattern_id%(date), "D", pos+1, pos  -> int %_parttime_start_pos%;
+  external "pattern_acts";
+  pattern, daytype, >=startpos, <= endpos -> startpos;
+  -, -, -, - -> void(int);
+end
+
+table pattern_count_table(abstime date, string dayType)=
+  leave_crewinfo.%pattern_id%(date), dayType -> int %nr_pattern_rows%;
+  external "pattern_acts";
+  pattern, daytype  -> count(row_number);
+end
+
+table pattern_end_acts_table(abstime date, string dayType, int min_pos, int max_pos, int match)=
+  leave_crewinfo.%pattern_id%(date), dayType, min_pos, max_pos, match -> int %pattern_end_pos%;
+  external "pattern_acts";
+  pattern, daytype, <endpos, >=endpos, match_number -> endpos;
+  -, -, -, -, - -> void(int);
+end
+
+
+
+/* Used in leave module (and possibly somewhere else.)*/
+export %leave_balance_length% = %number_of_vacation_days_in_period%(%leg_start%, %leg_end%);
+
+export %number_of_vacation_days_in_period%(abstime vacationstarttime, abstime vacationendtime) =
+  let vacationstart=round_down(vacationstarttime, 24:00),
+      vacationend=vacationendtime,
+      number_of_overlapping_days = sum(times(10), %overlapping_vacation_days%(vacationstart, vacationend, times_index(0))) 
+					while (not void(leave_params.%overruling_code%(vacationstart, times_index(0))));
+    (vacationend - vacationstart) / 24:00 - number_of_overlapping_days;
+
+%overlapping_vacation_days%(abstime vacstart, abstime vacend, int number) = 
+  let code = leave_params.%overruling_code%(vacstart, number);
+  sum(times(10), overlap(vacstart, vacend, leave_tables.%overlap_starttime%(vacstart, vacend, code, times_index(0)), leave_tables.%overlap_endtime%(vacstart, vacend, code, times_index(0)))) while (not void(leave_tables.%overlap_starttime%(vacstart, vacend, code, times_index(0)))) / 24:00;
+  
+export %vacation_type_for_prio%(AbsTime date, Int prio) =
+  leave_params.%_vacation_type%(%season%(date), date, prio);
+
+  
+/* ------------- For vacation points --------------- */
+
+export %has_points%(abstime start_date) = 
+  default(%a_points_period_start%(start_date) >= 01Jan1986, false);
+
+table has_vacation_points_table(abstime start_date) =
+  leave_crewinfo.%cat%(start_date), leave_crewinfo.%base%(start_date),leave_crewinfo.%company%(start_date),
+    start_date -366*24:00 -> 
+    abstime %a_points_period_start%;
+  external "leave_points";
+  "cat", base, company, <= "enddate" -> "startdate";
+  -, -, -, -  -> void(abstime);
+end
+
+export %get_points_for_period%(abstime start_date, abstime end_date) = 
+  default(sum(times(15), %get_points_for_match%(start_date, end_date, times_index(0)))
+	    while (%get_points_for_match%(start_date, end_date, times_index(0))<>void(int)), 
+	0);
+
+%round_to_closest_day_start%(abstime adate) =
+  let
+  temptime = time_of_day(adate);
+  if temptime >= 12:00 then
+    round_up(adate, 24:00)
+  else
+    round_down(adate, 24:00);
+
+%get_points_for_match_test%(abstime start_date, abstime end_date, int match) =
+  /*Added 12 hours to handle the concatenation of division by 24:00*/
+  (overlap(start_date, end_date, 
+    %points_period_start%(start_date, end_date, match), 
+    %points_period_end%(start_date, end_date, match)) * 
+      %_vacation_points_per_day%(start_date, end_date, match));
+
+%get_points_for_match%(abstime astart_date, abstime aend_date, int match) =
+  /*Added 12 hours to handle the concatenation of division by 24:00*/
+  let 
+    start_date = %round_to_closest_day_start%(astart_date),
+    end_date  = %round_to_closest_day_start%(aend_date);
+  (overlap(start_date, end_date, 
+    %points_period_start%(start_date, end_date, match), 
+    %points_period_end%(start_date, end_date, match)+24:00) * 
+      %_vacation_points_per_day%(start_date, end_date, match) + 12:00)  / 24:00;
+
+table vacation_points_table(abstime start_date, abstime end_date, int match) =
+  leave_crewinfo.%cat%(start_date), 
+  leave_crewinfo.%base%(start_date),
+  leave_crewinfo.%company%(start_date),  
+  start_date-24:00, 
+  end_date, 
+  match  -> 
+    abstime %points_period_start%, 
+    abstime %points_period_end%,  
+    int %_vacation_points_per_day%;
+  external "leave_points";
+  "cat", base, company, <"enddate", >"startdate", match_number -> "startdate", "enddate", points;
+  -, -, -, -, -, - -> void(abstime), void(abstime), void(Int);
+end
+
+
+/*--------- End points --------*/
+
+/*--------- Limit Search Depth --------*/
+
+/*This parameter is used to get limit search depth 
+to only be active during automatic assignment*/
+%use_limit_search_depth% = parameter False;
+
+/*--------- For matching strategy --------*/
+
+export %has_vacation_between%(abstime start_date, abstime end_date) =
+  min(tentative_roster, %_has_vacation_between%(start_date, end_date));
+%_has_vacation_between%(abstime start_date, abstime end_date) =
+  if(void(%_get_vac_start%(start_date)) or void(%_get_vac_end%(end_date)))
+    then
+      false
+    else
+      all(extended_trip(chain), %connected_to_prev%) where 
+      (leave_basic.%trip_is_vacation% and
+       %trip_end%<=%_get_vac_end%(end_date) and
+       %trip_start%>%_get_vac_start%(start_date));
+      
+
+%_get_vac_start%(abstime start_date) =
+  first(extended_trip(chain), %trip_start%) where
+                             (%trip_end%>start_date and 
+                              leave_basic.%trip_is_vacation% and 
+                              %trip_start%-%la_deduct%(%trip_start%)<=start_date);
+
+%_get_vac_end%(abstime end_date) =
+  first(extended_trip(chain), %trip_end%) where
+                             (%trip_start%<end_date and
+                              leave_basic.%trip_is_vacation% and
+                              %trip_end%>=end_date-%la_deduct_end%(end_date));
+
+%connected_to_prev% = 
+  default(prev(extended_trip(chain), %trip_end%)
+       where (leave_basic.%trip_is_vacation%) = %trip_start%-%la_deduct%(%trip_start%), false);
+
+%la_deduct%(abstime date) =
+  if leave_crewinfo.%has_no_vacation_on_parttime_days%(date)
+  then
+    default(%parttime_to_deduct%(date), 0)*24:00
+  else
+    00:00;
+
+%la_deduct_end%(abstime date) =
+  /* If crew changes contract on last day we need special treatment
+   * to do the calculations on the old pattern.
+   * Similar to get_next_vacation_end_parttime */
+
+  if leave_crewinfo.%crew_contract%(date) <>
+     leave_crewinfo.%crew_contract%(date-24:00)
+  then
+    if leave_crewinfo.%has_no_vacation_on_parttime_days%(date-24:00)
+    then
+      default(1+%parttime_to_deduct%(date-24:00), 0)*24:00
+    else
+      00:00
+
+  else 
+    if leave_crewinfo.%has_no_vacation_on_parttime_days%(date)
+    then
+      default(%parttime_to_deduct%(date), 0)*24:00
+    else
+      00:00;
+
+/* ------------ Vacation start and end for leave rotations ----------------*/
+
+/*The variables %get_corrected_rotation_start% and %get_corrected_rotation_end% are used to get rotation
+  start and end dates for crew that work less than 100% or is in fixed group. Rotation start date and end date 
+  from the rotation table are given as input and these variables correct these dates.
+  Special treatment for rotations 91-99. The start date is calculated by a function inside %get_corrected_rotation_start%,
+  and do not consider vacstart. 
+  2015: the special treatment also applies to 91A-99A, 91B-99B series, the defition moved to leave_params module.
+    The special treatment is hardcoded; it's intentionally not dependendent on VG values, as the VG may have anomalities 
+    like 2 days "missing" around 27 july. Please also note that for DK crew, with cycle length 17 days, there is still 9 
+    days between possible vacation start, giving an imaginary day left (the 18th) In practice this day with more crew
+    available than usual, will be well distributed over the summer for differnent rotations and cyclestarts, it's only 
+    slightly confusing. 
+  The "rotation" input can be used to find out what the corrected rotation start and end would be for a specific rotation.
+  To get the correct dates the vacstart and vacend needs to be retrieved the rotation table. It is currently used in the 
+  publish script to find start and end date if crew would have rotation in 91-99. Ordinarily the "rotation" input should 
+  be an empty string (""). 
+  */
+export %get_corrected_rotation_start%(abstime vacstart, abstime vacend, string season, int year, string rotation) = 
+    if leave_crewinfo.%crew_is_fixed_or_FV_group%(vacstart) then
+        %get_corrected_fixed_rotation_start_including_special%(vacstart, vacend, season, year, rotation)
+    else %get_corrected_variable_rotation_start%(vacstart);
+
+/* In some cases (when the rotation is to short) we get the same end date as start date. 
+   Try previous first, if that is the same as the start, take next instead */
+%get_corrected_rotation_end%(abstime vacstart, abstime vacend, string season, int year, string rotation) = 
+  let correct_start = %get_corrected_rotation_start%(vacstart, vacend, season, year, rotation),
+      prev_end = %_get_corrected_rotation_end_prev%(vacstart, vacend, correct_start, season, year);
+  if prev_end <= correct_start then
+    %_get_corrected_rotation_end_next%(vacstart, vacend, correct_start, season, year)
+  else
+    prev_end;
+
+/* Some crew with 50 percent contracts need special treatment. Rotation should be in 
+ * connection with part time days */
+%get_corrected_fixed_rotation_start_including_special%(abstime vacstart, abstime vacend, string season, int year, string rotation) = 
+ let origdate = %get_corrected_fixed_rotation_start%(vacstart, vacend, season, year, rotation);
+ if leave_crewinfo.%crew_has_special_rotation_contract%(origdate) then
+    %corrected_for_special_rotation%(origdate)
+ else
+    origdate;
+
+%get_corrected_fixed_rotation_start%(abstime vacstart, abstime vacend, string season, int year, string rotation) =
+  if leave_params.%FD_use_special_cycle_rot_calc%(vacstart, season, year) then
+    %FD_calculate_rotation_start%(vacstart, vacend, season, year,rotation)
+  else if leave_params.%CC_Norway_special_rotation_start%(vacstart, season, year) then
+    %next_vacation_start_including_input_date%(vacstart)
+  else %_get_corrected_fixed_rotation_start%(vacstart, vacend);
+  
+/*Skulle kuna ändras för att bara definiera extended season på ett ställe. Men det fungerar.*/
+%_get_corrected_fixed_rotation_start%(abstime vacstart, abstime vacend) = 
+  let prodstart = %get_nearest_production_start%(vacstart),
+      offset = prodstart-vacstart;
+  if offset <= 0:00 then  
+      /* We need to make sure we are within the season*/
+      if prodstart >= %period_start_date%(vacend) then
+	  prodstart
+      else
+	  %get_next_vacation_start%(vacstart)
+  else
+      /* Same thing here, but in the end */
+      if vacend + offset <= %period_end_date%(vacstart) then
+	  prodstart
+      else
+	  %get_prev_vacation_start%(vacstart);
+
+%corrected_for_special_rotation%(abstime origstart) = 
+  let days = leave_crewinfo.%full_summer_vacation_days%(origstart)*24:00;
+  /* We need to make sure that vacation is in connection to fixed pattern
+   * part time free days, and also within the season. */  
+  if %is_connected_to_parttime_free_day%(origstart - days) or %is_connected_to_parttime_free_day%(origstart + days)then
+    origstart
+  else
+    if %is_connected_to_parttime_free_day%(origstart) then
+      origstart + days
+    else
+      if %is_connected_to_parttime_free_day%(origstart+2*days) then
+        origstart + days
+      else
+	origstart + 2 * days;
+
+%_get_corrected_rotation_end_prev%(abstime vacstart, abstime vacend, abstime correct_start, string season, int year) = 
+  let /* First, see how much the start has adjusted */
+      offset = correct_start - vacstart,
+      /* We might need to correct the offset of the enddate, if the rotation
+       * shouldn't match the amount of days stated in the rotation
+       * This is only done for summer */
+      max_vacation_correction = if (not leave_crewinfo.%has_no_vacation_on_parttime_days%(vacstart) or 
+				    leave_crewinfo.%crew_has_special_rotation_contract%(vacstart)) and
+                                    (leave_tables.%season%(vacstart) = leave_params.%seasonname%(vacstart,"SUMMER")) then
+					  (vacend - vacstart) - leave_crewinfo.%full_summer_vacation_days%(vacstart)*24:00
+				else
+				    0:00;
+  if leave_crewinfo.%crew_is_fixed_or_FV_group%(vacend) and not leave_crewinfo.%crew_is_fixed_or_FV_group%(vacend + offset) then
+      /* Changing from fixed to variable group */
+      default(%get_prev_vacation_end%(leave_crewinfo.%crew_contract_valid_from%(vacend + offset)-24:00), vacend + offset)
+      
+  else if leave_crewinfo.%crew_is_fixed_or_FV_group%(correct_start) and not leave_crewinfo.%crew_has_special_rotation_contract%(correct_start) then
+      /* Fixed group, we need to adjust to the pattern*/
+      default(%get_prev_vacation_end%(vacend
+                                      -%postponed_vacation_days_in_period%(vacend)*24:00
+                                      + offset-max_vacation_correction+24:00),vacend
+                                                                              -%postponed_vacation_days_in_period%(vacend)*24:00
+                                                                              + offset-max_vacation_correction)
+      /* Otherwise, just add the corrected offset to the enddate*/
+  else vacend + offset-max_vacation_correction-%postponed_vacation_days_in_period%(vacend)*24:00;
+
+/* As above.. */
+%_get_corrected_rotation_end_next%(abstime vacstart, abstime vacend, abstime correct_start, string season, int year) = 
+  let offset = correct_start - vacstart,
+      max_vacation_correction = if (not leave_crewinfo.%has_no_vacation_on_parttime_days%(vacstart) or 
+				    leave_crewinfo.%crew_has_special_rotation_contract%(vacstart)) and
+                                    (leave_tables.%season%(vacstart) = leave_params.%seasonname%(vacstart,"SUMMER")) then
+					  (vacend - vacstart) - leave_crewinfo.%full_summer_vacation_days%(vacstart)*24:00
+				else
+				    0:00;
+  if leave_crewinfo.%crew_is_fixed_or_FV_group%(correct_start) and not leave_crewinfo.%crew_has_special_rotation_contract%(correct_start) then
+      default(%get_next_vacation_end%(vacend
+                                      -%postponed_vacation_days_in_period%(vacend)*24:00
+                                      + offset-max_vacation_correction+24:00),vacend
+                                                                              -%postponed_vacation_days_in_period%(vacend)*24:00
+                                                                              + offset-max_vacation_correction)
+  else vacend + offset-max_vacation_correction-%postponed_vacation_days_in_period%(vacend)*24:00;
+  
+  
+  /* return true if @date is part time free day or if @date is a freeday (F) followed by part time free days,
+       otherwise return false 
+     NOTE: this method is only meant to be used in %corrected_for_special_rotation% method*/
+%is_connected_to_parttime_free_day%(abstime date) = 
+  if %is_part_time_free_days%(date) then
+     true
+  else 
+     default(%is_F_activity_connected_to_parttime_free_day%(date), false);
+    
+          
+  /*We calculate if @date is a freeday (F) followed by part time free days,
+       in that case we return true, otherwise return false */     
+%is_F_activity_connected_to_parttime_free_day%(abstime date) =
+  let day_in_pattern = %vacation_start_pattern_offset%(date) + 1,
+      activity_type = leave_crewinfo.%pattern_contribution2%(leave_crewinfo.%pattern_id%(date), day_in_pattern),
+      activity_end_in_pattern = leave_tables.%_part_time_end%(date, day_in_pattern, activity_type);
+      
+  if activity_type = "F" then
+      /* we check if the next activity (after the F activity) is a part time freeday*/
+      %is_part_time_free_days%(date + 24:00*(activity_end_in_pattern - day_in_pattern + 1))
+  else 
+      false;   
+      
+  
+%is_part_time_free_days%(abstime date) =
+  default(not (%no_of_loa_days_after%(date)=0), false);
+
+
+%get_corrected_variable_rotation_start%(abstime vacstart) = 
+  if leave_tables.%monday_rule_is_active%(vacstart) then
+    %get_closest_monday%(vacstart)
+  else
+    vacstart;
+
+%get_closest_monday%(abstime date) = 
+  let last_monday = round_down_week(date), 
+      next_monday = round_up_week(date);
+  if date-last_monday < next_monday-date then
+    last_monday
+  else
+    next_monday; 
+
+%get_prev_monday%(abstime date) =
+  round_down_week(date);
+
+%_rot_start_before_prod_correction%(Abstime FD_cycle_start_date_current_year,
+  Abstime vacstart, String season, int year, String rotation) =
+  default(
+    FD_cycle_start_date_current_year 
+    + (9*24:00)* leave_params.%special_rot_nbr%(%rotation_to_search_for%(season, year, rotation))
+  ,
+    vacstart
+  );
+
+/*%_rot_start_before_prod_correction%(Abstime FD_cycle_start_date_current_year,
+  Abstime vacstart, String season, int year, String rotation) =
+  vacstart - 2 * 24:00;  
+*/
+
+%FD_calculate_rotation_start%(abstime vacstart, abstime vacend, string season, int year, string rotation) =
+  let FD_cycle_start_date_current_year = add_years(leave_params.%FD_cycle_start_date%, leave_params.%offset_from_reference_year%(year)),
+      rot_start_before_prod_correction = %_rot_start_before_prod_correction%(FD_cycle_start_date_current_year, 
+         vacstart, season, year, rotation);
+  if leave_crewinfo.%crew_is_fixed_or_FV_group%(rot_start_before_prod_correction)
+  then %next_vacation_start_including_input_date%(rot_start_before_prod_correction)
+  else %_get_corrected_fixed_rotation_start%(vacstart, vacend);
+  
+%rotation_to_search_for%(string season, int year, string rotation) =
+  if rotation = "" then leave_crewinfo.%crew_rotation%(season, year) 
+  else rotation;
+  
+%next_vacation_start_including_input_date%(abstime vacstart) =
+  if %get_prev_vacation_start%(vacstart) = vacstart
+  then vacstart
+  else %get_next_vacation_start%(vacstart);
+
+/*Calculate the number of days in a row of parttime LOA, if @date is not a parttime LOA return 0 */ 
+export %no_of_loa_days_after%(abstime date) = 
+  let day_in_pattern = %vacation_start_pattern_offset%(date)+1, 
+      loa_code = leave_crewinfo.%part_time_loa_code%(date);
+  default(leave_tables.%no_of_parttimedays_related_to_day%(date, day_in_pattern, loa_code),0);
+/*--------------- end rotations ---------------------------------*/
+
+export %is_full_consecutive_leave%(abstime start_date, abstime end_date) = 
+  leave_crewinfo.%full_summer_vacation_days%(start_date) <= leave_basic.%no_days%(start_date, end_date);
+  
+/* Used in assignment_strategy */
+export %short_vacation_type_for_prio%(Int days, Int prio) =
+  leave_params.%_short_vacation_type%(days, prio);
+
+/*Interbids export VAC_MOD_LEN*/
+export %vacation_mod_length%(AbsTime date) =
+  if leave_crewinfo.%crew_is_fixed_or_FV_group%(date) then
+    leave_crewinfo.%va_pattern_length%(date)
+  else
+    1;
+
+export %transfer_balance_date%(abstime season_start_date) =
+  nmin(leave_functions.%period_end_date%(season_start_date), %next_transaction_date%("VA",season_start_date));
+  
+%next_transaction_date%(string actcode, abstime date) = 
+  leave_tables.%transaction_date%(actcode, date);
+  
+  
+    /*-------------------- Rest assigner day calculation -------------------*/
+
+/* The parameters that can be set, changed if set in tables*/
+%max_rest_days% = parameter 50;
+%min_rest_days% = parameter 0;
+%saved_rest_days%= parameter 0;
+
+%min_legal_rest_days%(abstime date) = nmax(%min_rest_days%, %min_vacation_length%(date));
+
+/* Minimum vacation length. Min lenght rule is only valid for variable crew.*/
+%min_vacation_length%(abstime date) = 
+  if leave_tables.%min_length_rule_is_active%(date) and
+         leave_crewinfo.%crew_is_variable_group%(date) then
+    leave_params.%min_vacation_block_length%(date)
+  else
+    0;
+ 
+/* This is the one used by the rest assigner
+ * If summer, we try to get crew full summer vacation, 
+ * otherwise, empty the accounts, possibly save some for next season */
+redefine export %rest_vacation_days%(AbsTime date, int balance) = 
+  if %rest_days_roster%(date) > %max_rest_days% then
+    %max_rest_days%
+  else if %rest_days_roster%(date) < %min_legal_rest_days%(date) then
+    0/*If it is not possible to give enough rest days no rest days at all should be granted*/
+  else
+    %rest_days_roster%(date);
+
+%rest_days_roster%(abstime date) =
+  if leave_tables.%season%(date) = leave_params.%seasonname%(date, "SUMMER") then
+    /* To get full summer vacation*/
+    leave_crewinfo.%full_summer_vacation_days%(date)
+    - %no_vacation_days_in_period_given_by_date%(date)
+    - %postponed_vacation_days_in_period%(date)
+  else
+    %max_rest_days%;
+
+%no_vacation_days_in_period_given_by_date%(AbsTime date) =
+   let start_date = leave_functions.%period_start_date%(date),
+    end_date = leave_functions.%period_end_date%(date);
+   default(max(tentative_roster, sum(extended_trip(chain),leave_basic.%trip_va_length_balance%) where
+				    (leave_basic.%trip_is_vacation% and %trip_is_in_period%(start_date, end_date))),
+	  0);
+
+
+

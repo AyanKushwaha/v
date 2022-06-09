@@ -1,0 +1,478 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   Soft rules are rules not covered by industrial agreements. Instead they
+ *   cover quality, stability, plausibility or are process enhancing.
+ *   Soft rules often express common sense in a formal rule.
+ *
+ * Sections:
+ *   1. Plausible connections
+ *   2. Crew check-in
+ *   3. Composition
+ *
+ * Created by:
+ *   Peter Jonsson, 24-Feb-2005
+ *
+ * Major changes:
+ *
+ */
+
+root module rules_soft_cct
+
+import fundamental;
+import base_utils;
+import levels;
+import trip;
+import duty;
+import leg;
+import crew;
+import crew_pos;
+import checkinout;
+import crg_crew_pos;
+import alert_server;
+import base_break;
+import rule_exceptions;
+import publish;
+import standby;
+import roster;
+import compdays;
+import rules;
+import rest;
+import wop;
+import bought_days;
+import training;
+
+/****************************************************************
+ * Section 1: Plausible connections
+ ***************************************************************/
+
+/*
+** Rule:
+**    No overlapping activities are allowed.
+**    This goes for training activities with status open as well.
+**
+** Description:
+**    Any roster containing overlapping activities is considered
+**    illegal.
+**
+** Functional rule:
+**    System specification Tracking,
+**
+*/
+export rule sft_plaus_no_overlapping_activities =
+  valid %is_roster% and
+	      not void(%prev_activity_end%) and
+        %this_activity_start% > %pp_start% and
+        not crew.%is_leased_duty_start%;
+  
+  %no_overlapping_activities_exist%;
+  
+failtext concat("Soft: ", (if %superfreeday_overlapping_open_course% then 
+                              "FS or F7S is overlapping with an open course." 
+                           else 
+                              "Overlaps with prev. activity."), 
+                           " Per diem cannot be calculated correctly!");
+  startdate = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  remark "(CCT) Func: No overlapping activities allowed",
+  planner "The rule checks that no activities are overlapping. If this rule fails"
+          "the per diem will not be possible to calculate.";
+end
+
+%no_overlapping_activities_exist% =
+  %diff_time_between_activities% >= 0:00 -
+  default(rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%), 0:00) and
+  not (%superfreeday_overlapping_open_course%);
+
+%prev_activity_end% = 
+    prev(leg(chain),leg.%end_hb%);
+
+%this_activity_start% = 
+    leg.%start_hb%;
+
+%this_activity_end% = 
+    leg.%end_hb%;
+
+%diff_time_between_activities% = %this_activity_start% - %prev_activity_end%;
+
+%superfreeday_overlapping_open_course% =
+  if leg.%is_FS% or leg.%is_F7s% then
+    default(any(times(training.%count_crew_course_name%),
+      %_superfreeday_overlapping_open_course%(training.%course_name_ix%(%times_index_0%))), False)
+  else
+    False;
+%_superfreeday_overlapping_open_course%(String course) = 
+  any(times(training.%count_crew_course_block%(course)), 
+    not void(training.%course_activity_code_ix%(
+      %times_index_0%,
+      course, 
+      %this_activity_start%, 
+      %this_activity_end%)
+    )
+  );
+
+
+/*
+** Rule:
+**    All trips should start and end at homebase
+**
+** Description:
+**    All trips in rosters that start from another stations than what is 
+**    defined as the crew homebase are illegal. This only applies to trips 
+**    assigned to crew. The rule ignores off duty trips, like vacation etc.
+**
+** Functional rule:
+**    System specification Tracking, 
+** 
+*/
+export rule sft_plaus_trip_start_and_end_at_homebase_all =
+  valid trip.%in_pp_extended% and 
+        fundamental.%is_roster% and 
+        trip.%is_on_duty% and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+        
+  (trip.%starts_at_homebase% or %trip_starts_with_base_break%) and
+  (trip.%ends_at_homebase% or %trip_ends_with_base_break%);
+  
+  startdate = trip.%start_UTC%;
+  failtext %sft_plaus_trip_start_and_end_at_homebase_all_failtext%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %sft_plaus_trip_start_and_end_at_homebase_all_failobject%;
+  remark "(CCT) Func: All trips must start and end at homebase",
+  planner "The rule checks that all trips start and end at homebase. "
+          "The rule only applies to trips assigned to crew.";
+end
+
+%sft_plaus_trip_start_and_end_at_homebase_all_failobject% =
+  if trip.%starts_at_homebase% or %trip_starts_with_base_break%
+  then trip.%failobject_end%
+  else trip.%failobject_start%;
+               
+%trip_starts_with_base_break% =
+  first(duty(trip), base_break.%duty_break_starts_trip%);
+
+%trip_ends_with_base_break% =
+  last(duty(trip), base_break.%duty_break_ends_trip%);
+
+%sft_plaus_trip_start_and_end_at_homebase_all_failtext% =
+  concat("Soft: Trip must ", 
+         (if trip.%starts_at_homebase% or %trip_starts_with_base_break%
+          then "end"           
+          else "start"),
+         " at hb [", trip.%crew_homestation%, "]");
+
+/****************************************************************
+ * Section 2: Crew Check-in
+ ***************************************************************/
+
+/*
+** Rule:
+**    Check-in
+**
+** Description:
+**    Crew must be checked in at check-in time
+**
+** Functional rule:
+*/
+export rule sft_cio_crew_must_check_in =
+  valid %is_roster% and
+        not crew.%is_leased_duty_start% and
+	      checkinout.%check_cio_status% and
+        rule_exceptions.%rule_on%(duty.%start_UTC%);
+  
+  not checkinout.%leg_crew_late_for_check_in%;
+  
+  startdate = duty.%start_UTC%;
+  failtext "Soft: Late for check-in";
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = alert_server.%failobject_leg_checkin_str%;
+  remark "(CCT) Func: Crew must check in.",
+  planner "The rule checks that crew are not late for check-in"
+          "The rule checks that crew are checked in "
+          "for flight duties and airport standbys. "
+          "Duties checked are those who's (start,end+2:00) overlap "
+          "with %now% ";
+end
+
+/****************************************************************
+ * Section 3: Composition checks
+ ***************************************************************/
+
+
+/* Variables needed for no open positions rule that is defined in
+** child modules.*/  
+
+%sft_open_no_open_positions_failtext% =
+  concat("Soft: open time ",
+         format_int(trip.%days%, "%d"), " days, ",
+         substr(%crew_pos_trip_assignment_info%, 1, length(%crew_pos_trip_assignment_info%)-1),
+         %station_info_txt%);
+
+%crew_pos_trip_assignment_info% = 
+  cat(times(10), 
+    concat(%int2str%(crew_pos.%trip_assigned_pos%(%times_index_0%)), crew_pos.%pos2func%(%times_index_0%), " "))
+  where (crew_pos.%trip_assigned_pos%(%times_index_0%) > 0);
+      
+%station_info_txt% =
+  let start_station = first(leg(trip),departure_airport_name),
+      end_station = last(leg(trip),arrival_airport_name);
+      
+  if start_station <> end_station then 
+    concat(" (",start_station, "-", end_station,")")
+  else 
+    concat(" (",start_station,")");
+
+%trip_all_deadhead% = all(leg(trip), leg.%is_deadhead%);
+%trip_all_manual% = 
+  all(leg(trip), leg.%is_manual_flight%)
+  where(not leg.%is_deadhead%);
+
+/*  
+** Prevent users to add activities that makes the account balance negative.
+*/
+rule sft_no_negative_balance_ALL =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        not crew.%is_leased_trip_start% and
+        trip.%code% in no_negative_balance_activity_set;
+        
+  compdays.%balance_at_date%(trip.%code%, trip.%start_hb%+00:01) +
+  rule_exceptions.%overshoot_int%(trip.%start_UTC%) >= 
+  0;
+  
+  startdate = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = trip.%failobject_start%;
+  failtext(Int value, Int limit) =
+    %sft_no_negative_balance_ALL_failtext%(value, limit);
+  remark "(CCT) Func: No activites assigned to a negative balanced account";
+end
+
+%sft_no_negative_balance_ALL_failtext%(Int value, Int limit) =
+  rules.%failtext_str%(concat("Func: Account balance ", trip.%code%), 
+                       %int_with_factor2str%(value, 100),
+                       %int_with_factor2str%(limit, 100));
+  
+set no_negative_balance_activity_set =
+  "F7S";
+
+/*
+** Warning if a normal rest has turned into short rest due to delays etc.
+*/ 
+
+rule sft_normal_rest_changed_to_short_ALL =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        rest.%is_short% and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+        
+  rest.%is_short_scheduled%;
+  
+  startdate = leg.%activity_scheduled_start_time_UTC%;
+  severity = %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = next(leg(trip), leg.%failobject_departure%);
+  failtext "Func: Planned normal rest is now short";
+  remark "(CCT) Func: Scheduled normal rest is now short",
+  planner "The rule will give a warning if a rest planned to normal turns"
+          " into a short rest due to delays or modified check-in time."
+          " The purpose is to give an indication of a probable cause for"
+          " related rule violations.";
+end
+
+/*
+** Warning if a roster contains empty days between wops.
+** TWS only.
+*/
+
+rule sft_empty_day_on_roster_ALL =
+  valid roster.%check_rules% and
+        not wop.%is_dummy% and
+        (wop.%end_day% + 24:00) < crew.%available_end% and
+        %next_wop_start_day_or_crew_available_end% > %pp_start_day% and
+        not crew.%is_leased_wop_start% and wop.%in_pp_extended%;
+        
+  %wop_empty_days_after_in_crew_available_period% <= 0;
+  
+  startdate = wop.%end_utc%;
+  severity =
+    last(leg(wop), %severity_filter_int%(leg.%end_hb%, %duty_lh_region%));
+  failobject = 
+    alert_server.%failobject_no_object%(crew.%utc_time%(wop.%end_day% + 24:00));
+  failtext %sft_empty_day_on_roster_ALL_failtext%;
+  remark "(CCT) Func: Empty days between wops are not allowed",
+  planner "The rule warns if a roster contains empty days between"
+          " working periods. Such empty days should not be published."
+          " Only full homebase days within the planning period are considered.";
+end
+
+%wop_empty_days_after_in_crew_available_period% =
+  ((%next_wop_start_day_or_crew_available_end% - wop.%end_day%) / 24:00) - 1;
+  
+%next_wop_start_day_or_crew_available_end% =
+  nmin(default(next(wop(roster), wop.%start_day%), crew.%available_end%),
+       %pp_end_date%);
+
+%sft_empty_day_on_roster_ALL_failtext% =
+  concat("Func: Empty day",
+         if %wop_empty_days_after_in_crew_available_period% > 1 then "s" else "",
+         " not allowed: ",
+         fundamental.%time_span_str%(
+           wop.%end_day% + 24:00,
+           wop.%end_day% + (24:00 * %wop_empty_days_after_in_crew_available_period%)));
+
+%pp_end_date% = %pp_end_day% + 24:00;
+
+/*
+** Rule:
+**    No open training allowed (alert_server only)
+**
+** Description:
+**    Any open training (even overbooked) is considered
+**
+** Functional rule:
+**    System specification Tracking, 
+**
+** Checks open-time ground duty trips.
+**   - The rule fails if the trip contains any leg with open
+**       time in a crew position that is not fully rostered.
+**   - The fail object is the first such leg within the trip.
+**   - Trips with only not operating legs are not considered.
+**   - The fail message will include:
+**       - activity code of the first leg in the trip,
+**       - the first and last station touched by underrostered legs,
+**       - the underrostered crew positions that can be resolved with 
+**           legs in the trip, and by which number (which always is less
+**           than or equal to the assigned value in the trip).
+**     Example: "Soft: Traininig open time A4, 1AP, 1AH (CPH-AMS)"
+*/
+
+export rule sft_open_no_open_positions_training =
+  valid alert_server.%check_alert_rules% and
+        not fundamental.%is_roster% and
+        trip.%in_pp_extended% and
+        %is_ground_duty_trip% and
+        not (trip.%is_standby% or trip.%is_blank_day%) and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+        
+  crew_pos.%trip_assigned% = 0; /* Just to avoid trips with no complement */
+  
+  startdate = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = first(leg(trip), leg.%failobject_departure%);
+  failtext %sft_open_no_open_training_positions_failtext%;
+  remark "(CCT) Func: Do not allow open time",
+  planner ""
+          "This rule is used to generate alerts for the alert server."
+          " A trip is of course not illegal just because all positions are"
+          " not covered, but this is the only way to let the alert"
+          " server recognize the open time.";
+end
+
+%is_ground_duty_trip% = any(leg(trip), leg.%is_ground_duty_leg%) where (not not_operating);
+
+%sft_open_no_open_training_positions_failtext% =
+  concat("Soft: Training open time ",
+         first(leg(trip), leg.%code%), ", ",
+         substr(%crew_pos_trip_assignment_info%, 1, length(%crew_pos_trip_assignment_info%)-1),
+         %station_info_txt%);
+
+/*
+** Rule:
+**    Bought days that haven't been assigned production
+**
+** Description:
+**    Check if there are any bought days that haven't been assigned production, 
+**    so that crew don't receive payment for them if they are forgotten!
+**
+**    This rule is on only in Alert Monitor, not in studio.
+**
+** Functional rule:
+**    User request, Jira SASCMS-5095
+*/
+export rule sft_bought_day_not_assigned_production_all =
+  valid trip.%in_pp_extended% and 
+        fundamental.%is_roster% and 
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%end_hb%);
+
+  not %bought_day_between_trips%;
+
+  startdate = trip.%end_hb%;
+  severity = last(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext %sft_bought_day_not_assigned_production_all_failtext%;
+  failobject = last(leg(trip), leg.%failobject_departure%);
+  remark "(CCT) Func: Bought day hasn't been assigned production",
+  planner "The rule checks that there aren't any bought days without assigned."
+          " production, which, if forgotten, will still result in crew"
+          " receiving payment";
+end
+
+%sft_bought_day_not_assigned_production_all_failtext% =
+  Concat("Func: Production not assigned on bought day ",
+         (if %days_between_trips% > 1 then
+            "in period "
+          else ""),
+         format_time(trip.%end_day% + 24:00,"%d%b%y"),
+         (if %days_between_trips% > 1 then
+            %period_end_text%
+          else ""));
+
+%period_end_text% =
+  Concat("-", format_time(next(trip(roster),trip.%start_day%) - 24:00,"%d%b%y"));
+
+/*
+** True if there is an unassigned bought day between the current trip and the
+** next trip in the roster.
+*/
+%bought_day_between_trips% =
+  let start = trip.%end_day%;
+  any(times(%days_between_trips%),
+    not void(bought_days.%start_time_t%(start + %times_index_0% * 24:00)));
+
+%days_between_trips% =
+  default((next(trip(roster),trip.%start_day%) - (trip.%end_day% + 24:00)) / 24:00,
+          0);
+
+/*
+** Rule:
+**    Time-off must not be assigned on bought days
+**
+** Description:
+**    Check that time-off activities are not assigned on bought days. 
+**
+**    If trackers decide that registered bought days are not to be used, they
+**    should be removed using the 'Buy days/Unmark days' function, but trackers
+**    sometimes forget this, and just assign F-days instead. That means that the
+**    days are still marked/registered as bought, and crew will receive payment
+**    for them. This rule is intended to prevent that happening.
+**
+** Functional rule:
+**    User request, Jira SASCMS-5095
+*/
+export rule sft_time_off_assigned_on_bought_day_all =
+  valid trip.%in_pp_extended% and 
+        fundamental.%is_roster% and 
+        not crew.%is_leased_trip_start% and
+        not void(bought_days.%start_time_t%(duty.%start_hb%)) and
+        rule_exceptions.%rule_on%(duty.%start_day%);
+
+  duty.%is_on_duty%;
+
+  startdate = duty.%start_day%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext "Func: Don't assign time-off on bought day - use 'Buy days/Unmark days'";
+  failobject = first(leg(duty), leg.%failobject_departure%);
+  remark "(CCT) Func: Don't assign time-off on bought day - use 'Buy days/Unmark days'",
+  planner "The rule checks that trackers don't try to assign time-off on bought"
+          " days, which will still result in crew receiving payment."
+          " They should instead use the 'Buy days/Unmark days' function";
+end
+
+
+/* End of file */
+

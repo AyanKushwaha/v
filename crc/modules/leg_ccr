@@ -1,0 +1,1146 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   This file contains the additional leg definitions needed in 
+ *
+ * Created by:
+ *   Joakim Oskarsson, 20-Dec-2005
+ *
+ * Major changes:
+ *
+ */
+
+module leg_ccr inherits leg
+
+import crew;
+import meal;
+import attributes;
+import crew_pos;
+import rest;
+import training;
+import training_matador;
+import standby;
+import trip;
+import oma16_defs;
+import hotel;
+import base_break;
+
+redefine %ci_except_position% =
+  if %is_deadhead% then
+      "DH"
+  else if not %is_roster% then
+    if %cabin_crew% then
+      "AP"
+    else
+      "FC"
+  else
+    crew.%rank_leg_start%;
+
+redefine export %is_pact% = personal_activity;          /* personal ground activity, on- or off-duty */
+redefine export %is_ground_duty% = ground_duty;         /* ground activity, on-duty */
+redefine export %is_ground_duty_leg% = ground_activity; /* non-personal ground duty, on- or off-duty */
+
+export %is_2_pilot_long_haul% =
+  %flight_crew% and
+  %is_active_flight% and
+  %is_long_haul% and
+  crew_pos.%total_flight_crew_need% = 2;
+
+export %is_freeday% = not %is_flight_duty% and task.%is_freeday%(%code%);
+
+/* Should be used in old code for crew attribute lookups */
+export %uuid_crew% = default(%map_uuid%, ground_uuid);
+
+/* Will use the latest available mapping */
+%map_uuid% = default(%map_uuid_new%, %map_uuid_old%);
+
+
+
+
+table leg_uuid_from_mapping_old =
+    crew.%id%, %code%, %start_utc%, %end_utc% -> 
+      string %map_uuid_old%;
+    external "crew_gnd_key_mappings";
+    crew, code, st, et -> uuid;
+    -,    -,    -,  -  -> void_string;
+end
+
+/* Map for ground duty attr, so udor can be 
+   used in matador and fileplan studio */
+table ground_udor_from_mapping =
+    %code%, %start_utc%, %end_utc%, %start_station% -> 
+      Abstime %map_ground_udor%;
+    external %ground_task_mappings%;
+    code, st, et, adep -> udor;
+    -, -, -, -  -> void_abstime;
+end
+
+/* This variable is for assigning attributes */
+export %fd_or_uuid% =
+  if %is_flight_duty% then
+    %flight_descriptor%
+  else if ground_duty then
+    %uuid%
+  else void_string;
+
+redefine export %starts_in_extended_pp% = 
+  %start_hb% >= (%pp_start% - 24:00) and 
+  %start_hb% < (%pp_end_extended% + 24:00);
+
+redefine export %end_hb% =
+  if %is_roster% then 
+    station_localtime(%_airport%, %end_utc%) 
+  else 
+    homebase_arrival_summer;
+
+redefine export %start_hb% =
+  if %is_roster% then
+    station_localtime(%_airport%, %start_utc%)
+  else
+    homebase_departure_summer;
+
+%_airport% = default(crew.%homeairport%, leg.%start_station%);
+    
+redefine export %is_on_duty% =  
+  %is_flight_duty% or
+  %is_deadhead% or
+  %task_is_on_duty%;
+
+/* NB! SKD CC compensation days are not to be considered as production days.
+**
+** 4ExNG - CMP days are to be considered as production days
+*/
+%task_is_on_duty% =  
+  task.%is_on_duty%(%code%) and
+  not (%cabin_crew% and crew.%is_skd% and
+       not crew.%k4exng_cc_sp5_1_valid%(leg.%start_utc%) and
+       task.%is_compensation_day%(%code%));
+
+export %is_loa% = task.%is_loa%(%code%);
+export %is_LAx% = task.%is_LAx%(%code%);
+redefine export %is_illness% = task.%is_illness%(%code%);
+redefine export %is_longterm_illness% = task.%is_longterm_illness%(%code%);
+redefine export %is_loa_la12% = task.%is_loa_la12%(%code%);
+export %is_on_duty_illness% = task.%is_on_duty_illness%(%code%);
+export %is_freeday_illness% = task.%is_freeday_illness%(%code%);
+export %is_illness_during_duty% = task.%is_illness_during_duty%(%code%);
+export %is_child_illness% = task.%is_child_illness%(%code%);
+export %is_child_illness_during_duty% = task.%is_child_illness_during_duty%(%code%);
+export %is_child_illness_entire_day% = task.%is_child_illness_entire_day%(%code%);
+export %is_unfit_for_flight% = task.%is_unfit_for_flight%(%code%);
+redefine export %is_unfit_for_flight_star% = task.%is_unfit_for_flight_star%(%code%);
+export %is_report_back% = not void(task.%report_back_base_code%);
+export %can_report_back% = not void(task.%report_back_code%);
+export %is_SI1% = leg.%code%="SI1";
+
+export %is_rotationsferie% = task.%is_rotationsferie%(%code%);
+
+/* CCR uses trip start as homebase */
+redefine export %homebase% = %trip_homebase%;
+redefine export %homeairport% = %trip_start_home_airport%;
+
+/*
+** FC can be on loan to another base, using one of the following models:
+** 
+** 1) Ad-hoc passive
+**
+** A single trip now and again, starting passive (may also be active) from, and
+** ending passive to, their home base. Any night stops are considered to be at
+** an outstation, even if they should be at the base they are on loan to, so
+** check-in/check-out and minimum rest requirements are as for an outstation.
+** All other legality rules applicable are those for the base/region they are
+** on loan to.
+**
+** This model is identified by the involved flights' CPE not being equal to the
+** pilot's homebase region.
+** 
+** 2) Long term passive
+** Several trips over a fixed longer period, each trip starting passive (may 
+** also be active) from, and ending passive to, their home base. Any night stops 
+** are considered to be at an outstation, even if they should be at the base 
+** they are on loan to, so check-in/check-out and minimum rest requirements are 
+** as for an outstation. All other legality rules applicable are those for the
+** base/region they are on loan to.
+**
+** This model is identified by the pilot's employer region not being equal to 
+** the pilot's homebase region.
+**
+** 3) Transport/stationing
+**
+** The pilot is stationed at another base, and trips start and end at that base.
+** It's the pilot's own responsibility to make him-/her-self available at the at 
+** the stationed base at the start of each trip. The stationed base is
+** considered to be home base for the trips, and any night stops within trips
+** are considered to be at outstations. All legality rules applicable are those
+** for the base/region they are on loan to.
+**
+** This model is identified by the pilot's station not being equal to the 
+** pilot's homebase.
+**
+*/
+ 
+redefine export %arrives_at_homebase% =
+  %arrival_airport_base% = %homebase%;
+ 
+redefine export %departs_from_homebase% = 
+  %departure_airport_base% = %homebase%;
+
+
+redefine %arrives_at_crew_homebase% =
+  if %is_roster% then
+    %arrival_airport_base% = crew.%homebase%
+  else
+    false;
+    
+redefine export %trip_homecountry% = 
+  if %is_roster% then
+    first(leg(trip), %start_country%)
+  else
+    default(homebase_country,"");
+
+  
+/* Region is a CREW property determining Agreement 
+   Region is defined by employer, or as crew.%region% when assigned */
+redefine export %region% = 
+  if %is_roster% then
+    %region_roster%
+  else %region_open_time%;
+  
+export %region_roster% =
+  if %is_roster% then crew.%region_at_date%(%start_hb%) else void_string;
+  
+redefine export %planning_group% = 
+  if %is_roster% then
+    crew.%planning_group_at_date%(%start_hb%)
+  else %planning_group_unassigned%;
+
+redefine %check_in_region_fc% =
+  if %is_roster% and crew.%is_on_loan_at_date%(%start_hb%) and
+     is_first(trip(wop)) where (not trip.%has_no_duty_time_contribution%) and
+     is_first(leg(trip)) and %departure_airport_base% = %homebase% then
+    fundamental.%region_at_base%(crew.%base_at_date%(%start_hb%))
+  else
+    %region%;
+
+redefine export %ac_employer_code% =
+  let ret = if %is_deadhead% then "" else %employer%; /* from leg */ 
+  if ret="SK" then "SKI"
+  else if ret<>"" then ret
+  else if %is_roster% then crew.%ac_employer_code_at_date%(leg.%start_hb%)
+  else ""; /* unassigned ground duty. may be further extended */  
+  
+export %leg_end_longitude% = arrival_longitude;
+export %leg_start_longitude% = departure_longitude;
+
+export %is_locked% =
+  preassigned_activity or environment_activity;
+/* Redefinition of homebase-dependant variables */
+redefine export %activity_start_time_hb% = station_localtime(%trip_start_home_airport%, activity_start_time);
+redefine export %activity_end_time_hb%  = station_localtime(%trip_start_home_airport%, activity_end_time);
+redefine export %activity_scheduled_start_time_hb% = station_localtime(%trip_start_home_airport%, activity_scheduled_start_time);
+redefine export %activity_scheduled_end_time_hb%  = station_localtime(%trip_start_home_airport%, activity_scheduled_end_time);
+redefine export %activity_estimated_start_time_hb% = station_localtime(%trip_start_home_airport%, activity_estimated_start_time);
+redefine export %activity_estimated_end_time_hb%  = station_localtime(%trip_start_home_airport%, activity_estimated_end_time);
+redefine export %activity_actual_start_time_hb% = station_localtime(%trip_start_home_airport%, activity_actual_start_time);
+redefine export %activity_actual_end_time_hb%  = station_localtime(%trip_start_home_airport%, activity_actual_end_time);
+
+/*
+ * Deadhead type code redefinition.
+ * Type could be "P" passive or "D" deadhead
+ */
+
+redefine %deadhead_code_condition% =
+ if fundamental.%is_roster% then 
+   crew.%country_at_date%(leg.%start_utc%) = "SE"
+ else
+   first(leg(trip), %is_sks%) where (leg.%is_active_flight%);
+
+/* "PRIVATE" attr affects duty_code.%leg_code%, but not leg.%deadhead_code% */ 
+redefine export %is_private_passive% = %is_deadhead% and %has_attr%("PRIVATE");
+
+
+redefine export %activity_private_passive_original_start_utc% =
+  if %is_private_passive% then
+    default(attributes.%assignment_attr_abs%("PRIVATE"), 
+      %activity_updated_scheduled_start_time_UTC%)
+  else
+    %activity_updated_scheduled_start_time_UTC%;
+    
+redefine export %activity_private_passive_original_end_utc% =
+  if %is_private_passive% then
+    default(attributes.%assignment_attr_abs%("PRIVATE")
+     + attributes.%assignment_attr_rel%("PRIVATE"), 
+      %activity_scheduled_end_time_UTC%)
+  else
+    %activity_scheduled_end_time_UTC%;
+   
+/* Definitions for apt qualifications/restrictions */
+table airport_or_area_tab(String apt) =
+  apt -> String %airport_area%;
+  external crew.%airport_requirements_table%;
+  Airport -> Area;
+  -       -> void_string;
+end
+
+export %area_or_airport%(String apt) =
+  let apt_area = default(%airport_area%(apt), "");
+  if apt_area = "" then
+    apt
+  else
+    apt_area;
+
+export %place%(String station) = %area_or_airport%(station);
+
+/****************************************************************
+ * Section 1: Per Diem definitions & rules
+ * Per Diem always reported in 1/4
+ ***************************************************************/
+
+/* Meal stop definition. */
+redefine export %meal_stop% = default(meal.%is_assigned_meal_stop%, false);
+
+redefine %perdiem_entitled_meal% = %meal_stop% or
+  default(meal.%is_assigned_meal_on_ground_in_ac%, false) or
+  default(meal.%is_assigned_meal_during_flight%, false);
+
+export %leg_has_meal_reduction% = 
+  default(meal.%is_assigned_meal_on_ground_in_ac% or meal.%is_assigned_meal_during_flight%, false);
+
+/****************************************************************
+ * Section 2: Training
+ ***************************************************************/
+/* Cached here for easy access */
+export %is_fc% = default(crew.%is_pilot%, false);
+export %is_cc% = default(crew.%is_cabin%, false);
+
+/* A shortcut to reduce typing */
+%has_attr%(String attr) = 
+    attributes.%assignment_has_attr%(attr);
+%_has_training_code%(String train_attr) =
+    default(%training_code% = train_attr, false);
+export %has_training_attr_any_crew%(String train_attr) =
+    attributes.%assignment_has_attr_any_crew%("TRAINING", train_attr);
+
+export %training_attr_any_crew% =
+    attributes.%cfd_attr_str_value_any_crew%("TRAINING");
+
+export %crewid_on_training_subtype%(String subtype) =
+    attributes.%cfd_crewid_with_attr%("TRAINING", subtype);
+
+export %has_training_attr_FLT_INSTR_OL_any_crew% =
+    attributes.%assignment_has_attr_any_crew%("TRAINING", "FLT INSTR OL");
+
+export %is_FLT_INSTR_OL% = %_has_training_code%("FLT INSTR OL");
+
+export %crewid_on_zftt_lifus% =
+    attributes.%cfd_crewid_with_attr%("TRAINING", "ZFTT LIFUS");
+export %crewid_on_lifus% =
+    attributes.%cfd_crewid_with_attr%("TRAINING", "LIFUS");
+export %crewid_on_fam_flt% =
+    attributes.%cfd_crewid_with_attr%("TRAINING", "FAM FLT");
+
+
+/* SKCMS-36 */
+export %crewid_on_new_hire_follow_up% =
+    attributes.%cfd_crewid_with_attr%("TRAINING", "NEW HIRE FOLLOW UP");
+
+
+export %mentor_crewid_on_new_hire_follow_up% =
+    if (%crewid_on_new_hire_follow_up% <> "-" )
+    then
+        default(crew.%new_hire_mentor_for_crew%(%crewid_on_new_hire_follow_up%), "-")
+    else
+        %crewid_on_new_hire_follow_up%;
+
+
+/* Common */
+export %is_training_or_has_training_code% =
+    %is_x_supernum_or_release% or %has_training_code%;
+
+export %release_attr% =
+  if %is_release% and (%start_date% <> %end_date%) then
+    "OVERNIGHT"
+  else "";
+export %is_release% =
+    %_has_training_code%("RELEASE")
+    or %_is_release%;
+
+export %is_release_and_not_tagged_release% =
+    %_is_release%
+    and not %_has_training_code%("RELEASE");
+
+%_is_release% =
+    not %_has_training_code%("X SUPERNUM")
+    and %is_supernum%
+    and leg.%is_cc_initial_training%
+    and %num_cc_initial_x_supernum_training_legs_to_leg% > training.%num_x_supernum_flight_needed%
+    and training_matador.%num_release_legs_after% <= training.%num_release_flight_needed% - 1;
+
+%is_cc_initial_training% = %is_active_flight% and training_matador.%leg_matches_acqual_in_x_supernum_period%;
+
+export %is_qual_start% = %_has_training_code%("QUAL START");
+export %is_requal_start% = %_has_training_code%("REQUAL START");
+export %is_new% = 
+    %is_active_flight% and(
+    %_has_training_code%("NEW") or
+    crew.%has_qual_restr_new_actype_on_leg% and not %has_training_code%);
+redefine export %is_supernum% = 
+    crew_pos.%assigned_pos_crew% = 4 or
+    crew_pos.%assigned_pos_crew% = 8;
+redefine export %is_course% = 
+  task.%is_course%(%code%);
+
+/* Cabin crew specific */
+export %is_ap_training% = 
+  %is_cc% and %_has_training_code%("AP TRAINING");
+export %is_as_training% = 
+  %is_cc% and %_has_training_code%("AS TRAINING");
+export %is_x_supernum% =
+  %is_cc% and (%_has_training_code%("X SUPERNUM")
+               or %_is_x_supernum%);
+
+export %is_x_supernum_instructor% =
+  %is_cc% and %instructor_code_safe% = "X SUPERNUM";
+export %is_x_supernum_and_not_tagged_x_supernum% =
+    %is_cc% and %_is_x_supernum%
+    and not %_has_training_code%("X SUPERNUM");
+
+%_is_x_supernum% =
+    %is_supernum% and
+    %is_cc_initial_training% and
+    not %is_release%;
+
+export %is_x_supernum_or_release% =
+    %is_x_supernum%
+    or %is_release%;
+
+%num_cc_initial_x_supernum_training_legs_to_leg% =
+    let leg_start = leg.%start_hb%;
+    count(leg(roster)) from(first) while(leg.%start_hb% <= leg_start) where (leg.%is_cc_initial_training%);
+
+export %is_cc_fam_flt% =
+    %is_cc% and %_has_training_code%("FAM FLT");
+export %is_cc_line_flight% =
+    %is_cc% and %_has_training_code%("LINE FLIGHT");
+export %leg_has_line_flight% =
+  %has_training_attr_any_crew%("LINE FLIGHT");
+export %is_cc_lc% = 
+  %is_cc% and %_has_training_code%("LC");
+export %is_cc_ilc% = 
+  %is_cc% and %_has_training_code%("ILC");
+export %is_cc_lc_or_ilc% =
+    %is_cc_lc% or %is_cc_ilc%;
+
+/* Flight crew specific */
+export %is_x_lifus% = 
+  %is_fc% and %_has_training_code%("X LIFUS");
+export %leg_has_x_lifus% =
+  %has_training_attr_any_crew%("X LIFUS");
+export %is_zftt_lifus% = 
+  %is_fc% and %_has_training_code%("ZFTT LIFUS");
+export %leg_has_zftt_lifus% = 
+  %has_training_attr_any_crew%("ZFTT LIFUS");
+export %is_lifus% = 
+  %is_fc% and %_has_training_code%("LIFUS");
+export %leg_has_lifus% =
+  %has_training_attr_any_crew%("LIFUS");
+export %leg_has_fam_flt% =
+  %has_training_attr_any_crew%("FAM FLT");
+export %is_fam_flt% = 
+  %is_fc% and %_has_training_code%("FAM FLT");
+redefine export %is_ilc% = 
+  %is_fc% and %_has_training_code%("ILC");
+export %leg_has_ilc% =
+  %has_training_attr_any_crew%("ILC");
+redefine export %is_lc% = 
+  %is_fc% and %_has_training_code%("LC");
+export %leg_has_zftt_x% =
+  %has_training_attr_any_crew%("ZFTT X");
+export %is_zftt_x% =
+  %is_fc% and %_has_training_code%("ZFTT X");
+export %is_etops_lifus_lc% =
+  %is_fc% and %_has_training_code%("ETOPS LIFUS/LC");
+
+export %leg_is_any_instructor_lifus% =
+    let instructor_attr = leg.%instructor_code%;
+    %is_fc% and (instructor_attr = "LIFUS" or instructor_attr= "X LIFUS" or instructor_attr= "ZFTT LIFUS"  or instructor_attr= "ZFTT X");
+
+export %leg_is_any_instructor_lc% =
+    let instructor_attr = leg.%instructor_code%;
+    %is_fc% and (instructor_attr = "LC" or instructor_attr= "ILC");   
+  
+    
+export %is_lifus_instructor% =
+  %is_fc% and %instructor_code% = "LIFUS";
+export %is_zftt_lifus_instructor% =
+  %is_fc% and %instructor_code% = "ZFTT LIFUS";
+
+export %is_crew_zftt_lifus_instructor% =
+  %is_fc% and %instructor_code% = "ZFTT LIFUS";
+
+export %is_crew_zftt_x_instructor% =
+  %is_fc% and %instructor_code% = "ZFTT X";
+
+
+ /* SKCMS-36 */
+/*
+  Assigned crew is tagged as NEW HIRE FOLLOW UP
+*/
+redefine export %is_new_hire_follow_up_student% = 
+  %is_fc% and %_has_training_code%("NEW HIRE FOLLOW UP");
+
+/*
+  Assigned crew is mentor for a crew that is tagged as NEW HIRE FOLLOW UP on this flight
+*/
+redefine export %is_new_hire_follow_up_mentor% = 
+  %is_fc% and training.%crew_is_new_hire_mentor%;
+
+
+redefine export %is_new_hire_follow_up% = %is_new_hire_follow_up_student% or %is_new_hire_follow_up_mentor%;
+
+export %is_fbf% = 
+  %is_fc% and %_has_training_code%("FBF");
+export %is_cnf% = 
+  %is_fc% and %_has_training_code%("CNF");
+export %is_t_flight% = 
+  %is_fc% and %_has_training_code%("T-FLIGHT");
+export %leg_has_t_flight% =
+  %has_training_attr_any_crew%("T-FLIGHT");
+
+export %is_any_lifus% = 
+  %is_lifus% or %is_zftt_lifus% or %is_x_lifus% or %is_etops_lifus_lc%;
+
+export %is_non_zftt_lifus% =
+  %is_lifus% or %is_x_lifus%;
+
+redefine export %is_any_lc% = 
+  %is_lc% or %is_ilc%;
+
+redefine export %is_any_pilot_on_lc_or_ilc% =
+  %is_any_lc% or
+  default(training.%is_lcp_on_lc% or
+          training.%is_lcp_on_ilc%,
+          false);
+  
+
+/*******************************
+ * Simulator specific 
+ *******************************/
+/* Exceptions to default definitions 
+Comp is an integer with base 20, i.e. need_fc*20^4+need_fp*20^3...
+Briefings is an reltime with base 1000
+*/
+redefine export %has_sim_exception% =
+  not void(%_sim_comp_exception%);
+  
+%_sim_comp_exception% =
+  attributes.%ground_task_int%("SIM EXC");
+  
+%sim_need_fc% = %_sim_need_fc%(%_sim_comp_exception%);
+%sim_need_fp% = %_sim_need_fp%(%_sim_comp_exception%);
+%sim_need_fr% = %_sim_need_fr%(%_sim_comp_exception%);
+%sim_need_tl% = %_sim_need_tl%(%_sim_comp_exception%);
+%sim_need_tr% = %_sim_need_tr%(%_sim_comp_exception%);
+  
+table sim_comp_exc2(Int value) =
+  value -> %_sim_need_fc%,
+           %_sim_need_fp%,
+           %_sim_need_fr%,
+           %_sim_need_tl%,
+           %_sim_need_tr%;
+  -     -> value/160000, 
+           (value mod 160000)/8000,
+           (value mod 8000)/400,
+           (value mod 400)/20,
+           value mod 20;
+end
+  
+table sim_comp_exc(Int pos) =
+  pos -> redefine export %sim_comp_exc%;
+  1   -> %sim_need_fc%;
+  2   -> %sim_need_fp%;
+  3   -> %sim_need_fr%;
+  9   -> %sim_need_tl%;
+  10  -> %sim_need_tr%;
+  -   -> 0;
+end
+
+%_sim_briefings_exception% =
+  attributes.%ground_task_rel%("SIM EXC");
+
+redefine %sim_brief_exc% = %_sim_brief_exc%(%_sim_briefings_exception%);
+redefine %sim_midbrief_exc% = %_sim_midbrief_exc%(%_sim_briefings_exception%);
+redefine %sim_debrief_exc% = %_sim_debrief_exc%(%_sim_briefings_exception%);
+  
+table sim_brief_exc(Reltime value) =
+  alias rem = value mod (1000*1000*0:01);
+  value -> %_sim_brief_exc%,
+           %_sim_midbrief_exc%,
+           %_sim_debrief_exc%;
+  -     -> value/(1000*1000),
+           rem/1000,
+           rem mod (1000*0:01);
+end
+
+%_sim_multi_exception% =
+  attributes.%ground_task_str%("SIM EXC");
+
+redefine %sim_is_multi_exc% = 
+  default(%_sim_multi_exception% = "multisim", false);
+  
+export %is_forced_sim_assist% =
+  %is_simulator% and 
+  %_has_training_code%("SIM ASSIST");
+
+export %is_sim_assist_landings% =
+  (%is_pc_or_opc% or %is_asf% or %is_ffs% or %is_ast%) and
+  %_has_training_code%("SIM ASSIST LANDINGS");
+
+export %is_forced_opc% =
+  %is_pc_or_opc% and 
+  %_has_training_code%("OPC FORCED");
+
+export %is_forced_pc% =
+  %is_pc_or_opc% and 
+  %_has_training_code%("PC FORCED");
+
+export %is_skill_test% =
+  %is_pc_or_opc% and 
+  %_has_training_code%("SKILL TEST");
+
+export %is_pc_change_month% =
+  %is_pc_or_opc% and
+  (%_has_training_code%("PC CHANGE")
+  or
+    (%_has_training_code%("PC RENEWAL") and
+    system_db_parameters.%new_training_codes_17_FD_valid%(leg.%start_utc%))
+  );
+
+export %is_pc_change_month_CHANGE% =
+  %is_pc_or_opc% and
+  %_has_training_code%("PC CHANGE");
+
+export %is_pc_change_month_RENEWAL% =
+  %is_pc_or_opc% and
+  %_has_training_code%("PC RENEWAL");
+
+redefine export %pc_change_date%(Abstime s, Abstime e) =
+  last(leg(roster), leg.%start_hb%)
+  where (leg.%start_hb% >= s and leg.%start_hb% < e and %is_pc_change_month%);
+
+export %is_airport_sim% =
+  %is_simulator% and 
+  %has_training_code% and
+  locate("SIM APT", %training_code%) > 0;
+
+export %airport_sim% =
+    if %is_airport_sim% then
+        substr(%training_code%, 9, 3)
+    else
+        void_string;
+
+export %is_any_sim_instr% =
+  %is_sim_instr% or
+  %is_sim_instr_supervis%;
+
+/* We can calculate these, but need to check them for migrated data */  
+export %is_sim_instr% =
+  %is_simulator% and
+ (%_has_training_code%("SIM INSTR") or crew_pos.%assigned_pos_crew% = 10);/* TR is sim inst now 31Oct2008 pergr */
+
+export %is_sim_lower% =
+  %is_simulator% and
+  (%_has_training_code%("SIM LOWER") or crew_pos.%lower_rank%);
+
+/* Special cases
+ * SIM INSTR SUPERVIS is when an extra instructor is supervising the regular
+ * instructor.
+ * SIM SUPERVIS is the instructor being supervised 
+ */
+export %is_sim_instr_supervis% =
+  %is_simulator% and crew_pos.%assigned_pos_crew% = 4 and
+  %_has_training_code%("SIM INSTR SUPERVIS"); /*Pos 4 is instr supervis on sim now 31oct2008 pergr*/
+
+export %is_sim_supervis% =
+  %is_simulator% and crew_pos.%assigned_pos_crew% = 10 and /*Pos 10 is instr on sim now 31oct2008 pergr*/
+  (%_has_training_code%("SIM SUPERVIS") or 
+   (not %is_sim_instr_supervis% and %has_training_attr_any_crew%("SIM INSTR SUPERVIS")));
+  
+export %is_sim_supernum% =
+  %is_simulator% and crew_pos.%assigned_pos_crew% = 4 and
+  not %_has_training_code%("SIM INSTR SUPERVIS");
+
+/* SKCMS-2278 */
+redefine export %is_waiting_at_airport% =
+if base_product.%is_tracking% then 
+  %code% in waiting_at_airport or %is_standby_at_airport_code%
+else
+  false;
+
+/* New with SASCMS-3924 */
+export %is_sim_instr_ol% = /* Supervisor */
+  %is_simulator% and crew_pos.%assigned_pos_crew% = 4 and
+  %_has_training_code%("SIM INSTR OL");
+
+export %is_sim_ol% = /* Instructor */
+  %is_simulator% and crew_pos.%assigned_pos_crew% = 10 and /*Pos 10 is instr on sim now 31oct2008 pergr*/
+  (%_has_training_code%("SIM SUPERVIS") or 
+   (not %is_sim_instr_ol% and %has_training_attr_any_crew%("SIM INSTR OL")));
+
+/* New with SASCMS-3924 */
+export %is_sim_instr_supol% = /* Supervisor */
+  %is_simulator% and crew_pos.%assigned_pos_crew% = 4 and
+  %_has_training_code%("SIM INSTR SUPOL");
+
+export %is_sim_supol% = /* Instructor */
+  %is_simulator% and crew_pos.%assigned_pos_crew% = 10 and /*Pos 10 is instr on sim now 31oct2008 pergr*/
+  (%_has_training_code%("SIM SUPERVIS") or 
+   (not %is_sim_instr_supol% and %has_training_attr_any_crew%("SIM INSTR SUPOL")));
+
+export %is_ol123_supervis% =
+  %is_ol123% and crew_pos.%assigned_pos_crew% = 8 and
+  %_has_training_code%("IO SUPERVISOR");
+
+export %is_ol123_instr% =
+  %is_ol123% and crew_pos.%assigned_pos_crew% = 10 and
+  %_has_training_code%("ISV SUPERVISION");
+
+export %is_cc_instr_ausc% =
+  %is_cc_inst_activity_ntc17% and %_has_training_code%("CC INSTR AUSC");
+
+export %is_cc_instr_exam% =
+  %is_cc_inst_activity_ntc17% and %_has_training_code%("CC INSTR EXAM");
+
+export %is_cc_instr_sen% =
+  %is_cc_inst_activity_ntc17% and %_has_training_code%("CC INSTR SEN");
+
+set pc_opc_types = 
+  "PC", 
+  "PCA3", 
+  "PCA4",
+  "PCA5",
+  "PCA3A5";
+
+/* When the update job is performed, it will tag legs that updates documents */
+export %is_performed_recurrent% =
+    attributes.%assignment_has_attr%("RECURRENT") or
+    leg.%is_cc_rec_web% and leg.%start_hb% < %now%;
+
+export %is_performed_pc% =
+    %is_performed_recurrent% and
+    attributes.%assignment_attr_str%("RECURRENT") in pc_opc_types;
+
+/* Basic definitions */
+/* We should try and use this constant in all cases to avoid
+ * inconsistencies */
+export %no_attribute% = "NONE";
+
+export %has_training_code% = 
+  not void(%training_code%);
+
+export %has_instructor_code% = 
+  not void(%instructor_code%); 
+  
+export %has_any_training_code_any_crew% =
+    %has_training_attr_any_crew%("");
+  
+export %training_code% = 
+  attributes.%leg_training_code%;
+
+export %instructor_code% = 
+  attributes.%leg_instructor_code%;
+  
+/* Creates a default value to all legs without training codes */
+export %training_code_safe% = default(%training_code%, %no_attribute%);
+
+export %training_flight_lookup% =
+  if %has_training_code% then %training_code%
+  else if %is_new% then "NEW"
+  else "NONE";
+
+export %instructor_code_safe% = default(%instructor_code%, %no_attribute%);
+
+export %can_have_attribute% =
+ not %is_deadhead% and
+  (%is_flight_duty% or %is_ol123% or %is_cc_inst_activity_ntc17% or (%is_simulator% and %is_ground_duty% and not %is_pact%));
+  
+export %can_have_attribute_assigned% =
+    %starts_in_pp% and %can_have_attribute%;
+  
+/* The text displayed when trying to set attribute on invalid object */
+%invalid_for_attribute_text% =
+    "Only valid on flights or simulators, in the planning period";
+
+redefine export %ofdx_valid% =
+  training.%ofdx_id_valid_for_crew%(%ofdx_id%, %start_utc%);
+
+redefine export %ofdx_attended% =
+  training.%leg_ofdx_attended%;
+
+/*
+**  Training causes extra ci / co.
+**  Sometimes also referred to as briefing / debriefing
+**  SKI crew has no extra debriefing time for training.
+*/ 
+redefine export %check_out_training_exception% =
+  default(
+    if %is_roster% and crew.%is_pilot%
+    then if crew.%is_ski%
+        then 0:00
+    else if training.%is_last_ilc% or training.%is_lcp_last_ilc%
+         then %debriefing_time_after_ilc%
+         else if training.%is_last_lc% or training.%is_lcp_last_lc% 
+              then 0:30
+              else if training.%is_last_new_hire_follow_up% 
+                   then /* SKCMS-36 */ 0:30    
+                   else 0:00
+    else void_reltime
+  , default(
+      if parameters.%extra_ci_for_cc_training_valid%(leg.%start_utc%) 
+         and (crew.%has_agmt_group_sks_cc% 
+              or (system_db_parameters.%additional_briefing_skn_skd_cc%(leg.%start_utc%) 
+                  and (crew.%has_agmt_group_skn_cc% or crew.%has_agmt_group_skd_cc%)
+                 )
+             ) 
+         and leg.%is_last_in_duty%
+         and (leg.%is_release% or training.%is_instr_release%)
+       then 00:10
+       else 00:00
+    , 0:00)
+  );
+
+%debriefing_time_after_ilc% =
+  if parameters.%schedule_directive_lcp_01jan12_valid%(%start_hb%) then
+    if crew.%has_restr_training_capt_leg_start% or
+       training.%is_lcp_on_ilc_for_new_capt% then
+      1:00
+    else
+      0:45
+  else
+    if crew.%is_skn% then
+      0:30
+    else
+      0:45;
+
+/*Extra seat*/
+export %is_extra_seat% = extra_seat; 
+/* 
+** Check-in 
+*/    
+
+redefine %check_in_default_fc_flight% =
+  default(%_check_in_exception%,
+          %_check_in_default_fc_flight%) +
+  default(%check_in_fc_training_exception%, 0:00);
+  
+redefine export %check_in_default_cc_flight% =
+  default(%_check_in_exception%,
+          %common_check_in_default_cc_flight%) +
+  default(%check_in_cc_training_exception%, 0:00);
+  
+%check_in_fc_training_exception% =
+    if %is_roster% then
+      if %has_training_attr_any_crew%("ZFTT LIFUS") and
+         (training.%is_first_zftt_lifus% or training.%is_instr_first_zftt_lifus%) and
+	 (training.%course_extends_zftt_lifus_ci%) then
+        0:30
+      else if %has_training_attr_any_crew%("LIFUS") and
+              (training.%is_first_lifus% or training.%is_instr_first_lifus%) then
+        0:15
+      else if %has_training_attr_any_crew%("FAM FLT") and
+              (training.%is_first_fam_flt% or training.%is_instr_first_fam_flt%) then
+        0:15
+      else
+        0:00
+    else
+      0:00;
+
+%check_in_cc_training_exception% =
+  if parameters.%extra_ci_for_cc_training_valid%(leg.%start_utc%) and
+     (crew.%has_agmt_group_sks_cc% or
+     (system_db_parameters.%additional_briefing_skn_skd_cc%(leg.%start_utc%) and (crew.%has_agmt_group_skn_cc% or crew.%has_agmt_group_skd_cc%))) and
+     leg.%is_first_in_duty% and
+     (training.%is_first_x_supernum% or training.%is_instr_first_x_supernum_except_skd%)
+    then 00:10
+  else 
+    0:00;
+      
+/* Spec says that this in N/A for SKI. Unclear if it means supervision is not
+   used, or that supervision is used, but check-ins aren't changed.
+   In case two this will need to be fixed /EKG 081026 */
+%training_sim_supervis_checkin_p% =
+  parameter 0:15
+  remark "TRAINING: Extra briefing time for supervision simulators";
+  
+%training_sim_supervis_checkout_p% =
+  parameter 0:30
+  remark "TRAINING: Extra debriefing time for supervision simulators";
+
+redefine %ci_sim_supervis% =
+    if %is_sim_supervis% or %is_sim_instr_supervis% or 
+       %is_sim_ol% or %is_sim_instr_ol% or 
+       %is_sim_supol% or %is_sim_instr_supol% then
+       %training_sim_supervis_checkin_p% else 0:00;
+        
+redefine %co_sim_supervis% = 
+    if %is_sim_supervis% or %is_sim_instr_supervis% or 
+       %is_sim_ol% or %is_sim_instr_ol% or 
+       %is_sim_supol% or %is_sim_instr_supol% then
+       %training_sim_supervis_checkout_p% else 0:00;
+
+/* At roster publication ground duty trips shall be converted 
+   to PACTS. The publish script uses this variable to find the 
+   appropriate legs */
+/* UPDATE: Legs that are part of a WOP that crossed the %publ% border
+** needs also to be converted to prevent double accumulation */
+export %published_wop_start% =
+    default(attributes.%assignment_attr_abs%("SBY"), %start_hb%);
+    
+%published_in_previous_pp% =
+    %published_wop_start% < %pp_start%;
+    
+%create_pact_at_publish% = 
+  %sby_or_bl_wop_starting_in_publ% and
+  %is_ground_duty% and
+  not %is_pact%;
+  
+%sby_or_bl_wop_starting_in_publ% =
+  (%in_publ_period% or
+   any(leg(wop), %in_publ_period%) or
+   (%is_standby_line% and %standby_line_start% < %pp_start%)) and
+  (%is_blank_day% or %is_standby%) and not
+  %published_in_previous_pp%;
+
+%sby_after_publ_period% =
+    %is_standby% and not %in_publ_period%;
+
+export %is_first_in_standby_line% =
+  if %is_standby_line% then
+    default(not prev(leg(roster), %is_standby_line% and
+                                  next(leg(roster), %start_utc%) < %end_utc% + 24:00),
+            true) or
+    %start_utc% > prev(leg(roster), %end_utc%) + 24:00
+  else
+    void_bool;
+export %is_last_in_standby_line% =
+  if %is_standby_line% then
+    default(not next(leg(roster), %is_standby_line% and
+                                  prev(leg(roster), %end_utc%) > %start_utc% - 24:00),
+            true) or
+    %end_utc% < next(leg(roster), %start_utc%) - 24:00
+  else
+    void_bool;
+export %standby_line_start% =
+  if %is_standby_line% then
+    if %is_first_in_standby_line% then
+      %start_hb%
+    else
+      prev(leg(chain), %start_hb%) where(default(%is_first_in_standby_line%, false))
+  else
+    void_abstime;
+
+/*********************************************************************
+ * 6. Publish/rescheduling
+ *********************************************************************/
+
+redefine export %published_time% = published_time;
+
+/**********************************************************************
+** 7. Rest time
+***********************************************************************/
+redefine export %preceded_by_minimum_rest% =
+  /* Vazquez_H: by the moment, this is only used for FC
+     if also needed for CC, there is a circularity problem */
+  %rest_time% <= rest.%minimum_time_fc%
+  and %is_first_in_duty%;
+redefine export %rest_end_UTC% = 
+  next(leg(chain), %ci_start_utc%) 
+  where(%is_first_in_duty% and not %is_rest%);
+redefine %rest_end_UTC_incl_bought% = 
+  next(leg(chain), %ci_start_utc%) 
+  where(%is_first_in_duty% and not %is_rest% and not %is_bought%);
+
+/**********************************************************************
+** 8. Homebase dependants
+***********************************************************************/
+ 
+redefine export %trip_homebase% = 
+  if %is_roster% then
+    first(leg(trip), default(crew.%station_at_date%(%start_utc%), %start_station%))
+  else
+    homebase;
+
+redefine export %trip_start_home_airport% =
+  if %is_roster% then
+    %_crew_trip_start_home_airport%
+  else if homebase = "STO" then
+    "ARN"
+  else
+    homebase;
+
+
+%_crew_trip_start_home_airport% =
+  let hb = %trip_homebase%;
+  if hb = "STO" then "ARN" else hb;
+  
+/**********************************************************************
+** 9. Per diem
+***********************************************************************/
+ /* Amount Per Diem in 1/4. */
+redefine export %per_diem_assigned_crew_amount% = 
+  if (%is_simulator_not_homebase% or %course_per_diem% 
+      or %is_deadhead% or default(%is_school_flight_not_homebase%, false)) 
+    then 1
+  else
+    %assigned_crew_amount%; 
+  
+/**********************************************************************
+** 10. Crew Bunks
+***********************************************************************/
+redefine %leg_crew_bunks_1_from_attr_fc% = attributes.%leg_crew_bunks_1_fc%;
+redefine %leg_crew_bunks_2_from_attr_fc% = attributes.%leg_crew_bunks_2_fc%;
+redefine %leg_crew_bunks_3_from_attr_fc% = attributes.%leg_crew_bunks_3_fc%;
+redefine %leg_crew_bunks_1_from_attr_cc% = attributes.%leg_crew_bunks_1_cc%;
+redefine %leg_crew_bunks_2_from_attr_cc% = attributes.%leg_crew_bunks_2_cc%;
+redefine %leg_crew_bunks_3_from_attr_cc% = attributes.%leg_crew_bunks_3_cc%;
+         
+redefine export %nr_rest_class_1_cc% = default(%leg_crew_bunks_1_from_attr_cc%, default(%_class_1_cabin_crew%(%ac_type%),0));
+redefine export %nr_rest_class_2_cc% = default(%leg_crew_bunks_2_from_attr_cc%, default(%_class_2_cabin_crew%(%ac_type%),0));
+redefine export %nr_rest_class_3_cc% = default(%leg_crew_bunks_3_from_attr_cc%, default(%_class_3_cabin_crew%(%ac_type%),0));
+redefine %nr_rest_class_1_fc% = default(%leg_crew_bunks_1_from_attr_fc%, default(%_class_1_flight_crew%(%ac_type%),0));
+redefine %nr_rest_class_2_fc% = default(%leg_crew_bunks_2_from_attr_fc%, default(%_class_2_flight_crew%(%ac_type%),0));
+redefine %nr_rest_class_3_fc% = default(%leg_crew_bunks_3_from_attr_fc%, default(%_class_3_flight_crew%(%ac_type%),0));
+
+
+/************************************
+ * Define blank day used for CR404
+*************************************/
+export %is_blank_day_BL% = task.%code% = "BL";
+
+/* Crew licence */
+export %licence_required% =
+  (%is_flight_duty% or %is_standby% or %is_blank_day%) and
+  not (crew.%is_cabin% and
+       (crew.%is_SKS% or crew.%is_SKI% or
+        (crew.%has_restr_new%(%start_hb%) and
+         (%is_x_supernum% or %is_deadhead%))));
+  
+/**
+*
+*  Per Diem
+*
+**/
+
+table link_per_diem_compensation(reltime per_diem_time) =
+  per_diem_time, %any_leg_has_hotel_svs% -> %svs_no_per_diem_in_minutes%;
+  (0:00, 12:00), - -> 0;
+  )12:00, 24:00), false-> 0; /* No perdiem without hotel stay for SAS Link */
+  )12:00, 24:00), true -> 1440; /* i.e. 24*60 */
+  > 24:00, -  -> round_up(per_diem_time,01:00)/0:01;
+end
+
+/** 
+*    SVS Perdiem tiem is calculated as
+*    LastLeg( %Activity_end_time_UTC%(ATA) + 0:30) - ( first_legets.%start_UTC(STD)% - 01:00)
+**/
+%svs_per_diem_time% =
+  if trip.%start_base% <> "CPH" OR
+   (trip.%has_flight_duty% and not trip.%is_standby%) then
+      if %activity_actual_end_time_UTC% = %abstimemin% and not leg.%_is_homebase_activity% then
+         default(
+            (last(leg(trip), %end_UTC%) where (not leg.%_is_homebase_activity%) + 0:30)
+            - (first(leg(trip), leg.%activity_scheduled_start_time_UTC%) where (not leg.%is_standby%) - 01:00)
+            , 0:00)
+      else
+         default(
+            (last(leg(trip), %activity_actual_end_time_UTC%) where (not %_is_homebase_activity%) + 0:30)
+            -  (first(leg(trip), leg.%activity_scheduled_start_time_UTC%) where (not leg.%is_standby%) - 01:00)
+            , 0:00)
+   else
+     0:00;
+
+%svs_per_diem_leg% =
+  if %_is_last_in_trip_not_base_activity% then
+      %svs_no_per_diem_in_minutes%(%svs_per_diem_time%)
+  else
+    0;
+
+%_is_last_in_trip_not_base_activity% = is_last(leg(trip)) where (not leg.%_is_homebase_activity%);
+%_is_homebase_activity% =
+  crew.%homebase% = leg.%start_base% and crew.%homebase% = leg.%end_base%;
+
+%any_leg_has_hotel_svs% = 
+  if %svs_per_diem_time% > 24:00 then
+    true
+  else
+    any(leg(trip), %need_hotel_svs%);
+
+export %per_diem_amount_at_date%(Abstime Date) =
+  if crew.%has_agmt_group_svs_at_date%(Date) then
+    %svs_per_diem_leg% 
+  else
+    if %per_diem_entitled% then
+      %per_diem_meal_stop% * %per_diem_assigned_crew_amount%
+    else
+      0;
+
+/* Additional definitions to check hotel for Link crew */
+%leg_start_lt% = leg.%activity_scheduled_start_time_lt%;
+%leg_end_lt% = leg.%activity_scheduled_end_time_lt%;
+
+%need_hotel_svs% =
+  leg.%is_hotel_flight_duty%
+  and not hotel.%is_cancelled_booking%
+  and not crew.%is_leased%(leg.%activity_scheduled_end_time_hb%)
+  and (%hotel_layover_svs% or %_ground_duty_hotel_layover_svs%) 
+  and not (base_break.%is_break_after% 
+            or default(next(leg(trip), base_break.%is_break_before%), 
+                      false))
+  and %has_depart_flight_svs%;
+
+%hotel_layover_svs% =
+  if %crew_is_ill_out_homebase_svs%
+    then default((next(leg(chain), %leg_start_lt%)
+                where (leg.%is_hotel_flight_duty%) - %leg_end_lt%) >= 5:00, true)
+  else 
+    default(%_leg_hotel_layover_svs%,
+            default(%_leg_hotel_layover_split_duty_hb_svs%, false));
+
+%_leg_hotel_layover_svs% =
+  let end_hotel = next(leg(trip), %leg_start_lt%)
+                  where (leg.%is_hotel_flight_duty%),
+      start_hotel = %leg_end_lt%;
+  any(leg(trip), (next(leg(trip), %leg_start_lt%) - %leg_end_lt%) >= 5:00)
+  where (%leg_end_lt% >= start_hotel and %leg_start_lt% < end_hotel);
+
+%_leg_hotel_layover_split_duty_hb_svs% =
+  let end_hotel = next(leg(wop), %leg_start_lt%)
+                  where (leg.%is_hotel_flight_duty%),
+      start_hotel = %leg_end_lt%,
+      leg_start_day = leg.%start_date%;
+  any(leg(wop), (next(leg(wop), %leg_start_lt%) - %leg_end_lt%) >= 6:00)
+  where (%leg_end_lt% >= start_hotel and %leg_start_lt% < end_hotel and leg_start_day = next(leg(wop), leg.%start_date%));
+  
+%_ground_duty_hotel_layover_svs% =
+  default(next(leg(duty), not leg.%is_hotel_flight_duty%)
+          and last(leg(duty), not leg.%is_hotel_flight_duty%)
+              where (%hotel_layover_svs%),
+          false);
+          
+%crew_is_ill_out_homebase_svs% =
+  default(not %_crew_arrives_at_homebase_svs%
+          and is_last(leg(trip))
+          and next(leg(chain), (leg.%is_illness%)),
+          false);
+
+%_crew_arrives_at_homebase_svs% =
+  leg.%arrival_airport_base% = leg.%homebase%;
+
+%has_depart_flight_svs% = 
+  if %crew_is_ill_out_homebase_svs%
+    then True
+  else
+    default(next(leg(wop), leg.%is_hotel_flight_duty%)
+            where(leg.%is_hotel_flight_duty%),
+            false);
+/* end of file */

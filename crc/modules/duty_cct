@@ -1,0 +1,259 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   Definitions of tracking specific duty fundamentals.
+ *
+ * Created by:
+ *   Peter Jonsson 28 feb 2006
+ *
+ * Major changes:
+ *
+ */
+
+module duty_cct inherits duty_ccr
+
+import leg;
+import rescheduling;
+import standby;
+import base_break;
+
+redefine export %rest_start_scheduled% =
+  %end_scheduled_hb%;
+
+
+/* Containing not operating legs.*/
+export %has_not_operating_leg% =
+  any(leg(duty), leg.%is_not_operating%);
+
+redefine export %is_operating% = 
+  any(leg(duty), not leg.%is_not_operating%) where(leg.%is_active_flight%);
+  
+redefine export %is_single_leg_standby_callout% =
+  %num_legs% = 1 and
+  first(leg(duty), leg.%is_standby_callout%);
+  
+redefine export %is_standby_callout% =
+  standby.%duty_is_standby_callout%;
+  
+export %is_airport_callout% =
+  standby.%duty_is_airport_callout%;
+  
+redefine export %is_sby_manual_duty_break% = 
+  last(leg(duty), leg.%is_sby_manual_duty_break%);
+
+redefine export %has_delayed_check_out% = 
+  default(%end_utc% > last(leg(duty), leg.%co_end_scheduled_utc%), false); 
+
+export %last_leg_has_landed% =
+  last(leg(duty),leg.%has_landed%);
+
+redefine export %has_waiting_at_airport% =
+  any(leg(duty),leg.%is_waiting_at_airport%);
+
+export %has_waiting_standby_at_airport_type% =
+  any(leg(duty),leg.%is_standby_at_airport_code%);
+
+export %start_first_waiting_at_airport% =
+ first(leg(duty),leg.%start_utc%) where (leg.%is_waiting_at_airport%);
+
+redefine export %waiting_time_at_airport_in_duty% =
+  sum(leg(duty), leg.%time%) where (leg.%is_waiting_at_airport%);
+
+export %first_airport_standby_in_duty_is_code_A% =
+ default(first(leg(duty),leg.%is_standby_at_airport_type_A%), false);
+
+
+/* a try to define active flight duties and other similar duties not allowed before tireing trips,
+   like single slip to far awayi. In tracking, unused standbys is allowed */
+redefine export %is_active_union_def% =
+  any(leg(duty), leg.%is_active_flight%
+    or (leg.%is_ground_duty% and leg.%is_on_duty% and not leg.%is_standby%  and not task.%is_compensation_day%(leg.%code%)));
+ 
+/*
+** Duty time calculation for a given period
+**
+*/
+
+redefine export %duty_time%(DutyCalculation dutycalc, Bool night_upg) =
+  let dstart = if dutycalc = overtime then %start_UTC_private% else %start_UTC%,
+      dend   = if dutycalc = overtime then %end_UTC_private% else %end_UTC%;
+  /* 1. off-duty activities contribute with zero as well as tasks defined as
+   *    no duty time contribution */
+  if %is_salary%(dutycalc) and %duty_is_not_valid_overtime% then
+    0:00
+  else
+    if duty.%is_privately_traded% then
+      rescheduling.%duty_time_before_ptd%(rescheduling.%_dt_part%)
+    else
+      if %is_roster% and ((not %is_on_duty%) or %has_no_duty_time_contribution% or
+              %is_bought% or
+              crew.%is_leased_without_overtime%(%start_hb%)) then 
+        0:00
+          else if %is_union_scheduled%(dutycalc) then
+            (%scheduled_end_UTC% - %scheduled_start_UTC%) +
+            %short_stop_duty_time_contribution% -
+            %duty_time_standby_reduction_16%(%scheduled_start_UTC%, %scheduled_end_UTC%) -
+            %net_reduction_skj%(dutycalc)
+      else
+    	(if (%is_roster% and %is_salary%(dutycalc) and
+             next(duty(chain), %is_bought%)) then
+      	   0:00
+         else
+      	  %short_stop_duty_time_contribution%) +
+        ((dend - dstart) - %duty_time_standby_reduction_16%(dstart, dend)) -
+        %net_reduction_skj%(dutycalc);
+
+redefine export %duty_time_spec_sched%(DutyCalculation dutycalc, Bool night_upg) =
+  let start = first(leg(duty), leg.%ci_start_utc%) where (not leg.%is_standby_callout%),
+      schedule_start = first(leg(duty), leg.%ci_default_start_utc%) where (not leg.%is_standby_callout%);
+
+  /* 1. off-duty activities contribute with zero as well as
+        tasks defined as no duty time contribution */
+  if %is_salary%(dutycalc) and %duty_is_not_valid_overtime% then
+    0:00
+  else if (not %is_on_duty%) or duty.%has_no_duty_time_contribution%  then
+    0:00
+   /* 2. Flight-duty or combined ground / flight duties
+        with or with-out night-upgrade and reduced by
+        standby-rest or duty-free-breaks */
+  else if %is_union_scheduled%(dutycalc) and duty.%is_standby_callout% then
+      (%scheduled_end_UTC% - schedule_start) +
+       %short_stop_duty_time_contribution%
+  else if duty.%is_standby_callout% then
+   (%end_UTC% - start) +
+   %short_stop_duty_time_contribution%
+   else if %is_union_scheduled%(dutycalc) then
+      (%scheduled_end_UTC% - %scheduled_start_UTC%) +
+       %short_stop_duty_time_contribution% -
+       %duty_time_standby_reduction_16%(%scheduled_start_UTC%, %scheduled_end_UTC%)
+  else
+   (%end_UTC% - %start_UTC%) +
+   %short_stop_duty_time_contribution% -
+   %duty_time_standby_reduction_16%(%start_UTC%, %end_UTC%);
+
+
+/* CR 463B: FD SH SKS and FD SH SKD should always count duty time on short stops
+   not at homebase */
+redefine %short_stop_duty_time_contribution_valid% =
+  (%flight_crew% or
+   crew.%k4exng_cc_sp5_1_valid%(duty.%start_day%))
+  and default(crew.%is_sks% or crew.%is_skd% or crew.%is_skn%, %is_sks% or %is_skd% or %is_skn%)      
+  and not duty.%is_long_haul%
+  and not %fd_skd_duty_as_subpart_q%      /* SASCMS-2711 */
+  and not is_last(duty(wop))
+  and %is_on_duty_not_rest% and next(duty(wop), %is_on_duty_not_rest%)
+  and %inside_short_stop_time_limits%;    
+  
+/* Modelled from subpart_q: %subq_sby_break_daytime_long_to_check_in% (SASCMS-2711)*/
+%fd_skd_duty_as_subpart_q% = 
+  (%flight_crew% and %is_skd%) and 
+  (last(leg(duty), leg.%is_standby% and
+        leg.%is_standby_callout%) and
+        (next(duty(chain), duty.%start_utc%) - duty.%end_utc%) >= 
+              oma16_defs.%subq_min_sby_break_to_check_in_no_duty%) and
+  time_of_day(%sby_callout_wlt_sh%) >= oma16_defs.%subq_sby_night_end% and
+  time_of_day(%sby_callout_wlt_sh%) < oma16_defs.%subq_sby_night_start%;
+
+%sby_callout_wlt_sh% =
+  last(leg(duty), standby.%callout_time%) + %homebase_tz_corrector%;
+
+/* Preserving old short stop contribution from CR319*/  
+%inside_short_stop_time_limits% =   
+  if not parameters.%short_stop_duty_time_valid%(duty.%start_hb%) then
+     overlap(%rest_start%, %rest_end%, 
+                 round_down(%rest_end%,24:00), 
+                 round_down(%rest_end%,24:00)+7:00) 
+     < 5:00
+  else
+    true;
+  
+redefine export %duty_time_scheduled%(DutyCalculation dutycalc, Bool night_upg) =
+  if (not %is_on_duty%) or duty.%has_no_duty_time_contribution% 
+    or crew.%is_leased_without_overtime%(%start_hb%) then 
+      0:00 
+  else
+    (%end_scheduled_UTC% - %start_scheduled_UTC%) -
+    %duty_time_standby_reduction_16%(%start_scheduled_UTC%, %end_scheduled_UTC%);
+   
+redefine export %duty_time_in_period%(Abstime a1, Abstime a2, Bool night_upg, DutyCalculation dutycalc) =
+  if duty.%is_privately_traded% then
+     rescheduling.%duty_time_before_ptd_in_period%(rescheduling.%_dt_part%, a1, a2)
+  else if default(%rest_end_UTC%, %end_utc%) <= a1 or %start_UTC% >= a2 or
+     duty.%is_bought% or
+     crew.%is_leased_without_overtime%(%start_hb%) then 
+    0:00
+  else if %start_UTC% >= a1 and default(%rest_end_UTC%, %end_utc%) <= a2 then
+    %duty_time%(dutycalc, night_upg) +
+      %prev_duty_short_stop_contribution_in_period%(a1, a2)
+  else if not %is_on_duty% or duty.%has_no_duty_time_contribution% then
+    0:00
+  else
+    overlap(%start_UTC%, %end_UTC%, a1, a2) +
+    %short_stop_duty_time_contribution_in_period%(a1,a2) -
+    %duty_time_standby_reduction_16%(a1, a2) -
+    %net_reduction_skj_overlap%(a1,a2,dutycalc);
+      
+redefine export %duty_time_in_period_scheduled%(Abstime a1, Abstime a2, Bool night_upg, DutyCalculation dutycalc) =
+  if %end_scheduled_UTC% <= a1 or %start_scheduled_UTC% >= a2 or duty.%is_bought% or duty.%is_privately_traded%
+    or crew.%is_leased_without_overtime%(%start_hb%) then 
+    0:00
+  else if %start_scheduled_UTC% >= a1 and %end_scheduled_UTC% <= a2 then
+    %duty_time_scheduled%(dutycalc, night_upg)
+  else if not %is_on_duty% or duty.%has_no_duty_time_contribution% then
+    0:00
+  else
+    overlap(%start_scheduled_UTC%, %end_scheduled_UTC%, a1, a2) -
+    %duty_time_standby_reduction_16%(a1, a2); 
+
+%convert_to_utc%(Reltime tim) =
+  let start_time = round_down(duty.%start_hb%, 24:00) + tim;
+  station_utctime(crew.%homebase%, start_time);
+
+/*
+ * The duty is normally finished if last leg has landed.
+ * Since a landing message can be missed we can't treat it like that though.
+ * (For CheckInOut.py)
+ */
+%is_finished% =
+  last(leg(duty), fundamental.%now% >= leg.%end_UTC%);
+  
+/* Apply as new definition of 'is_night_duty' based on JIRA SASCMS-2337
+   for only SKN and CC
+*/
+redefine %valid_interval%  =
+  let night_duty_cc_skn = scale_time(%start_scheduled_UTC%,%end_scheduled_UTC%,0, 
+                                     %night_duty_start_od%,%night_duty_end_od%,1);
+  if %cabin_crew% and duty.%is_SKN% then
+    if parameters.%k11_skn_cc_sp10_7_valid%(%pp_start%) then
+      night_duty_cc_skn > 1:00
+    else
+      night_duty_cc_skn > 0:00
+  else
+    scale_time(%start_UTC%, %end_UTC%, 0, 
+               %night_duty_start_od%, %night_duty_end_od%, 1) > 0:00;
+
+export %duty_has_airport_standby_code_A% =
+  any(leg(duty),leg.%is_standby_at_airport% and
+      not leg.%is_cancellation_standby%);
+
+redefine %rest_buffer_early_start_late_finish%(AbsTime reference_time) = 0:00;
+
+/* SKCMS-622 */
+redefine export %is_agmt_group_qa_or_cc_employer_qa% = crew.%agmt_group_id%="QA_CC_AG";
+
+
+export %has_base_break_after% =
+  default(last(leg(duty), base_break.%is_break_after%), false) or
+  default(next(duty(chain), first(leg(duty), base_break.%is_break_before%)) where(%is_on_duty%), false);
+  
+export %has_base_break_before% =
+  default(first(leg(duty), base_break.%is_break_before%), false) or
+  default(prev(duty(chain), last(leg(duty), base_break.%is_break_after%)) where (%is_on_duty%), false);
+
+export %has_frozen_est_blkoff% =
+      not void(first(leg(duty), attributes.%cfd_abs%("FROZEN_EST_BLKOFF")));
+
+/* end of file */
+

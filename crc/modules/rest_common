@@ -1,0 +1,621 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   This module contains rest definitions and calculations for both cabin crew 
+ *   and flight crew.
+ *
+ * Sections:
+ *
+ * Created by:
+ *   Henrik Albertson, 31-Mar-2005
+ *
+ * Major changes:
+ *   Rickard Petz�ll, 23-Oct-2009: Moved from rest to rest_common to allow some rest time limits
+ *                                 to be used in duty time calculations.
+ */
+
+module rest_common inherits rest
+import fundamental;
+import levels;
+import leg;
+import duty;
+import trip;
+import base_product;
+import hotel;
+import meal;
+import parameters;
+import keywords;
+import oma16;
+import duty_period;
+
+/*
+** Rest limits
+*/
+export %min_time% = 8:00;
+
+/* Night rest limit */
+/* Leg dependent */
+export %min_time_at_night% = %min_time% + %local_transport_default%;
+/* Duty/Trip dependent */
+export %trip_min_time_at_night% = last(duty(trip), %duty_min_time_at_night%);
+export %duty_min_time_at_night% = last(leg(duty), %min_time_at_night%);
+
+/* 24 hrs rest limit */
+table min_time_in_24_hrs =
+  %flight_crew%, duty.%region%, duty.%is_long_haul% ->
+    export %min_time_in_24hrs%;
+  
+  /* All FCSH: 8:00 + 1 x local_trspt */
+  true,    -,   false -> %min_time_at_night%;
+  
+  /* SKD CCSH: 8:00 + 1 x local_trspt */
+  false, "SKD", false -> %min_time_at_night%;
+  
+  /* SKS CCLH: Always 10:00 */
+  false, "SKS", true  -> 10:00;
+  
+  -, -, - -> %min_time_at_night%;
+end
+
+/* Standard rest time short haul = 8:00 + 2 x local_transport, used by SKN */
+table minimum_time =  
+  %flight_crew%, 
+     %fc_training_rest_between_simulator_passes%,
+        not trip.%is_ski%,
+           duty_period.%is_fdp% and  oma16.%is_extended_fdp% and default(next(duty(wop),%is_fdp_extension_min_rest_exception_k11_fc%), false),
+              duty.%is_skn%
+                -> %_minimum_time%;
+  y, y, -, -, - -> %fc_training_min_time_between_simulator_passes%;
+  y, n, y, n, - -> oma16.%min_rest_after_dp%;
+  y, n, n, -, y -> oma16.%min_rest_after_dp%;
+  -, -, -, -, - -> %min_time% + (2 * %local_transport_time%);
+end  
+
+/* Redefined in rest_ccr - Agreement: FC 1:3 mom3.c */
+%fc_training_rest_between_simulator_passes% = false;
+
+%fc_training_min_time_between_simulator_passes% = 16:00;
+ 
+
+/* SKS and SKD use only default local transport times */
+%_min_time_default% =
+  %min_time% + 2 * %local_transport_default%;
+  
+/* SKN does not include local transport before/after standby at home */
+export %min_time_homebase_skn% =
+  %_min_time_limit_skn% + 2 * %local_transport_default% -
+  /* No transport time on home sby */
+  (if leg.%is_standby_at_home% then %local_transport_default% else 0:00) -
+  (next(leg(chain), if leg.%is_standby_at_home% then %local_transport_default% 
+                    else 0:00));
+  
+%_min_time_limit_skn% =
+  if parameters.%k11_skn_cc_valid%(%pp_start%) then 8:15			/* K11 Jira 3205 */
+  else 8:00;
+
+/* Local transport is hotel transport time, if not found the default is 1:00 at
+ * station and 2:00 at homebase (1:00 for SKN). */
+export %local_transport_time% =
+  default(hotel.%slt_mean_time%,
+    default(%hotel_transport_time%, %local_transport_default%));
+  
+/* Use hotel transport times for SKN at station */
+%hotel_transport_time% =
+  if  %cabin_crew% and
+      leg.%is_SKN% 
+  then
+    hotel.%transport_time%(leg.%end_station%, hotel.%leg_hotel_id%, leg.%end_UTC%)
+  else void_reltime;
+
+/*
+ * Local transport default times
+ *   - CC SKN homebase/stn: 1:00
+ *   - All others homebase: 2:00
+ *   - All others station:  1:00 
+ */
+ 
+export %local_transport_default% =
+  if %cabin_crew% and leg.%is_SKN% then
+    1:00
+  else if leg.%arrives_at_homebase% then
+    2:00
+  else
+    1:00;
+
+/*
+** Hours in flight duty period surrounded by periods of minimum rest
+** Includes local transfer before duty. Used by the '20hrs from one min rest to
+** the next' rule
+**
+** NB! This doesn't assume that there is minimum rest before/after a trip.
+** That is of course part of the normal definition of a trip, but if there
+** for some reason isn't min rest, then it shouldn't be assumed for this rule
+** A warning should be given if the 20hrs rule is violated, so that users
+** don't just accept the missing min rest.
+ */
+export %time_since_previous_min_rest% = 
+  duty.%end_utc% - %end_previous_min_rest%;
+  
+%end_previous_min_rest% =
+  last(duty(wop), %_end_previous_min_rest%) from(current)
+  where(default(prev(duty(wop),%minimum_rest_satisfied%),true));
+  
+export %duty_rest_end_before% =
+  last(duty(trip), %_end_previous_min_rest%) from(current)
+  where(rest.%duty_preceded_by_minimum_rest%);
+  
+%_end_previous_min_rest% =
+  %__end_previous_min_rest%;
+
+%__end_previous_min_rest% =
+  if duty.%has_no_duty_time_contribution% then
+          duty.%rest_end_UTC%
+       else
+         duty.%start_utc% - 
+         first(leg(duty),hotel.%leg_local_transport_hotel_to_apt%);
+
+export %trip_minimum_time% = last(duty(trip), %duty_minimum_time%);
+export %trip_minimum_time_plan% = last(duty(trip), %duty_minimum_time_plan%);
+
+export %duty_minimum_time% = last(leg(duty), %minimum_time%);
+export %duty_minimum_time_plan% = last(leg(duty), %minimum_time_plan%);
+
+/* Minimum rest time allowed for COMPENSATION purposes */
+redefine export %minimum_time% = 
+  if %flight_crew% then %minimum_time_fc% else %minimum_time_cc%;
+  
+/* Minimum rest time allowed to PLAN for */
+export %minimum_time_plan% =
+  if %flight_crew% then
+    %minimum_time_fc%
+  else
+    %minimum_time_cc_plan%;
+
+%fdp_extension_min_rest_exception% =
+  if leg.%arrives_at_homebase% then
+    12:00
+  else
+    10:00;
+    
+table rest_time_limits_fc =
+  %short_haul_rest%,
+  leg.%arrives_at_homebase%,
+  parameters.%k12_fc_sp4_2_valid%(duty.%start_hb%) and %local_nights_exception_lh_fc%,
+  parameters.%k15_fc_lh_single_slipping_valid%(duty.%start_hb%) and %destination_has_local_night_exception_LH_FC_K15% ->
+  redefine export %minimum_time_fc%;
+  true,  false,   -  ,   -   -> %_minimum_time%;
+  true,  true ,   -  ,   -   -> %_minimum_time%;
+  false, false, true , false -> %min_at_station_lh_local_nights_exception_fc%;
+  false, false, false, false -> %min_at_station_lh%(true, true);
+  false, false,   -  , true  -> %min_at_station_lh_fc_k15%;
+    -  ,   -  ,   -  ,   -   -> 14:00; /* Max value of short rest for SH */
+end
+
+export %minimum_time_cc_plan% = 
+  %minimum_time_cc% +
+  (if not duty.%k4exng_cc_sp5_1_valid%(trip.%start_day%) and
+      duty.%is_skd% and leg.%arrives_at_homebase% and %short_haul_rest% then
+     2:00 - %_min_rest_reduction_hb_skd_cc%
+   else
+     0:00);
+
+table rest_time_limits_cc =
+  %short_haul_rest%,
+  leg.%arrives_at_homebase%,
+  default(duty.%is_agmt_group_qa_or_cc_employer_qa%, false) -> /* Cimber */
+    export %minimum_time_cc%;
+  
+  -  ,   true , false -> nmax(13:00, oma16.%min_rest_after_dp% ); /* currently 13 for SH, 14 for LH */
+  true , false, false -> oma16.%min_rest_after_dp%; /* currently 10 */
+  false, false, false -> 15:00;
+
+  
+  
+  -    , -  ,   true  -> oma16.%min_rest_after_dp%; /* currently 10, 12 or 14 */
+  
+  -    , -  ,   -     -> 14:00; /* Max value of short rest for SH */
+end
+
+export %night_duty_extra_rest_homebase_cc_skn% =
+  if parameters.%k11_skn_cc_sp10_7_valid%(%pp_start%) then
+    6:45
+  else
+    7:00;
+
+%night_duty_extra_rest_not_homebase_cc_skn% =
+  if parameters.%k11_skn_cc_sp10_7_valid%(%pp_start%) then
+    5:00
+  else
+    7:00;
+
+/* Some duties don't have a region (deadhead duties), in that case we check the trip. */
+%_duty_region_safe% = if duty.%region% = "" then trip.%region% else duty.%region%;
+
+/* Short haul rest applies btw long haul leg and passive 
+ * transfer to homebase, or passive long haul flights */
+export %short_haul_rest% =
+  not %long_haul_rest%;
+  
+/* Long-haul rest i.e slipping rest time applies */
+%long_haul_rest% =
+  if %flight_crew% then
+    %long_haul_rest_fc%
+  else %long_haul_rest_cc%;
+  
+%long_haul_rest_fc% =
+  leg.%is_long_haul% 
+  and not leg.%arrival_is_interscand%;
+  
+%long_haul_rest_cc% =
+  leg.%is_long_haul% and (leg.%is_active_flight% or (not trip.%is_skd%)) and
+  ((duty.%is_ski% and leg.%arrival_is_interscand%) or
+   (not duty.%is_ski% and not leg.%arrival_is_interscand%));
+
+export %min_at_station_lh%(Bool double_slipping, Bool use_tz) =
+  (if use_tz then abs(duty.%start_time_zone% - duty.%end_time_zone%) else 0:00) +
+  (if double_slipping then 2 else 1) * duty.%block_time%;
+
+/* K15 */
+/* JIRA SKCMS-647 */
+/* by mikaelje HiQ 03JUL2015 */
+
+set FD_LH_stations_with_local_night_exception_K15_set =
+  parameter "BKK", "HKG", "PVG", "NRT", "SFO", "MIA", "LAX", "HND"
+  remark "FD LH stations with local night exception (K15)";
+
+%destination_has_local_night_exception_LH_FC_K15% =
+    last(leg(duty),leg.%end_station% in FD_LH_stations_with_local_night_exception_K15_set);
+
+%min_at_station_lh_fc_k15% =
+  (if leg.%end_od_lt% > 22:00 then
+     24:00 - leg.%end_od_lt% + 22:00
+   else
+     22:00 - leg.%end_od_lt%
+  ) + 8:00;
+
+/*
+** K12 FC SKI 6.2.8
+**
+** Instead of double slipping, some destinations require a minimum number of
+** loca1 nights' rest (local night = 2200-0800):
+**
+** NRT = 1
+** PVG = 1, but only in jun->aug
+** BKK = 2
+*/
+%min_at_station_lh_local_nights_exception_fc% =
+  (if leg.%end_od_lt% > 22:00 then
+     24:00 - leg.%end_od_lt% + 22:00
+   else
+     22:00 - leg.%end_od_lt%) + 10:00 +
+  (%nr_of_local_nights_exception_lh_fc% - 1) * 24:00;
+
+%local_nights_exception_lh_fc% =
+  let year_start = round_down_year(duty.%end_hb%);
+  last(leg(duty),leg.%end_station% = "BKK" or
+                 leg.%end_station% = "NRT") or
+  (last(leg(duty),leg.%end_station% = "PVG") and
+   duty.%end_hb% >= add_months(year_start,5) and
+   duty.%end_hb% < add_months(year_start,8));
+  
+%nr_of_local_nights_exception_lh_fc% =
+  if last(leg(duty),leg.%end_station% = "NRT" or
+                    leg.%end_station% = "PVG") then
+    1
+  else
+    if last(leg(duty),leg.%end_station%) = "BKK" then
+      2
+    else
+      99;
+  
+%lh_trip_to_west% = first(leg(trip), leg.%is_west_bound%) where (leg.%is_long_haul%);
+
+%short_before_long% =
+  duty.%is_short_haul% and
+  default(next(duty(chain), duty.%is_long_haul%), false);
+
+/* Agreement: CAU K06 C.1.2a, C.1.2b */
+%extended_duty_for_minimum_rest% =
+  /* Only duty is necessary to check since the extension is when at station.
+   * If it should be a short stop, the rest rule will never be checked and
+   * there are other limitations that prevent 2 short stops in a row, i.e.
+   * after a short stop at station the next night rest period must be at homebase. */
+  duty.%duty_time_scheduled%(duty.union, True) > 10:00 + %add_hrs%(duty.%ends_with_deadhead%, 1:00) and
+  not duty.%is_long_haul% and
+  (duty.%num_flight_legs% <= 3 or
+  (duty.%num_flight_legs% >= 4 and
+   (not meal.%is_required% or any(leg(duty), meal.%stop%))));
+
+/* SKD CC (short-haul) has minimum rest 14:00 until the duty is 
+** executing (registered departure on the first leg in duty) at which time
+** the limit is reduced to 12:00.
+** Redefined in cct submodule
+*/
+%_min_rest_reduction_hb_skd_cc% = 0:00;
+
+export %add_hrs%(Bool condition, Reltime value) = if condition then value else 0:00;
+
+/* Agreement: NKF/SBK 7.1, 7.2 */
+table rest_after_long_duty(Bool at_homebase) =
+  at_homebase, duty.%duty_time%(duty.union, True) ->
+    %rest_after_long_duty%;
+  true,  >12:00 -> 1:00;
+  false, >10:00 -> 2:00;
+  -, - -> 0:00;
+end
+
+/* Agreement: NKF/SBK 8.1 
+** NB! Standby with rest is not considered night-duty */
+%night_duty% =
+  ((not duty.%is_standby_with_rest%) and duty.%is_night_duty%) or
+   default(next(duty(chain), (not duty.%is_standby_with_rest%) and 
+                              duty.%is_night_duty%), false);
+
+/* 
+** Short stop definitions
+*/
+table short_stop_allowed =
+  %flight_crew%,
+  duty.%region%,
+  leg.%arrives_at_homebase%,
+  %night_stop% ->
+    export %short_stop_allowed%;
+  
+  /* Flight crew */
+  true,    -,   true,  true  -> false; /* Night short stop at homebase */
+  true,    -,   false, true  -> true;  /* Night short stop at station */
+  true,    -,   true,  false -> false; /* Day short stop at homebase */
+  true,    -,   false, false -> false; /* Day short stop at station */
+  
+  /* Cabin crew - DK */
+  false, "SKD", true,  true  -> true;  /* Night short stop at homebase */
+  false, "SKD", false, true  -> true;  /* Night short stop at station */
+  false, "SKD", true,  false -> true;  /* Day short stop at homebase */
+  false, "SKD", false, false -> true;  /* Day short stop at station */
+  
+  /* Cabin crew - NO */
+  false, "SKN", true,  true  -> false; /* Night short stop at homebase */
+  false, "SKN", false, true  -> false; /* Night short stop at station */
+  false, "SKN", true,  false -> false; /* Day short stop at homebase */
+  false, "SKN", false, false -> false; /* Day short stop at station */
+  
+  /* Cabin crew - SE */
+  false, "SKS", true,  true  -> false; /* Night short stop at homebase */
+  false, "SKS", false, true  -> true;  /* Night short stop at station */
+  false, "SKS", true,  false -> false; /* Day short stop at homebase */
+  false, "SKS", false, false -> true;  /* Day short stop at station */
+  
+  -, -, -, - -> false;
+end
+
+export %is_short_first_in_trip% = first(duty(trip), %is_short_in_duty_period%);
+export %is_short_last_in_trip% = last(duty(trip), %is_short_in_duty_period%);
+export %is_short_in_trip% = any(duty(trip), %is_short_in_duty_period%);
+
+export %is_short_last_in_duty% = last(leg(duty), %is_short%);
+export %is_short_in_duty_period% =
+  /* Night rest less than 8:00, i.e. same duty */
+  any(leg(duty), %is_short%) or
+  /* Night rest (8:00, min_rest), i.e. same duty period */
+  %duty_period_start_UTC%(duty.union) <> duty.%start_UTC% or
+  %duty_period_end_UTC%(duty.union) <> duty.%end_UTC%;
+
+export %is_short_in_next_duty_period% =
+  let this = %duty_period_start_UTC%(duty.union);
+  next(duty(trip), %is_short_in_duty_period%)
+  where (%duty_period_start_UTC%(duty.union) > this);
+
+export %is_short% =
+  leg.%is_last_in_duty%
+  and %duty_is_short%;
+export %is_short_scheduled% =
+  leg.%is_last_in_duty%
+  and %duty_is_short_scheduled%;
+export %duty_is_short% =
+  not duty.%has_no_duty_time_contribution% and
+  last(leg(duty), leg.%is_short_haul%
+                  and leg.%rest_time% < %minimum_time%);
+export %duty_is_short_scheduled% =
+  not duty.%has_no_duty_time_contribution% and
+  last(leg(duty), leg.%is_short_haul%
+                  and leg.%rest_time_scheduled% < %minimum_time%);
+  
+/* Rest is < 9:00 + local transport -> duty-time restrictions apply */
+export %is_short_scheduled_skn% =
+  leg.%is_last_in_duty% and
+  leg.%is_short_haul% and
+  leg.%rest_time_scheduled% < 9:00 + 2 * %local_transport_time%;
+  
+
+export %is_short_at_station% = %is_short% and not leg.%arrives_at_homebase%;
+export %is_short_at_homebase% = %is_short% and leg.%arrives_at_homebase%;
+
+export %is_short_in_prev_duty% =
+  default(prev(leg(trip), %is_short_at_station%)
+          where(leg.%is_last_in_duty%),
+  false);
+
+/* 
+** Duty period start/end (surrounded by minimum rest)
+*/
+/* Defined here as module duty cannot import module rest due to circularity. */
+export %minimum_rest_satisfied% = duty.%rest_time% >= last(leg(duty), %minimum_time%);
+export %minimum_scheduled_rest_satisfied%(DutyCalculation dutycalc) =
+  if duty.%is_salary%(dutycalc) then
+    duty.%rest_time_scheduled_private% >= last(leg(duty), %minimum_time_scheduled%)
+  else
+    duty.%rest_time_scheduled% >= last(leg(duty), %minimum_time_scheduled%);
+%minimum_time_scheduled% = 
+  if %flight_crew% then %minimum_time_fc% else %minimum_time_cc_scheduled%;
+ /* Will be redefined for CCT */    
+%minimum_time_cc_scheduled%  =  %minimum_time_cc%;  
+  
+export %duty_preceded_by_minimum_rest% =
+  is_first(duty(trip)) or
+  default(prev(duty(trip), %minimum_rest_satisfied%)
+            where (not duty.%has_no_duty_time_contribution%),
+          true);
+
+export %duty_followed_by_minimum_rest% =
+  is_last(duty(trip)) or
+  %minimum_rest_satisfied%;
+
+export %duty_preceded_by_minimum_scheduled_rest%(DutyCalculation dutycalc) =
+  is_first(duty(trip)) or
+  default(prev(duty(trip), %minimum_scheduled_rest_satisfied%(dutycalc))
+            where (not duty.%has_no_duty_time_contribution%),
+          true);
+
+export %duty_followed_by_minimum_scheduled_rest%(DutyCalculation dutycalc) =
+  is_last(duty(trip)) or
+  %minimum_scheduled_rest_satisfied%(dutycalc);
+
+export %duty_period_start_UTC%(DutyCalculation dutycalc) =
+  if %duty_preceded_by_minimum_rest% or %duty_preceded_by_minimum_scheduled_rest%(duty.union) then
+    if duty.%is_salary%(dutycalc) then
+         duty.%start_utc_private%
+       else
+         duty.%start_utc%
+  else 
+    prev(duty(trip), duty.%start_UTC%)
+    where (%duty_preceded_by_minimum_rest%);
+
+export %duty_period_end_UTC%(DutyCalculation dutycalc) =
+  if duty.%has_no_duty_time_contribution% or
+     %duty_followed_by_minimum_rest% or
+     %duty_followed_by_minimum_scheduled_rest%(duty.union) then
+    if duty.%is_salary%(dutycalc) then
+       duty.%end_utc_private%
+     else
+       duty.%end_utc%
+  else
+    next(duty(trip), duty.%end_UTC%)
+    where (%duty_followed_by_minimum_rest%);
+
+export %duty_period_scheduled_start_UTC%(DutyCalculation dutycalc) =
+  if %duty_preceded_by_minimum_scheduled_rest%(dutycalc) then
+    if duty.%is_salary%(dutycalc) then 
+    	duty.%start_scheduled_utc_private% 
+	else 
+		duty.%start_scheduled_utc%
+  else
+    prev(duty(trip), duty.%start_scheduled_utc%)
+    where (%duty_preceded_by_minimum_scheduled_rest%(dutycalc));
+    
+export %duty_period_scheduled_end_UTC%(DutyCalculation dutycalc) =
+  if %duty_followed_by_minimum_scheduled_rest%(dutycalc) then
+    if duty.%is_salary%(dutycalc) then 
+		duty.%end_scheduled_utc_private% 
+	else 
+		duty.%end_scheduled_utc%
+  else
+    next(duty(trip), duty.%end_scheduled_utc%)
+    where (%duty_followed_by_minimum_scheduled_rest%(dutycalc));
+
+export %duty_period_scheduled_rest_start_UTC%(DutyCalculation dutycalc) =
+  if %duty_preceded_by_minimum_scheduled_rest%(dutycalc) then
+    duty.%start_utc%
+  else
+    prev(duty(trip),
+       if duty.%is_salary%(dutycalc) then
+         duty.%start_scheduled_utc_private%
+       else
+         duty.%start_scheduled_utc%
+         )
+    where (%duty_preceded_by_minimum_scheduled_rest%(dutycalc));
+    
+export %duty_period_scheduled_rest_end_UTC%(DutyCalculation dutycalc) =
+  if %duty_followed_by_minimum_scheduled_rest%(dutycalc) then
+     if duty.%is_salary%(dutycalc) then
+       duty.%end_scheduled_utc_private%
+     else
+       duty.%end_scheduled_utc%
+  else
+    next(duty(trip), duty.%end_utc%)
+    where (%duty_followed_by_minimum_scheduled_rest%(dutycalc));
+    
+export %duty_is_last_in_duty_period%(DutyCalculation dutycalc) =
+  default(next(duty(trip), %duty_period_start_UTC%(dutycalc)) > %duty_period_start_UTC%(dutycalc), true);
+
+/* 
+** Rest definitions
+*/
+export %in_prev_duty% =
+  if flight_duty or not flight_duty
+  then prev(duty(trip), last(leg(duty), leg.%rest_time%))
+  else 0:00;
+
+export %day_stop% = is_last(leg(duty)) and duty.%is_day_stop%;
+  
+/* Touching period (02:00, 04:00) local homebase time zone */
+export %night_stop% = default(%_night_stop%, true);
+%_night_stop% =
+  scale_time(leg.%end_UTC%, next(leg(trip), leg.%start_UTC%), 0,
+             %night_stop_start%, %night_stop_end%, 1)
+  > 0:00;
+
+/* Taken from the current source code, HenrikA 30oct2006 */
+%night_stop_start% = 02:00 - leg.%homebase_tz_corrector%;
+%night_stop_end% = 04:00 - leg.%homebase_tz_corrector%;
+
+/* Agreement: FC 1:10 2.4, CAU H.1.1.2, H.2.1.4 */
+export %night_start% = 20:00;
+export %night_end% = 09:00;
+
+export %leg_night_start_UTC% = %night_start% - leg.%homebase_tz_corrector%;
+export %leg_night_end_UTC% = %night_end% - leg.%homebase_tz_corrector%;
+
+export %duty_night_start_UTC% = last(leg(duty), %leg_night_start_UTC%);
+export %duty_night_end_UTC% = first(leg(duty), %leg_night_end_UTC%);
+
+export %trip_night_start_UTC% = last(duty(trip), %duty_night_start_UTC%);
+export %trip_night_end_UTC% = first(duty(trip), %duty_night_end_UTC%);
+
+/*
+** Rest calculations
+*/
+/* A rest period is isolated if the duty is surrounded by 24hrs of rest */
+export %isolated_24hr_period% =
+  default(prev(duty(trip), duty.%rest_time%) >= 24:00, true) and 
+  (duty.%rest_time% >= 24:00 or is_last(duty(trip)));
+
+/* Rest in 24hrs is either the time from duty pass end until 24hrs from duty pass start
+ * or the rest time to next duty, if that is within 24hrs from duty pass start. 
+ * The rest can also be fulfilled if the rest time from the last leg in the next duty pass
+ * to the stop time (see below) is sufficient. Interesting for short stops. */
+export %in_24hrs% =
+  let stop   = %in_24hrs_stop%,
+      start = %in_24hrs_start%;
+  nmax(
+    nmin(stop - start, leg.%rest_time%),
+    default(stop - next(leg(trip), leg.%duty_end_UTC%) 
+                   where (leg.%duty_end_UTC% > start), 0:00));
+export %in_24hrs_stop% = 
+ leg.%duty_start_utc% + 24:00;
+%in_24hrs_start% = leg.%duty_end_utc%;
+
+export %in_24hrs_scheduled% = %in_24hrs%;
+%_in_24hrs_stop_scheduled% = %in_24hrs_stop%;
+%_in_24_hrs_start_scheduled% = leg.%duty_end_scheduled_UTC%;
+
+export %in_24hrs_duty% = default(first(leg(duty), %in_24hrs%), 0:00);
+
+/* Returns the rest time touching the interval 20:00 - 09:00 hb tz.
+ * The first nmax statement is to aviod adding the rest time before night end
+ * from the current duty end, i.e. duty_end = 07:30, the time between 
+ * 07:30 and 09:00 (1:30) must not be added. */
+export %night_rest% =
+  let night_end = next(leg(trip), %leg_night_end_UTC%);
+  scale_time(nmax(leg.%duty_end_UTC%, round_down(leg.%duty_end_UTC%, 24:00) + night_end), 
+             next(leg(trip), leg.%duty_start_UTC%), 0,
+             %leg_night_start_UTC%, night_end, 1);
+
+export %trip_night_rest% = void_reltime;
+
+export %duty_night_rest% = last(leg(duty), %night_rest%);
+
+export %is_fdp_extension_min_rest_exception_k11_fc% =
+  %param_table%("fdp_ext_min_rest_exception_k11_fc",duty.%group_code%,duty.%start_hb%);
+
+/* end of file */
+

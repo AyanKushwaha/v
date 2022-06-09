@@ -1,0 +1,493 @@
+/* -*- crc -*-
+ *
+ * 
+ *
+ * Purpose:
+ *   This file containes transport variables needed for reports.
+ *
+ * Created by:
+ *   Hugo Vazquez; 10-Oct-2007
+ *
+ * Major changes:
+ *
+ */
+
+module report_transport
+
+import report_common;
+import report_hotel;
+import fundamental;
+import trip;
+import duty;
+import leg;
+import task;
+import levels;
+import hotel;
+import crew;
+import crew_pos;
+import rest;
+import iterators;
+import base_break;
+import system_db_parameters;
+
+/* Mappings to other modules */
+export %crew_id% = crew.%id%;
+
+/* shortened version of variables for stetic purposes */
+%leg_STD_lt% = leg.%activity_scheduled_start_time_lt%;
+%leg_STA_lt% = leg.%activity_scheduled_end_time_lt%;
+
+export %flight_time_from_hotel% = %leg_STD_lt%;
+export %flight_time_from_airport% = report_hotel.%leg_end_hotel%;
+  
+export %pick_up_time_from_hotel% =
+  %leg_STD_lt% - leg.%check_in% - hotel.%leg_local_transport_hotel_to_apt%;
+
+export %pick_up_time_from_airport% = 
+  %leg_STA_lt%;
+  
+export %airport_from_hotel% =
+  leg.%start_station%;
+export %airport_from_airport% = 
+  leg.%end_station%;
+  
+export %flight_nr% = leg.%flight_descriptor%;
+export %flight_start% = leg.%udor%;
+export %flight_dep_stn% = leg.%start_station%;
+export %flight_arr_stn% = leg.%end_station%;
+
+export %region% =
+  hotel.%region%;
+export %ac_region% = %region%;
+
+%has_depart_flight% = 
+  if not %crew_is_ill_from_airport% then
+    if (duty.%is_first_in_b2b_subtrip%) then
+      next(leg(chain), leg.%is_hotel_flight_duty%)
+      where(leg.%is_hotel_flight_duty%)
+    else
+      next(leg(wop), leg.%is_hotel_flight_duty%)
+      where(leg.%is_hotel_flight_duty%)
+  else
+    default(next(leg(chain), leg.%is_hotel_flight_duty%)
+            where(leg.%is_hotel_flight_duty%),
+            false);
+
+%has_arrival_flight% =
+  if not %crew_is_ill_from_hotel% then
+    if (duty.%is_second_in_b2b_subtrip%) then
+      prev(leg(chain), leg.%is_hotel_flight_duty%)
+      where(leg.%is_hotel_flight_duty%)
+    else
+      prev(leg(wop), leg.%is_hotel_flight_duty%)
+      where(leg.%is_hotel_flight_duty%)
+  else
+    default(prev(leg(chain), leg.%is_hotel_flight_duty%)
+            where(leg.%is_hotel_flight_duty%),
+            false);
+
+%crew_is_ill_from_hotel% = 
+  default(not leg.%departs_from_homebase%
+          and is_first(leg(trip))
+          and prev(leg(chain), (leg.%is_illness%)),
+          false);
+
+%crew_is_ill_from_airport% = report_hotel.%crew_is_ill_out_homebase%;
+
+/* Currently transport is only booked when crew fly to and from an airport,
+   and a transport is associated to that airport*/
+   
+%has_associated_transport_from_hotel% =
+    default(not (%transport_id_from_hotel% = "default"), false);
+%has_associated_transport_from_airport% =
+    default(not (%transport_id_from_airport% = "default"), false);
+
+%leg_is_private% = leg.%is_passive_transfer% or leg.%is_private_passive%;
+
+%need_transport_from_hotel% =
+  default((leg.%is_on_airport% or %is_preceeded_by_hotel_standby%)
+          and not crew.%is_leased%(leg.%activity_scheduled_start_time_hb%)
+          and not %leg_is_private%
+          and not (base_break.%is_break_before% 
+               or default(prev(leg(trip), base_break.%is_break_after%), false)) 
+          and (%_layover_before% 
+               or %_ground_duty_from_hotel%) 
+          and %has_arrival_flight%
+          and not void(%default_transport_from_hotel%),
+          false);
+
+
+%is_preceeded_by_hotel_standby% =
+    default(prev(leg(trip), leg.%is_standby_at_hotel%), false);
+
+
+%need_transport_from_airport% =
+ default(leg.%is_on_airport%
+          and not crew.%is_leased%(leg.%activity_scheduled_end_time_hb%)
+          and not %leg_is_private%
+          and not (base_break.%is_break_after% 
+               or default(next(leg(trip), base_break.%is_break_before%), false)) 
+          and (%_layover_after% 
+               or %_ground_duty_from_airport%) 
+          and %has_depart_flight%
+          and not void(%default_transport_from_airport%),
+          false);
+
+%_ground_duty_from_hotel% = 
+  default(prev(leg(duty), not leg.%is_hotel_flight_duty%)
+          and first(leg(duty), not leg.%is_hotel_flight_duty%)
+              where (%_layover_before%),
+          false);
+%_ground_duty_from_airport% =
+  default(next(leg(duty), not leg.%is_hotel_flight_duty%)
+          and last(leg(duty), not leg.%is_hotel_flight_duty%)
+              where (%_layover_after%),
+          false);
+
+%_layover_before% = 
+  default(prev(leg(wop), %_layover_after%), false);
+%_layover_after% = report_hotel.%hotel_layover%;
+
+/* Retrieves hotel id*/
+export %hotel_id_from_hotel% =
+  if %crew_is_ill_from_hotel%
+          then
+            prev(leg(chain), report_hotel.%layover_hotel_id_override%)
+            where (leg.%is_hotel_flight_duty%)
+          else
+            prev(leg(wop), report_hotel.%layover_hotel_id_override%)
+            where(leg.%is_hotel_flight_duty%);
+    
+export %hotel_id_from_airport% =  
+  report_hotel.%layover_hotel_id_override%;
+  
+table default_hotel_from_hotel =
+  leg.%start_station% -> string %default_hotel_from_hotel%;
+  External hotel.%airport_hotel_table_p%;
+  "airport" -> "hotel";
+  -         -> "default";
+end
+
+/*
+** Retrieves transport id.
+** Day transport for duty pass and simulator 
+** training away from base. If no transport is found, 
+** but is needed, it returns default transport id*/
+export %transport_id_from_hotel% = 
+  if %need_transport_from_hotel% 
+  then %default_transport_from_hotel%
+  else void_string;
+export %transport_id_from_airport% =
+  if %need_transport_from_airport%
+  then %default_transport_from_airport%
+  else void_string;
+
+
+
+/* Retrieves default transport id used when no airport
+   or hotel is found */
+table default_transport_from_hotel =
+  leg.%start_station%,
+  %hotel_id_from_hotel% ->
+    String %default_transport_from_hotel%;
+  External %airport_hotel_table_p%;
+  "airport", "hotel" -> "transport";
+          -,       - -> "default";
+end
+
+
+table default_transport_from_airport =
+  leg.%end_station%,
+  %hotel_id_from_airport% ->
+    String %default_transport_from_airport%;
+  External %airport_hotel_table_p%;
+  "airport", "hotel" -> "transport";
+          -,       - -> "default";
+end
+
+
+/* Used to calculate the amount of crew to be picked up.*/ 
+export %crew_needing_transport_from_hotel% =
+    let crew = %crew_needing_transport_from_hotel_roster%
+            + %crew_needing_transport_from_hotel_open_trip%;
+        if(crew > 0) then
+            crew
+        else
+            %crew_needing_transport_from_hotel_A0%;
+
+export %crew_needing_transport_from_hotel_roster% =
+  let hotel_id = default(%hotel_id_from_hotel%, "None"),
+      pick_up_time = default(%pick_up_time_from_hotel%, 01Jan1986 0:00);
+  if hotel_id = "None" then 0
+  else
+  default(count(equal_legs)
+          where(%is_roster% and
+                %need_transport_from_hotel% and
+                %hotel_id_from_hotel% = hotel_id and
+                %pick_up_time_from_hotel% = pick_up_time),
+          0);
+export %crew_needing_transport_from_hotel_open_trip% =
+  let hotel_id = default(%hotel_id_from_hotel%, "None"),
+      pick_up_time = default(%pick_up_time_from_hotel%, 01Jan1986 0:00);
+  if hotel_id = "None" then 0
+  else
+  default(sum(equal_legs, crew_pos.%leg_assigned%)
+          where(report_common.%is_open_trip_all% and
+                %need_transport_from_hotel% and
+                %hotel_id_from_hotel% = hotel_id and
+                %pick_up_time_from_hotel% = pick_up_time),
+          0);
+
+/* Used to calculate the amount of crew which are deadhead, to be picked up from Hotel to Airport*/ 
+export %crew_needing_transport_from_hotel_dh% =
+  %crew_needing_transport_from_hotel_roster_dh%
+  + %crew_needing_transport_from_hotel_open_trip_dh%;
+
+export %crew_needing_transport_from_hotel_roster_dh% =
+  let hotel_id = %hotel_id_from_hotel%,
+      pick_up_time = %pick_up_time_from_hotel%;
+  default(count(equal_legs)
+          where(%is_roster% and
+                leg.%is_deadhead% and
+                %need_transport_from_hotel% and
+                %hotel_id_from_hotel% = hotel_id and
+                %pick_up_time_from_hotel% = pick_up_time),
+          0);
+
+export %crew_needing_transport_from_hotel_open_trip_dh% =
+  let hotel_id = %hotel_id_from_hotel%,
+      pick_up_time = %pick_up_time_from_hotel%;
+  default(sum(equal_legs, crew_pos.%leg_assigned%)
+          where(report_common.%is_open_trip_all% and
+                leg.%is_deadhead% and
+                %need_transport_from_hotel% and
+                %hotel_id_from_hotel% = hotel_id and
+                %pick_up_time_from_hotel% = pick_up_time),
+          0);
+
+/* Used to calculate the amount of crew, to be picked up from Airport to Hotel */
+export %crew_needing_transport_from_airport% =
+    let crew = %crew_needing_transport_from_airport_roster%
+             + %crew_needing_transport_from_airport_open_trip%;
+        if(crew > 0) then
+            crew
+        else
+            %crew_needing_transport_from_airport_A0%;
+
+
+export %crew_needing_transport_from_airport_roster% =
+  let hotel_id = %hotel_id_from_airport%,
+      pick_up_time = %pick_up_time_from_airport%;
+  default(count(equal_legs)
+          where(%is_roster% and
+                %need_transport_from_airport% and
+                %hotel_id_from_airport% = hotel_id and
+                %pick_up_time_from_airport% = pick_up_time),
+          0);
+
+export %crew_needing_transport_from_airport_open_trip% =
+  let hotel_id = %hotel_id_from_airport%,
+      pick_up_time = %pick_up_time_from_airport%;
+  default(sum(equal_legs, crew_pos.%leg_assigned%)
+          where(report_common.%is_open_trip_all% and
+                %need_transport_from_airport% and
+                %hotel_id_from_airport% = hotel_id and
+                %pick_up_time_from_airport% = pick_up_time),
+          0);
+
+/* These two functions are for finding ALL legs, including A-SBY.
+  But they are probably somewhat slow, so they are not called unless the result of
+  the above calls return 0 crew. */
+
+%crew_needing_transport_from_airport_A0% =
+    let hotel_id = %hotel_id_from_airport%,
+        pick_up_time = %pick_up_time_from_airport%;
+    default(
+        context(sp_crew,
+        sum(chain_set,
+        (count(leg(chain))
+            where(  leg.%is_standby_at_airport% and
+                    %need_transport_from_airport% and
+                    %hotel_id_from_airport% = hotel_id and
+                    %pick_up_time_from_airport% = pick_up_time )))),
+        0);
+
+%crew_needing_transport_from_hotel_A0% =
+    let hotel_id = default(%hotel_id_from_hotel%, "None"),
+        pick_up_time = default(%pick_up_time_from_hotel%, 01Jan1986 0:00);
+    if hotel_id = "None" then
+        0
+    else
+        default(
+            context(sp_crew, sum(chain_set, (count(leg(chain))
+                where(  leg.%is_standby_at_airport% and
+                        %need_transport_from_hotel% and
+                        %hotel_id_from_hotel% = hotel_id and
+                        %pick_up_time_from_hotel% = pick_up_time )))),
+            0);
+
+
+/* Used to calculate the amount of crew which are deadhead, to be picked up from Airport to Hotel */
+export %crew_needing_transport_from_airport_dh% =
+  %crew_needing_transport_from_airport_roster_dh% 
+  + %crew_needing_transport_from_airport_open_trip_dh%;
+
+export %crew_needing_transport_from_airport_roster_dh% =
+  let hotel_id = %hotel_id_from_airport%,
+      pick_up_time = %pick_up_time_from_airport%;
+  default(count(equal_legs)
+          where(%is_roster% and
+                leg.%is_deadhead% and
+                %need_transport_from_airport% and
+                %hotel_id_from_airport% = hotel_id and
+                %pick_up_time_from_airport% = pick_up_time),
+          0);
+
+export %crew_needing_transport_from_airport_open_trip_dh% =
+  let hotel_id = %hotel_id_from_airport%,
+      pick_up_time = %pick_up_time_from_airport%;
+  default(sum(equal_legs, crew_pos.%leg_assigned%)
+          where(report_common.%is_open_trip_all% and
+                leg.%is_deadhead% and
+                %need_transport_from_airport% and
+                %hotel_id_from_airport% = hotel_id and
+                %pick_up_time_from_airport% = pick_up_time),
+          0);
+  
+export %total_crew_needed% =
+  crew_pos.%total_cabin_crew_need% + 
+  crew_pos.%total_flight_crew_need%;
+export %assigned% = report_hotel.%assigned%;
+export %assigned_fc% = report_hotel.%assigned_fc%;
+export %assigned_cc% = report_hotel.%assigned_cc%;
+
+/* Used in transport booking report for iterate over legs in trips not assigned to crew. */
+export iterator layover_set_from_hotel =
+  partition(leg)
+  by(%has_associated_transport_from_hotel%,
+     %transport_id_from_hotel%,
+     %region%,
+     %flight_nr%,
+     %flight_start%,
+     %flight_dep_stn%,
+     report_common.%is_open_trip_all%);
+end
+
+export iterator layover_set_from_airport =
+  partition(leg)
+  by(%has_associated_transport_from_airport%,
+     %transport_id_from_airport%,
+     %region%,
+     %flight_nr%,
+     %flight_start%,
+     %flight_dep_stn%,
+     report_common.%is_open_trip_all%);
+end
+
+/* Performed transport report variables. */
+export %formatted_arrival_day% = report_hotel.%formatted_arrival_day%;
+export %arrival_day% = report_hotel.%arrival_day%;
+
+export %formatted_departure_day% = format_time(%departure_day%, "%a %02d%b");
+export %departure_day% = round_down(%flight_time_from_hotel% - hotel.%hotel_time_of_day_change%, 24:00);
+
+export %is_airport_hotel% = report_hotel.%is_airport_hotel%;
+
+/****************************************************************
+ * Interface to external tables
+ ***************************************************************/
+
+export %transport_table_p% =
+  parameter "transport"
+  remark "External table with transport names and contact information";
+ 
+export %transport_contract_table_p% =
+  parameter "transport_contract"
+  remark "External table with transport agreements, check-in/out times and cost";
+  
+export %hotel_transport_table_p% =
+  parameter "hotel_transport"
+  remark "External table with local transport times and costs to hotels";
+
+export %airport_hotel_table_p% = 
+  parameter "airport_hotel"
+  remark "External table linking airports to hotels and transports"; 
+
+export %transport_default_cost_p% =
+  parameter 4000 minvalue 0
+  remark "Default cost of one transport";
+
+export %transport_default_transport_cost_p% =
+  parameter 500 minvalue 0
+  remark "Default transport cost to/from a transport";
+
+export %transport_default_transport_time_p% =
+  parameter 1:00 minvalue 0:00
+  remark "Default transport time to/from a transport";
+
+
+/* airport_hotel */
+table airport_hotel_lookup_table(String airport_id) = 
+  airport_id -> String %hotel_airport_id%;
+  External %airport_hotel_table_p%;
+  "airport" -> "transport";
+  -         -> void_string;
+end
+
+/* transport_contract */
+table transport_contract_table(String transport_id, AbsTime validat) =
+  transport_id, validat ->
+    String %transport_contract_transport_id%,
+    AbsTime %transport_contract_validfrom%,
+    AbsTime %transport_contract_validto%,
+    Int %transport_contract_cost%,
+    String %transport_contract_contact%,
+    String %transport_contract_si%;
+    
+  External %transport_contract_table_p%;
+  /* Match a transport and date to a contract valid at 'validat' */
+  "transport", ("validfrom", "validto"( -> "transport",
+                                       "validfrom", 
+                                       "validto", 
+                                       "cost", 
+                                       "contact", 
+                                       "si";
+  /* Default values if no valid contract is found */
+  -, - -> "transport", 
+          void_abstime,
+          void_abstime,
+          %transport_default_cost_p%,
+          "",
+          concat("Default values, no match in table ", %transport_contract_table_p%); 
+end
+
+ /* transport */
+table transport_table(String transport_id) =
+  transport_id -> 
+    String %transport_name%, 
+    String %transport_street%, 
+    String %transport_city%,
+    String %transport_state%, 
+    String %transport_postalcode%,
+    String %transport_country%,
+    String %transport_tel%,
+    String %transport_fax%,
+    String %transport_si%,
+    String %transport_email%;
+    
+  External %transport_table_p%;
+  "id" -> "name", "street", "city", "state", 
+          "postalcode", "country", "tel", "fax", "si", "email";
+  - -> void_string, void_string, void_string, void_string, void_string,
+       void_string, void_string, void_string, void_string, void_string;
+end
+
+/* CR SASCMS-2014 */
+export %pick_up_time_correction%
+  = parameter 0:05
+  remark "Correction term to pick-up times shown in reports";
+
+export %Stockholm_taxi_valid% =
+  system_db_parameters.%stockholm_taxi_valid_17%(fundamental.%now%);
+
+/* end of file */

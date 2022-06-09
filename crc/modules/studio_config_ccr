@@ -1,0 +1,190 @@
+/* -*- crc -*-
+ *
+ *
+ *
+ * Purpose:
+ *   Redefining variables not available in preRostering.
+ *
+ * Created by:
+ *   07-Jun-2007: Erik Gustafsson,
+ *
+ * Major changes:
+ *
+ */
+
+module studio_config_ccr inherits studio_config_ccr_basic
+import crew_warnings;
+import studio_soft_locks;
+import rules_indust_ccr;
+import wop;
+
+/*******************************************************************
+**
+** Redefine Crew Header
+**
+********************************************************************/
+
+redefine %crew_header_text_top_left% =
+  if not %is_reference_roster_view% then
+    default(substr(crew.%login_name%,1,8),"No name") /*max 8 characters*/
+  else
+    "";
+
+redefine %crew_header_text_top_right% =
+  if not %is_reference_roster_view%
+    then default(crew.%rank%,"")
+    else "";
+
+redefine %crew_header_text_bottom_left% =
+  if not %is_reference_roster_view% then
+    default(crew.%employee_number%,
+        default(crew.%id%,"No empl. nr"))
+  else
+     %name_reference_plan%;
+
+redefine %crew_header_text_bottom_middle% =
+  if not %is_reference_roster_view%
+    then
+      if default(crew.%special_qual_pp_start%, "") <> ""
+        then crew.%special_qual_pp_start%
+        else
+          if default(crew.%_spec_sched_limit_int_to%("PartTime", crew.%available_start%),0) > 0
+            then
+              concat(format_int(crew.%crew_contract_part_time_factor_at_date%(crew.%available_start%),"%i"),"*")
+            else
+              format_int(crew.%crew_contract_part_time_factor_at_date%(crew.%available_start%),"%i")
+    else "";
+
+/*******************************************************
+ * Crew warnings rudob
+ *******************************************************/
+export %display_crew_warnings_p% =
+  parameter True
+  remark "Crew warnings: Display in crew margin";
+
+redefine %crew_header_text_bottom_right% =
+  if not %is_reference_roster_view%
+    then if %display_crew_warnings_p% and crew_warnings.%crew_has%
+           then crew_warnings.%crew_header_string%
+           else default(crew.%homebase%,"")
+    else "";
+
+redefine %crew_header_color_bottom_right% =
+  if not %is_reference_roster_view%
+    then if %display_crew_warnings_p% and crew_warnings.%crew_has%
+           then %color_crew_warning%
+           else %color_crew_header%
+    else %color_crew_header%;
+
+redefine %crew_header_color_bottom_left% =
+  if not %is_reference_roster_view%
+    then if annotations.%on_crew%
+           then %color_annotation%
+           else %color_crew_header%
+    else %color_crew_header%;
+
+redefine %crew_header_color_top_left% =
+  if not %is_reference_roster_view%
+    then %color_default%
+    else %color_crew_header%;
+
+redefine %crew_header_color_top_middle% =
+  if not %is_reference_roster_view%
+    then %color_default%
+    else %color_crew_header%;
+
+redefine %crew_header_color_top_right% =
+  if not %is_reference_roster_view%
+    then if rule_exceptions.%crew_has%
+           then %color_rule_exception%
+           else %color_default%
+    else %color_crew_header%;
+
+/*******************************************************
+ * Soft lock rudob
+ * Duplicate definition exist in studio_config_ccp
+ * This is to avoid importing module studio_soft_locks
+ * in Tracking rule set.
+ *******************************************************/
+
+/*
+** Leg color crr bottom middle: soft lock
+*/
+redefine %leg_color_bottom_middle_crr% =
+  if studio_soft_locks.%leg_color_bottom_middle% = -1 then
+    %leg_color%
+  else studio_soft_locks.%leg_color_bottom_middle%;
+
+/*
+** Leg color leg bottom middle: soft lock
+*/
+%leg_color_bottom_middle_leg% =
+  studio_soft_locks.%leg_color_bottom_middle%;
+
+/* Redefined rudobs */
+redefine %rudob_recency_display_p% =
+  parameter True
+  remark "Show markers for recency";
+
+redefine %rudob_show_rest_required_trip_p% =
+  parameter False
+  remark "Show markers for required rest after trip";
+
+redefine %rudob_crew_change_display_p% =
+  parameter False
+  remark "Show markers for crew changes";
+
+export %roster_bid_rudob_display_p% =
+  parameter True
+  remark "Show markers for roster bids";
+
+redefine %rudob_show_briefing_debriefing_time_p% =
+  parameter TRUE
+  remark "Show markers for briefing and debriefing time";
+
+/***************************************************************************
+ CC SKS Additional Free Weekend - related to 3.6 in studio_config_ccr_basic
+****************************************************************************/
+
+/* Additional free weekends */
+%rudob_additional_free_weekend_display% =
+    parameter False
+    remark "Show markers for additional free weekends (CC SKS)";
+
+%rudob_additional_free_weekend_start%(int ix) =
+    let s = %pp_start% + (ix - 1) * 24:00;
+    if %rudob_additional_free_weekend_display% and
+       rules_indust_ccr.%ind_additional_weekend_days_in_period_sks_valid_crew% and
+       s < round_up_month(%pp_start% + 0:01)
+    then
+        s
+    else
+        void_abstime;
+
+%rudob_additional_free_weekend_len%(int ix) =
+    let s = %pp_start% + (ix - 1) * 24:00;
+    /* No rudob if this is the same days covered by rudob above */
+    if s = round_up(%rudob_last_free_weekend_start%, 24:00) then 0:00 else
+    /* No rudob if this day isn't w/o duty */
+    if %days_without_duty_in_period%(s, s + 24:00) < 1 then 0:00 else
+    /* No rudob if this is not part of a 2+ day block of off duty - checks +/- 1 day around the current date */
+    if %days_without_duty_in_period%(s - 24:00, s + 48:00) < 2 then 0:00 else
+    /* Rudob only if this is a weekend */
+    if rules_indust_ccr.%day_is_a_weekend_day%(s) then 24:00 else 0:00;
+
+%days_without_duty_in_period%(abstime start, abstime stop) =
+    let on_duty_in_period = sum(wop(roster), overlap(start, stop, wop.%start_hb%, wop.%end_hb%))
+                            where (wop.%is_on_duty% and
+                                   wop.%start_hb% <= stop and
+                                   wop.%end_hb% >= start);
+    (stop - start - on_duty_in_period) / 24:00;
+
+%rudob_additional_free_weekend_top% = 55;
+%rudob_additional_free_weekend_bottom% = 45;
+%rudob_additional_free_weekend_color% = 6;
+%rudob_additional_free_weekend_text% = "Additional free weekend day";
+%rudob_additional_free_weekend_layer% = 0;
+%rudob_additional_free_weekend_delimiter% = false;
+
+/* end of file */
+

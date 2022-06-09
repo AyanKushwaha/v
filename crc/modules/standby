@@ -1,0 +1,181 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   Definitions for standby handling, common to rostering and tracking
+ *
+ * Sections:
+ *   1. Basic defines
+ *   2. Vars for accumulator usage
+ *
+ * Created by:
+ *   David Lennartsson, 9-June-2006
+ *
+ * Major changes:
+ *
+ */
+
+root module standby
+
+import levels;
+import wop;
+import trip;
+import duty;
+import leg;
+import crew;
+import crew_pos;
+import fundamental;
+import attributes;
+import annotations;
+import parameters;
+import system_db_parameters;
+
+/****************************************************************
+ * Section 1: Basic defines
+ ***************************************************************/
+
+/* 
+** standby block preceeded by something other than standby 
+** Identifies the start of a standby block
+** A standby block in this context is considered a block
+** of dayswise consecutive standby activities 
+** This definition is used since a wop can theoretically 
+** contain several sby trips divided by ex. an empty day
+** although it is assumed not to happen in the pairing and rostering phase.
+*/
+export %first_trip_in_standby_block% =
+  trip.%is_standby% and
+  (is_first(trip(wop)) or
+   prev(trip(wop), not (trip.%is_standby% and trip.%no_days_btw_trips_fwd%)));
+
+export %last_trip_in_standby_block% =
+  trip.%is_standby% and
+  (is_last(trip(wop)) or
+   next(trip(wop), not (trip.%is_standby% and trip.%no_days_btw_trips_bwd%)));
+  
+export %trip_is_standby_block% = 
+  %first_trip_in_standby_block%;
+
+export %callout_time% = void_abstime;
+export %airport_callout_time% = void_abstime;
+
+export %first_standby_in_wop_date% = 
+  default(first(duty(wop),duty.%start_UTC%) where(duty.%is_standby%), wop.%start_UTC%); 
+
+export %last_standby_in_wop_date% = 
+  default(last(duty(wop),duty.%end_UTC%) where(duty.%is_standby%), wop.%start_UTC%); 
+
+export %last_standby_in_publ_period% =
+  default(last(duty(wop),duty.%end_UTC%) where(duty.%is_standby% and duty.%end_utc% < %publ_period_end%), wop.%start_UTC%);
+
+/* Redefined in CCT module */
+export %leg_is_standby_callout% = false;
+export %leg_is_callout_from_standby% = false;
+export %leg_is_airport_callout% = false;
+export %leg_is_callout_from_airport% = false;
+
+/****************************************************************
+ * Section 2: Vars for accumulator usage
+ ***************************************************************/
+
+export %standby_days_in_period%(abstime p_start, abstime p_end) =
+  sum(trip(wop), trip.%days_in_period%(p_start, p_end))
+  where(trip.%days_in_period%(p_start, p_end) > 0
+        and trip.%has_standby_not_bought_day% 
+        and not trip.%is_standby_line%);
+
+export %scattered_standby_days_in_period%(abstime p_start, abstime p_end) =
+  sum(trip(wop), trip.%days_in_period%(p_start, p_end))
+  where(trip.%days_in_period%(p_start, p_end) > 0
+        and trip.%has_scattered_standby_at_home_not_bought_day%);
+
+export %isolated_standby_days_in_period%(Abstime p_start, Abstime p_end) = 0; 
+
+export %airport_standby_days_in_period%(abstime p_start, abstime p_end) =
+  sum(trip(wop), trip.%days_in_period%(p_start, p_end))
+  where(trip.%days_in_period%(p_start, p_end) > 0
+        and trip.%is_airport_standby%);
+
+/* Used for publish functionality*/
+export %duty_is_standby_callout% = false;
+export %duty_is_airport_callout% = false;
+
+/* Standby to AC qual mapping used in fast selects */
+
+%SBY_SKN_check% =
+  leg.%ac_region% = "SKN";
+
+/* Map standby code to ac family */
+table valid_sby_map = 
+  substr(leg.%code%, 2, 1), crew_pos.%leg_has_assigned_cc% -> export String %sby_ac_qual%;
+  "0", - -> "M0";                                     /* MD90 */
+  "1", - -> "EJ";                                     /* EJ */
+  "2", - -> "A2";                                     /* A320/321 */
+  "3", - -> if %SBY_SKN_check% or system_db_parameters.%converted_36_38% then "38" else "36";   /* B737-700 NG */
+  "4", true -> "AL";                                  /* A340 */
+  "4", false -> "A4";                                 /* A340 */
+  "5", true -> "AL";                                  /* A350 */
+  "5", false -> "A5";                                 /* A350 */
+  "6", true -> "AL";                                  /* A330 */
+  "6", false -> "A3";                                 /* A330 */
+  "7", - -> "CJ";                                     /* CRJ900 (Used to be Dash8 Q400) */
+  "8", - -> "M8";                                     /* MD80 */
+  "9", - -> "37";                                     /* B737-4/500 (classic) */
+  
+  -, -   -> "";
+end
+
+export %local_transport_time% =
+  %default_local_transport_time%;
+
+export %default_local_transport_time% = 
+  if leg.%is_standby_at_home% then
+    default(%special_transport_time%, %home_transport_time%)
+  else if leg.%is_standby_at_hotel% then
+    %hotel_transport_time%(leg.%start_station%)
+  else
+    0:00;
+
+/* 
+ Transport time with an extra minute added.
+ This is used to make standbys adjacent to another task overlap and in turn
+ display the standy callout form.
+*/
+export %default_local_transport_time_with_extra_minute% =
+  if %default_local_transport_time% > 0:00 then
+    %default_local_transport_time% + 0:01
+  else
+    %default_local_transport_time%;
+
+export %home_transport_time% = 
+  %home_transport_time_func%(leg.%start_station%, leg.%start_utc%, default(crew.%has_qln_lh_in_pp%,false));
+
+/* This function must be on chain level*/
+export %home_transport_time_func%(String station, abstime check_time, bool is_long_haul) = 
+  if fundamental.%flight_crew% then
+    if crew.%is_SKN% then
+      1:30
+    else
+      1:20
+  else if crew.%is_SKN% then
+    1:40
+  else if crew.%is_SVS% then
+    1:20
+  else if crew.%k4exng_cc_sp5_1_valid%(check_time) then
+    1:20
+  else
+    1:00;
+
+/* Read hotel transport time from table? */
+export %hotel_transport_time%(String station) = 0:40;
+
+%special_transport_time% = %special_transport_time_func%(leg.%start_hb%);
+export %special_transport_time_func%(Abstime check_time) = 
+  annotations.%property_on_time%("ST", check_time) * 0:01;
+
+/* SBY is converted to PACT at publish and tagged with the original wop.%start_hb%
+   /EKG 090305 */
+export %published_wop_start% = leg.%published_wop_start%;
+
+/* End of file */

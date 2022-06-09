@@ -1,0 +1,290 @@
+/* -*- crc -*-
+ *
+ * 
+ *
+ *   Code to support assignments in Studio:
+ *     1. assign trips from an etable
+ *     2. assign pacts from an etable
+ *     3  split/merge pacts
+**/
+                                                                               
+module studio_assign
+import fundamental;
+import levels;
+import crew;
+import trip;
+import leg;
+import task; 
+import crg_date;
+import crew_pos;
+import iterators;
+
+/*
+**  1. assign trips from an etable
+*/
+                                                                            
+export %table% = %etab_path%(%table_para%);
+%table_para% =
+  parameter "Fleet/Period/Preassignments.etab"
+  remark "ETAB: Preassignment table (trips)";
+ 
+/* Build a unique string to identify each trip. 
+   Modify this to suit your own trip assignment matching.
+   The assignment script does not require a strict unique key.
+*/
+export %trip_unique_string% = trip.%trip_unique_string%;
+
+/* -- this definition moved to trip module so it can be used in optimizer ruleset for kpis
+export %trip_unique_string% = cat(leg(trip), %leg_trip_contrib_string%);
+
+%leg_arrival_string% = format_time(arrival,"%d%b_%02H%02M:");
+%leg_trip_contrib_string% = 
+  if trip.%has_only_flight_duty% then
+    concat(%leg_arrival_string%,arrival_airport_name)
+  else
+    concat(%leg_arrival_string%,leg.%code%);
+*/
+
+export %crew_nr_preassignments% = 
+  default(%_crew_nr_preassignments%(crew.%id%), 0);
+
+table crew_table(string crewid) =
+    crewid -> int %_crew_nr_preassignments%;
+    External %table%;
+    CrewId      -> count(row_number);
+end
+
+/* These variables are only used in the assign python script */
+export %trip_string_ix% = %_trip_string%(crew.%id%, %py_index%);
+export %crew_func_ix% = %_crew_func%(crew.%id%, %py_index%);
+export %pact_code_ix% = %_pact_code%(crew.%id%, %py_index%);
+
+table preassigned_table(string crewid, int i) =
+    crewid, i -> string %_trip_string%, string %_crew_func%;
+    External %table%;
+    CrewId, match_number  -> TripDesc, CrewFunc;
+    -, -                  -> void_string, void_string;
+end
+
+/* Used by export report */
+%trip_departure_time_lt% =
+  first(leg(trip),leg.%start_lt%);
+  
+%trip_arrival_time_lt% = trip.%end_lt%;
+
+/* But, could of course be formatted in rave too */
+%trip_departure_time_lt_etab% = crg_date.%etab_abs%(%trip_departure_time_lt%);
+%trip_arrival_time_lt_etab% = crg_date.%etab_abs%(%trip_arrival_time_lt%);
+%leg_arrival_time_lt_etab% = leg.%end_lt%;
+
+/* working code... details to be decided
+   when building a trip tagging form... */
+export %trip_working_code% = "";
+ 
+/*
+**  2. assign pacts from an etable
+*/
+
+export %pact_table% = %etab_path%(%pact_table_para%);
+%pact_table_para% =
+  parameter "Fleet/Period/PactPreassignments.etab"
+  remark "ETAB: Preassignment table (pacts)";
+ 
+
+%crew_nr_pact_preassignments% = 
+  default(%_crew_nr_pact_preassignments_count%(crew.%id%), 0);
+
+table crew_pact2_table(string crewid) =
+    crewid -> int %_crew_nr_pact_preassignments_count%;
+    External %pact_table%;
+    CrewId      -> count(row_number);
+end
+
+/* Reformat abstime back to the etable string
+These variables are only used in the assign python script*/
+export %pact_start_etab_ix% = crg_date.%etab_abs%(%_pact_start%(crew.%id%, %py_index%));
+export %pact_end_etab_ix% = crg_date.%etab_abs%(%_pact_end%(crew.%id%, %py_index%));
+
+/*
+%pact_split_nr_legs%(abstime s, abstime e) = (e-s+23:59)/24:00;
+*/
+%pact_split_nr_legs%= 
+  (%mps_end_abstime% - %trip_departure_time_lt% +23:59)/24:00;
+
+%pact_split_int_nr_legs%(int s, int e) = (e-s+23*60+59)/(24 * 60);
+%pact_split_int_end%(int s, int e) = 
+  let tod_s=time_of_day(s * 0:01 + 1jan1986),
+      tod_e=time_of_day(e * 0:01 + 1jan1986);
+  if (tod_e>tod_s) then
+    s+(tod_e-tod_s)/0:01
+  else
+    s+(tod_e-tod_s)/0:01 + 24*60;
+
+table preassigned_pact_table(string crewid, int i) =
+    crewid, i -> 
+      string %_pact_code%, abstime %_pact_start%, abstime %_pact_end%;
+    External %pact_table%;
+    CrewId, match_number  -> Code,StartLocal,EndLocal;
+    -, -            -> void_string, void_abstime, void_abstime;
+end
+
+
+/*
+**  3  split/merge pacts
+*/
+
+/*
+ * Definitons for the Python script
+ *
+ * MPS - Merge (Off Duty) Pact Seq.
+ *
+ * Stefan Hammar, Carmen Systems AB. Sept 2004.
+ *
+ */
+ 
+%mps_possible_leg% =
+  leg.%safe_to_split_merge%
+  and personal_activity
+  and not environment_activity;
+/*  and not preassigned_activity; */
+   
+%mps_next_is_identical% =
+  default(%_mps_next_is_identical%,FALSE);
+
+%_mps_next_is_identical% =
+  let code = leg.%code%,
+      tod_s=time_of_day(departure),
+      tod_e=time_of_day(arrival),
+      airp = arrival_airport_name,
+      e = arrival;
+  %mps_possible_leg% 
+  and not is_last(leg(chain)) 
+  and next(leg(chain),%mps_possible_leg%
+		      and tod_s = time_of_day(departure)
+		      and tod_e = time_of_day(arrival)
+                      and code = leg.%code%
+                      and airp = arrival_airport_name
+                      /* close to each other */
+                      and departure - e < 24:00);
+
+%mps_first_identical_in_seq% =
+  %mps_next_is_identical%
+  and
+  (is_first(leg(chain))
+   or
+   prev(leg(chain),not %mps_next_is_identical%));
+
+%mps_end_abstime% =
+  if not %mps_possible_leg% then
+    void_abstime
+  else if not %mps_next_is_identical% then
+    %leg_arrival_time_lt_etab%
+  else
+    next(leg(chain),%leg_arrival_time_lt_etab%)
+      where (not %mps_next_is_identical%);
+
+%mps_next_leg_id% =
+  default(next(leg(chain),format_int(leg_identifier,"%d")),"");
+
+/* How do I write this in a nice way???
+%mps_first_leg_id_in_seq% =
+  default(min(leg(chain),format_int(leg_identifier,"%d"))
+          from(current) backwards
+          while(%mps_next_is_identical%)
+          where(%mps_first_identical_in_seq%),"");
+  
+*/
+/* Enhancement of Assign any position */
+
+table assign_rank(String type, Abstime date) =
+    type            -> %assign_rank%;
+    "SCHOOL_FLIGHT" -> if (crew.%has_restr_training_capt%(date) or
+                           crew.%has_restr_training_dct%(date)) then "FP"
+                       else "FC";
+    -               -> crew.%crewrank_at_date%(date);
+end
+    
+%first_open_position% =
+    first(times(10), %times_index_0%)
+    where (%trip_has_pos%(%times_index_0%));
+    
+%trip_has_pos%(Int pos) =
+    first(leg(trip), crew_pos.%leg_assigned_pos%(pos) > 0);
+    
+%assign_position%(Int rank) =
+    if %trip_has_pos%(9) then "TL"
+    else if %trip_has_pos%(10) then "TR"
+    else %_assign_position%(rank);
+    
+table trip_assign_position(Int rank) =
+    rank    ->  %_assign_position%;
+    1       ->  if %trip_has_pos%(1) then "FC"
+                else if %trip_has_pos%(2) and not trip.%is_standby% then "FP"
+                else if %trip_has_pos%(3) and not trip.%is_standby% then "FR"
+                else void_string;
+    2       ->  if %trip_has_pos%(2) then "FP"
+                else if %trip_has_pos%(3) and not trip.%is_standby% then "FR"
+                else void_string;
+    3       ->  if %trip_has_pos%(3) then "FR"
+                else if trip.%is_simulator% and %trip_has_pos%(2) then "FP"
+                else void_string;
+    5       ->  if %trip_has_pos%(5) then "AP"
+                else if %trip_has_pos%(7) and not trip.%is_standby% then "AH"
+                else void_string;
+    6       ->  if %trip_has_pos%(6) then "AS"
+                else if %trip_has_pos%(7) and not trip.%is_standby_line% then "AH"
+                else void_string;
+    7       ->  if %trip_has_pos%(7) then "AH"
+                else void_string;
+    -       ->  void_string;
+end
+
+/* Helper variabels for simulator exceptions */
+%has_sim_exception% = 
+  first(leg(trip), leg.%has_sim_exception%)
+  where (leg.%is_simulator%);
+  
+%sim_brief% = 
+  %_sim_brief%/0:01;
+%sim_midbrief% = 
+  %_sim_midbrief%/0:01;
+%sim_debrief% = 
+  %_sim_debrief%/0:01;
+
+%_sim_brief% =
+  first(leg(trip), leg.%check_in%)
+  where (leg.%is_simulator%);
+  
+%_sim_midbrief% =
+  default(last(leg(trip), leg.%check_in%)
+          where (leg.%is_simulator% and prev(leg(trip), leg.%is_simulator%)),
+          0:00);
+  
+%_sim_debrief% =
+  last(leg(trip), leg.%check_out%)
+  where (leg.%is_simulator%);
+  
+%sim_is_multi% =
+  first(leg(trip), leg.%sim_type_is_multi%)
+  where (leg.%is_simulator%);
+  
+%sim_need%(int pos) = 
+  first(leg(trip), crew_pos.%need_in_pos%(pos))
+  where (leg.%is_simulator%);
+  
+%sim_book%(int pos) = 
+  first(leg(trip), crew_pos.%leg_booked_pos%(pos))
+  where (leg.%is_simulator%);
+  
+%sim_need_fc% = %sim_need%(1);
+%sim_need_fp% = %sim_need%(2);
+%sim_need_fr% = %sim_need%(3);
+%sim_need_tl% = %sim_need%(9);
+%sim_need_tr% = %sim_need%(10);
+
+%sim_book_fc% = %sim_book%(1);
+%sim_book_fp% = %sim_book%(2);
+%sim_book_fr% = %sim_book%(3);
+%sim_book_tl% = %sim_book%(9);
+%sim_book_tr% = %sim_book%(10);
+/* end of file */

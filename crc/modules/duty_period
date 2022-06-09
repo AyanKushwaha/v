@@ -1,0 +1,557 @@
+/*  -*- crc -*- */
+
+/*
+ * This module contains definitions related to FTL/OMA16 duty periods.
+ * All definitions exported by this module are implemented according to SAS' OMA16 interpretation
+ * and may or may not differ in their semantics from similarly-named definitions in other modules.
+ *
+ * All definitions in this module are to be used at the duty level. However, there's one peculiarity
+ * to take into account. When dealing with a split duty, all duty_period definitions return the 
+ * appropriate value for the entire duty period, not just the duty they're being evaluated on.
+ * For example, say there's a duty 10-12:00 followed by another one 16:00-18:00. When you evaluate
+ * duty_period.%start_utc% on the second duty, it will return 10:00, because that's the start of the
+ * OMA16 duty period.
+ *
+ * Created by: Ralf Damaschke, Lars Westerlind and Lena Heed (HiQ), 2015
+ */
+
+root module duty_period
+
+import duty;
+import levels;
+import task;
+import leg;
+import system_db_parameters;
+import base_utils;
+import oma16_defs;
+import hotel;
+import parameters;
+import fundamental;
+import trip;
+import base_product;
+
+/* A duty period may consist of two CMS duties, with a break in between.
+** Also referred to as "split duty".
+*/
+export %is_first_duty_in_duty_period% =
+  default(prev(duty(wop), %is_last_duty_in_duty_period%), true);
+  
+export %is_last_duty_in_duty_period% =
+  if %is_fdp% 
+  then ( duty.%rest_time% > 10:00 or 
+         default(next(duty(wop), not %is_fdp%), true) )
+  else true;
+
+export %is_split% =
+  not (%is_first_duty_in_duty_period% and %is_last_duty_in_duty_period%);
+
+%_legs_in_duty_until_current% =
+    count(leg(duty)) from(first) to(current)
+    where (leg.%is_active_flight% or leg.%is_deadhead%);
+
+export %legs_until_current% =
+    if %is_split% and %is_last_duty_in_duty_period% then
+      prev(leg(trip), %_legs_in_duty_until_current%) + %_legs_in_duty_until_current%
+    else %_legs_in_duty_until_current%;
+
+export %split_duty_break_start_utc% =
+  if %is_first_duty_in_duty_period%
+  then if %is_last_duty_in_duty_period%
+       then void_abstime /*not split*/
+       else duty.%block_on% + 
+            nmax(duty.%end_utc% - duty.%block_on% + hotel.%duty_transport_time_apt_to_hotel%, 
+                 oma16_defs.%min_split_duty_post_pre_flight_duration%)
+  else prev(duty(wop), duty.%block_on% + 
+                       nmax(duty.%end_utc% - duty.%block_on% + hotel.%duty_transport_time_apt_to_hotel%, 
+                            oma16_defs.%min_split_duty_post_pre_flight_duration%));
+
+export %split_duty_break_end_utc% = 
+  if %is_first_duty_in_duty_period%
+  then if %is_last_duty_in_duty_period%
+       then void_abstime /*not split*/
+       else next(duty(wop), duty.%block_off% - 
+                            nmax(duty.%block_off% - duty.%start_utc% + hotel.%duty_transport_time_hotel_to_apt%, 
+                                 oma16_defs.%min_split_duty_post_pre_flight_duration%))
+  else duty.%block_off% - 
+       nmax(duty.%block_off% - duty.%start_utc%  + hotel.%duty_transport_time_hotel_to_apt%, 
+            oma16_defs.%min_split_duty_post_pre_flight_duration%);
+
+export %split_duty_break_start_acclim% = %split_duty_break_start_utc% + %acclim_tz_corrector%;
+export %split_duty_break_end_acclim% = %split_duty_break_end_utc% + %acclim_tz_corrector%;
+
+export %start_utc% =
+  if not %is_first_duty_in_duty_period% then 
+    prev(duty(chain), duty.%start_utc%)
+  else duty.%start_utc%;
+  
+export %end_utc% =
+  if not %is_last_duty_in_duty_period% then 
+    next(duty(chain), duty.%end_utc%)
+  else duty.%end_utc%;
+
+export %end_scheduled_utc% =
+  if not %is_last_duty_in_duty_period% then
+    next(duty(chain), duty.%end_scheduled_utc%)
+  else duty.%end_scheduled_utc%;
+
+export %block_on_utc% =
+  if not %is_last_duty_in_duty_period% then
+    next(duty(chain), duty.%last_active_scheduled_block_on%)
+  else default(duty.%last_active_block_on%, duty.%last_active_scheduled_block_on%);
+
+export %start_hb% = %start_utc% + duty.%homebase_tz_corrector%;
+export %end_hb% = %end_utc% + duty.%homebase_tz_corrector%;
+export %start_day_hb% = round_down(%start_hb%, 24:00);
+export %end_day_hb% = round_down(%end_hb%, 24:00);
+export %start_day_hb_utc% = %start_day_hb% - duty.%homebase_tz_corrector%;
+export %end_day_hb_utc% = %end_day_hb% - duty.%homebase_tz_corrector%;
+export %start_month_end_hb% = round_up_month(%start_hb% + 0:01);
+export %start_lt% = %start_utc% + %departure_station_tz_corrector%;
+export %end_lt% =   %end_utc% + %arrival_station_tz_corrector%;
+export %start_acclim% = %start_utc% + %acclim_tz_corrector%;
+export %end_acclim% = %end_utc% + %acclim_tz_corrector%;
+
+export %last_7_days_start_day_start% = %start_day_hb_utc% - 6*24:00;
+export %last_7_days_start_day_end% = %start_day_hb_utc% + 24:00;
+export %last_7_days_end_day_start% = %end_day_hb_utc% - 6*24:00;
+export %last_7_days_end_day_end% = %end_day_hb_utc% + 24:00;
+export %last_7_days_start_day_start_day% = %start_day_hb% - 6*24:00;
+export %last_7_days_start_day_end_day% = %start_day_hb%;
+export %last_7_days_end_day_start_day% = %end_day_hb% - 6*24:00;
+export %last_7_days_end_day_end_day% = %end_day_hb%;
+
+export %last_14_days_start_day_start% = %start_day_hb_utc% - 13*24:00;
+export %last_14_days_start_day_end% = %start_day_hb_utc% + 24:00;
+export %last_14_days_end_day_start% = %end_day_hb_utc% - 13*24:00;
+export %last_14_days_end_day_end% = %end_day_hb_utc% + 24:00;
+export %last_14_days_start_day_start_day% = %start_day_hb% - 13*24:00;
+export %last_14_days_start_day_end_day% = %start_day_hb%;
+export %last_14_days_end_day_start_day% = %end_day_hb% - 13*24:00;
+export %last_14_days_end_day_end_day% = %end_day_hb%;
+
+export %last_28_days_start_day_start% = %start_day_hb_utc% - 27*24:00;
+export %last_28_days_start_day_end% = %start_day_hb_utc% + 24:00;
+export %last_28_days_start_day_end_hb% = %start_day_hb% + 24:00;
+export %last_28_days_end_day_start% = %end_day_hb_utc% - 27*24:00;
+export %last_28_days_end_day_end% = %end_day_hb_utc% + 24:00;
+export %last_28_days_end_day_end_hb% = %end_day_hb% + 24:00;
+export %last_28_days_start_day_start_day% = %start_day_hb% - 27*24:00;
+export %last_28_days_start_day_end_day% = %start_day_hb%;
+export %last_28_days_end_day_start_day% = %end_day_hb% - 27*24:00;
+export %last_28_days_end_day_end_day% = %end_day_hb%;
+
+
+export %next_duty_start%(Abstime s) =
+  first (duty(chain), duty.%start_utc%) from(current)
+  where (duty.%start_utc% > s and %is_first_duty_in_duty_period%);
+
+/* Duty is (part of) a duty period (DP) */
+export %is_on_duty% =
+  duty.%is_on_duty% and
+  not duty.%is_rest% and
+  (duty.%has_flight_duty% or
+  not task.%has_no_duty_time_contribution%(duty.%code%));
+  
+/* Duty is part of a flight duty period (FDP) */  
+export %is_fdp% =  
+  duty.%is_on_duty% and
+  ( duty.%has_active_flight% or
+    ( (duty.%is_sby_manual_duty_break% or duty.%has_deadhead%) and
+      ( ( duty.%rest_time% < 10:00 and next(duty(chain), duty.%has_active_flight%) ) or 
+        ( duty.%rest_time_before_duty% < 10:00 and prev(duty(chain), duty.%has_active_flight%) )
+     )
+    )
+  );
+
+export %trip_has_split_duty% =
+    any(duty(trip), %is_split%);
+
+export %trip_count_split_duties% =
+    count(duty(trip))
+    where (%is_split% and %is_first_duty_in_duty_period%);
+ 
+/* True iff duty period includes training activity */
+export %has_fdp_training% =
+  duty.%is_fdp_training% or
+  (not duty_period.%is_first_duty_in_duty_period% and prev(duty(wop), duty.%is_fdp_training%)) or
+  (not duty_period.%is_last_duty_in_duty_period% and next(duty(wop), duty.%is_fdp_training%));
+
+/* check if duty is disruptive. tz_corrector = difference btw acclim timezone and utc, etc */
+export %is_disruptive% =
+	%is_on_duty% and
+	oma16_defs.%is_disruptive_duty%(%start_acclim%, %end_acclim%) and
+	not (%has_standby_with_rest% and not %has_standby_callout%);
+
+export %arrives_at_homebase% = %_arrives_at_homebase%;
+
+export %departs_from_homebase% = %_departs_from_homebase%;
+
+%_arrives_at_homebase% =
+  if not %is_last_duty_in_duty_period%
+  then next(duty(chain), duty.%arrives_at_homebase%)
+  else duty.%arrives_at_homebase%;
+
+%_departs_from_homebase% =
+  if not %is_first_duty_in_duty_period% 
+  then prev(duty(chain), duty.%departs_from_homebase%)
+  else duty.%departs_from_homebase%;
+
+export %arrival_station_tz_corrector% = 
+  if not duty_period.%is_last_duty_in_duty_period% 
+  then next(duty(chain), duty.%arrival_station_tz_corrector%)
+  else duty.%arrival_station_tz_corrector%;
+  
+export %departure_station_tz_corrector% = 
+  if not duty_period.%is_first_duty_in_duty_period% 
+  then prev(duty(chain), duty.%departure_station_tz_corrector%)
+  else duty.%departure_station_tz_corrector%;
+
+%tz_diff_calc%(Reltime tz_corrector_1, Reltime tz_corrector_2) =
+  let ret = %abs_reltime%(tz_corrector_1 - tz_corrector_2);
+  if ret<=12:00 then ret 
+  else 24:00 - ret;
+
+export %abs_tz_diff% =
+  %abs_reltime%(%tz_diff_calc%(%arrival_station_tz_corrector%, %departure_station_tz_corrector%));
+
+/*
+** calculations of acclimatisated times, as time zone corrector, the difference from requested timezone and utc time
+*/
+
+/*
+** Table for reftime calculations.
+** ref_tz_corrector: last timezone in acclimatisated state for that start
+** ret_utc: last time departure in acclimated state for that state
+** %acclim_begin% when acclimatization is expected to begin, after the duty before current
+** %acclim_finish% when acclimatization is finished, after duty before curret
+** %tz_corr_arrival% timezone before acclimatization starts
+** %tz_corr_acclim% acclimatized time zone when finished.
+**
+** Example: we are looking at duty EWR - ORD, after a duy CDG - EWR. 
+** ref_tz_corrector: timezone for CDG Paris
+** ref_utc: Time of departure from CDG
+** %acclim_begin% acclimatization begins 48 hours after CDG departure. 
+** %acclim_finish% when acclimatization is finished, after duty before curret
+** %tz_corr_arrival% timezone for acclimatization if EWR-ORD starts within 48 hours from CDG departure
+** %tz_corr_acclim% acclimatized time if EWR-ORD starts after crew has been acclimatizated for EWR.
+** If EWR - ORD starts between the two points, the acclimatizated state is undefined.
+*/
+table tz_diff_tbl(Reltime ref_tz_corrector, Abstime ref_utc)  =
+  %tz_diff_calc%(ref_tz_corrector, %departure_station_tz_corrector%) 
+    -> %acclim_begin%, %acclim_finish%, %tz_corr_arrival%;
+  (0:00,2:00) -> ref_utc, ref_utc, %departure_station_tz_corrector%; /* no reacclimatization */
+  )2:00,4:00( -> ref_utc + 48:00, ref_utc + 48:00, ref_tz_corrector;
+  (4:00,6:00) -> ref_utc + 48:00, ref_utc + 72:00, ref_tz_corrector;
+  )6:00,9:00) -> ref_utc + 48:00, ref_utc + 96:00, ref_tz_corrector;
+  )9:00,12:00) -> ref_utc+ 48:00, ref_utc + 120:00, ref_tz_corrector;
+end  
+
+%acclim_tz_corrector_calc%(Reltime ref_tz_corrector, Abstime ref_utc) =
+  if %start_utc% >= %acclim_finish%(ref_tz_corrector,ref_utc) then %departure_station_tz_corrector%
+  else if %start_utc% >= %acclim_begin%(ref_tz_corrector,ref_utc) then void_reltime /* unknown acclimatisation */
+	else %tz_corr_arrival%(ref_tz_corrector,ref_utc);
+
+
+  
+%_check_acclim%(Reltime prev_ref_tz, Abstime prev_ref_time) =
+  if duty.%start_utc% >= %acclim_finish%(prev_ref_tz, prev_ref_time) then duty.%start_utc%
+  else prev_ref_time;
+ 
+/*
+** Does the projection from one reference time to the next, depending on the duty  
+*/ 
+%_ref_time_from_base%(Abstime prev_ref_time, Abstime cur_time) =
+  let prev_ref_tz = if %start_utc% = prev_ref_time then %departure_station_tz_corrector% else 
+    next(duty(chain), %departure_station_tz_corrector%) where (%start_utc% = prev_ref_time);
+  if prev_ref_time=cur_time then prev_ref_time /* it IS acclimatisated */ 
+  else default(
+    next(duty(chain), %_check_acclim%(prev_ref_tz, prev_ref_time ))
+    where (duty.%start_utc% > prev_ref_time and duty.%is_flight_duty% and duty_period.%is_first_duty_in_duty_period%)
+    while (duty.%start_utc%<cur_time)
+  ,
+    prev_ref_time /* ref time is the time before current normally, also if current may be ref time for next duty */
+  );
+  
+  
+
+/*
+** Run at the first duty in a sub_trip, calculates succsive reference time departures until cur_time.
+** Currently up to 9 duties are evalued in a sequence.
+*/
+%ref_time_from_base%(Abstime cur_time) =
+  %_ref_time_from_base%(
+    %_ref_time_from_base%(
+      %_ref_time_from_base%(
+        %_ref_time_from_base%(
+          %_ref_time_from_base%(
+            %_ref_time_from_base%(
+              %_ref_time_from_base%(
+                %_ref_time_from_base%(
+                  %_ref_time_from_base%(%start_utc%, cur_time),                 
+                cur_time),
+              cur_time),
+            cur_time),
+          cur_time),
+        cur_time),
+      cur_time),
+    cur_time),
+  cur_time);
+
+%is_b2b_rest% =
+  duty.%is_second_in_b2b_subtrip% and parameters.%oma16_b2b_valid%(duty.%start_utc%);
+
+/* Check if acclimatised at duty period start because it was a homebase departure or the start of an open trip. */
+%base_acclimatised% =
+  (%is_first_duty_in_duty_period% and %departs_from_homebase% and not %is_b2b_rest%) or
+  (not fundamental.%is_roster% and is_first(duty(chain)));
+
+
+/*
+** Calculated reference time, which is the latest time before current duty where crew was locally acclimatised. At homebase
+** the duty start time is used.
+*/
+export %ref_time% =
+  let cur_time = %start_utc%;
+  prev(duty(chain), %ref_time_from_base%(cur_time))
+    where (%base_acclimatised%);
+
+/*
+** Help routine used for duties not from homebase 
+*/  
+%_acclim_tz_corrector% =
+  let ref_time = %ref_time%,
+      ref_tz_corr = prev(duty(chain), %departure_station_tz_corrector%)
+        where (%start_utc% = ref_time);
+  %acclim_tz_corrector_calc%(ref_tz_corr, ref_time);
+  
+/* 
+** This gives the tz corrector for which crew is acclimatised at the start of the duty, or void if not defined.
+** Typically a crew keeps the departure acclimatisation when leaving homebase +/- 2 hrs zone, until 48 hours from that reference time.
+** After that crew can be unacclimatised (=void) for a time, depending on tzd and flight durations. When arriving at homebase
+** crew is regarded as acclimatised as he should have enough rest to obtain that state. Any object / ground duties in homebase will
+** be regarded as having this acclimatisation for practical reasons; even if it would be more correct to say he is not acclimatised until a certain
+** point in time. The acclimatisation at homebase is taken for granted, if needed must be assured by enough rest at homebase.
+*/
+export %acclim_tz_corrector% =
+  if %base_acclimatised% then %departure_station_tz_corrector%
+  else %_acclim_tz_corrector%;
+
+/*
+** Help routine used for duties not from homebase 
+*/  
+%_is_acclim% =
+  let ref_time = %ref_time%,
+      ref_tz_corr = prev(duty(chain), %departure_station_tz_corrector%)
+        where (%start_utc% = ref_time);
+  not void(%acclim_tz_corrector_calc%(ref_tz_corr, ref_time));
+  
+export %is_acclim% =
+  if %base_acclimatised% then True
+  else %_is_acclim%;
+
+/* True iff current duty period is the last one starting on the same day */
+export %is_last_duty_period_on_start_day% =
+	first(duty(chain), default(%start_day_hb% <> next(duty(chain),%start_day_hb%), true)) 
+	from(current) 
+	where(%is_last_duty_in_duty_period%);
+
+/* True iff current duty period is the last duty on the same day */
+export %is_last_duty_period_on_end_day% =
+	first(duty(chain), default(%end_day_hb% <> next(duty(chain),%start_day_hb%), true)) 
+	from(current) 
+	where(%is_last_duty_in_duty_period%);
+
+export %time% = %end_utc% - %start_utc%;
+export %scheduled_time% = %end_scheduled_utc% - %start_utc%;
+export %time_until_block_on% = %block_on_utc% - %start_utc%;
+
+export %block_time% = 
+  if not %is_last_duty_in_duty_period% then
+    duty.%block_time% + next(duty(chain), duty.%block_time%)
+  else if not %is_first_duty_in_duty_period% then
+    duty.%block_time% + prev(duty(chain), duty.%block_time%)
+  else
+    duty.%block_time%;
+
+export %time_reducing_sb_w_rest% =
+  if %has_standby_callout% then
+    %time_after_ci_after_sb_w_rest%
+  else %time%;
+
+export %start_duty_period_in_trip_abs_tzd_exceed%(Reltime lim) =
+  first(duty(trip), %start_utc%) /* note: start_utc in this module; previous duty if split */
+  where (duty.%abs_tzd_from_hb% >= lim);
+
+export %rest_time_before% =
+  if %is_first_duty_in_duty_period%
+  then duty.%rest_time_before_duty%
+  else prev(duty(wop), duty.%rest_time_before_duty%);
+
+export %rest_start_before_utc% =
+  if %is_first_duty_in_duty_period%
+  then duty.%rest_start_before_duty%(0:00)
+  else prev(duty(wop), duty.%rest_start_before_duty%(0:00));
+    
+export %rest_start_before_acclim% =
+  if %is_first_duty_in_duty_period%
+  then duty.%rest_start_before_duty%(duty_period.%acclim_tz_corrector%)
+  else prev(duty(wop), duty.%rest_start_before_duty%(duty_period.%acclim_tz_corrector%));
+  
+export %rest_time_after% =
+  if %is_last_duty_in_duty_period%
+  then duty.%rest_time%
+  else next(duty(wop), duty.%rest_time%);
+ 
+export %planned_rest_time_after% =
+  if %is_last_duty_in_duty_period%
+  then duty.%planned_rest_time%
+  else next(duty(wop), duty.%planned_rest_time%);
+
+export %has_standby% =
+  if %is_first_duty_in_duty_period%
+  then duty.%has_standby%
+  else prev(duty(chain), duty.%has_standby%);
+  
+export %has_standby_with_rest% =
+  if %is_first_duty_in_duty_period%
+  then duty.%has_standby_with_rest%
+  else prev(duty(chain), duty.%has_standby_with_rest%);
+
+export %has_waiting_at_airport% = false;
+
+export %start_first_flight_in_first_duty% =
+ if %is_first_duty_in_duty_period%
+ then duty.%start_first_flight_duty%
+ else prev(duty(wop), duty.%start_first_flight_duty%);
+
+export %start_first_flight_in_last_duty% =
+ if %is_last_duty_in_duty_period%
+ then duty.%start_first_flight_duty%
+ else next(duty(wop), duty.%start_first_flight_duty%);
+
+export %start_first_flight_in_duty_period% =
+  let first_duty_flight_start = default(%start_first_flight_in_first_duty%, 31DEC2035),
+      last_duty_flight_start = default(%start_first_flight_in_last_duty%, 31DEC2035);
+  nmin(first_duty_flight_start, last_duty_flight_start);
+
+export %ci_orig_default_start_utc_first_flight_in_first_duty% =
+ if %is_first_duty_in_duty_period%
+ then duty.%ci_orig_default_start_utc_first_flight_duty%
+ else prev(duty(wop), duty.%ci_orig_default_start_utc_first_flight_duty%);
+
+export %ci_orig_default_start_utc_first_flight_in_last_duty% =
+ if %is_last_duty_in_duty_period%
+ then duty.%ci_orig_default_start_utc_first_flight_duty%
+ else next(duty(wop), duty.%ci_orig_default_start_utc_first_flight_duty%);
+
+export %ci_orig_default_start_utc_first_flight_in_duty_period% =
+  let first_duty_flight_start = default(%ci_orig_default_start_utc_first_flight_in_first_duty%, 31DEC2035),
+      last_duty_flight_start = default(%ci_orig_default_start_utc_first_flight_in_last_duty%, 31DEC2035);
+  nmin(first_duty_flight_start, last_duty_flight_start);
+
+
+
+
+export %has_standby_callout% = false;
+export %has_airport_callout% = false;
+ 
+export %time_after_ci_after_sb_w_rest% =
+  if %is_first_duty_in_duty_period%
+  then %end_utc% - duty.%checkin_utc_after_sb_w_rest%
+  else prev(duty(chain), %end_utc% - duty.%checkin_utc_after_sb_w_rest%);
+
+export %scheduled_time_after_ci_after_sb_w_rest% =
+  if %is_first_duty_in_duty_period%
+  then %end_scheduled_utc% - duty.%checkin_utc_after_sb_w_rest%
+  else prev(duty(chain), %end_scheduled_utc% - duty.%checkin_utc_after_sb_w_rest%);
+ 
+/* Definitions for use in industrial rules */
+export %is_bought% =
+  default(if %is_first_duty_in_duty_period%
+				  then duty.%is_bought% and (if %is_last_duty_in_duty_period%
+				                           then true
+				       										 else next(duty(wop), duty.%is_bought%))
+				  else duty.%is_bought% and prev(duty(wop), duty.%is_bought%),
+          false
+         );
+
+export %is_privately_traded% =
+  default(if %is_first_duty_in_duty_period%
+				  then duty.%is_privately_traded% and (if %is_last_duty_in_duty_period%
+				                           then true
+				       										 else next(duty(wop), duty.%is_privately_traded%))
+				  else duty.%is_privately_traded% and prev(duty(wop), duty.%is_privately_traded%),
+          false
+         );
+  
+  
+/* True iff Fatigue Risk Management is approved by authorities */
+%frm_valid% = parameters.%frm_valid%(%pp_start%);
+
+
+/* -- Weekly rest (ORO.FTL.235) ----------------------- */
+
+/*
+** Start of duty following the previous weekly rest period. Intended to be used on duty that is not rest; if used on rest, 
+** and there is no prior non rest duty, a future date may be returned.
+*/
+%end_prev_weekly_rest% =
+  default(
+    prev(duty(chain), duty.%rest_end_UTC%)
+      where (%has_weekly_rest_after%)
+  ,
+    first(duty(chain), duty.%start_utc%) 
+      where (not duty.%is_rest%)
+  );
+
+/*
+** Check if duty is immediately follow by a weekly rest, prolonged, or fit after disruptive duty
+** Testing on smaller rest is true also for longer rests.
+** Note: lt is used for defintions of local nights/days as this was the way in old code. However, it might be wrong
+** as crew is not normally acclimatisated to foreign stations.
+*/
+export %has_weekly_rest_after% =
+  %rest_time_after% >= oma16_defs.%reqd_minimum_duration_weekly_rest%(%end_lt%);
+
+export %has_prolonged_weekly_rest_after% =
+  %rest_time_after% >= oma16_defs.%reqd_minimum_duration_prolonged_weekly_rest%(%end_lt%);
+
+/*
+** Minimum rest not at home base includes a total of 1:00 for local transport.
+** If the actual local transport time is greater than this, 
+** the difference must be added to the minimum rest requirement.
+*/
+export %has_weekly_rest_before% = 
+  %rest_time_before% >= oma16_defs.%reqd_minimum_duration_weekly_rest%(%rest_start_before_acclim%);
+  
+/*
+** this this method is the heart of checking for weekly rests. It returns the time since last VALID weekly rest, that is,
+** it accepts only rests that fulfil length requirements etc. It also accepts only weekly rests if the pp contains two extended weekly 
+** rests (new for oma16) 
+**
+** Note: the variable is voidy: if no previous production duty found = no last weekly rest found, void is used, and treated 
+**       as no error in the rule.
+*/
+export %time_since_last_weekly_rest% =
+  duty_period.%end_utc% - %end_prev_weekly_rest%;
+
+
+/*
+** New parameter to switch rule caa_oma16_max_time_between_weekly_rest_ALL 
+** on/off in standby lines. Default value is OFF [SKCMS-2821]
+*/
+export %caa_oma16_max_time_btw_weekly_rest_incl_standby% =
+  parameter FALSE
+  remark "OMA16: recurrent extended recovery rest in standby line";
+
+/*
+** Duties following the previous weekly rest period until current duty includes
+** duty that should be checked for weekly rest. 
+*/
+export %has_duty_to_check_weekly_rest% =
+  if ((%is_tracking% or %caa_oma16_max_time_btw_weekly_rest_incl_standby%) and system_db_parameters.%oma16_weekly_rest_RL%(duty.%start_UTC%)) then
+    duty.%any_selection_since_duty_end%(duty.%duty_sel_duty_btw_weekly_rests_incl_standby%, %end_prev_weekly_rest%)
+  else
+    duty.%any_selection_since_duty_end%(duty.%duty_sel_duty_btw_weekly_rests%, %end_prev_weekly_rest%);
+
+  

@@ -1,0 +1,956 @@
+/* -*- crc -*-
+ *
+ *
+ * Purpose:
+ *  Fundamental definitions, mostly rave specific, such as
+ *  indexing, linear and quadratic functions. Also file
+ *  paths to common files.
+ *
+ * During the years, the modules has evolved to be a mix of everything and nothing. It's not "fundamental" as it is dependent on
+ * environment in ways that are not always possible to implement; Manpower cannot import fundamental of that reason!!!
+ * A really dirty thing is that tracking child module is dependent on high level modules like crew. This should be seen as an
+ * exception that should be avoided
+ *
+ * Created by:
+ *   Extracted from the Carmen Standard User, 07-Dec-2005
+ *
+ * Major changes:
+ *   1-Feb-2006, Joakim Oskarsson:
+ *     The dynamic fleet concept has been removed since it is of
+ *     no use in a Dave environment.
+ *   June 2015 created module "utils" with really independent code for handling basic data types in rave mainly. /LarsWe
+ */
+
+root module fundamental
+
+import keywords;
+import base_product;
+
+/*******************************************************************************
+   Now time
+   The keyword "now" gets its value from the timeserver and is not available in
+   optimizer.
+   1. Optimizer rulesets need to set %now% to the value of "now" at the time of
+      starting the optimizer for recency to behave.
+   2. During test the timeserver will be regularly reset to a specified value,
+      which is suitable for CCT. CCP/CCR needs %now% to be the time of data
+      extraction.
+   3. In production all products can use the timeserver.
+*******************************************************************************/
+global export %now% =
+  if %use_now_debug% then %now_debug%
+  else keywords.%nowtime%;
+
+global export %now_hb% =
+  %now%;
+
+global export %now_date% =
+  round_down(%now%, 24:00);
+
+global export %now_date_hb% =
+  round_down(%now_hb%, 24:00);
+
+%use_now_debug% =
+  parameter False
+  remark "Use debug now time";
+
+%now_debug% =
+  parameter 16Jul 2008 0:00
+  remark "Now time used for debug (UTC)";
+
+/*
+** Planning period start
+*/
+
+export %start_para% =
+  parameter 01Jan1986 0:00
+  remark "Start of planning period";
+
+global export %pp_start% = %start_para%;
+global export %nr_days_in_pp% = 1 + ((%pp_end_day% - %pp_start_day%) / 24:00);
+global export %pp_iter_date%(Int ix) = %pp_start_day% + (ix-1)*24:00;
+global export %pp_iter_date_reverse%(Int ix) = %pp_end_day% - (ix-1)*24:00;
+
+/* Plan start is used to know for which period to update various tables, and
+   also to know for what period data is to be collected from tables.
+   pp_start_time/pp_end_time has been used a long time, but might not be exactly
+   correct. It is not defined for Matador, so we need to use another keyword
+   that probably means the same. /EKG 090617 */
+export %plan_start% =
+  if keywords.%studio_ruleset% then
+    keywords.%pp_start_time%
+  else
+   global_lp_period_start;
+
+export %plan_end% =
+  if keywords.%studio_ruleset% then
+    keywords.%pp_end_time%
+  else
+    global_lp_period_end;
+
+export %days_in_plan% =
+    (%plan_end% - %plan_start%)/24:00 + 1;
+
+export %end_para% =
+  parameter 01Jan1986 00:00
+  remark "End of planning period ( default = one month after start)";
+
+global export %pp_end% =
+  /* Default to months if no end given */
+  if %end_para% < %pp_start% then
+    round_up_month(%pp_start% + 0:01)
+  else
+    %end_para%;
+
+global export %pp_end_extended% = %pp_end%;
+
+global export %pp_start_day% = round_down(%pp_start%, 24:00);
+global export %pp_end_day% = round_down(%pp_end% - 0:01, 24:00);
+global export %pp_end_extended_day% = round_down(%pp_end_extended% - 0:01, 24:00);
+
+global export %pp_month_number% =
+    let year_start = round_down_year(%pp_start%);
+    count(times(12))
+    while(round_down_month(%pp_start%) >= add_months(year_start, times_index(0)-1));
+
+global export %select_pp_end% =
+  /* To make qual selections correct we need a time point that ends before %pp_end% */
+  %pp_end% - 0:01;
+
+global export %pp_start_less_24h% = %pp_start% - 24:00;
+global export %pp_end_plus_24h% = %pp_end% + 24:00;
+global export %pp_end_extended_plus_24h% = %pp_end_extended% + 24:00;
+/* Loaded data period definitions */
+
+%extra_days_loaded_beginning% =
+    parameter 0
+    remark "[Script] Extra days loaded at beginning. Set by script when opening plan";
+
+%extra_days_loaded_beginning_resource% =
+    parameter 7
+    remark "[Script] Extra days loaded at beginning. Must be same value as resource gpc.config.DataPeriodDbPre in Customer.etab";
+
+%extra_days_loaded_end% =
+    parameter 0
+    remark "[Script] Extra days loaded at end. Set by script when opening plan";
+
+%extra_days_loaded_beginning_alertgenerator_fix% =
+  let day_of_month = 1 + ((round_down(%pp_start%, 24:00) - round_down_month(%pp_start%))/24:00);
+  nmax(%extra_days_loaded_beginning_resource%, day_of_month);
+
+global export %loaded_data_period_start% =
+  let extra_days = if %extra_days_loaded_beginning% > 0 or %is_report_server%
+                   then %extra_days_loaded_beginning%
+                   else %extra_days_loaded_beginning_alertgenerator_fix%;
+
+  %pp_start% - (extra_days * 24:00);
+
+global export %loaded_data_period_end% =
+  %pp_end% + %extra_days_loaded_end% * 24:00;
+
+/* The published period is always a complete month, i.e. the tail of the planning
+ * period should be cut of. */
+global export %publ_period_start% = round_down_month(%pp_start%);
+global export %publ_period_end% = round_up_month(%pp_start% + 0:01);
+global export %publ_period_end_plus_24h% = %publ_period_end% + 24:00;
+
+/* CPH are used as a default base since the local time is the same for
+ * both CPH, STO and OSL.
+ * *** stefanh 4Mar2009: But that doesn't work for asian crew, does it?
+ * ***                   These variables should be in the crew module instead */
+global export %publ_period_start_UTC% = station_utctime("CPH", %publ_period_start%);
+global export %publ_period_end_UTC% = station_utctime("CPH", %publ_period_end%);
+
+/* Application */
+%is_report_server% =
+  parameter false
+  remark "[Script] Report server mode. Set by reportserver on startup";
+
+global export %is_database% =
+  parameter true
+  remark "ETAB: Must be true if working in database and must be false when working on files";
+
+global export %etab_path%(String filepath) = filepath;
+
+/* Parameters to be used when debugging reports */
+%debug_manual_index% = parameter 1;
+%debug_manual_index1% = parameter 1;
+%debug_manual_index2% = parameter 1;
+%debug_use_manual_index% = parameter false;
+
+%debug_verbose_mode% =
+  parameter false
+  remark "Show popup windows and log messages for information";
+
+%debug_no_change_mode% =
+  parameter false
+  remark "Debug mode,  do not introducting any change";
+
+export %debug_select_one_crew% =
+  parameter ""
+  remark "Can be passed to python prpgrams for crew selection";
+
+/* These index variables are only used in times() loops */
+global export %times_index_0% = times_index(0);
+global export %times_index_1% = times_index(1);
+global export %times_index_2% = times_index(2);
+
+/* These index variables are only used in py and reports */
+global export %py_index% =
+  if %debug_use_manual_index% then %debug_manual_index%
+  else index;
+
+global export %py_index1% =
+  if %debug_use_manual_index% then %debug_manual_index1%
+  else index(1);
+
+global export %py_index2% =
+  if %debug_use_manual_index% then %debug_manual_index2%
+  else index(2);
+
+/* date_index returns the dates in pp, starting at pp_start
+   Only to be used in reports and scripts */
+global export %date_index% =
+  %pp_start% + (%py_index%-1)*24:00;
+
+/* date_index_p1 returns the dates in pp, starting at pp_start + 24:00 */
+global export %date_index_p1% =
+  %pp_start% + %py_index%*24:00;
+
+/* Needs to be defined in child module, HenrikA 20-Dec-2005 **
+global export %int2str%(Int i) = format_int(i,"%d");
+** Note: Not needed from T1 nightjobs 2007-11-10 (BZ 7043),
+         format_time should format negative reltimes correctly **
+global export %abstimemin% =
+  01jan1986;
+global export %abstimemax% =
+  31dec2035;
+global export %abstime2str%(Abstime d) =
+  if d<=%abstimemin% then
+    "---"
+  else if d>=%abstimemax% then
+    "+++"
+  else
+    format_time(d, "%d%b%Y %02H:%02M");
+
+global export %reltime2str%(Reltime t) =
+  if t >= 0:00 then
+    format_time(t, "%H:%02M")
+  else
+    format_time(-t, "-%H:%02M");
+
+
+global export %bool2str%(Bool val) =
+  if (val) then
+    "True"
+  else
+    "False";
+
+global export %int2reltime%(int val) =
+0:01 * val;
+*/
+
+global export %average_int_0%(Int talj, Int namn) =
+  if namn = 0 then void_int
+  else talj/namn;
+
+global export %average_reltime_0%(Reltime talj, Int namn) =
+  if namn = 0 then void_reltime
+  else talj/namn;
+
+global export %int_with_factor2str%(Int Value, Int factor) =
+  if abs(value) < factor then
+    if value >= 0 then
+      format_int(value,concat("0.%0", %pow_str%(factor), "d"))
+    else
+      format_int(-value,concat("-0.%0", %pow_str%(factor), "d"))
+  else
+    format_int(value, concat("%v", %pow_str%(factor), ".d"));
+
+global export %trunc_decimals%(String strvalue) =
+  let len = length(strvalue),
+      point_pos = locate(".", strvalue),
+      zeros = %number_of_zeros_at_end%(strvalue, len, point_pos);
+  if point_pos = 0 then
+    strvalue
+  else if zeros = len - point_pos then
+    substr(strvalue, 1, point_pos - 1)
+  else
+    substr(strvalue, 1, len - zeros);
+
+%number_of_zeros_at_end%(String strvalue, Int len, Int point_pos) =
+  if point_pos = 0 then 0
+  else
+    count(times(len))
+    while (substr(strvalue, len + 1 - %times_index_0%, 1) = "0");
+
+global export %plural%(Int nr) = if nr = 1 then "" else "s";
+
+/* Function returning the number of days since date and prev_date */
+global export %days_since%(Abstime date, Abstime prev_date) =
+  (round_down(date, 24:00) - round_down(prev_date, 24:00)) / 24:00;
+
+/* Returns number of calendar days touched in the interval. The end time is
+* non-inclusive, so 01jan01-02jan01 -> 1 day, 01jan01-02jan01 0:01 -> 2 days */
+global export %days_touched%(Abstime dstart, Abstime dend) =
+  (round_up(dend, 24:00) - round_down(dstart, 24:00)) / 24:00;
+
+global export %period_daylight_save_hour%(Abstime day_start_utc, AbsTime day_end_utc) =
+        let diff = ((round_down(day_start_utc,24:00)-day_start_utc)-
+                    (round_down(day_end_utc,24:00)-day_end_utc));
+        diff*(-1); /* change sign*/
+
+/* Context definitions used in rule valids and for some scripts / reports
+ * Studio must know when a trip is a trip in order to avoid illegalities
+ * in for example A/C-rotation view.
+ * The keyword crr_identifier is only defined for Studio and needs to be
+ * overridden for optimizer rulesets.
+*/
+global export %is_roster% =
+  not void(crr_crew_id);
+global export %is_trip% =
+  not %is_roster% and not void(keywords.%crr_identifier%);
+
+export %chain_is_trip_duty_or_leg% =
+    not %is_roster%
+    and not %chain_is_acrot%;
+
+export %chain_is_acrot% = keywords.%is_acrot%;
+
+global export set own_carrier_codes =
+  parameter "SK", "BU", "OD"
+  remark "Carrier code(s) of own airline";
+
+/*
+** Range functions
+*/
+
+global export %is_in_range_abs%(Abstime t, Abstime s, Abstime e) = t>=s and t<e;
+global export %is_in_range_int%(Int i, Int s, Int e) = i>=s and i<=e;
+global export %is_in_range_rel%(Reltime t, Reltime s, Reltime e) =
+  if e < s then t >= s or t <= e
+  else t >= s and t <= e;
+
+/*
+** Linear functions
+**  Creates f(x)= kx+m out of 2 points (X1,Y1) & (X2,Y2)
+*/
+
+global export %f_x1%(Int X,Int X1, Int Y1, Int X2, Int Y2) =
+  if X1=X2 then Y1 else Y1 + ((X-X1)*(Y2-Y1)+(X2-X1)/2)/(X2-X1);
+
+/*
+** Quadratic functions
+**  Creates f(x)=ax2+bx+c out of 2 points and its derivate (X1,Y1,dXY1).
+**  Conditions: f(X1)=Y1,f(X2)=Y2,f'(X1)=dXY1/100,f'(X2)=dXY2/100;
+*/
+
+global export %f_x2%(Int X,Int X1, Int Y1, Int dXY1, Int X2, Int Y2, Int dXY2)=
+  (100*X*(X-X1)*(dXY1-dXY2)/2*(X1-X2) + 100*(dXY1*(X-X1) + 100*Y1)) / 10000;
+
+/*
+** Str2Int slow function that you do not want to use
+** handles up to 9 characters. Non-digit leads to 0
+** Function does not handle negative sign.
+*/
+
+global export %str2int%(String nrasstr) =
+  let len = length(nrasstr);
+  sum(times(len), %_str2int_digit%(substr(nrasstr, len - %times_index_0% + 1, 1)) *
+                  %_str2int_base%(%times_index_0% - 1));
+
+table str2int_digit_table(String onedigit) =
+  onedigit -> %_str2int_digit%;
+  "0" -> 0;
+  "1" -> 1;
+  "2" -> 2;
+  "3" -> 3;
+  "4" -> 4;
+  "5" -> 5;
+  "6" -> 6;
+  "7" -> 7;
+  "8" -> 8;
+  "9" -> 9;
+  - -> void_int;
+end
+table str2int_base_table(Int base) =
+  base -> %_str2int_base%;
+  0 -> 1;
+  1 -> 10;
+  2 -> 100;
+  3 -> 1000;
+  4 -> 10000;
+  5 -> 100000;
+  6 -> 1000000;
+  7 -> 10000000;
+  8 -> 100000000;
+  9 -> 1000000000;
+  - -> void_int;
+end
+
+table factor2power_str_table(Int factor) =
+  factor -> %pow_str%;
+  1       -> "0";
+  10      -> "1";
+  100     -> "2";
+  1000    -> "3";
+  10000   -> "4";
+  100000  -> "5";
+  1000000 -> "6";
+  -       -> void_string;
+end
+
+/*********************************************
+** to handle decimal as fraction
+*********************************************/
+global export %str2frac_dec%(String nrasstr) =
+  let len = length(nrasstr);
+  sum(times(len), %_str2int_base%(%times_index_0% - 1 - (if substr(nrasstr, len - %times_index_0% + 2, 1) = "." then 1 else %times_index_0%)));
+
+global export %str2frac_num%(String nrasstr) =
+  let len = length(nrasstr);
+  %str2int%(substr(nrasstr, 1, -1 + sum(times(len), ((%_dig_bf_dot%(nrasstr,len,%times_index_0%))))));
+
+global export %str2int_sign%(String nrasstr) =
+  if %_sign%(nrasstr) = "-" then -1 else 1;
+
+%_sign%(String nrasstr) = substr(nrasstr, 1, 1);
+%_is_decimal%(String nrasstr, int len, int idx) = if (substr(nrasstr, len - idx + 2, 1) = ".") then substr(nrasstr, len - idx + 1, 1) else "0";
+%_dig_bf_dot%(String nrasstr, int len, int idx) = if (substr(nrasstr, idx, 1) = ".") then idx else 0;
+
+/* Performs integer divison, rounding to the nearest integer */
+global export %div_rounds%(int i, int j) =
+    if j = 0 then
+        0
+    else
+        %sign%(i) * %sign%(j) * %div_rounds_abs%(abs(i), abs(j));
+
+table sign_t(int i) =
+    i -> %sign%;
+    0 -> 0;
+    < 0 -> -1;
+    > 0 -> 1;
+    - -> void_int;
+end
+
+%div_rounds_abs%(int i, int j) =
+    i / j + %div_rest%(i, j);
+
+%div_rest%(int i, int j) =
+    if (i mod j >= (j / 2 + j mod 2)) then
+        1
+    else
+        0;
+
+/* Performs integer divison, rounding to the nearest smaller integer */
+global export %div_floor%(Int i, Int j) =
+    if %sign%(i) * %sign%(j) < 0 then
+        -((abs(i) + abs(j) - 1) / abs(j))
+    else
+        i / j;
+
+
+/*******************************************************************************
+BITWISE OPERATIONS on integer values.
+Notes:
+  - Bit 1 is least significant, and bit 32 is the sign bit.
+  - The sign bit can't be used in these operations,
+    so valid bit_pos values are in the range 1..31.
+*******************************************************************************/
+
+/*
+** Check if a bit is set in an integer value.
+*/
+global export %bit_chk%(Int bit_pos, Int value) =
+  %bit_val_chk%(%bit_val%(bit_pos), value);
+
+%bit_val_chk%(Int bit_val, Int value) =
+  value >= bit_val and
+  ((value / bit_val) mod 2) = 1;
+
+/*
+** Returns integer value with bit (1-31) set.
+*/
+global export %bit_set%(Int bit_pos, Int value) =
+  let bit_val = %bit_val%(bit_pos);
+  if %bit_val_chk%(bit_val, value) then value else value + bit_val;
+
+/*
+** Returns value with bit (1-31) cleared.
+*/
+global export %bit_clr%(Int bit_pos, Int value) =
+  let bit_val = %bit_val%(bit_pos);
+  if %bit_val_chk%(bit_val, value) then value - bit_val else value;
+
+/*
+** Return bitwise OR of v1 and v2.
+*/
+global export %bit_or%(Int v1, Int v2) =
+  sum(times(31), if %bit_chk%(%times_index_0%, v1) or
+                    %bit_chk%(%times_index_0%, v2)
+                 then %bit_val%(%times_index_0%) else 0);
+
+/*
+** Return bitwise AND of v1 and v2.
+*/
+global export %bit_and%(Int v1, Int v2) =
+  sum(times(31), if %bit_chk%(%times_index_0%, v1) and
+                    %bit_chk%(%times_index_0%, v2)
+                 then %bit_val%(%times_index_0%) else 0);
+
+/*
+** Integer value with one bit (1-31) set (all other bits are clear).
+** Note: It is a programming error to use bit_val not in the range [1..31].
+*/
+table bit_val_tab(Int bit_pos) =
+  bit_pos -> global export %bit_val%;
+   1 -> 1;          /* 2^0  */
+   2 -> 2;          /* 2^1  */
+   3 -> 4;          /* 2^2  */
+   4 -> 8;          /* 2^3  */
+   5 -> 16;         /* 2^4  */
+   6 -> 32;         /* 2^5  */
+   7 -> 64;         /* 2^6  */
+   8 -> 128;        /* 2^7  */
+   9 -> 256;        /* 2^8  */
+  10 -> 512;        /* 2^9  */
+  11 -> 1024;       /* 2^10 */
+  12 -> 2048;       /* 2^11 */
+  13 -> 4096;       /* 2^12 */
+  14 -> 8192;       /* 2^13 */
+  15 -> 16384;      /* 2^14 */
+  16 -> 32768;      /* 2^15 */
+  17 -> 65536;      /* 2^16 */
+  18 -> 131072;     /* 2^17 */
+  19 -> 262144;     /* 2^18 */
+  20 -> 524288;     /* 2^19 */
+  21 -> 1048576;    /* 2^20 */
+  22 -> 2097152;    /* 2^21 */
+  23 -> 4194304;    /* 2^22 */
+  24 -> 8388608;    /* 2^23 */
+  25 -> 16777216;   /* 2^24 */
+  26 -> 33554432;   /* 2^25 */
+  27 -> 67108864;   /* 2^26 */
+  28 -> 134217728;  /* 2^27 */
+  29 -> 268435456;  /* 2^28 */
+  30 -> 536870912;  /* 2^29 */
+  31 -> 1073741824; /* 2^30 */
+end
+
+/*
+** Category of crew. Flight (F) or Cabin (C)
+*/
+export %main_cat% = String;
+global export %flight_crew% = Bool;
+global export %cabin_crew% = not %flight_crew%;
+
+/* CR326 GM-agreement */
+export %night_upg% =
+  default(if %flight_crew% then false
+  else true, true);
+
+/*
+** Functions for converting from station to base and from base to station
+*/
+
+export %base_table% = %etab_path%(%base_table_p%);
+%base_table_p% =
+  parameter "bases"
+  remark "ETAB: Base definition table";
+
+export %base2stations%(String base) =
+  cat(times(%nr_stations_for_base%(base)), %_base2stations%(base, %times_index_0%), ",")
+  where(%_base2stations%(base, %times_index_0%) <> "");
+
+table station_count_table(string base) =
+  base -> Int %nr_stations_for_base%;
+  external %base_table%;
+  base -> count(row_number);
+end
+
+table base2station_table(String base, Int nr) =
+  nr, base -> String %_base2stations%;
+  external %base_table%;
+  match_number, base -> station;
+  -, - -> "";
+end
+
+export %base2station%(String base) = %_base2mainstation%(base);
+
+table base2mainstation_table(String base) =
+  base -> String %_base2mainstation%;
+  external "crew_base_set";
+  id -> airport;
+  - -> void_string;
+end
+
+table station2base_table(String station) =
+  station -> export String %station2base%;
+  external %base_table%;
+  station -> base;
+  - -> "";
+end
+
+/*
+* Function for converting between base and region
+*/
+
+export %region_at_base%(String base) =
+  default(if base in skn_bases then
+     "SKN"
+  else if base = "STO" then "SKS"
+    else if base = "CPH" then "SKD"
+      else if base = "NRT" then "SKJ"
+        else if base in skk_bases then "SKK"
+      else "", "");
+set skn_bases = "OSL", "TRD", "SVG";
+set skk_bases = "PEK", "PVG";
+
+
+/*
+** Time related stuff
+*/
+
+/* The localized string representation of a weekday. Three alternatives. */
+table abstime2gui_weekday_short_name_tab(Int day_num) =
+    day_num ->
+        export %day_num2gui_weekday_very_short_name%,
+        export %day_num2gui_weekday_short_name%,
+        export %day_num2gui_weekday_full_name%;
+    1 -> msgr("Mo"), msgr("Mon"), msgr("Monday");
+    2 -> msgr("Tu"), msgr("Tue"), msgr("Tuesday");
+    3 -> msgr("We"), msgr("Wed"), msgr("Wednesday");
+    4 -> msgr("Th"), msgr("Thu"), msgr("Thursday");
+    5 -> msgr("Fr"), msgr("Fri"), msgr("Friday");
+    6 -> msgr("Sa"), msgr("Sat"), msgr("Saturday");
+    7 -> msgr("Su"), msgr("Sun"), msgr("Sunday");
+end
+
+/* Round to nearest minute, i.e. 29sec -> floor, 30sec -> roof */
+global export %reltime_round_off%(Reltime tim, Int factor) =
+  (tim * 2 + 0:01 * factor) / (factor * 2);
+
+table month_conversion(String month_in_year) =
+  month_in_year -> export int  %month_in_quarter%,
+                   export bool %month_is_even%;
+  "1" -> 0, false;
+  "2" -> 1, true;
+  "3" -> 2, false;
+  "4" -> 0, true;
+  "5" -> 1, false;
+  "6" -> 2, true;
+  "7" -> 0, false;
+  "8" -> 1, true;
+  "9" -> 2, false;
+  "10" -> 0, true;
+  "11" -> 1, false;
+  "12" -> 2, true;
+
+  - -> 0, void_bool;
+end
+
+export %even_month_by_month_start%(abstime month_start)=
+        %month_is_even%(format_time(month_start,"%m"));
+
+export %even_month% = %even_month_by_month_start%(%pp_start%);
+
+global export %abs2str%(AbsTime t) =
+    format_time(t, "%02d%02b%Y %02H:%02M", "");
+
+
+/* old "slow" way  %str2int%(format_time(%pp_start%,"%m")) mod 2 = 0; */
+
+
+/*
+**	month last month in quarter ?
+*/
+set quarter_months = "3", "6", "9", "12";
+
+export %last_month_in_quarter% =
+  format_time(round_down_month(%pp_start%),"%m") in quarter_months;
+
+export %is_last_month_in_quarter%(AbsTime date) =
+  format_time(round_down_month(date),"%m") in quarter_months;
+
+/* deprecated: use base_calendar.%wd_from_abs% with same semantic */
+export %day_of_week%(Abstime date) =
+  time_of_week(date)/24:00+1;
+
+/*
+** Handling of expiry dates for visualization of internally stored exclusive
+** dates.
+*/
+global export %expiry_date_inclusive%(Abstime date) =
+  format_time(date-0:01,"%d%b%Y");
+
+global export %expiry_month_inclusive%(Abstime date) =
+  format_time(date-0:01,"%b%02y");
+
+global export %month_inclusive_full_year%(Abstime date) =
+  format_time(date-0:01,"%b%Y");
+
+/*
+** planning_area exports to get severity for tracking alerts to work!
+** redefined in fundamental_cct
+*/
+global export %severity_filter_int%(AbsTime start_t, String duty_lh_pg_s)=0;
+global export %severity_filter_int_chain%(AbsTime start_t)=0;
+global export %duty_lh_region%="";
+
+global export %severity_filter_ignorable% =
+    /* sorts this alert under caterogry/group "IGNORABLE" */
+    1000;
+
+
+/*
+** Timespan
+*/
+
+export %time_span_str%(Abstime start, Abstime stop) =
+  let start_d = format_time(start, "%d"),
+      start_m = format_time(start, "%b"),
+      start_y = format_time(start, "%Y"),
+      stop_d = format_time(stop, "%d"),
+      stop_m = format_time(stop, "%b"),
+      stop_y = format_time(stop, "%Y");
+  if start_y = stop_y then
+    if start_m = stop_m then
+      if start_d = stop_d then
+        concat(stop_d,stop_m,stop_y)
+      else
+        concat(start_d, "-", stop_d,stop_m,stop_y)
+    else
+      concat(start_d,start_m,"-", stop_d,stop_m,stop_y)
+  else
+    concat(start_d,start_m,start_y, "-",stop_d,stop_m,stop_y);
+
+/*
+** Time to be used in 'info' window/reports
+*/
+export %info_time% = %pp_start%;
+/*
+** Round.
+*  Note 2014-10-15 /lw: if result is negative, rounding always is away from 0, but if positive, to nearest.
+*  Suggested implementation, which also is correct on more than 3 decimals:
+*
+*export %divide%(int a, int b) =
+*    if b > 0 then
+*        %div_int%(a,b)
+*    else if b<0 then
+*        %div_int%(-a,-b)
+*    else
+*        void
+*
+*%div_int%(int a, int b) =
+*    if a>=0 then
+*        (a+b/2)/b
+*    else
+*        (a-b/2)/b
+*/
+
+
+
+export %divide%(int a, int b) =
+    if b = 0 then
+        0
+    else
+        %round1000%(1000 * a / b) / 1000;
+
+%round1000%(Int value) =
+    if value mod 1000 >= 500 then
+        (value / 1000) * 1000 + 1000
+    else if value mod 1000 < 0 then
+        (value / 1000) * 1000 - 1000
+    else
+        (value / 1000) * 1000 ;
+
+/*
+ * Function used to get a date that is OK to use as
+ * key in external tables.
+ */
+
+%_daily% = global_lp_period_end - global_lp_period_start < 24:00  * 2;
+%_lp_period_start% = round_down(global_lp_period_start, 24:00);
+%_lp_period_end% = round_down(global_lp_period_end, 24:00);
+
+export %normalized_date%(AbsTime org) =
+   let rdd = round_down(org, 24:00);
+   if keywords.%global_is_dated_mode% then
+      rdd
+   else if %_daily% then
+      %_lp_period_start%
+   else if rdd < %_lp_period_start% then
+      rdd + 7 * 24:00 * (1 + (%_lp_period_start% - rdd) / (7 * 24:00))
+   else if rdd >= %_lp_period_start% + (7 * 24:00) then
+      rdd - (7 * 24:00 * ((rdd - %_lp_period_start%) / (7 * 24:00)))
+   else
+      rdd;
+
+export %normalized_abstime%(AbsTime org) =
+   %normalized_date%(org) + time_of_day(org);
+
+/* Offset considering that flights may have gdop "monday 2" */
+export %real_offset%(AbsTime org) =
+   org - %normalized_abstime%(org);
+
+
+global export enum SBPlacement =
+    FirstSB;
+    FirstTwoSB;
+    LastSB;
+    FisrtLastSB;
+    SingleSB;
+    SingleSBNotLastInWop;
+    EveryWhereSB;
+    NotLastSB;
+    PreDefinedSBPlacement;
+    NoneSB;
+end
+
+global export enum SBImportance =
+    Must;
+    Should;
+    VeryImportant;
+    Important;
+    PreDefinedImportance;
+    NotImportant;
+end
+
+global export enum SBCodeType =
+    NormalSB;
+    AirportSB;
+    TailoredSB ;
+    QualSpecAB;
+    PreDefinedSBCode;
+    NoneCodeType;
+end
+
+global export enum special_sb_type =
+    FirstAP;
+    FirstNormal;
+    LastNormal;
+    SpecialFDP;
+    SpecialStation;
+    SpecialFDPSpecialStation;
+    SpecialStationLateEnd;
+    ExistingSB;
+    FirstOrFDPAP;
+    SpecialPreDefined;
+    NoneType;
+end
+global export enum SBOverviewType =
+    Sick;
+    SBActivity;
+    Manko;
+    ResourcePool;
+    NoneSBO;
+end
+table sb_activity_details(String base, String activity_code, AbsTime start_date, AbsTime end_date) =
+  base, activity_code, start_date,  end_date ->
+  export string %sb_lookup_check_base_old%,  export RelTime %_sb_duty_old%, export RelTime %_sb_block_old%, export special_sb_type %_sb_type_old%, export string %_sb_extra_info_old%, export string %_sb_special_station_old%;
+    external %sb_activity_details_p%;
+   "Base",
+"ActivityCode",
+"StartTime",
+"EndTime" -> "Base",
+"DutyTime",
+"BlockTime",
+"SBType",
+"SBInfo",
+"SBSpecailStation";
+  -, -, -, - -> void_string, void_reltime, void_reltime, NoneType, void_string, void_string;
+end
+
+export %sb_activity_details_p% = parameter
+    "SBActivityDetails" remark "SB activity details";
+
+table sb_activity_details_new(String base, String activity_code, AbsTime start_date, AbsTime end_date, String strAtr, int intAtr) =
+  %main_cat%, base, activity_code, start_date,  end_date,  strAtr, intAtr ->
+  export string %sb_lookup_check_base%,
+  export RelTime %_sb_duty%,
+  export RelTime %_sb_block%,
+  export special_sb_type %_sb_type%,
+  export string %_sb_extra_info%,
+  export string %_sb_special_station%;
+    external "sb_activity_details";
+    "category",
+   "base",
+   "activity_code",
+   "sby_start",
+   "sby_end",
+   "strattribute",
+   "intattribute"
+   -> "base",
+   "duty_time",
+   "block_time",
+   "sb_type",
+   "sb_info",
+   "special_stations";
+  -, -, -, -, -, -, - -> void_string, void_reltime, void_reltime, NoneType, void_string, void_string;
+end
+
+table sb_activity_details_new_no_qual(String base, String activity_code, AbsTime start_date, AbsTime end_date, int intAtr) =
+  %main_cat%, base, activity_code, start_date,  end_date,  intAtr ->
+  export string %sb_lookup_check_base_no_qual%,
+  export RelTime %_sb_duty_no_qual%,
+  export RelTime %_sb_block_no_qual%,
+  export special_sb_type %_sb_type_no_qual%,
+  export string %_sb_extra_info_no_qual%,
+  export string %_sb_special_station_no_qual%;
+    external "sb_activity_details";
+    "category",
+   "base",
+   "activity_code",
+   "sby_start",
+   "sby_end",
+   "intattribute"
+   -> "base",
+   "duty_time",
+   "block_time",
+   "sb_type",
+   "sb_info",
+   "special_stations";
+  -, -, -, -, -, - -> void_string, void_reltime, void_reltime, NoneType, void_string, void_string;
+end
+
+export %upper_assigned_vector_pos% = Int;
+export %lower_assigned_vector_pos% = Int;
+export %upper_cat% = String;
+export %lower_cat% = String;
+export set lower_cat_set = "FP", "FR";
+
+export set cat_set = "FC", "FP", "FR";
+
+export %use_matador_rules% =
+    %use_matador_rules_in_studio% or
+    not %studio_ruleset%;
+
+export %use_matador_rules_in_studio% =
+  parameter true
+  remark "Use Matador rules in Studio";
+
+export %rule_set_crew_cat% =
+  "";
+
+export %rule_set_full_name% =
+  concat(base_product.%product%, "+", keywords.%compile_product%, "+", %rule_set_crew_cat%, ": ", keywords.%rule_set_name%);
+
+/*
+** NUM ROWS IN ETABLE
+*/
+
+table num_rows_in_table(String table_path) =
+    0 -> Int %_num_rows_in_table%;
+    external table_path;
+    < row_number -> count(row_number);
+end
+
+global export %num_rows_in_table%(String table_path) =
+    default(%_num_rows_in_table%(table_path), 0);
+
+/* Performs integer division, rounding to the nearest larger integer */
+global export %div_ceil%(Int i, Int j) =
+    if %sign%(i) * %sign%(j) > 0 then
+        (abs(i) + abs(j) - 1) / abs(j)
+    else
+        i / j;

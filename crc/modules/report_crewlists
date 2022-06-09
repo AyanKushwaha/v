@@ -1,0 +1,1359 @@
+/* -*- crc -*-
+ * changelog {{{2
+ * [acosta:06/257@14:50] First version.
+ * [acosta:07/143@09:19] Merged with report_crewsheet
+ * [acosta:07/144@13:25] Added more comments.
+ * }}}
+ *
+ * Support module for the various crew list services.
+ */
+
+root module report_crewlists
+
+
+/* Imports *********************************************************** {{{1 */
+import accumulators;
+import attributes;
+import checkinout;
+import crew;
+import crew_log_acc;
+import crew_pos;
+import crew_warnings;
+import oma16;
+import duty;
+import duty_code;
+import duty_time;
+import duty_period;
+import fdp;
+import fundamental;
+import iterators;
+import leg;
+import levels;
+import meal;
+import salary_overtime;
+import salary_loss_of_rest;
+import packed_roster;
+import recency;
+import report_cio;
+import report_meal;
+import report_overtime;
+import report_common;
+import rest;
+import rules_caa_ccr;
+import task;
+import trip;
+import wop;
+import roster;
+import training;
+import base_utils;
+
+/* Variables that are shadowed here ********************************** {{{1 */
+/* To protect the crew lists from changes in Rave code. */
+
+/* keywords */
+export %origsuffix% = origsuffix;
+
+/* mixed */
+export %activity_name% =
+  if %leg_is_flight% then
+    %leg_flight_name%
+  else
+    %leg_code%;
+
+export %activity_id% = leg.%flight_id%;
+export %activity_udor% = leg.%udor%;
+
+export iterator activity_set = 
+  partition(leg) by(%activity_id%, 
+                    %activity_udor%);
+end
+
+
+/* from checkinout */
+export %cio_crew_checked_in% = checkinout.%crew_checked_in%;
+export %cio_duty_crew_checked_in% = checkinout.%duty_crew_checked_in%;
+export %cio_mandatory_ci% = checkinout.%leg_has_mandatory_ci%;
+export %cio_mandatory_co% = checkinout.%leg_has_mandatory_co%;
+
+/* from crew */
+export %crew_ac_qlns%(abstime t) = crew.%ac_qlns_at_date%(t);
+export %crew_active_landing% = crew.%active_landing%;
+export %crew_base%(abstime t) = crew.%base_at_date%(t);
+export %crew_birthday% = crew.%birthday%;
+export %crew_birth_country% = crew.%country_of_birth%;
+export %crew_birth_place% = crew.%city_of_birth%;
+export %crew_birth_state% = crew.%state_of_birth%;
+export %crew_civic_station%(abstime t) = crew.%civicstation_at_date%(t);
+export %crew_station%(abstime t) = crew.%station_at_date%(t);
+export %crew_company%(abstime t) = crew.%company_at_date%(t);
+export %crew_empno% = crew.%employee_number%;
+export %crew_empno_at_date%(abstime t) = crew.%employee_number_at_date%(t);
+export %crew_extperkey_to_id%(String nr) = crew.%extperkey_to_id%(nr);
+
+
+export %crew_gender% = crew.%sex%;
+export %crew_gn% = crew.%firstname%;
+export %crew_group_type%(abstime t) = crew.%group_at_date%(t);
+export %crew_id% = crew.%id%;
+export %crew_is_pilot% = crew.%is_pilot%;
+export %crew_line_check%(abstime t) = crew.%is_line_check%(t);
+export %crew_logname% = crew.%login_name%;
+export %crew_logname_at_date%(abstime t) = crew.%login_name_at_date%(t);
+export %crew_main_rank%(abstime t) = crew.%main_func_at_date%(t);
+export %crew_nr_landings% = crew.%nr_landings%;
+export %crew_res_city%(abstime t) = crew.%city%(t);
+export %crew_res_country%(abstime t) = crew.%country%(t);
+export %crew_res_postal_code%(abstime t) = crew.%postal_code%(t);
+export %crew_res_state%(abstime t) = crew.%state%(t);
+export %crew_res_street%(abstime t) = crew.%street%(t);
+export %crew_scc%(abstime t) = crew.%is_scc_qualified_at_date%(t);
+export %crew_seniority%(abstime t) = crew.%seniority_value%(t);
+export %crew_seniority_pp_start% = crew.%seniority_value%(%pp_start%);
+export %crew_sn% = crew.%surname%;
+export %crew_sub_category%(abstime t) =
+    /* Subcategory shall contain different information for flight/cabin crew, see SKCMS-1568 */
+    if %flight_crew% then default(crew.%sub_category_fc%(t), "")
+    else default(crew.%sub_category%(t), "");
+
+export %crew_title_rank%(abstime t) = crew.%titlerank_at_date%(t);
+
+/* from crew_log_acc */
+export %leg_loggable_block_time% = crew_log_acc.%loggable_block_time%;
+
+/* from crew_pos */
+export %crew_pos_relief_pilot% = crew_pos.%relief_pilot%;
+export %crew_pos_assigned_function% = crew_pos.%assigned_function%;
+
+/* from duty_code */
+export %duty_code% = duty_code.%leg_code%;
+
+/* from duty */
+export %duty_end_hb% = duty.%end_hb%;
+export %duty_end_lt% = duty.%end_lt%;
+export %duty_off_duty_station% = duty.%end_station%;
+export %duty_rest_time% = duty.%rest_time_scheduled%;
+export %duty_start_lt% = duty.%start_lt%;
+export %duty_start_hb% = duty.%start_hb%;
+export %duty_time% = 
+  duty.%duty_time%(duty.union, 
+                   not(crew.%region_at_date%(duty.%start_hb%) = "SKS" or not fundamental.%night_upg%));
+
+export %duty_end_scheduled_lt% = duty.%end_scheduled_lt%;
+
+/* from leg */
+export %leg_ac_family% = leg.%ac_family%;
+export %leg_ac_reg% = leg.%ac_reg%;
+export %leg_ac_type% = leg.%ac_type%;
+export %leg_adep% = leg.%start_station%;
+export %leg_ades% = leg.%end_station%;
+export %leg_ata_lt% = leg.%activity_actual_end_time_lt%;
+export %leg_ata_utc% = leg.%activity_actual_end_time_UTC%;
+export %leg_atd_lt% = leg.%activity_actual_start_time_lt%;
+export %leg_atd_utc% = leg.%activity_actual_start_time_UTC%;
+export %leg_block_time% = leg.%block_time%;
+export %leg_block_time_scheduled% = leg.%block_time_scheduled%;
+export %leg_check_in% = leg.%check_in%;
+export %leg_check_out% = leg.%check_out%;
+export %leg_code% = report_common.%leg_code%; /*default(training.%leg_code_redefined%, leg.%code%);*/
+export %leg_end_country% = leg.%end_country%;
+export %leg_end_lt% = leg.%end_lt%;
+export %leg_end_utc% = leg.%end_utc%;
+export %leg_end_hb% = leg.%end_hb%;
+export %leg_eta_lt% = leg.%activity_estimated_end_time_lt%;
+export %leg_eta_utc% = leg.%activity_estimated_end_time_UTC%;
+export %leg_etd_lt% = leg.%activity_estimated_start_time_lt%;
+export %leg_etd_utc% = leg.%activity_estimated_start_time_UTC%;
+export %leg_fd_carrier% = leg.%flight_carrier%;
+export %leg_fd_number% = leg.%flight_nr%;
+export %leg_fd_suffix% = leg.%our_flight_suffix%;
+export %leg_flight_descriptor% = leg.%flight_descriptor%;
+export %leg_flight_id% = leg.%flight_id%;
+export %leg_flight_name% = leg.%flight_name%;
+export %leg_has_check_in% = leg.%has_check_in%;
+export %leg_is_active_flight% = leg.%is_active_flight%;
+export %leg_is_apis% = leg.%is_apis%;
+export %leg_is_dk_nsch% = leg.%is_denmark_non_schengen%;
+export %leg_is_deadhead% = leg.%is_deadhead%;
+export %leg_is_first_in_duty% = leg.%is_first_in_duty%;
+export %leg_is_flight% = leg.%is_flight_duty%;
+export %leg_is_last_in_duty% = leg.%is_last_in_duty%;
+export %leg_is_last_in_wop% = leg.%is_active_flight% and is_last(leg(wop));
+export %leg_is_meal_stop% = meal.%stop%;
+export %leg_is_not_operating% = leg.%is_not_operating%;
+export %leg_is_on_duty% = leg.%is_on_duty%;
+export %leg_is_school_flight% = leg.%is_school_flight%;
+export %leg_is_simulator% = leg.%is_simulator%;
+export %leg_is_test_flight% = leg.%is_test_flight%;
+export %leg_ldor% = leg.%ldor%;
+export %leg_legno% = 
+    if %leg_is_flight% then
+        leg.%leg_number%
+    else
+        %py_index%;
+export %leg_sta_hb% = crew.%hb_time%(activity_scheduled_end_time);
+export %leg_sta_lt% = default(leg.%activity_scheduled_end_time_lt%, 01 Jan 1986 0:00);
+export %leg_sta_utc% = leg.%activity_scheduled_end_time_UTC%;
+export %leg_start_country% = leg.%start_country%;
+export %out_bound% = leg.%country_is_domestic%(leg.%start_country%);
+export %leg_start_lt% = leg.%start_lt%;
+export %leg_start_utc% = leg.%start_utc%;
+export %leg_start_hb% = leg.%start_hb%;
+export %leg_std_hb% = crew.%hb_time%(activity_scheduled_start_time);
+export %leg_std_lt% = default(leg.%activity_scheduled_start_time_lt%, 01 Jan 1986 0:00);
+export %leg_std_utc% = leg.%activity_scheduled_start_time_UTC%;
+export %leg_udor% = if leg.%is_flight_duty% or leg.%is_ground_transport% then leg.%udor% else leg.%start_date_utc%;
+export %leg_operated_by_SAS% = (leg.%aircraft_owner% = "SK" or leg.%aircraft_owner% = "SVS");
+export %leg_aircraft_owner% = leg.%aircraft_owner%;
+
+/* from salary_overtime  */ 
+export %overtime_scc% = salary_overtime.%senior_cc_allowance_leg%;
+export %overtime_sccnp% = salary_overtime.%senior_cc_allowance_no_purser_leg%;
+export %overtime_lrhigh% = 
+  salary_loss_of_rest.%is_loss_of_rest_high% and %leg_is_last_in_duty%;
+export %overtime_lrlow% = 
+  salary_loss_of_rest.%is_loss_of_rest_low% and %leg_is_last_in_duty%;
+export %overtime_is_SKD% = salary_overtime.%is_SKD%;
+export %overtime_is_SKS% = salary_overtime.%is_SKS%;
+export %overtime_is_SKN% = salary_overtime.%is_SKN%;
+
+/* from packed_roster */
+export %pr_name% = packed_roster.%rev_roster_activity%;
+export %pr_next_activity% = packed_roster.%next_activity_slash%;
+export %pr_next_duty% = packed_roster.%next_duty_slash%;
+export %pr_packed_roster%(abstime s, abstime e) = 
+  packed_roster.%interval_packed_roster%(s, e);
+export %pr_packed_roster_relative%(abstime s, abstime e) = 
+  packed_roster.%interval_packed_roster_relative%(s, e);
+export %pr_prev_activity% = packed_roster.%prev_activity_slash%;
+export %pr_prev_duty% = packed_roster.%prev_duty_slash%;
+
+%fdp_time% = if duty_period.%is_fdp% then fdp.%time% else 0:00;
+
+%extended_fdp_flag% =
+  if default(oma16.%is_extended_fdp%, false) then "E" else "";
+
+/* from report_cio */
+export %rc_pic% = report_cio.%pic%;
+export %rc_pic_logname% = report_cio.%pic_logname%;
+
+/* from report_meal */
+export %rm_meal_code% = report_meal.%meal_code%;
+export %rm_meal_code_excl_meal_break% = report_meal.%meal_code_excl_meal_on_ground%;
+export %rm_meal_break_code% = report_meal.%meal_on_ground_code%;
+
+/* from report_overtime */
+export %overtime_mdcsh% = salary_overtime.%maitre_de_cabin_short_haul_leg%;
+export %overtime_mdclh% = salary_overtime.%maitre_de_cabin_long_haul_leg%;
+
+/* from task */
+export %task_code% = %leg_code%; /* task.%code%; */
+export %task_description% = report_common.%task_description%;
+
+/* from trip */
+export %trip_end_utc% = trip.%end_UTC%;
+export %trip_rest_time% = trip.%rest_time%;
+export %trip_start_utc% = trip.%start_UTC%;
+export %trip_name% = trip.%name%;
+
+/* from wop */
+export %wop_end_hb% = wop.%end_hb%;
+export %wop_start_hb% = wop.%start_hb%;
+export %wop_end_lt% = wop.%end_lt%;
+export %wop_start_lt% = wop.%start_lt%;
+
+
+/* first/last leg **************************************************** {{{1 */
+export %leg_is_first_in_trip% = leg.%is_first_in_trip%;
+export %leg_is_last_in_trip% = leg.%is_last_in_trip%;
+export %flight_is_first_in_duty% = is_first(leg(duty)) where (leg.%is_flight_duty%);
+
+
+/* Type of flight **************************************************** {{{1 */
+export %type_of_flight% =
+  if leg.%is_domestic% then
+    concat("DOMESTIC ", leg.%start_country%)
+  else if leg.%is_interscand% then
+    "INTRASCAND"
+  else if leg.%is_european% then
+    "EUROPEAN"
+  else if leg.%is_intercont% then
+    "INTERCONT"
+  else if leg.%is_charter% then
+    "CHARTER"
+  else
+    "*";
+
+
+/* Start / end time of day ******************************************* {{{1 */
+export %std_time_lt% = 
+  time_of_day(leg.%activity_scheduled_start_time_lt%);
+export %std_date_lt% = 
+  leg.%ldor%;
+export %std_time_utc% = 
+  time_of_day(leg.%activity_scheduled_start_time_UTC%);
+export %std_date_utc% = 
+  round_down(leg.%activity_scheduled_start_time_UTC%, 24:00);
+
+
+/* Next flight info (in same duty) *********************************** {{{1 */
+export %next_flight_id% =
+  next(leg(duty), leg.%flight_id%);
+export %next_flight_udor% =
+  next(leg(duty), leg.%udor%);
+export %next_flight_depsta% =
+  next(leg(duty), leg.%start_station%);
+export %next_flight_arrsta% =
+  next(leg(duty), leg.%end_station%);
+export %next_flight_std_UTC% =
+  next(leg(duty), leg.%start_UTC%);
+export %next_flight_sta_UTC% =
+  next(leg(duty), leg.%end_UTC%);
+export %next_flight_std_lt% =
+  next(leg(duty), leg.%start_lt%);
+export %next_flight_sta_lt% =
+  next(leg(duty), leg.%end_lt%);
+
+
+/* Last flown date *************************************************** {{{1 */
+export %last_flown_date% =
+  prev(leg(chain), leg.%end_lt%) where (leg.%is_flight_duty%);
+
+
+/* Flight Delay Info ************************************************* {{{1 */
+/*
+ * [acosta:08/035@13:22] Note:
+ * Delay info is moved to Python module paxfigures.py.
+ * This to avoid loading peripheral information into Rave model.
+ * (see comments below for PAX).
+ */
+
+/* PAX info ********************************************************** {{{1 */
+/* 
+ * [acosta:08/029@15:11] Note:
+ * PAX info was removed from this file since it's too large to be 
+ * loaded in a normal Studio session. All PAX-related information is
+ * instead retrieved using an EntityConnection to the database.
+ */
+
+
+/* Crew document info ************************************************ {{{1 */
+export %document_count% = %document_count_at%(leg.%end_lt%);
+
+export %doc_typ% = %doc_typ_at%(leg.%end_lt%);
+export %doc_subtype% = %doc_subtype_at%(leg.%end_lt%);
+export %doc_validto% = %doc_validto_at%(leg.%end_lt%);
+export %doc_docno% = %doc_docno_at%(leg.%end_lt%);
+export %doc_issuer% = %doc_issuer_at%(leg.%end_lt%);
+export %doc_maindocno% = %doc_maindocno_at%(leg.%end_lt%);
+
+export %doc_typ_at%(abstime t) = %_doc_typ%(t, %py_index%);
+export %doc_subtype_at%(abstime t) = %_doc_subtype%(t, %py_index%);
+export %doc_validto_at%(abstime t) = %_doc_validto%(t, %py_index%);
+export %doc_docno_at%(abstime t) = %_doc_docno%(t, %py_index%);
+export %doc_issuer_at%(abstime t) = %_doc_issuer%(t, %py_index%);
+export %doc_maindocno_at%(abstime t) = %_doc_maindocno%(t, %py_index%);
+
+table crew_document_table(abstime t, int seq) =
+   crew.%id%, seq, t -> 
+      string %_doc_typ%, 
+      string %_doc_subtype%,
+      abstime %_doc_validto%, 
+      string %_doc_docno%,
+      string %_doc_issuer%,
+      string %_doc_maindocno%;
+  external "crew_document";
+  crew, match_number, (validfrom, validto( ->
+      doc_typ,
+      doc_subtype,
+      validto,
+      docno,
+      issuer,
+      maindocno;
+  -, -, - -> 
+      void_string, 
+      void_string,
+      void_abstime,
+      void_string,
+      void_string,
+      void_string;
+end 
+
+table crew_document_count_table(abstime t) =
+  crew.%id%, t -> export int %document_count_at%;
+  external "crew_document";
+  crew, (validfrom, validto( -> count(row_number);
+end 
+
+
+/* Previous A/C Rotations ******************************************** {{{1 */
+%prev_1_start% =
+  prev(leg(chain), leg.%start_UTC%);
+%prev_2_start% =
+  prev(leg(chain), %prev_1_start%);
+%prev_3_start% =
+  prev(leg(chain), %prev_2_start%);
+
+/* returns start time of the first in a chain of three previous a/c rotations
+ * in case there were only two prior a/c rotations, return start of these,
+ * similarly if only one a/c rotation was found before before current leg.
+ */
+export %prev_max3_start_in_ac_rot% =
+  default(
+    transform(ac_rotations_ref, %prev_3_start%),
+      default(
+        transform(ac_rotations_ref, %prev_2_start%),
+          default(
+            transform(ac_rotations_ref, %prev_1_start%),
+              leg.%start_UTC%)));
+
+
+/* EXPERIMENTAL */
+export %in_prev3_ac% = 
+  %leg_start_utc% >= min(above(3), %prev_max3_start_in_ac_rot%)
+  and %leg_start_utc% < max(above(3), %leg_start_utc%);
+
+
+/* Sort order for crew lists ***************************************** {{{1 */
+/*
+ * SORT ORDER FOR CREW LISTS
+ * crew lists will be sorted ascending (lower numbers first) 
+ *    sort_by=('report_crewlists.%sort_key_1%', 'crew.%seniority%')
+ */
+
+export %sort_key% = crew.%sort_key%;
+export %sort_key_1% = crew.%sort_key_1%;
+
+/* Task code conversion for crew lists ***************************************** {{{1 */
+/*
+ * Since there are special needs, for CrewList on ground duties, we need to convert
+ * incoming task code. 
+ * This is currently not used, but in case of performance problem for CrewList on 
+ * ground duties is could be used.
+ */
+
+set cod = "NP", "NW", "NS";
+set opcpc = "Y", "S", "Z";
+export %external_task_code2internal%(String code) =
+  let code2 = substr(code, 1, 2),
+      code1 = substr(code, 1, 1),
+      code1rest = substr(code, 2, length(code));
+  if code2 in cod then
+     code2
+  else
+     if code1 in opcpc then
+        concat("S",code1rest) 
+     else
+        code;
+
+/* In current or next sling ****************************************** {{{1 */
+/* for crewroster */
+export %in_current_or_next_sling% =
+  default(
+      leg.%start_UTC% >= %current_or_next_sling_start_UTC%
+      and leg.%start_UTC% <= %current_or_next_sling_end_UTC%,
+    false);
+
+%current_or_next_sling_start_UTC% =
+  first(wop(chain), wop.%start_UTC%) 
+    where (wop.%end_UTC% >= fundamental.%now% and any(leg(wop), %leg_is_on_duty%) or 
+	next(wop(chain), wop.%end_UTC% >= fundamental.%now% and not any(leg(wop), %leg_is_on_duty%)));
+
+%current_or_next_sling_end_UTC% =
+  first(wop(chain), %next_or_current_sling_end_UTC%) 
+    where (wop.%end_UTC% >= fundamental.%now% and any(leg(wop), %leg_is_on_duty%) or
+	next(wop(chain), wop.%end_UTC% >= fundamental.%now% and not any(leg(wop), %leg_is_on_duty%)));
+
+%next_or_current_sling_end_UTC% =
+  default(next(wop(chain), wop.%end_UTC%)
+		where(any(leg(wop), %leg_is_on_duty%)),
+  	wop.%end_UTC%);
+
+export %crewlist_allowed% = report_common.%crew_list_allowed%;
+
+/* checkin / checkout / stop duration ******************************** {{{1 */
+%checkin_time% = leg.%duty_brief_start_lt%;
+%checkout_time% = leg.%duty_debrief_end_scheduled_lt%;
+%stop_duration% =
+  next(leg(chain), leg.%start_utc%) where (%leg_is_on_duty% and not leg.%is_blank_day%) 
+  - leg.%end_utc%;
+%_scheduled_start% = report_common.%leg_scheduled_start%;
+%_scheduled_end% = report_common.%leg_scheduled_end%;
+%_actual_end% =
+  let sta = %leg_end_utc%;
+  if %leg_is_simulator% then sta + default(%leg_check_out%, 0:00) else sta;
+%stop_duration_scheduled% =
+  next(leg(chain), %_scheduled_start%) where (%leg_is_on_duty% and not leg.%is_blank_day%) 
+  - %_scheduled_end%;
+%stop_duration_scheduled_actual% =
+  next(leg(chain), %_scheduled_start%) where (%leg_is_on_duty% and not leg.%is_blank_day%) 
+  - %_actual_end%;
+
+/* Roster released until {{{1 */
+%released_until% = attributes.%crew_last_published%;
+
+/* Roster do not show times and station {{{1 */
+/* WP FAT Int 28 */
+set not_show_times_stations =
+"BL", "BL1", "BL12", "BL2", "BL20", "BL3", "BL5", "BL6", "BL7", "BL8", "BL9", "F", "FE", "FK", "FN", "F0", "F1", "F10", "F11", "F12", "F14", "F2", "F20", "F22", "F3", "F3C", "F3M", "F3S", "F31", "F32", "F34", "F35", "F38", "F4", "F42", "F5", "F6", "F61", "F62", "F65", "F7", "F7S", "F71", "F72", "F8", "F81", "F82", "F84", "F85", "F88", "F9", "IL", "IL1", "IL12", "IL2", "IL3", "IL4", "IL41", "IL42", "IL5", "IL6", "IL8", "IL81", "IL82", "IL83", "KD", "LA", "LA11", "LA12", "LA13", "LA14", "LA15", "LA21", "LA22", "LA31", "LA32", "LA33", "LA34", "LA35", "LA36", "LA37", "LA39", "LA41", "LA42", "LA44", "LA45", "LA46", "LA47", "LA48", "LA5", "LA51", "LA52", "LA53", "LA57", "LA58", "LA59", "LA61", "LA62", "LA63", "LA64", "LA65", "LA66", "LA67", "LA68", "LA7", "LA70", "LA71", "LA72", "LA73", "LA76", "LA77", "LA8", "LA80", "LA81", "LA82", "LA83", "LA84", "LA85", "LA86", "LA87", "LA88", "LA89", "LA91", "LA92", "MI", "MT9", "IL14", "FS", "OX0", "OX9", "SB2", "SD", "SD1", "SD2", "SD3", "SD5", "SD8", "TN", "VA", "VA1", "VA3", "VA8", "VB", "WB";
+%show_times_and_stations% = task.%code% not in not_show_times_stations;
+
+/* OAA Identification {{{1 */
+%OAA_id% = attributes.%ground_task_str%("OAAID");
+
+/* For DutyCalculation report {{{1 */
+
+/* leg_is_ground_duty {{{2 */
+export %leg_is_ground_duty% = not %leg_is_flight% and %leg_is_on_duty% and not leg.%is_blank_day%;
+
+/* leg_is_off_duty {{{2 */
+export %leg_is_off_duty% = not report_crewlists.%leg_is_on_duty% or leg.%is_blank_day%;
+
+/* seq_no {{{2 */
+export %seq_no% = 1;
+
+/* ci_time {{{2 */
+export %ci_time% = duty.%start_utc%;
+
+/* co_time {{{2 */
+export %co_time% = duty.%end_utc%;
+
+/* max_dutP {{{2 */
+export %max_dutP% = duty_time.%max_in_duty_period%;
+
+/* dutP {{{2 */
+export %dutP% = 
+  duty.%duty_time%(duty.union, 
+                   not(duty.%region% = "SKS" or not fundamental.%night_upg%));
+
+/* dut_night {{{2 */
+export %dut_night% = 
+  duty.%duty_time%(duty.union,duty.%region% = "SKS" or fundamental.%night_upg%) 
+  - duty.%duty_time%(duty.union,False);
+
+/* max_dut1 {{{2 */
+export %max_dut1% = duty_time.%max_in_1x24_hrs%;
+
+/* dut1 {{{2 */
+export %dut1% = 
+  if duty.%region% = "SKS" 
+  then duty_time.%1x24_hrs_no_night_upg%
+  else duty_time.%1x24_hrs%;
+
+/* dut1B {{{2 */
+export %dut1B% = 
+  if duty.%region% = "SKS" 
+  then duty_time.%1x24_hrs_bwd_no_night_upg%
+  else duty_time.%1x24_hrs_bwd%;
+
+/* dut1F {{{2 */
+export %dut1F% = 
+  if duty.%region% = "SKS"
+  then duty_time.%1x24_hrs_fwd_no_night_upg%
+  else duty_time.%1x24_hrs_fwd%;
+
+/* max_dut7 {{{2 */
+/* For duty time in duty pass both with/without night upg time is displayed,
+ * but not for 7x24. Is this correct? HenrikA */
+export %max_dut7% = duty_time.%max_in_7x24_hrs%;
+
+/* dut7 {{{2 */
+export %dut7% = 
+  nmax(%dut7B%, %dut7F%);
+
+/* dut7B {{{2 */
+export %dut7B% =
+  duty_time.%7x24_hrs_bwd_no_cmp_day%;
+
+/* dut7F {{{2 */
+export %dut7F% =
+  duty_time.%7x24_hrs_fwd_no_cmp_day%;
+
+/* dut7Facc {{{2 */
+export %dut7Facc% =
+  if duty.%region% = "SKS" then 
+  	trip.%duty_time_in_period%(wop.%start_UTC%, wop.%start_UTC% + 7*24:00, false, duty.union)
+  else 
+	trip.%duty_time_in_period%(wop.%start_UTC%, wop.%start_UTC% + 7*24:00, fundamental.%night_upg%, duty.union);
+
+/* slip {{{2 */
+/* Is this only valid for out-station rest for long-haul duties? */
+export %slip% =
+  if duty.%is_long_haul% and not duty.%arrives_at_homebase% then
+    rest.%duty_minimum_time%
+  else
+    0:00;
+
+/* timeoff {{{2 */
+export %time_off% = default(duty.%rest_time%, trip.%rest_time%);
+
+/* timeoff_last_24 {{{2 */
+export %time_off_last_24% = rest.%in_24hrs_duty%;
+
+/* timeoff_min {{{2 */
+export %time_off_min% = rest.%duty_minimum_time%;
+
+/* active_landings_in_duty {{{2 */
+/* nr of landings in this duty */
+/* This will only cover for already logged landings, not the ones performed
+ * the last 3 days or so. You could use recency.%leg_qualifies_for_recency%
+ * which includes the landings not yet booked. When is the report run? HenrikA */
+export %active_landings_in_duty% =
+  sum(leg(duty), crew.%nr_landings%);
+
+/* agreement_name {{{2 */
+/* Name of agreement used in the calculation of duty/points */
+/* I have no idea what this is. HenrikA */
+export %agreement_name% = "";
+
+/* monthly calculations {{{2 */
+export %n_months_sort% = 100 - %py_index%;
+export %n_months_ago%(abstime start, int nn) = 
+  add_months(round_down_month(start), -nn); 
+
+export %monthly_block_time_n_months_ago%(abstime start, int nn) =
+  %acc_block_time%(%n_months_ago%(start, nn), %n_months_ago%(start, nn - 1));
+
+export %monthly_duty_time_n_months_ago%(abstime start, int nn) =
+  %acc_duty_time%(%n_months_ago%(start, nn), %n_months_ago%(start, nn - 1));
+
+export %ix_months_ago%(abstime start) =
+  %n_months_ago%(start, %py_index% - 1); 
+
+export %monthly_block_time_ix_months_ago%(abstime start) =
+  %monthly_block_time_n_months_ago%(start, %py_index% - 1);
+
+export %monthly_duty_time_ix_months_ago%(abstime start) =
+  %monthly_duty_time_n_months_ago%(start, %py_index% - 1);
+
+%acc_block_time%(abstime start, abstime stop) = accumulators.%block_time_in_period_caa%(start, stop);
+
+%acc_duty_time%(abstime start, abstime stop) = accumulators.%duty_time_in_period%(start, stop);
+
+/* Number of Crew to Load Sheet ************************************** {{{1 */
+/*
+ * 41. PAH Number of Crew (to Load Sheet), integration.
+ * This report sends number of crew onboard to the PAH system.
+ * The message is time initiated and will be sent three times:
+ *  1. 180 min before STD
+ *  2.  60 min before STD
+ *  3.  22 min before STD
+ */
+
+/* Exported variables ************************************************ {{{2 */
+export %num_fc% = sum(equal_legs, %fc%)
+					where(leg.%is_active_flight% and fundamental.%is_roster%);
+export %num_cc% = sum(equal_legs, %cc%)
+					where(leg.%is_active_flight% and fundamental.%is_roster%);
+export %num_other% = sum(equal_legs, %other%)
+					where(leg.%is_active_flight% and fundamental.%is_roster%);
+export %num_all% = sum(equal_legs, %all%)
+					where(leg.%is_active_flight% and fundamental.%is_roster%);
+/* Consider cc in ferry flights also */
+export %num_cc_incl_ferryflight% = sum(equal_legs, %cc%)
+					where(((leg.%is_ferry_flight% and leg.%is_active_flight_not_operating%) or leg.%is_active_flight%) and fundamental.%is_roster%);
+export %num_legs% = count(iterators.unique_leg_set);
+export %num_legs_above% = sum(above(1), %num_legs%);
+export %num_legs_above2% = sum(above(2), %num_legs%);
+
+
+/* Private variables ************************************************* {{{2 */
+%fc% =
+  assigned_crew_position_1 +
+  assigned_crew_position_2 +
+  assigned_crew_position_3 +
+  assigned_crew_position_4;
+
+%cc% =
+  assigned_crew_position_5 +
+  assigned_crew_position_6 +
+  assigned_crew_position_7 +
+  assigned_crew_position_8;
+
+%other% =
+  assigned_crew_position_9 +
+  assigned_crew_position_10;
+
+%all% =
+  %fc% + %cc% +%other%;
+
+
+/* Crew Manifests / Master Crew List (APIS) ************************** {{{1 */
+export %crew_passport_gn%(abstime t) =
+  crew.%passport_gn%(t);
+export %crew_passport_sn%(abstime t) =
+  crew.%passport_sn%(t);
+export %crew_nationality%(abstime t) = 
+  crew.%nationality%(t);
+
+export %crew_nationality_prefer%(abstime t, String nat) =
+  crew.%nationality_prefer%(t, nat);
+
+export %crew_passport_nat%(Abstime d, String destination) =
+  crew.%doc_current_dest_nationality%(d, destination);
+
+export %crew_passport_no%(Abstime d, String destination) =
+  crew.%doc_current_dest_passport_no%(d, destination);
+
+export %crew_passport_issuer%(Abstime d, String destination) =
+  crew.%doc_current_dest_passport_issuer%(d, destination);
+
+export %crew_passport_validto%(Abstime d, String destination) =
+   %date_conv%( crew.%doc_current_dest_passport_validto_str%(d, destination)) - 0:01;
+   /* Validto is the beginning of the day after expiry, so subtract one minute */
+
+export %crew_visa_no%(Abstime d, String destination) =
+  crew.%doc_current_dest_visa_no%(d, destination);
+  
+export %crew_visa_issuer%(Abstime d, String destination) =
+  crew.%doc_current_dest_visa_issuer%(d, destination);
+  
+export %crew_visa_validto%(Abstime d, String destination) =
+   %date_conv%( crew.%doc_current_dest_visa_validto_str%(d, destination)) - 0:01;
+   /* Validto is the beginning of the day after expiry, so subtract one minute */
+  
+
+export %crew_license_no%(Abstime d) =
+  if %crew_is_pilot% then crew.%doc_current_license_no%(d)
+  else void_string;
+
+export %crew_license_issuer%(Abstime d) =
+  if %crew_is_pilot% then crew.%doc_current_license_issuer%(d)
+  else void_string;
+
+export %crew_license_validto%(Abstime d) =
+   if %crew_is_pilot% then %date_conv%( crew.%doc_current_license_validto_str%(d)) - 0:01
+   /* Validto is the beginning of the day after expiry, so subtract one minute */
+   else void_abstime;
+
+
+
+
+/* US Department of Homeland Security crew category */
+%flight_is_passenger% = true;
+%flight_is_cargo% = false;
+%crew_is_mgmt% = false;
+export %dhs_category% =
+  /* to be evaluated on leg */
+  if %crew_is_pilot% and %leg_is_deadhead% then 
+    "CR5" /* Pilots deadheading */
+  else if %crew_is_pilot% then 
+    "CR1" /* Pilot */
+  else if %crew_is_mgmt% then
+    "CR3" /* Airline operation mgmt with cockpit access */
+  else if %flight_is_cargo% then
+    "CR4" /* Cargo crew */
+  else
+    "CR2"; /* Cabin crew */
+
+export %dhs_category_mcl% =
+  /* to be evaluated on chain */
+  if %crew_is_pilot% then
+    "CR1"
+  else
+    "CR2";
+
+enum mcl_status_flag =
+  added remark "Crew is added";
+  changed remark "Crew has changed";
+  deleted remark "Crew is deleted";
+  unchanged remark "Unhandled state";
+  remark "Status flag for Master Crew List";
+end
+
+export %crew_change_status%(abstime t, reltime i) =
+  if %crew_is_starting%(t, i) or %crew_became_lh%(t, i) then
+    added
+  else if %crew_is_retiring%(t, i) then
+    deleted
+  else if %crew_doc_or_address_change%(t, i) then
+    changed
+  else
+    unchanged;
+
+export %is_interesting_for_mcl%(abstime t, reltime i) = 
+  crew.%is_long_haul%(t) and (%crew_change_status%(t, i) <> unchanged);
+
+/* private variables {{{2 */
+%_in_interval%(abstime x, abstime t, reltime i) =
+  t <= x and x < t + i;
+
+%crew_is_starting%(abstime t, reltime i) =
+  default(%_crew_is_starting%(t, i), false);
+%_crew_is_starting%(abstime t, reltime i) = 
+  crew.%is_starting_in_interval%(t, i);
+
+%crew_is_retiring%(abstime t, reltime i) =
+  default(%_crew_is_retiring%(t, i), false);
+%_crew_is_retiring%(abstime t, reltime i) = 
+  crew.%is_retiring_in_interval%(t, i);
+
+%crew_became_lh%(abstime t, reltime i) =
+  default(%_crew_became_lh%(t, i), false);
+%_crew_became_lh%(abstime t, reltime i) =
+  not crew.%is_long_haul%(t - 0:01) and crew.%is_long_haul%(t + i);
+
+table crew_expiring_passport_count_table(abstime t, reltime i) =
+  crew.%id%, "PASSPORT", t, t + i -> int %expiring_passport_count%;
+  external "crew_document";
+  crew, doc_typ, < validto, > validto  -> count(row_number);
+end 
+
+table crew_expiring_licence_count_table(abstime t, reltime i) =
+  crew.%id%, "LICENCE", t, t + i -> int %expiring_licence_count%;
+  external "crew_document";
+  crew, doc_typ, < validto, > validto  -> count(row_number);
+end 
+
+table crew_expiring_address_count_table(abstime t, reltime i) =
+  crew.%id%, t, t + i -> int %expiring_address_count%;
+  external "crew_address";
+  crew, < validto, > validto  -> count(row_number);
+end 
+
+%crew_doc_or_address_change%(abstime t, reltime i) =
+  default(%expiring_passport_count%(t, i) > 0, false) or
+  default(%expiring_licence_count%(t, i) > 0, false) or
+  default(%expiring_address_count%(t, i) > 0, false);
+
+
+/* For automated tests *********************************************** {{{1 */
+export %t_first_flight_adep% = 
+  first(leg(chain) where (leg.%is_flight_duty% and %t_in_window%), leg.%start_station%);
+export %t_first_flight_ades% = 
+  first(leg(chain) where (leg.%is_flight_duty% and %t_in_window%), leg.%end_station%);
+export %t_first_flight_id% = 
+  first(leg(chain) where (leg.%is_flight_duty% and %t_in_window%), leg.%flight_id%);
+export %t_first_flight_std_utc% = 
+  first(leg(chain) where (leg.%is_flight_duty% and %t_in_window%), leg.%activity_scheduled_start_time_UTC%);
+export %t_first_flight_std_lt% = 
+  first(leg(chain) where (leg.%is_flight_duty% and %t_in_window%), leg.%activity_scheduled_start_time_lt%);
+export %t_first_flight_udor% = 
+  first(leg(chain) where (leg.%is_flight_duty% and %t_in_window%), leg.%udor%);
+export %t_first_flight_ca1% = 
+  first(leg(chain) where (leg.%is_flight_duty% and %t_in_window%), report_cio.%ca1%);
+export %t_first_non_flight_start% = 
+  first(leg(chain) where (not leg.%is_flight_duty% and %t_in_window%), leg.%start_utc%);
+export %t_first_non_flight_code% = 
+  first(leg(chain) where (not leg.%is_flight_duty% and %t_in_window%), leg.%code%);
+export %t_start_date% = fundamental.%pp_start%;
+  /*round_down(fundamental.%now%, 24:00) - 240:00;*/
+export %t_end_date% = fundamental.%pp_end%;
+  /*round_down(fundamental.%now%, 24:00) + 240:00;*/
+export %t_mid_date% = 
+  fundamental.%pp_start% + (fundamental.%pp_end% - fundamental.%pp_start%) / 2;
+%t_window_start% = nmin(%t_start_date% + 4 * 30 * 24:00, %t_mid_date%);
+%t_window_end% = %t_end_date%;
+%t_in_window% = (leg.%start_utc% > %t_window_start%) and (leg.%start_utc% <= %t_window_end%);
+
+
+/* Block time/Duty time (CREWSLIP) *********************************** {{{1 */
+export %bt_in_month%(abstime st) = 
+  let et = add_months(st, 1);
+  roster.%block_time_in_period%(crew.%utc_time%(st), crew.%utc_time%(et));
+
+export %dt_in_month%(abstime st) =
+  let et = add_months(st, 1);
+  roster.%duty_time_in_period%(crew.%utc_time%(st), crew.%utc_time%(et), fundamental.%night_upg%, duty.union);
+
+
+/* Rule group (for CREWSLIP) ***************************************** {{{1 */
+/* 
+ * [acosta:08/108@12:46] See CR 119.
+ * Currently these group statements are in:
+ *   Valid license
+ *     rules_caa_ccr.caa_valid_licence_ALL
+ *   Valid visa
+ *     rules_caa_ccr.caa_valid_visa_ALL
+ *   Valid vaccination
+ *     rules_caa_ccr.caa_valid_vaccination_ALL
+ *   Valid medical (pilot)
+ *     rules_caa_ccr_fc.caa_valid_medical_FC
+ *   Route and airport R103 - R128
+ *     rules_qual_ccr_fc.qln_airport_ok_FC
+ *   Route and airport R182 - R183, missing??
+ *   Route and airport R592, 593, missing??
+ */
+group crewslip = 
+  rules_caa_ccr.caa_valid_licence_ALL,
+  rules_caa_ccr.caa_valid_visa_ALL,
+  rules_caa_ccr.caa_valid_vaccination_ALL;
+
+
+/* Crew warnings for CREWSLIP **************************************** {{{1 */
+
+
+/* t_warn_prio {{{2 */
+export %t_warn_prio% = crew_warnings.%crew_nr_section_priorities%(%py_index%);
+
+/* warn_prio {{{2 */
+export %warn_has_prio% = 
+  crew_warnings.%section_priority_warning%(%py_index1%, %py_index%);
+
+/* warn_code {{{2 */
+export %warn_code% = 
+  crew_warnings.%section_priority_code%(%py_index1%, %py_index%);
+
+/* warn_desc {{{2 */
+export %warn_desc% = 
+  crew_warnings.%section_priority_descr%(%py_index1%, %py_index%);
+
+/* warn_crew_has {{{2 */
+export %warn_has_warn% = crew_warnings.%crew_has%;
+
+/* warn_short {{{2 */
+export %warn_short% = crew_warnings.%warnings_short%;
+
+/* t_warn_sections {{{2 */
+export %t_warn_sections% = crew_warnings.%crew_nr_warning_sections%;
+
+/* warn_has_warn_in_section {{{2 */
+export %warn_has_warn_in_section% = 
+  crew_warnings.%crew_has_warning_in_section%(%py_index%);
+
+/* warn_group {{{2 */
+export %warn_group% = crew_warnings.%crew_section_group%(%py_index%);
+
+/* document_expiry_group_count {{{2 */
+%document_expiry_group_count%=3;
+
+/* document_expiry_count {{{2 */
+%document_expiry_count%(Abstime date, Int ix) = crew.%max_iter_crew_doc%(%document_expiry_group%(ix), date);
+
+/* document_expiry_group {{{2 */
+table document_expiry_group_table(Int ix) =
+    ix -> %document_expiry_group%;
+
+    1 -> "PASSPORT";
+    2 -> "VISA";
+    3 -> "VACCINATION";
+    - -> "";
+end
+
+/* has_document_expiry_warning {{{2 */
+%has_document_expiry_warning%(Abstime fromDate, Abstime toDate) =
+        %_document_expiry_warning%(fromDate, toDate, %py_index%, %py_index1%) <> "";
+
+/* document_expiry_warning {{{2 */
+%_document_expiry_warning%(Abstime fromDate, Abstime toDate, Int ix, Int ix1) =
+  	let doctype = %document_expiry_group%(ix1),
+        docsubtype = crew.%crew_doc_subtyp_ix%(doctype, fromDate, ix),
+        expiry = crew.%doc_max_validto_date%(doctype, docsubtype, fromDate);
+    if expiry < toDate then
+        concat(docsubtype, " ", %expiry_date_inclusive%(expiry))
+    else
+       "";
+
+%document_expiry_warning%(Abstime fromDate, Abstime toDate) =
+    %_document_expiry_warning%(fromDate, toDate, %py_index%, %py_index1%);
+
+
+
+/* Office list 32.12 ************************************************* {{{1 */
+
+export iterator office_list_iterator =
+  partition(roster)
+  by(%office_list_code%);
+end
+
+export %office_list_code% =
+  default(%office_list%, "Other");
+
+set office_list_stations = "CPH", "OSL", "STO";
+%stationed_crew% = crew.%homestation% not in office_list_stations;
+
+table office_list_table =
+  %stationed_crew%, %crew_title_rank%(crew.%available_start%) 
+    -> export string %office_list%;
+  false, "FC" -> "FC_AS";
+  false, "AS" -> "FC_AS";
+  false, "FP" -> "FP";
+  false, "FR" -> "FR_AP";
+  false, "AP" -> "FR_AP";
+  false, "AH" -> "AH";
+  true,   -   -> "Stationed Crew";
+   -,     -   -> void_string;
+end
+
+%office_list_valid%(Int ix) =
+  crew.%qln_type%(ix) = "ACQUAL" 
+  and crew.%qln_validfrom%(ix) <= %now% 
+  and crew.%qln_validto%(ix) > %now%;
+
+%office_list_first_qual% =
+  first(times(crew.%number_of_qualifications%) where (%office_list_valid%(%times_index_0%)),
+    crew.%qln_subtype%(%times_index_0%));
+
+table office_list_fd_table =
+  crew.%homebase%, %office_list_first_qual% 
+    -> export string %office_list_fd%;
+  "CPH", "M8" -> "F_CPH_M8";
+  "CPH", "A2" -> "F_CPH_A2";
+  "CPH", "A3" -> "F_CPH_A3A4";
+  "CPH", "A4" -> "F_CPH_A3A4";
+
+  "OSL", "38" -> "F_OSL_38";
+  "OSL", "F5" -> "F_OSL_F5";
+  "OSL", "A3" -> "F_OSL_A3A4";
+  "OSL", "A4" -> "F_OSL_A4A4";
+
+  "SVG", "38" -> "F_SVG_38";
+  "SVG", "F5" -> "F_SVG_F5";
+
+  "TRD", "38" -> "F_TRD_38";
+  "TRD", "F5" -> "F_TRD_F5";
+
+  "STO", "36" -> "F_STO_36";
+  "STO", "M8" -> "F_STO_M8";
+  "STO", "A3" -> "F_STO_A3A4";
+  "STO", "A4" -> "F_STO_A3A4";
+
+   -, - -> void_string;
+end
+
+table office_list_cc_table =
+  crew.%homebase%, crew.%rank% -> export string %office_list_cc%;
+  "CPH", "AP" -> "A_CPH_AP";
+  "CPH", "AS" -> "A_CPH_AS";
+  "CPH", "AH" -> "A_CPH_AH";
+
+  "OSL", "AP" -> "A_OSL_AP";
+  "OSL", "AS" -> "A_OSL_AS";
+  "OSL", "AH" -> "A_OSL_AH";
+
+  "SVG", "AP" -> "A_SVG_AP";
+  "SVG", "AS" -> "A_SVG_AS";
+  "SVG", "AH" -> "A_SVG_AH";
+
+  "TRD", "AP" -> "A_TRD_AP";
+  "TRD", "AS" -> "A_TRD_AS";
+  "TRD", "AH" -> "A_TRD_AH";
+
+  "STO", "AP" -> "A_STO_AP";
+  "STO", "AS" -> "A_STO_AS";
+  "STO", "AH" -> "A_STO_AH";
+
+   -, - -> void_string;
+end
+
+/* Future Activities ************************************** {{{1 */
+/*
+ * 32.15.1. FutureActivities report (PRE), integration.
+ */
+
+set non_pre_set = "F","F4","FE";
+export %is_PRE_act% =
+	not leg.%is_flight_duty% and
+	task.%code% not in non_pre_set and
+	not task.%is_standby_at_home%(task.%code%) and
+	not task.%is_standby_line%(task.%code%) and
+	not task.%is_standby_at_airport%(task.%code%) and
+	not task.%is_blank_day%(task.%code%) and
+	not ((substr(task.%code%, 1, 2) = "F8") and task.%code% <> "F89") and
+	not (substr(task.%code%, 1, 2) = "FB") and
+	not (substr(task.%code%, 1, 2) = "FF");
+
+
+/* CR 184 Landings on non-ACARS A/C and CR 220 If no landing is registrered *********************** {{{1 */
+/*
+ * Register "landings" on A/C that does not have the ACARS system, 
+ * or where no landing is registrered.
+ * The ACARS system allows crew members to send crew landing message to
+ * CMS.
+ *
+ */
+export %no_landing_recorded% = default(
+  leg.%is_flight_duty%
+  and not crew.%landing_any_crew%
+  and not leg.%is_deadhead%
+  and not leg.%is_supernum%, false);
+export %designated_landing% = 
+  if crew_pos.%acting_commander% then
+    recency.%active_landing_default%
+  else if crew_pos.%acting_copilot% then
+    not %fc_lands%
+  else false;
+  
+%fc_lands% =
+  any(equal_legs, recency.%active_landing_default%)
+  where (crew_pos.%acting_commander%);
+
+iterator no_landing_recorded_iterator =
+  partition(leg)
+  by(%no_landing_recorded%);
+end
+
+export %no_suitable_pilot_found% = 
+  not any(equal_legs, %designated_landing%);
+
+export %several_pilots_found% = 
+  let this_crew = %crew_id%;
+  %designated_landing%
+  and any(equal_legs where (%crew_id% <> this_crew), %designated_landing%);
+
+
+/* Crew Manifest to China/Japan/Thailand (PDF files, CR 329, SASCMS-2318, SASCMS-2372) ** {{{1 */
+
+iterator flight_country_leg_set =
+  partition(leg)
+  by(
+    %leg_flight_descriptor%,
+    %leg_is_flight%,
+    %leg_udor%,
+    default(%leg_start_country%, "DK"),
+    default(%leg_end_country%, "DK"));
+end
+
+export %in_next_days%(int d) =
+  fundamental.%now_date% <= %leg_udor% and %leg_udor% <= fundamental.%now_date% + (d * 24:00);
+
+export %touches_country%(string country) =
+  %leg_start_country% = country or %leg_end_country% = country;
+
+%date_conv%(String d_str) =
+  base_utils.%abstime_parse%(d_str);
+
+/* If flight departs from China, Japan or Thailand then send email to previous
+ * departure (A/C rotation) in Scandinavia */
+set manifest_bases = "CPH", "ARN";
+export %mail_dest% =
+  if %touches_country%("JP") then
+    /* SASCMS-2372 */
+    "NRT"
+  else if %touches_country%("TH") then
+    /* SASCMS-2372 / SASCMS-2318 */
+    "BKK"
+  else
+    if %leg_adep% in manifest_bases then
+      %leg_adep%
+    else
+      default(transform(ac_rotations_ref, %ac_mail_dest%), "CPH");
+
+%ac_mail_dest% =
+  prev(leg(chain) where (%leg_adep% in manifest_bases), %leg_adep%);
+
+/* Number of days in China/Japan/Thailand */
+/* entering country */
+%_end_date_lt% = leg.%end_date_lt%;
+%_entry_date%(string country) = 
+  prev(leg(chain) where (%leg_start_country% <> country and %leg_end_country% = country), %_end_date_lt%);
+
+/* leaving country */
+%_start_date_lt% =
+  round_down(%leg_start_lt%, 24:00);
+%_departure_date%(string country) = 
+  next(leg(chain) where (%leg_end_country% <> country and %leg_start_country% = country), %_start_date_lt%);
+
+%for_stays_of_hours%(string country) =
+  if %leg_start_country% = country then
+    if %leg_end_country% = country then
+      /* continuation flight */
+      %_departure_date%(country) - %_entry_date%(country)
+    else
+      /* leaving country with this flight */
+      %_start_date_lt% - %_entry_date%(country)
+  else
+    if %leg_end_country% = country then
+      /* entering country with this flight */
+      %_departure_date%(country) - %_end_date_lt%
+    else
+      /* not touching country at all */
+      void_reltime;
+
+export %for_stays_of%(string country) =
+  %for_stays_of_hours%(country) / 24:00 + 1;
+
+/* iterate countries for crew_list, needing visa etc. These routines present right passport and visa for multiple document holders */
+%cntry_code_ar% ="**USCN"; /* currently only US is using MCL; just add other 2 letter country codes matchin crew_document and 
+                         country_req_docs on need, the code works for iti. ** is used for visa-less countries */ 
+
+export %cntry_lt% =
+  if %out_bound% then %leg_end_lt%
+  else %leg_start_lt%;
+
+export %cntry_count_at% = length(%cntry_code_ar%)/2;
+
+export %cntry_code% =
+  substr(%cntry_code_ar%,%py_index%*2-1,2);
+
+export %cntry_nationality%(Abstime d) =
+  crew.%doc_current_dest_nationality%(d, %cntry_code%);
+
+export %cntry_passport_no%(Abstime d) =
+  crew.%doc_current_dest_passport_no%(d, %cntry_code%);
+ 
+export %cntry_passport_issuer%(Abstime d) =
+  crew.%doc_current_dest_passport_issuer%(d, %cntry_code%);
+
+export %cntry_passport_validto%(Abstime d) =
+   %date_conv%( crew.%doc_current_dest_passport_validto_str%(d, %cntry_code%)) - 0:01;
+   /* Validto is the beginning of the day after expiry, so subtract one minute */
+
+export %cntry_visa_no%(Abstime d) =
+  crew.%doc_current_dest_visa_no%(d, %cntry_code%);
+
+export %cntry_visa_issuer%(Abstime d) =
+  crew.%doc_current_dest_visa_issuer%(d, %cntry_code%);
+
+export %cntry_visa_validto%(Abstime d) =
+   %date_conv%( crew.%doc_current_dest_visa_validto_str%(d, %cntry_code%)) - 0:01;
+   /* Validto is the beginning of the day after expiry, so subtract one minute */
+
+
+
+/* For basic testing ****************************************************************************** {{{1 */
+export %test_sort_after_now% =
+  default(first(leg(roster) where (leg.%start_utc% >= %now%), 
+      concat(format_time(leg.%start_utc%, "A%Y%02m%02d%02H:%02M"), %activity_name%)),
+    default(last(leg(roster) where (leg.%start_utc% < %now%),
+        concat(format_time(leg.%start_utc%, "B%Y%02m%02d%02H:%02M"), %activity_name%)),
+      concat("ZZZ", %activity_name%)));
+
+
+/*
+ * Non-Operational Crew
+ * (According to Michael Almgren, NOP is currently unused.)
+ */
+
+table nonop_crew_table(Int nr) =
+  %_assigned_nop_crew%(nr)
+  ->
+  export
+  String %nop_crew_id%,
+  String %nop_crew_position%,
+  String %nop_crew_gn%,
+  String %nop_crew_sn%,
+  String %nop_crew_gender%,
+  String %nop_crew_nationality%,
+  AbsTime %nop_crew_birthday%,
+  String %nop_crew_birth_place%,
+  String %nop_crew_birth_state%,
+  String %nop_crew_birth_country%,
+  String %nop_crew_res_street%,
+  String %nop_crew_res_city%,
+  String %nop_crew_res_postal_code%,
+  String %nop_crew_res_country%,
+  String %nop_crew_phone%,
+  String %nop_crew_email%,
+  String %nop_crew_passport%,
+  String %nop_crew_passport_issuer%,
+  AbsTime %nop_crew_passport_validto%,
+  String %nop_crew_visa_type%,
+  String %nop_crew_visa_number%,
+  String %nop_crew_visa_country%,
+  AbsTime %nop_crew_visa_validto%,
+  export
+  Bool %nop_crew_on_mcl%,
+  String %nop_crew_si%;
+  external "nop_crew";
+  id
+  ->
+  "crew_id",
+  "position",
+  "gn",
+  "sn",
+  "gender",
+  "nationality",
+  "birthday",
+  "birth_place",
+  "birth_state",
+  "birth_country",
+  "res_street",
+  "res_city",
+  "res_postal_code",
+  "res_country",
+  "phone",
+  "email",
+  "passport",
+  "passport_issuer",
+  "passport_validto",
+  "visa_type",
+  "visa_number",
+  "visa_country",
+  "visa_validto",
+  "on_mcl",
+  "si";
+  - ->
+  void_string,
+  void_string,
+  void_string,
+  void_string,
+  void_string,
+  void_string,
+  void_abstime,
+  void_string,
+  void_string,
+  void_string,
+  void_string,
+  void_string,
+  void_string,
+  void_string,
+  void_string,
+  void_string,
+  void_string,
+  void_string,
+  void_abstime,
+  void_string,
+  void_string,
+  void_string,
+  void_abstime,
+  void_bool,
+  void_string
+  ;
+end
+
+
+table nonop_crew_flight_asmt_table(int ix) =
+  %leg_udor%,
+  %leg_flight_descriptor%,
+  %leg_adep%,
+  ix
+  -> export string %_assigned_nop_crew%;
+  external "nop_crew_asmt";
+    "leg_udor",
+    "leg_fd",
+    "leg_adep",
+    match_number
+    -> "nop_crew";
+    -,-,-,- -> void_string;
+end
+
+/*
+CR3 = Airline operation management with cockpit access.
+CR4 = Cargo non-cockpit crew and/or non-crew individuals.
+*/
+export %nop_crew_dhs_category%(Int ix) =
+  if %nop_crew_has_cockpit_access%(ix) then "CR3"
+  else "CR4";
+
+/* Test */
+/*
+export %nop_crew_dhs_category%(Int ix) = "CR3";
+*/
+
+table nonop_crew_position_set_table(Int ix) =
+    %nop_crew_position%(ix) -> export bool %nop_crew_has_cockpit_access%;
+    external "nop_crew_position_set";
+    id -> cockpit;
+    - -> void_bool;
+end
+
+/* an arbitrary sufficiently large number */
+%max_count% = 9999;
+
+export %assigned_nop_crew_t% = %_assigned_nop_crew%(%times_index_0%);
+
+export %num_assigned_nop_crew% =
+  count(times(%max_count%)
+    while (not void(%_assigned_nop_crew%(%times_index_0%))));
+  
+export %assigned_nop_crew_0% = %_assigned_nop_crew%(0);
+export %assigned_nop_crew_1% = %_assigned_nop_crew%(1);
+
+
+/*APIS Turkey Edifact SKCMS-1097*/
+export %com_primary_phone% = crew.%phone_primary%;
+
+/* modeline ********************************************************** {{{1 */
+/* vim: set fdm=marker: */
+
+/* eof */

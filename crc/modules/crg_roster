@@ -1,0 +1,243 @@
+/* -*- crc -*- 
+ 
+ 
+
+CRG ROSTER
+--------------------------------------------------------
+
+Contents:
+  RAVE definitions for the Roster Report
+
+*******************************************************/
+
+root module crg_roster
+import keywords;
+import crew;
+import pp;
+import crew_pos;
+import levels;
+import iterators;
+import trip;
+import duty;
+import leg;
+import crg_basic;
+import crg_date;
+import duty_code;
+
+/* Config Item */
+%time_mode% = timemode_LT;
+
+/* Possible settings are LT, HB or UTC. Default is LT. */
+
+export %leg_start% = if %time_mode% = timemode_UTC then leg.%start_utc%
+              else if %time_mode% = timemode_HB then leg.%start_hb%
+              else leg.%start_lt%;
+export %leg_end% =   if %time_mode% = timemode_UTC then leg.%end_utc%
+              else if %time_mode% = timemode_HB then leg.%end_hb%
+              else leg.%end_lt%;
+export %duty_start% = if %time_mode% = timemode_UTC then duty.%start_utc%
+              else if %time_mode% = timemode_HB then duty.%start_hb%
+              else duty.%start_lt%;
+export %duty_end% =   if %time_mode% = timemode_UTC then duty.%end_utc%
+              else if %time_mode% = timemode_HB then duty.%end_hb%
+              else duty.%end_lt%;
+export %trip_start% = if %time_mode% = timemode_UTC then trip.%start_utc%
+              else if %time_mode% = timemode_HB then trip.%start_hb%
+              else trip.%start_lt%;
+export %trip_end% =  if %time_mode% = timemode_UTC then trip.%end_utc%
+              else if %time_mode% = timemode_HB then trip.%end_hb%
+              else trip.%end_lt%;
+
+/*
+** General
+*/
+
+%report_name% = "Roster Report (flight based)";
+%days% = pp.%days% + crg_basic.%extra_days%;
+%crew_name% = default(crew.%signature%, crew.%id%);
+%corner_text% = format_time(crg_basic.%report_pp_start%, "%B %Y");
+
+%crew_info_11% = crew.%id_text%;
+%crew_info_21% = concat("Base: ", crew.%homebase%);
+%crew_info_31% = format_int(crew.%seniority%, "Sen: %i");
+
+%crew_info_12% = %printed_credit_time%;
+%crew_info_22% = %printed_block_time%;
+%crew_info_32% = %printed_duty_rest_days%;
+export %printed_credit_time% = concat("CT: ", crg_date.%print_reltime%(pp.%credit_time%));
+export %printed_block_time% = concat("BT: ", crg_date.%print_reltime%(pp.%block_time%));
+export %printed_duty_rest_days% = concat(format_int(pp.%duty_days%,"DD/FD: %2i"), format_int(pp.%rest_days%,"/%2i"));
+
+%compact% = false;
+%rows_per_page% = 999999; /* only used in compact version */
+
+/*
+** DATES, fundamental defs
+*/
+
+%is_full_calendar_day_period% = 
+  not trip.%has_only_flight_duty% and trip.%start_od% = 0:00 and
+  (trip.%end_od% = 23:59 or trip.%end_od% = 00:00);
+
+export %leg_start_date% = round_down(%leg_start%,24:00);
+
+export %duty_start_date% = first(leg(duty),%leg_start_date%);
+export %duty_end_date%	= 
+    if trip.%has_only_flight_duty% then last(leg(duty),%leg_start_date%)
+    else round_down(last(leg(duty),%leg_end%),24:00);
+
+export %trip_start_date% = first(duty(trip),%duty_start_date%);
+export %trip_end_date% = last(duty(trip),%duty_end_date%);
+
+export %duty_real_start_date% =  round_down(%duty_start%,24:00);
+export %duty_real_end_date% =  round_down(%duty_end%-0:01,24:00);
+export %trip_real_start_date% = round_down(%trip_start%,24:00);
+export %trip_real_end_date% =  round_down(%trip_end%-0:01,24:00);
+
+%leg_could_have_info_this_date% =
+    default(overlap(crg_date.%ix1%,crg_date.%ix1% + 24:00,
+	    %trip_real_start_date%, %trip_real_end_date% + 23:59) > 0:00, false);
+
+%has_info_this_date%(Abstime Date, String Info) =
+  let this_info = if Date=crg_date.%ix1% then Info else "";
+  default(this_info <> "", false);
+
+/*
+** LEG INFO
+*/
+
+%extra_leg_info% = "";
+
+export %flight_info% = 
+  let dh_info = "";/*if leg.%is_deadhead% then crg_basic.%dh_mark% else "";*/
+  if keywords.%flight_duty% 
+  then concat(dh_info,format_int(keywords.%flight_number%,"%4.3i"))
+  else "";
+
+%extra_leg_info_trigger% = 
+  %has_info_this_date%(%leg_start_date%,%extra_leg_info%);
+%flight_info_trigger% = 
+  %has_info_this_date%(%leg_start_date%,%flight_info%);
+%meal_info_trigger% =
+  %has_info_this_date%(%leg_start_date%,"Meal");
+/*
+** TASK INFO (trip level)
+*/
+
+%task_info% =
+  if not trip.%has_only_flight_duty% then trip.%code% else "";
+
+%task_info_trigger% = 
+  is_first(leg(trip)) and
+  (%trip_real_start_date% <= crg_date.%ix1% and
+   %trip_real_end_date% >= crg_date.%ix1%)
+  and %task_info% <> "";
+
+/*
+** LAYOVER INFO (duty level)
+*/
+
+export %layover_info% =
+  if trip.%has_only_flight_duty% then
+    (if is_last(duty(trip)) then ""
+     else last(leg(duty),keywords.%arrival_airport_name%))
+  else
+    (if default(last(leg(duty),keywords.%arrival_airport_base% = crew.%homebase%),false)
+     then "" else last(leg(duty),keywords.%arrival_airport_name%));
+
+%layover_info_trigger% = 
+  is_last(leg(duty)) and %has_info_this_date%(%duty_end_date%,%layover_info%);
+
+/*
+** START/END TIMES (trip level)
+*/
+
+export %start_time_aux% = 
+  if trip.%is_off_duty% or %is_full_calendar_day_period% then " "
+  else crg_date.%print_time2%(%trip_start%);
+
+%start_time% =
+  if %trip_start_date% = crg_date.%ix1% then %start_time_aux%
+  else if trip.%has_only_flight_duty% then "" else " ";
+  
+%start_time_standby% = 
+  if %duty_start_date% = crg_date.%ix1% then 
+    crg_date.%print_time2%(%duty_start%)
+  else if trip.%has_only_flight_duty% then "" else " ";
+
+export %end_time_aux% = 
+    if trip.%is_off_duty% or %is_full_calendar_day_period% then " "
+    else crg_date.%print_time2_end%(%trip_end%);
+
+%end_time% =
+    if %trip_end_date% = crg_date.%ix1% then %end_time_aux%
+    else if trip.%has_only_flight_duty% then "" else " ";
+    
+%end_time_standby% =
+    if %duty_end_date% = crg_date.%ix1% then 
+      crg_date.%print_time2%(%duty_end%)
+    else if trip.%has_only_flight_duty% then "" else " ";
+
+%start_time_trigger% = is_first(leg(trip)) and %start_time% <> "";
+
+%start_time_trigger_standby% = 
+  is_first(leg(duty)) and leg.%is_standby% and %start_time_standby% <> "";
+  
+%start_time_trigger2% = leg.%is_first_in_trip%;
+%end_time_trigger% = is_last(leg(trip)) and %end_time% <> "";
+
+%end_time_trigger_standby% = 
+  is_last(leg(duty)) and leg.%is_standby% and %end_time_standby% <> "";
+
+%end_time_daywrap% = %trip_real_end_date% > %trip_end_date%;
+
+
+/*
+** DRAW TRIP 
+*/
+
+%use_graphics% = true;
+%use_trip_id% = true;
+
+%flight_trip_touch_this_date% =
+  trip.%has_only_flight_duty% and
+  %trip_real_start_date% <= crg_date.%ix% and 
+  %trip_real_end_date% >= crg_date.%ix%;
+%any_flight_trip_touch_this_date% =
+  any(trip_set, %flight_trip_touch_this_date%);
+%num_flight_trip_touch_this_date% =
+  count(trip_set) where(%flight_trip_touch_this_date%);
+%trip_block_info% =
+  let the_first = default(min(trip_set,%trip_start%)
+                  where(%trip_real_start_date% = crg_date.%ix%),1jan1986);
+  default(min(trip_set,trip.%name%) 
+          where(%trip_start% = the_first), 
+          " ");
+%sby_block_info% =
+  let the_first = default(min(duty_set,%duty_start%)
+                  where(%duty_real_start_date% = crg_date.%ix%),1jan1986);
+  default(min(duty_set,%sby_task_code%) 
+          where(%duty_start% = the_first and duty.%is_standby%), 
+          " ");
+%sby_task_code% =
+  if duty.%is_standby% then
+    substr(duty.%code%,1,1)
+  else
+    "";
+
+%min_draw_trip_start% = min(trip_set, %draw_trip_start%)
+                        where(%flight_trip_touch_this_date%);
+%max_draw_trip_start% = max(trip_set, %draw_trip_start%)
+                        where(%flight_trip_touch_this_date%);
+%min_draw_trip_end% = min(trip_set, %draw_trip_end%)
+                      where(%flight_trip_touch_this_date%);
+%max_draw_trip_end% = max(trip_set, %draw_trip_end%)
+                      where(%flight_trip_touch_this_date%);
+%draw_trip_start% = 
+  if %trip_real_start_date% = crg_date.%ix%
+  then crg_date.%abs2rel%(%trip_start%)
+  else 0:00;
+%draw_trip_end% = 
+  if %trip_real_end_date% = crg_date.%ix%
+  then crg_date.%abs2rel%(%trip_end%-0:01)
+  else 23:59;

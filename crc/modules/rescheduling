@@ -1,0 +1,1375 @@
+/* -*- crc -*-
+ * 
+ *
+ * Purpose:
+ *
+ * Created by:
+ *   Stefan Hansson, 11-Jun-2007
+ *
+ * Major changes:
+ *
+ */
+
+root module rescheduling
+
+import checkinout;
+import crew;
+import keywords;
+import fundamental;
+import levels;
+import leg;
+import duty;
+import trip;
+import wop;
+import rest;
+import rule_exceptions;
+import standby;
+import oma16;
+import duty_period;
+import fdp;
+
+%crew_informed_info_table% = parameter "crew_publish_info";
+
+/*********************************
+ * Definitions of overtime types *
+ *********************************/
+export %_ot_part_7x24_fwd% = "OT_PART_7x24_FWD";
+export %_ot_part_7x24_bwd% = "OT_PART_7x24_BWD";
+export %_ot_part_calendarweek% = "OT_PART_CALENDARWEEK";
+export %_ot_part_1x24_fwd% = "OT_PART_1x24_FWD";
+export %_ot_part_1x24_bwd% = "OT_PART_1x24_BWD";
+export %_ot_part_dutypass% = "OT_PART_DUTYPASS";
+export %_ot_part_late_checkout_freeday% = "OT_PART_LATE_CHECKOUT_FREEDAY";
+export %_ot_part_late_checkout_resched% = "OT_PART_LATE_CHECKOUT_RESCHED";
+export %_ot_part_late_checkout_free_weekend% = "OT_PART_LATE_CHECKOUT_FREE_WEEKEND";
+export %_ot_part_parttime_month% = "OT_PART_PARTTIME_MONTH";
+export %_mt_part_parttime_cc_month% = "MT_PART_PARTTIME_CC_MONTH";
+export %_ot_part_parttime_cc_month% = "OT_PART_PARTTIME_CC_MONTH";
+export %_mt_part_parttime_cc_3_months% = "MT_PART_PARTTIME_CC_3_MONTHS";
+export %_ot_part_parttime_cc_3_months% = "OT_PART_PARTTIME_CC_3_MONTHS";
+export %_ot_part_month% = "OT_PART_MONTH";
+export %_ot_part_7_calendar_days% = "OT_PART_7_CALENDAR_DAYS";
+
+/**********************************
+ * Definition of duty time type   *
+ **********************************/
+export %_dt_part% = "DT_PART";
+
+/*
+* PP helpers
+*/
+
+export %pp_start_date% = fundamental.%pp_start_day%;
+export %pp_end_date% = round_up(%pp_end_extended%, 24:00);
+export %pp_days% = (%pp_end_date% - %pp_start_date%) / 24:00;
+
+/*
+* Determine what belongs to the publishing period
+*/
+
+%crew_is_active_in_period%(Abstime start_date, Abstime end_date) =
+  not void(crew.%base_at_date%(start_date)) or
+  not void(crew.%base_at_date%(end_date));
+  
+%wop_has_homebase_in_period%(Abstime start_date, Abstime end_date) =
+  overlap(start_date, end_date, wop.%start_hb%, wop.%end_hb%) > 0:00
+  and not void(crew.%base_at_date%(wop.%start_day%));
+
+/*
+* Indexing forwards and backwards over dates within %crew_informed_info_table%. 
+*/
+
+%_period_date_ix%(Abstime start) = start + (%times_index_0%-1)*24:00;
+%_period_date_ix_backwards%(Abstime start) = start - (%times_index_0%-1)*24:00;
+
+/*
+* Crew time & stn helpers
+*/
+
+export %crew_time_utc%(Abstime hb_time) =
+  station_utctime(%crew_station_at_date%(hb_time), hb_time);
+export %crew_time_hb%(Abstime utc_time) =
+  station_localtime(%crew_station_at_date%(utc_time), utc_time);
+%crew_station_at_date%(Abstime date) =
+  let stn = crew.%station_at_date%(date);
+  if stn = "STO" then "ARN" else stn;
+
+/*******************************************************************************
+* Privately Traded Days data
+*******************************************************************************/
+%crew_privately_traded_days_table% = parameter "privately_traded_days";
+
+table privately_traded_days_data(String OvertimeType, AbsTime duty_start, AbsTime duty_end) =
+    crew.%id%, OvertimeType, duty_start, duty_end ->
+			AbsTime %_ptd_duty_start%,
+			AbsTime %_ptd_duty_end%,
+			RelTime %_ptd_duty_time%,
+			RelTime %_ptd_duty_overtime%,
+			String  %_ptd_duty_traded_with_crew%;
+		external %crew_privately_traded_days_table%;
+	"crew", "duty_overtime_type", >= "period_start", <= "period_end" ->
+		min("duty_start"),
+		max("duty_end"),
+		min("duty_time"),
+		min("duty_overtime"),
+		cat("crew_ref");
+end
+
+export %duty_overtime_before_ptd%(String OvertimeType) = %_ptd_duty_overtime%(OvertimeType, duty.%start_hb%, duty.%end_hb%);
+export %duty_start_before_ptd%(String OvertimeType) = %_ptd_duty_start%(OvertimeType, duty.%start_hb%, duty.%end_hb%);
+export %duty_end_before_ptd%(String OvertimeType) = %_ptd_duty_end%(OvertimeType, duty.%start_hb%, duty.%end_hb%);
+export %duty_time_before_ptd%(String OvertimeType) = %_ptd_duty_time%(OvertimeType, duty.%start_hb%, duty.%end_hb%);
+export %duty_time_before_ptd_in_period%(String OvertimeType, Abstime a1, Abstime a2) =
+  let a1_hb = %crew_time_hb%(a1),
+      a2_hb = %crew_time_hb%(a2);
+
+  if duty.%start_hb% >= a1_hb then
+    if duty.%start_hb% < a2_hb then
+      %_ptd_duty_time%(OvertimeType, duty.%start_hb%, nmin(duty.%end_hb%, a2_hb))
+    else
+      0:00
+  else 
+    if duty.%end_hb% >= a2_hb - 0:01 then
+      %_ptd_duty_time%(OvertimeType, a1_hb, a2_hb) /* This covers multi-day freeday activities */
+    else
+      0:00;
+
+
+/*******************************************************************************
+* EXTRACTION OF INFORMED-DATA FOR CURRENT CREW
+*******************************************************************************/
+
+/* LOOKUP OVER A SPECIFIC PERIOD */
+
+/* shb, ehb:      Range of matching homebase dates
+*  spcat, epcat:  Range of matching pcat:s
+*/
+table period_informed_data(Abstime shb, Abstime ehb, Int spcat, Int epcat) =
+  crew.%id%,
+  shb, ehb,
+  spcat, epcat               -> 
+      Abstime %_period_inf_start%,
+      Abstime %_period_inf_end%,
+      Int     %_period_inf_pcat%,
+      Abstime %_period_inf_checkin%,
+      Abstime %_period_inf_checkout%,
+      String  %_period_inf_flags%,
+      Reltime %_period_inf_duty_time%,
+      Reltime %_period_inf_prev_duty_time%,
+      Abstime %_period_inf_refcheckin%,
+      Abstime %_period_inf_refcheckout%,
+      Abstime %_period_inf_sched_end_time%;
+    external %crew_informed_info_table%;
+  "crew",
+  < "end_date", > "start_date",
+  <= "pcat", >= "pcat"       ->
+      min("start_date"),
+      max("end_date"),
+      min("pcat"),
+      min("checkin"),
+      max("checkout"),
+      cat("flags"),
+      sum("duty_time"),
+      sum("prev_informed_duty_time"),
+      min("refcheckin"),
+      max("refcheckout"),
+      max("sched_end_time");
+end
+
+/* Start of informed data within pp (pp_end if none) */
+export %crew_pp_inf_start% =
+  default(%_period_inf_start%(%pp_start_date%, %pp_end_date%, 0, 9999)
+         ,%pp_end_date%);
+    
+/* End of informed data within pp (pp_start if none) */
+export %crew_pp_inf_end% =
+  default(%_period_inf_end%(%pp_start_date%, %pp_end_date%, 0, 9999)
+         ,%pp_start_date%);
+    
+/* Most significant category informed during period */
+export %period_inf_pcat%(Abstime shb, Abstime ehb) =
+  default(%_period_inf_pcat%(shb, ehb, 0, 99999), %pcat_free%);
+  
+/* Earliest checkin informed during period */
+export %period_inf_checkin%(Abstime shb, Abstime ehb) =
+  %_period_inf_checkin%(shb, ehb, 0, 99999);
+  
+/* Earliest checkout informed during period */
+export %period_inf_checkout%(Abstime shb, Abstime ehb) =
+  %_period_inf_checkout%(shb, ehb, 0, 99999);
+
+/* Earliest scheduled end time informed during period */
+export %period_inf_sched_end_time%(Abstime shb, Abstime ehb) =
+  %_period_inf_sched_end_time%(shb, ehb, 0, 99999);
+  
+  
+/* All flags informed during period (":f1:f2:...:fN"). May contain duplicates. */
+export %period_inf_flags%(Abstime shb, Abstime ehb) =
+  default(%_period_inf_flags%(shb, ehb, 0, 99999), "");
+
+/* Total informed duty time in days covered by period. */
+export %period_inf_duty_time%(Abstime shb, Abstime ehb) =
+  default(%_period_inf_duty_time%(shb, ehb, 0, 99999), 0:00);
+
+/* Total previously informed duty time in days covered by period */
+export %period_inf_prev_duty_time%(Abstime shb, Abstime ehb) =
+  default(%_period_inf_prev_duty_time%(shb, ehb, 0, 99999), 0:00);
+
+/* Earliest reference checkin informed during period */
+export %period_inf_refcheckin%(Abstime shb, Abstime ehb) =
+  %_period_inf_refcheckin%(shb, ehb, 0, 99999);
+
+/* Latest previously informed checkout during period */
+export %period_inf_prev_checkout%(Abstime shb, Abstime ehb) =
+	%_period_inf_refcheckout%(shb, ehb, 0, 99999);
+
+/* True if category is informed during period */  
+export %period_inf_any_pcat%(Int pcat, Abstime shb, Abstime ehb) =
+  not void(%_period_inf_pcat%(shb, ehb, pcat, pcat));
+/* Start of first day where category is informed during period */  
+export %period_inf_pcat_start%(Int pcat, Abstime shb, Abstime ehb) =
+  %_period_inf_start%(shb, ehb, pcat, pcat);
+  
+/* True if flag is informed during period */
+export %period_inf_any_flag%(String flag, Abstime shb, Abstime ehb) =
+  locate(concat(":",flag,":"), %period_inf_flags%(shb, ehb)) > 0;
+
+/* True if any production is informed during period */
+export %period_inf_any_production%(Abstime shb, Abstime ehb) =
+  not void(%_period_inf_pcat%(shb, ehb, 0, %_pcat_production_limit%));
+
+/* True if any on-duty activity is informed during period */
+export %period_inf_any_on_duty%(Abstime shb, Abstime ehb) =
+  not void(%_period_inf_pcat%(shb, ehb, 0, %_pcat_on_duty_limit%));
+
+/* True if any time-off (=not on-duty) is informed during period */
+export %period_inf_any_timeoff%(Abstime shb, Abstime ehb) =
+  not void(%_period_inf_pcat%(shb, ehb, %_pcat_on_duty_limit% + 1, 99999));
+  
+/* True if short-stop is informated during period */
+export %period_inf_short_stop%(Abstime shb, Abstime ehb) =
+  %period_inf_any_flag%(%flag_short_stop_2%, shb, ehb);
+
+/* LOOKUP ON SPECIFIC DAY */
+
+export %dt_inf_start%(Abstime datetime_hb) =
+  let dt = round_down(datetime_hb, 24:00);
+  %_period_inf_start%(dt, dt+0:01, 0, 99999);
+
+export %dt_inf_end%(Abstime datetime_hb) =
+  let dt = round_down(datetime_hb, 24:00);
+  %_period_inf_end%(dt, dt+0:01, 0, 99999);
+
+export %dt_inf_pcat%(Abstime datetime_hb) =
+  let dt = round_down(datetime_hb, 24:00);
+  %period_inf_pcat%(dt, dt+0:01);
+  
+export %dt_inf_checkin%(Abstime datetime_hb) =
+  let dt = round_down(datetime_hb, 24:00);
+  %period_inf_checkin%(dt, dt+0:01);
+  
+export %dt_inf_checkout%(Abstime datetime_hb) =
+  let dt = round_down(datetime_hb, 24:00);
+  %period_inf_checkout%(dt, dt+0:01);
+
+export %dt_inf_prev_checkout%(Abstime datetime_hb) =
+  let dt = round_down(datetime_hb, 24:00);
+  %period_inf_prev_checkout%(dt, dt+0:01);
+
+export %published_standbys_table% =%etab_path%(%published_standbys_table_p%);
+%published_standbys_table_p% =
+  parameter "published_standbys"
+  remark "ETAB: Table with published standbys";
+
+table published_standbys(String id, Abstime date) =
+  id, date ->
+    export Abstime %sby_end%;
+  external %published_standbys_table%;
+  crew, (sby_start, sby_end( -> sby_end;
+  -,  -                    -> void_abstime;
+end
+
+export %dt_inf_sched_end_time%(Abstime datetime_hb) =
+  let dt = round_down(datetime_hb, 24:00);
+  %period_inf_sched_end_time%(dt, dt+0:01);
+
+export %dt_inf_flags%(Abstime datetime_hb) =
+  let dt = round_down(datetime_hb, 24:00);
+  default(%_period_inf_flags%(dt, dt+0:01, 0, 99999), "");
+  
+export %dt_inf_duty_time%(Abstime datetime_hb) =
+  let dt = round_down(datetime_hb, 24:00);
+  %period_inf_duty_time%(dt, dt+0:01);
+  
+export %dt_inf_prev_duty_time%(Abstime datetime_hb) =
+  let dt = round_down(datetime_hb, 24:00);
+  %period_inf_prev_duty_time%(dt, dt+0:01);
+  
+/* True if flag is informed on the specified day */
+export %dt_inf_any_flag%(String flag, Abstime datetime) =
+  %is_flag_set%(flag, %dt_inf_flags%(datetime));
+
+/*
+* True if the leg has a short stop that was not informed at checkin.
+*/
+export %is_late_informed_short_stop% = rest.%is_short% and 
+  (%leg_inf_flag_late_change_short_stop% or
+   fundamental.%now% > trip.%start_UTC% and not %_can_have_inf_short_stop%);
+
+/*
+ * True if the short stop is already informed on time. The cross-period checking
+ * is done to handle situations where delays cause start of the short stop
+ * to move into the next period.
+ */
+%_can_have_inf_short_stop% = 0 < %inf_short_stops_in_this_period%
+  or %cur_short_stops_in_prev_period% < %inf_short_stops_in_prev_period%
+  or %cur_short_stops_in_next_period% < %inf_short_stops_in_next_period%;
+
+  
+/*
+* Informed data corresponding to the current activity on the roster. (What was
+* informed in the days covered by the current wop/trip/duty/leg on the roster?)
+*/
+
+export %wop_inf_duty_time% = %period_inf_duty_time%(wop.%start_hb%, wop.%end_hb%);
+
+export %trip_inf_pcat%  = %period_inf_pcat%(trip.%start_hb%, trip.%end_hb%);
+export %trip_inf_flags% = %period_inf_flags%(trip.%start_hb%, trip.%end_hb%);
+export %duty_inf_flags% = %period_inf_flags%(duty.%start_hb%, duty.%end_hb%);
+export %duty_inf_pcat% = %period_inf_pcat%(duty.%start_hb%, duty.%end_hb%);
+
+export %duty_inf_checkin% =
+  %dt_inf_checkin%(%duty_start_date_hb%);     
+
+
+export %trip_inf_checkin% =
+  /* Starting from the earliest informed checkin within the duration of the
+     current trip, scan backwards until the checkin for the informed trip. */
+  let infci = %period_inf_checkin%(%trip_start_date_hb%, %trip_end_date_hb%);
+  first(times(9), %dt_inf_checkin%(%_period_date_ix_backwards%(infci)))
+  where(%_is_first_day_in_inf_trip%(%_period_date_ix_backwards%(infci)));
+
+export %trip_inf_checkout% =
+  /* Starting from the lastest informed checkout within the duration of the
+     current trip, scan forwards until the checkout for the informed trip. */
+  let infco = %period_inf_checkout%(%trip_start_date_hb%, %trip_end_date_hb%) - 2:00;
+             /* (- 2:00: so checkout just after midnight -> day before) */
+  first(times(9), %dt_inf_checkout%(%_period_date_ix%(infco)))
+  where(%_is_last_day_in_inf_trip%(%_period_date_ix%(infco)) or
+  			(%_is_last_day_in_inf_trip%(%_period_date_ix%(infco+24:00)) and
+  			void(%dt_inf_checkout%(%_period_date_ix%(infco+24:00)))));
+
+export %trip_inf_prev_checkout% =
+  /* Starting from the lastest informed checkout within the duration of the
+     current trip, scan forwards until the checkout for the informed trip. */
+  let infco = %period_inf_checkout%(%trip_start_date_hb%, %trip_end_date_hb%) - 2:00;
+             /* (- 2:00: so checkout just after midnight -> day before) */
+  first(times(9), %dt_inf_prev_checkout%(%_period_date_ix%(infco)))
+  where(%_is_last_day_in_inf_trip%(%_period_date_ix%(infco)) or
+  			(%_is_last_day_in_inf_trip%(%_period_date_ix%(infco+24:00)) and
+  			void(%dt_inf_prev_checkout%(%_period_date_ix%(infco+24:00)))));
+
+export %trip_inf_checkin_utc%  = %crew_time_utc%(%trip_inf_checkin%);
+export %trip_inf_checkout_utc% = %crew_time_utc%(%trip_inf_checkout%);
+
+export %wop_inf_checkin% =
+  let infci = %period_inf_checkin%(%wop_start_date_hb%, %wop_end_date_hb%);
+  first(times(14), %dt_inf_checkin%(%_period_date_ix_backwards%(infci)))
+  where(%_is_first_day_in_inf_wop%(%_period_date_ix_backwards%(infci)));
+  
+export %wop_inf_checkin_utc%  = %crew_time_utc%(%wop_inf_checkin%);
+
+export %wop_inf_sched_end_time% =
+  /* Starting from the last informed scheduled end time within the duration of the
+     current wop, scan forwards until the scheduled end time for the informed wop. */
+  let infset = %period_inf_sched_end_time%(%wop_start_date_hb%, %wop_end_date_hb%) - 2:00;
+             /* (- 2:00: so end-time just after midnight -> day before) */
+  first(times(14), %dt_inf_sched_end_time%(%_period_date_ix%(infset)))
+  where(%_is_last_day_in_inf_wop%(%_period_date_ix%(infset)) or
+       (%_is_last_day_in_inf_wop%(%_period_date_ix%(infset+24:00)) and
+       void(%dt_inf_sched_end_time%(%_period_date_ix%(infset+24:00)))));
+
+
+export %wp_fat_legality_500_trip_inf_checkout_is_suspicious% =
+  %trip_scheduled_checkout_hb% > %crew_pp_inf_end%
+  and %trip_inf_checkout% <= %crew_pp_inf_end%
+  and not %period_inf_any_flag%(%flag_last_in_wop%, %trip_inf_checkout%, %crew_pp_inf_end%)
+  and not %period_inf_any_flag%(%flag_homerest%, %trip_inf_checkout%, %crew_pp_inf_end%);
+
+export %trip_inf_checkin_pcat% = %dt_inf_pcat%(%trip_checkin_hb%);
+export %trip_inf_checkout_pcat% = %dt_inf_pcat%(%trip_scheduled_checkout_hb%);
+
+export %trip_inf_any_pcat%(Int pcat) =
+  %period_inf_any_pcat%(pcat, trip.%start_hb%, trip.%end_hb%);
+
+export %duty_inf_any_flag%(String flag) =
+  %is_flag_set%(flag, %duty_inf_flags%);
+  
+export %duty_inf_vacation% = 
+  %duty_inf_any_flag%(%flag_vacation%);
+export %duty_inf_flag_standby_callout% =
+  %duty_inf_any_flag%(%flag_standby_callout%);
+
+export %duty_inf_flag_had_sba% =
+  %duty_inf_any_flag%(%flag_had_sba%);
+
+export %trip_inf_any_flag%(String flag) =
+  %is_flag_set%(flag, %trip_inf_flags%);
+ 
+/********/
+
+%_is_first_day_in_inf_trip%(Abstime datetime) =
+  %dt_inf_any_flag%(%flag_first_in_wop%, datetime)
+  or not %dt_inf_any_flag%(%flag_stopover%, datetime - 24:00);
+
+%_is_last_day_in_inf_trip%(Abstime datetime) =
+  let dt_inf_flags = %dt_inf_flags%(datetime);
+  %is_flag_set%(%flag_last_in_wop%, dt_inf_flags)
+  or %is_flag_set%(%flag_homerest%, dt_inf_flags)
+  or %is_flag_set%(%flag_standby_home%, dt_inf_flags)
+  or %is_flag_set%(%flag_standby_line%, dt_inf_flags)
+  or %is_flag_set%(%flag_standby_at_airport%, dt_inf_flags)
+  or %dt_inf_any_flag%(%flag_blank%, datetime + 24:00)
+  or %dt_inf_any_flag%(%flag_first_in_wop%, datetime + 24:00)
+  or %dt_inf_pcat%(datetime) = %pcat_standby%;
+  
+%tciresch% = default(%trip_checkin_hb% <> %trip_inf_checkin%, false);
+%tcoresch% = default(%trip_scheduled_checkout_hb% <> %trip_inf_checkout%, false);
+
+%_is_first_day_in_inf_wop%(Abstime datetime) =
+  %dt_inf_any_flag%(%flag_first_in_wop%, datetime);
+
+%_is_last_day_in_inf_wop%(Abstime datetime) =
+  %dt_inf_any_flag%(%flag_last_in_wop%, datetime);
+/********/
+
+export %trip_inf_flag_vacation% =
+  %trip_inf_any_flag%(%flag_vacation%);
+export %trip_sched_flag_F7S% =
+  %trip_inf_any_flag%(%flag_F7S%);
+export %trip_inf_flag_standby_line% =
+  %trip_inf_any_flag%(%flag_standby_line%);
+export %trip_inf_flag_standby_home% =
+  %trip_inf_any_flag%(%flag_standby_home%);
+export %trip_inf_flag_standby_hotel% =
+  %trip_inf_any_flag%(%flag_standby_hotel%);
+export %trip_inf_flag_long_haul% =
+  %trip_inf_any_flag%(%flag_long_haul%);
+export %trip_inf_flag_homerest% =
+  %trip_inf_any_flag%(%flag_homerest%);
+export %trip_inf_flag_short_stop% =
+  %trip_inf_any_flag%(%flag_short_stop_1%)
+  or %trip_inf_any_flag%(%flag_short_stop_2%);
+export %trip_inf_flag_standby_at_airport% =
+  %trip_inf_any_flag%(%flag_standby_at_airport%);
+export %trip_inf_flag_prod_cancelled_late_tmp_cc% =
+  %trip_inf_any_flag%(%flag_prod_cancelled_late_tmp_cc%);
+
+
+export %trip_inf_flag_prod_cancelled_checkin_tmp_cc% =
+  %trip_inf_any_flag%(%flag_prod_cancelled_checkin_tmp_cc%);
+export %trip_inf_flag_freeze_prev_inf_duty_time% =
+    %trip_inf_any_flag%(%flag_freeze_prev_inf_duty_time%);
+/*export %trip_inf_flag_freeze_sby_sched_end_time% =
+    %trip_inf_any_flag%(%flag_freeze_sby_sched_end_time%);*/
+export %trip_inf_any_production% =
+  %period_inf_any_production%(trip.%start_hb%, trip.%end_hb%);
+  
+
+/* Redefined in rescheduling_cct */
+export %trip_inf_rescheduled_from_prod_to_standby% = false;
+
+/* Redefined in rescheduling_cct */
+export %trip_inf_rescheduled_from_prod_to_standby_late% = false;
+
+/* Redefined in rescheduling_cct */
+export %trip_inf_is_cancelled_production% = false;
+export %duty_inf_is_cancelled_production% = false;
+  
+export %trip_inf_any_on_duty% =
+  %period_inf_any_on_duty%(trip.%start_hb%, trip.%end_hb%);
+  
+export %trip_inf_any_timeoff% =
+  %period_inf_any_timeoff%(trip.%start_hb%, trip.%end_hb%);
+  
+export %trip_inf_any_vacation% =
+  %period_inf_any_pcat%(%pcat_vacation%, trip.%start_hb%, trip.%end_hb%);
+  
+export %trip_inf_any_standby% =
+  %period_inf_any_pcat%(%pcat_standby%, trip.%start_hb%, trip.%end_hb%);
+
+export %trip_inf_any_compday% =
+  %period_inf_any_pcat%(%pcat_compday%, trip.%start_hb%, trip.%end_hb%);
+  
+export %trip_inf_any_freeday% =
+  %period_inf_any_pcat%(%pcat_free%, trip.%start_hb%, trip.%end_hb%);
+
+export %duty_inf_any_freeday% =
+  %period_inf_any_pcat%(%pcat_free%, duty.%start_hb%, duty.%end_hb%);
+  
+export %trip_inf_any_blank_day% =
+  %period_inf_any_pcat%(%pcat_blank%, trip.%start_hb%, trip.%end_hb%);
+
+export %duty_inf_any_blank_day% =
+  %period_inf_any_pcat%(%pcat_blank%, duty.%start_hb%, duty.%end_hb%);
+
+/*
+export %leg_inf_any_blank_day% =
+  %period_inf_any_pcat%(%pcat_blank%, leg.%start_hb%, leg.%end_hb%);
+*/
+export %duty_start_hb_inf_any_blank_day% =
+  %period_inf_any_pcat%(%pcat_blank%, duty.%start_hb%, duty.%start_hb% + 0:01);
+
+export %inf_illness%(AbsTime st, AbsTime et) = %period_inf_pcat%(st, et) = %pcat_illness%;
+
+export %duty_inf_long_haul% =
+  %period_inf_any_flag%(%flag_long_haul%, %duty_start_date_hb%, %duty_end_date_hb%);
+  
+export %leg_inf_hist_blank_day% =
+  %period_inf_any_flag%(%flag_blank%, %leg_start_date_hb%, %leg_end_date_hb%);
+
+export %trip_inf_hist_blank_day% =
+  %period_inf_any_flag%(%flag_blank%, trip.%start_hb%, trip.%end_hb%);
+
+export %duty_inf_hist_blank_day% =
+  %period_inf_any_flag%(%flag_blank%, duty.%start_hb%, duty.%end_hb%);
+
+export %leg_inf_is_standby% =
+  %dt_inf_pcat%(leg.%activity_scheduled_start_time_hb%) = %pcat_standby%;
+
+export %leg_inf_is_airport_standby% =
+ %dt_inf_any_flag%(%flag_standby_at_airport%,
+                   leg.%activity_scheduled_start_time_hb%)
+ and not %leg_inf_is_airport_callout%;
+  
+export %leg_inf_is_homehotel_standby% =
+  %leg_inf_is_standby% and not %leg_inf_is_airport_standby%;
+    
+export %leg_inf_is_airport_callout% =
+  %dt_inf_any_flag%(%flag_airport_callout%,
+                    leg.%activity_scheduled_start_time_hb%);
+  
+export %leg_inf_is_homehotel_callout% =
+  %dt_inf_any_flag%(%flag_standby_callout%,
+                    leg.%activity_scheduled_start_time_hb%);
+  
+export %leg_inf_has_stopover% =
+  %dt_inf_any_flag%(%flag_stopover%, leg.%activity_scheduled_start_time_hb%);
+  
+export %leg_inf_has_extended_fdp% =
+  %dt_inf_any_flag%(%flag_extended_fdp%, duty.%start_hb%);
+
+export %leg_inf_has_non_extended_fdp% =
+  %dt_inf_any_flag%(%flag_non_extended_fdp%, duty.%start_hb%);
+  
+export %leg_inf_fdp_has_split_after% =
+  %dt_inf_any_flag%(%flag_split_fdp%, duty.%start_hb%);  
+  
+export %leg_inf_flag_late_change_short_stop% =
+  %dt_inf_any_flag%(if %_starts_on_first_half_of_day%
+                    then %flag_late_change_short_stop_1% 
+                    else %flag_late_change_short_stop_2%
+                    ,leg.%activity_scheduled_start_time_hb%);
+  
+export %trip_rescheduled_to_standby_callout% =
+  any(duty(trip), standby.%duty_is_standby_callout%
+                  and not first(leg(duty), %leg_inf_is_standby%));
+  
+export %leg_inf_checkout% =
+  %dt_inf_checkout%(leg.%end_hb%);
+
+/* Dates of first and last informed blank day overlapped by trip */ 
+export %trip_inf_blank_start_hb% =
+  let start_hb = %trip_start_date_hb%;
+  first(times(trip.%days%), %_period_date_ix%(start_hb))
+  where(%dt_inf_pcat%(%_period_date_ix%(start_hb)) = %pcat_blank%);
+export %trip_inf_blank_end_hb% =
+  let start_hb = %trip_end_date_hb% - 24:00;
+  first(times(trip.%days%), %_period_date_ix_backwards%(start_hb))
+  where(%dt_inf_pcat%(%_period_date_ix_backwards%(start_hb)) = %pcat_blank%);
+
+/* True if there is an informed short stop on the specified day */
+export %dt_inf_short_stop_day%(Abstime t) =  
+  %dt_inf_any_flag%(%flag_short_stop_1%, t)
+  or %dt_inf_any_flag%(%flag_short_stop_2%, t); 
+  
+/* True if there is an informed short stop on the specified part of day */
+export %dt_inf_short_stop_part%(Abstime t) =  
+  %dt_inf_any_flag%(if time_of_day(t) < 12:00 then %flag_short_stop_1% else %flag_short_stop_2% , t);
+  
+/*
+* Informed freeday block corresponding to the current trip on the roster.
+*  This is F-day activity following any other roster activity.
+*  Note that F-days appear after the last trip in a WOP, so there may be
+*  other activity between the current trip and the freeday block. 
+*/
+
+export %trip_inf_freeday_start_date_hb% =
+  let start_hb = %trip_start_date_hb%;
+  if %dt_inf_pcat%(start_hb) = %pcat_free%
+  then first(times(30), %_period_date_ix_backwards%(start_hb))
+       where(default(%dt_inf_pcat%(%_period_date_ix_backwards%(start_hb-24:00))
+                     <> %pcat_free%, true))
+  else first(times(30), %_period_date_ix%(start_hb))
+       where(default(%dt_inf_pcat%(%_period_date_ix%(start_hb))
+                     = %pcat_free%, true));
+
+export %trip_inf_freeday_end_date_hb% =
+  %trip_inf_freeday_start_date_hb% + 24:00*%trip_inf_freedays%;
+  
+export %trip_inf_freedays% =
+  let start_hb = %trip_inf_freeday_start_date_hb%;
+  count(times(30))
+  while(default(%dt_inf_pcat%(%_period_date_ix%(start_hb)) = %pcat_free%, false));
+
+/*
+** Informed freeday block corresponding to the trip following the current trip
+** on the roster.
+*/
+export %next_trip_inf_freeday_start_date_hb% =
+  let start_hb = %trip_end_date_hb%;
+  if %dt_inf_pcat%(start_hb) = %pcat_free%
+  then first(times(30), %_period_date_ix_backwards%(start_hb))
+       where(default(%dt_inf_pcat%(%_period_date_ix_backwards%(start_hb-24:00))
+                     <> %pcat_free%, true))
+  else first(times(30), %_period_date_ix%(start_hb))
+       where(default(%dt_inf_pcat%(%_period_date_ix%(start_hb))
+                     = %pcat_free%, true));
+       
+export %next_trip_inf_freeday_end_date_hb% =
+  %next_trip_inf_freeday_start_date_hb% + 24:00*%next_trip_inf_freedays%;
+  
+export %next_trip_inf_freedays% =
+  let start_hb = %next_trip_inf_freeday_start_date_hb%;
+  count(times(30))
+  while(default(%dt_inf_pcat%(%_period_date_ix%(start_hb)) = %pcat_free%, false));
+
+
+/*
+* Check if a specific day (date) on a roster is a freeday.
+* A freeday is represented either by an object or a "hole".
+*/
+
+%is_freeday_date%(Abstime date_hb) =
+  default(all(wop(roster), wop.%is_freeday%)
+          where(%_wop_overlaps_day%(date_hb)) ,true);
+
+  %_wop_overlaps_day%(Abstime date_hb) =
+    overlap(wop.%start_hb%, wop.%end_hb% , date_hb, date_hb+24:00) > 0:00;
+    
+export %is_freeday_date_ix%(Abstime date_offset_hb) =
+  %is_freeday_date%(%_period_date_ix%(date_offset_hb));
+
+/* Number of consecutive informed time-off days following current trip */
+export %trip_inf_timeoff_days% =
+  let start_hb = trip.%rest_start_day%;
+  count(times(30))
+  while(%pcat_is_timeoff%(
+            default(%dt_inf_pcat%(%_period_date_ix%(start_hb)), %pcat_free%)));
+
+/*
+* Reference check in
+*/
+export %reference_check_in% = 
+  if duty.%has_no_duty_time_contribution% then 
+    default(%period_inf_refcheckin%(duty.%start_hb% - 24:00, duty.%end_hb% - 24:00),
+      default(%period_inf_refcheckin%(duty.%start_hb%, duty.%end_hb%), %wop_inf_checkin%))
+  else
+    void_abstime;
+
+export %reference_check_in_utc% =
+  %crew_time_utc%(%reference_check_in%);  
+
+export %reference_check_in_valid% = 
+  crew.%is_skd% and %cabin_crew%;
+
+
+/*
+* Checks for informed vacation, blank and compdays on 
+* specific calendar day for doing per calendar day schedule 
+* reporting to WFS in WorkSchedule interface
+*/
+%prev_inf_VA_at_dt%(Abstime dt) = %dt_inf_any_flag%(%flag_vacation%, dt);
+%prev_inf_BL_at_dt%(Abstime dt) = %dt_inf_any_flag%(%flag_blank%, dt);
+%prev_inf_CMP_at_dt%(Abstime dt) = %dt_inf_any_flag%(%flag_cmp%, dt); 
+%prev_inf_LOA_at_dt%(Abstime dt) = %dt_inf_any_flag%(%flag_loa%, dt);
+
+
+/*
+* Publishing categories and flags.
+*/
+
+/*
+* Publishing categories.
+*
+* The crew_publish_info database table stores crew activity on a day level.
+*   Each entry in the table covers one or more days.
+*
+* Each day is identified by ONE publishing category; the most relevant one
+*   on any crew activity during that day. The most relevant one is that with
+*   the lowest number from the %pcat_xx% definitions below.
+* This means that it is important to keep the ordering of the pcats correct,
+*   and to define them to be within the correct sub-category (defined by the
+*   %_pcat_xx_limit% values).
+*
+* Days *between* trips without any activity will be stored as %pcat_blank%
+*  (along with activity defined as %pcat_blank%). NOTE that these "holes" are
+*  illegal, but we must give them some kind of category.
+*
+* Further below, the %duty_pcat% variable defines how different task codes are
+*   categorized into specific %pcat_xx% values.
+*
+* NOTE 1: The %pcat_xx% defs must be in sync with table pcat_name below.
+* NOTE 2: In crew_publish_info, the publishing category is stored as an
+*         integer value. This means that the %pcat_xx% constants must not
+*         be modified in a production system. (Unless you convert existing
+*         crew_publish_info data to reflect any altered %pcat_xx% value.)                                          
+*/
+export %pcat_flight%         =  10;
+  %_pcat_production_limit%     =  19; /* cat < 20 -> production */
+export %pcat_standby%        =  20;
+export %pcat_training%       =  30;
+export %pcat_ground%         =  40;
+export %pcat_positioning%    =  50;
+export %pcat_blank%          =  80;
+export %pcat_special_ground% =  90;
+  %_pcat_on_duty_limit%        = 99; /* cat < 100 -> on-duty */
+export %pcat_leave%          = 200;
+export %pcat_compday%        = 300;
+export %pcat_vacation%       = 400;
+export %pcat_illness%        = 500;
+export %pcat_rest%           = 600; /* (obsolete, keep for bw compatibility) */
+export %pcat_free%           = 900;
+export %pcat_ignore%         = 1000;
+export %pcat_undef%          = 2000;
+export %pcat_empty%          = 9000;
+
+export %pcat_is_production%(Int pcat) = pcat <= %_pcat_production_limit%;
+export %pcat_is_on_duty%(Int pcat)    = pcat <= %_pcat_on_duty_limit%;
+export %pcat_is_timeoff%(Int pcat)    = pcat > %_pcat_on_duty_limit%;
+export %pcat_is_standby%(Int pcat)    = pcat = %pcat_standby%;
+
+/*
+* Publishing Flags:
+*
+* Each entry in the crew_publish_info table has a field (flags), which holds
+*   details regarding the activity covered by the crew_publish_info entry.
+*
+* The field is a case-sensitive string,
+*   where flags are concatenated with ':' as delimiter.
+*/
+/*                                        info regarding the db entry: */
+export %flag_first_in_wop%       = "wf";  /* There is a wop start */
+export %flag_last_in_wop%        = "wl";  /* There is a wop end */
+export %flag_F7S%                = "F7S"; /* There is a scheduled F7S */
+export %flag_standby_at_airport% = "SBA"; /* Has a duty ending with standby at the airport */
+export %flag_had_sba%            = "hsa"; /* Has had a %flag_standby_at_airport% (sticky) */
+export %flag_standby_home%       = "SBB"; /* Is a standby at home */
+export %flag_standby_hotel%      = "SBH"; /* Is a standby at hotel */
+export %flag_standby_line%       = "SBL"; /* Is a standby line */
+export %flag_standby_callout%    = "sc";  /* Called out from standby at home */
+export %flag_airport_callout%    = "ac";  /* Called out from airport standby */
+export %flag_homerest%           = "hr";  /* Has a rest at home within a wop */
+export %flag_short_stop_1%       = "ss1";  /* Has short stop starting 0:00-11:59. */
+export %flag_short_stop_2%       = "ss2";  /* Has short stop starting 12:00-23:59. */
+export %flag_late_change_short_stop_1% = "cs1"; /* Late change short stop starting 0:00-11:59 */
+export %flag_late_change_short_stop_2% = "cs2"; /* Late change short stop starting 12:00-23:59 */
+export %flag_stopover%           = "so";  /* Has stopover (non-homebase) */
+export %flag_long_haul%          = "lh";  /* Is long haul. */
+export %flag_vacation%           = "pv";  /* Informed vacation (sticky) */
+export %flag_cmp%                = "cmp"; /* Informed compensation day (sticky) */
+export %flag_loa%                = "la";  /* Informed leave of absence (sticky) */
+export %flag_prod2standby%       = "sp";  /* Standby replacing prod. (sticky) */
+export %flag_prod2standby_late%  = "spl"; /* Standby replacing prod. <48h before orig. check-in (sticky) */
+export %flag_freeday2prod%      = "pf"; /* Prod replacing FN or other freeday. (sticky) */
+export %flag_prod_cancelled%  = "pcb"; /* Production cancelled (leg statcode=C) */
+export %flag_prod_cancelled_late_tmp_cc%  = "pcl"; /* Production for temps cancelled 12 hrs before ci*/
+export %flag_prod_cancelled_checkin_tmp_cc% = "pcc"; /* Production for temps cancelled after ci */
+export %flag_blank%              = "bl";  /* Blank day (sticky) */
+export %flag_BLS%                = "BLS"; /* BL-day special (sticky) */
+export %flag_extended_fdp%             = "x";   /* Duty with or scheduled or rescheduled extended FDP */
+export %flag_non_extended_fdp%         = "y";   /* Duty with planned scheduled or rescheduled non extended FDP. 
+    The reason we need the y-flag is to see that duty has been scheduled first time.*/
+export %flag_split_fdp%             = "fs";   /* Duty is first in FDP with split duty after (before c/i */                                                                           
+export %flag_freeze_prev_inf_duty_time% = "frz"; /* Freeze update of column prev_inf_duty_time (R312) */
+export %flag_freeze_sby_sched_end_time% = "fzs"; /* Freeze standby scheduled end time */
+
+/* Flags that will be kept in crew_publish_info even after rescheduling. */
+%sticky_flags% = concat(":", %flag_vacation%,
+                        ":", %flag_prod2standby%,
+                        ":", %flag_prod2standby_late%,
+                        ":", %flag_freeday2prod%,
+                        ":", %flag_prod_cancelled%,
+                        ":", %flag_prod_cancelled_late_tmp_cc%,
+                        ":", %flag_prod_cancelled_checkin_tmp_cc%,
+                        ":", %flag_blank%,
+                        ":", %flag_BLS%,
+                        ":", %flag_had_sba%,
+                        ":", %flag_F7S%,
+                        ":", %flag_cmp%,
+                        ":", %flag_loa%,
+                        ":");
+  
+export %is_flag_set%(String flag, String in_flags) =
+  locate(concat(":",flag,":"), in_flags) > 0;
+
+/*******************************************************************************
+* FOR GENERATION OF INFORMED-DATA
+* Note: These variables should, where applicable, also be used when comparing
+*       roster data to stored informed-data.
+*******************************************************************************/
+
+/* NOTE: This table must be in sync with the %pcat_xx% defs above. */
+table pcat_name(int id) =
+   id  -> export %pcat_name%;
+   10  -> "FLPROD";
+   /* id < 20 is production */
+   20  -> "SBY";
+   30  -> "TRNG";
+   40  -> "GND";
+   50  -> "POS";
+   80  -> "BL-DAY";
+   90  -> "SPCGND";
+  /* id < 100 is on-duty (>=100 is counted as time-off) */
+  200  -> "LEAVE";
+  300  -> "COMPDAY";
+  400  -> "VA-DAY";
+  500  -> "ILL";
+  600  -> "REST"; /* (obsolete, keep for bw compatibility) */
+  900  -> "F-DAY";
+  /* id >= 1000 will not be stored as PUBLISHED-DATA */
+  1000  -> "IGNORE";
+  2000 -> "UNDEF";
+  9000 -> "EMPTY";
+  -  -> void_string;
+end
+  
+%duty_pcat% =
+  default(
+         if duty.%is_freeday%          then %pcat_free%
+    else if duty.%is_illness%          then %pcat_illness%
+    else if duty.%is_vacation%         then %pcat_vacation%
+    else if duty.%is_compensation_day% then %pcat_compday%
+    else if duty.%is_loa%              then %pcat_leave%
+    else if duty.%group_code% = "SGD"  then %pcat_special_ground%
+    else if duty.%is_blank_day%        then %pcat_blank%
+    else if duty.%is_deadhead%         then %pcat_positioning%
+    else if duty.%is_training%         
+         or duty.%is_recurrent%        
+         or duty.%is_simulator%        then %pcat_training%
+    else if duty.%is_standby%          then %pcat_standby%
+    else if duty.%is_ground_duty%      then %pcat_ground%
+    else if duty.%is_active_flight%    then %pcat_flight%
+                                       else %pcat_undef%
+  ,%pcat_empty%);                      
+
+export %trip_pcat% =
+  min(duty(trip), %duty_pcat%);
+  
+export %wop_pcat% =
+  min(trip(wop), %trip_pcat%);
+
+%trip_pcat_name% =
+  %pcat_name%(%trip_pcat%);
+
+export %duty_pcat_ignore% = %duty_pcat% >= %pcat_ignore%;
+export %trip_pcat_ignore% = %trip_pcat% >= %pcat_ignore%;
+export %wop_pcat_ignore%  = %wop_pcat%  >= %pcat_ignore%;
+
+export %leg_start_date_hb% =
+  round_down(leg.%activity_scheduled_start_time_hb%, 24:00);
+export %leg_end_date_hb% =
+  let sched_end_date = round_up(leg.%activity_scheduled_end_time_hb%, 24:00);
+  if sched_end_date > %leg_start_date_hb% + 24:00
+     and default(sched_end_date > next(leg(chain), %leg_start_date_hb%), false)
+  then sched_end_date - 24:00
+  else sched_end_date; 
+
+export %duty_start_date_hb% = duty.%start_day%;
+export %duty_end_date_hb% =
+  let end_date = round_up(duty.%end_hb%, 24:00);
+  if end_date > %duty_start_date_hb% + 24:00
+     and default(end_date > next(duty(chain), %duty_start_date_hb%), false)
+  then end_date - 24:00
+  else end_date; 
+
+export %trip_start_date_hb% = trip.%start_day%;
+export %trip_end_date_hb%= last(duty(trip), %duty_end_date_hb%);
+
+export %wop_start_date_hb% = wop.%start_day%;
+export %wop_end_date_hb%= last(trip(wop),  %trip_end_date_hb%);
+   
+/* Voidy: the intention is to keep track of rest within a duty period only. */ 
+export %duty_rest_end_date_hb% = next(duty(wop),  %duty_start_date_hb%);
+
+/*
+*/
+
+export %wop_duty_times_per_day% =
+  let night_upg = fundamental.%night_upg%
+                  and not (crew.%region% = "SKS")  
+                  and not (crew.%region% = "SKD" and 
+                           crew.%is_temporary_at_date%(wop.%start_day%));
+
+ /* Vazquez, 20May2009: 
+     temporary crew should have duty time with night upgrade, but as this is not 
+     used in any legality rule, and its only used in overtime payment, it needs to be 
+     without night upgrade. If any rule is added, it should be with night upgrade */
+  cat(times(wop.%days%), %_dt_day_ix%(wop.%start_day%, night_upg));
+    
+%_dt_day_ix%(AbsTime start_utc, Bool night_upg) =
+    let st = crew.%utc_time%(%_period_date_ix%(start_utc)),
+        dt = wop.%duty_time_in_period%(st, st+24:00, night_upg, duty.union);
+    if dt <= 0:00 then "," else format_time(dt, "%h%02M,");
+
+export %duty_is_long_haul% =
+  duty.%has_active_flight%
+  and (if %flight_crew% then
+         crew.%is_long_haul_trip_start%
+       else
+         duty.%is_long_haul% or ((not duty.%is_short_haul%) and
+                                 crew.%is_long_haul_trip_start%));
+  
+export %duty_is_short_haul% =
+  duty.%has_active_flight%
+  and not %duty_is_long_haul%;
+    
+export %trip_is_long_haul% =
+  any(duty(trip), %duty_is_long_haul%);
+  
+export %trip_is_short_haul% =
+  (not %trip_is_long_haul%) 
+  and any(duty(trip), %duty_is_short_haul%);
+
+/* The trip check-in time to be stored in the rescheduling info table.
+*  In comparisons, use the same variable on the current roster.
+*  - For flight duty, ground transports and airport standby, the returned value
+*    will be the actual trip start time (most often equal to check-in).
+*  - For home standby and standby callouts, the returned value will be the
+*    standby start time + the transport time to the airport; i.e. the earliest
+*    possible check-in at the airport.*/
+
+/*
+** Check-in/out times.
+**
+** In crew_publish_info, we store the values "checkin" and "checkout" for
+** days with informed on-duty activity. These values are used to evaluate
+** - if a check-in/out at homebase has been rescheduled.
+** - proper placement of notification alert deadline in relation to mandatory
+**   check-in/out (i.e. at any scandinavian base, not nescessarily at home).
+**
+** Note that the values stored not always equal check-in/out times at a portal.
+** For example:
+** - for a standby-at-home activity, we store the earliest possible check-in
+**   (standby start + transport time).
+** - for an on-duty activity without mandatory check-out, the activity end time
+**   is stored.
+*/
+
+/* Checkin-at-homebase evaluated from the current roster */
+export %trip_checkin_hb% =
+  if not (%_trip_has_mandatory_ci% or trip.%is_standby%)
+  then void_abstime
+  else if %_trip_rest_before_scheduled_in_wop% < 10:00 
+       then default(prev(trip(wop), %_trip_min_duty_checkin_hb%),
+                    %_trip_min_duty_checkin_hb%)
+  else %_trip_min_duty_checkin_hb%;
+    
+export %trip_checkin_utc% =
+  %crew_time_utc%(%trip_checkin_hb%);
+  
+%_trip_has_mandatory_ci% =
+  any(leg(trip), checkinout.%leg_has_mandatory_ci%);
+
+%_trip_rest_before_scheduled_in_wop% =
+  default(trip.%start_utc%
+          - prev(trip(wop), if trip.%is_blank_day%
+                            then trip.%start_utc%
+                            else trip.%end_scheduled_utc%)
+  , 99:00);
+
+%_trip_min_duty_checkin_hb% =
+  min(duty(trip), %duty_checkin_hb%);
+  
+
+/* Duty checkin at home base*/
+%duty_checkin_hb% =
+  first(leg(duty), %duty_checkin_time%)
+  where((if is_first(duty(trip))
+         then trip.%has_flight_duty%
+         else default(checkinout.%leg_has_mandatory_ci%, false)
+         )
+        or duty.%is_standby_at_home%
+        or (duty.%is_standby_at_hotel%
+            and checkinout.%leg_starts_at_mandatory_station%) 
+        or standby.%duty_is_standby_callout%);
+
+/* Duty checkin */
+export %duty_checkin% =
+  first(leg(duty),%duty_checkin_time%)
+  where((if is_first(duty(trip))
+         then trip.%has_flight_duty%
+         else default(leg.%has_check_in%, false))
+        or duty.%is_standby_at_home%
+        or (duty.%is_standby_at_hotel%
+            and checkinout.%leg_starts_at_mandatory_station%) 
+        or standby.%duty_is_standby_callout%);
+
+%duty_checkin_time% =
+    /* If we have a standby callout,
+       then the actual called-out-from standby may be in the previous duty. */
+    if duty.%is_standby_callout%
+    then if leg.%is_standby_callout%
+         then %standby_start_hb_plus_transport%
+         else prev(leg(chain), %standby_start_hb_plus_transport%)
+    /* Not a callout, but it can still be a home standby. */
+    else if duty.%is_standby_at_home%
+         or duty.%is_standby_at_hotel%
+         then %standby_start_hb_plus_transport%
+    /* So, we have a normal flight duty, airport standby or ground transport. */
+    else duty.%start_hb%;
+    
+%standby_start_hb_plus_transport% =
+  leg.%start_hb% + standby.%default_local_transport_time%;
+
+export %trip_scheduled_checkout_hb% =
+  if not (%_trip_has_mandatory_co% or trip.%is_standby%)
+  then void_abstime
+  else if %_trip_rest_after_scheduled_in_wop% < 10:00
+       then default(next(trip(wop), %_trip_max_duty_scheduled_checkout_hb%),
+                    %_trip_max_duty_scheduled_checkout_hb%)
+  else %_trip_max_duty_scheduled_checkout_hb%;
+  
+%_trip_has_mandatory_co% =
+  any(leg(trip), checkinout.%leg_has_mandatory_co%);
+
+export %trip_scheduled_checkout_utc% =
+  %crew_time_utc%(%trip_scheduled_checkout_hb%);
+
+%_trip_rest_after_scheduled_in_wop% =
+  default(next(trip(wop), if trip.%is_blank_day%
+                          then trip.%end_scheduled_utc%
+                          else trip.%start_utc%)
+          - trip.%end_scheduled_utc%
+  , 99:00);
+  
+%_trip_max_duty_scheduled_checkout_hb% =
+  max(duty(trip), %duty_scheduled_checkout_hb%);
+  
+export %duty_scheduled_checkout_hb% =
+  last(leg(duty), duty.%end_scheduled_hb% + (keywords.%departure%-keywords.%departure%))
+  where((if is_last(duty(trip))
+         then trip.%has_flight_duty%
+         else default(leg.%has_check_out%, false)
+         )
+        or duty.%is_standby_at_home%
+        or (duty.%is_standby_at_hotel%
+            and checkinout.%leg_ends_at_mandatory_station%));
+
+/*
+* Check-on/out values to store in 'crew_publish_info'.
+* We evaluate on duty level, to contain the closest ci/co range for the duty.
+* The purpose is to be able to find informed ci/co both:
+* - at home base (see %trip_inf_checkin_hb%/%trip_inf_checkout_hb%), and
+* - at any scandinavian base using %dt_inf_checkin/out%.
+*
+* Note 2:
+*   %duty_closestXX values will differ from %trip_checkXX only in case a duty
+*   within a trip has a mandatory ci/co at a scandinavian base.
+* Note 2:
+*   For a single-duty trip the range:
+*      [%duty_closest_checkin_hb% .. %duty_closest_scheduled_checkout_hb%]
+*   will always be equal to:
+*      [%trip_checkin_hb% .. %trip_scheduled_checkout_hb%]
+*/
+%duty_closest_checkin% =
+  max(duty(trip), %duty_checkin%)
+  from(first) to(current);
+  
+%duty_closest_scheduled_checkout_hb% =
+  min(duty(trip), %duty_scheduled_checkout_hb%)
+  from(current) to(last);
+  
+/* Strings for debugging */
+%tcistr% = default(format_time(%trip_checkin_hb%,"%02d.%02H%02M"),"void");
+%tcostr% = default(format_time(%trip_scheduled_checkout_hb%,"%02d.%02H%02M"),"void");
+%dcistr% = default(format_time(%duty_checkin_hb%,"%02d.%02H%02M"),"void");
+%dcostr% = default(format_time(%duty_scheduled_checkout_hb%,"%02d.%02H%02M"),"void");
+%pcistr% = default(format_time(%duty_closest_checkin%,"%02d.%02H%02M"),"void");
+%pcostr% = default(format_time(%duty_closest_scheduled_checkout_hb%,"%02d.%02H%02M"),"void");
+%cicostr% =
+  if %tcistr% = "void" and %tcostr% = "void"
+  then "VOID"
+  else concat(if %tciresch% then "I" else " ",
+              if %tcoresch% then "O" else " ",
+              " ",
+              %tcistr%,
+              if %pcistr% = %tcistr% then "" else concat("/",%pcistr%),
+              " - ",
+              if %pcostr% = %tcostr% then "" else concat(%pcostr%, "/"), 
+              %tcostr%,
+              if %pcistr% = %dcistr% and %pcostr% = %dcostr%
+              then "" else  concat("       [duty ",%dcistr%," - ",%dcostr%,"]")
+              );
+  
+/*
+** Flags, calculated from current roster.
+**
+** These flags are stored in 'crew_publish_info' (see Rescheduling.py) for days 
+** covered: see variables "%[trip|duty|duty_rest|leg]_[start|end]_date_hb%". 
+*/ 
+
+%trip_flags% =
+  let flags = concat(
+    if trip.%is_vacation%
+    then concat(":",%flag_vacation%)
+    else "",
+
+    if trip.%is_compensation_day%
+    then concat(":",%flag_cmp%)
+    else "",
+
+    if trip.%is_loa%
+    then concat(":",%flag_loa%)
+    else "",
+    
+    if %trip_is_F7S%
+    then concat(":",%flag_F7S%)
+    else "",
+    
+    if trip.%is_blank_day%
+    then concat(":",%flag_blank%)
+    else "",
+    
+    if first(leg(trip), leg.%is_BLS%)
+    then concat(":",%flag_BLS%)
+    else "",
+    
+    if trip.%is_home_standby%
+    then concat(":",%flag_standby_home%)
+    else "",
+
+    if trip.%is_hotel_standby%
+    then concat(":",%flag_standby_hotel%)
+    else "",
+
+    if %standby_homehotel_has_started%
+    then concat(":",%flag_freeze_sby_sched_end_time%)
+    else "",
+    
+    if trip.%is_standby_line%
+    then concat(":",%flag_standby_line%)
+    else "",
+    
+    if %trip_will_be_rescheduled_from_prod_to_standby_late%
+    then concat(":",%flag_prod2standby_late%)
+    else if %trip_will_be_rescheduled_from_prod_to_standby%
+         then concat(":",%flag_prod2standby%)
+    else "",
+    
+    if crew.%is_temporary% and %trip_will_be_inf_cancelled_late% and not trip.%is_unfit_for_flight%
+    then concat(":",%flag_prod_cancelled_late_tmp_cc%)
+    else "",
+    
+    if crew.%is_temporary% and %trip_will_be_inf_cancelled_after_checkin% and not trip.%is_unfit_for_flight%
+    then concat(":",%flag_prod_cancelled_checkin_tmp_cc%)
+    else "",
+
+    if wop.%has_prev_illness%(trip.%start_utc%) or wop.%has_prev_child_illness%(trip.%start_utc%)
+    or trip.%is_illness% or trip.%is_child_illness% or trip.%is_unfit_for_flight%
+    then concat(":",%flag_freeze_prev_inf_duty_time%)
+    else "",
+    
+    ":");
+  if length(flags) > 1 then flags else "";
+
+
+%duty_flags% =
+  let flags = concat(
+    if standby.%duty_is_standby_callout%
+    then concat(":",%flag_standby_callout%)
+    else "",
+
+    if standby.%duty_is_airport_callout%
+    then concat(":",%flag_airport_callout%)
+    else "",
+
+    if %duty_will_be_inf_cancelled% 
+    then concat(":",%flag_prod_cancelled%)
+    else "",
+
+    if %duty_is_long_haul% or (duty.%is_deadhead% and %trip_is_long_haul%)
+    then concat(":",%flag_long_haul%)
+    else "",
+
+    if %duty_will_be_rescheduled_from_freeday_to_prod% 
+    then concat(":",%flag_freeday2prod%)
+    else "",    
+
+    ":");
+  if length(flags) > 1 then flags else "";
+  
+%duty_rest_flags% =
+  let flags = concat(
+    if is_last(duty(trip))
+    then (if %trip_has_homerest%
+          then concat(":",%flag_homerest%)
+          else "")
+    else (if %duty_has_stopover%
+          then concat(":",%flag_stopover%)
+          else ""),
+      
+    ":");
+  if length(flags) > 1 then flags else void_string;
+  
+%leg_flags% =
+  let flags = concat(
+    default(if rest.%is_short%
+            then concat(":",if %_starts_on_first_half_of_day%
+                            then %flag_short_stop_1%
+                            else %flag_short_stop_2%)
+            else "",""),
+    
+    default(if %is_late_informed_short_stop%
+            then concat(":",if %_starts_on_first_half_of_day% 
+                            then %flag_late_change_short_stop_1%
+                            else %flag_late_change_short_stop_2%)
+            else "",""),
+
+    default(if leg.%is_last_in_duty% and leg.%is_standby_at_airport% 
+            then concat(":",%flag_standby_at_airport%,":",%flag_had_sba%)
+            else "",""),
+
+    default(if is_first(leg(duty)) and duty_period.%is_fdp% then
+              if (oma16.%is_extended_fdp%)
+              then concat(":", %flag_extended_fdp%)
+              else concat(":", %flag_non_extended_fdp%)
+            else "", ""),
+
+     default(if is_first(leg(duty))
+            and ((not %fdp_has_started% and duty_period.%is_split% and duty_period.%is_first_duty_in_duty_period%)
+                  or (%fdp_has_started% and %leg_inf_fdp_has_split_after%))
+            then concat(":", %flag_split_fdp%)
+            else "", ""),
+     
+    ":");
+  if length(flags) > 1 then flags else void_string;
+    
+
+%fdp_has_started% =
+  fdp.%start_utc% <= %now%;
+  
+%standby_homehotel_has_started% =
+  if (trip.%is_home_standby% or trip.%is_hotel_standby%) then
+   trip.%start_hb% <= %now_hb%
+  else False;
+
+/* Redefined in rescheduling_cct */
+%trip_will_be_rescheduled_from_prod_to_standby_late% = False;
+%trip_will_be_rescheduled_from_prod_to_standby% = False;
+export %duty_will_be_inf_cancelled% = False;
+%duty_will_be_rescheduled_from_freeday_to_prod% = False;
+
+export %trip_will_be_inf_cancelled_late% = False;
+export %trip_will_be_inf_cancelled_after_checkin% = False;
+%trip_is_f7s% = trip.%is_f7s%;
+
+/* Rest at homebase between trips, except between adjacent standby days */
+export %trip_has_homerest% =
+  let rest_start_day = last(duty(trip),
+                            if duty.%time% < 22:59
+                            then duty.%start_day%
+                            else trip.%end_day% + 24:00),
+      rest_end_day = last(duty(trip), 
+                          default(%duty_rest_end_date_hb%, duty.%start_day%));
+  rest_start_day < rest_end_day
+  and default(trip.%rest_time% > 0:01
+              and not (trip.%is_standby%
+                       and last(leg(trip),
+                                next(leg(chain),
+                                     leg.%is_standby%
+                                     and duty.%start_day% = rest_end_day)))
+             , false);
+
+%duty_has_stopover% =
+  last(leg(duty), %leg_has_stopover%);
+  
+export %leg_has_stopover% =
+  not is_last(duty(trip))
+  and leg.%is_last_in_duty%
+  and not leg.%arrives_at_homebase%;
+  
+/*
+ * Short stop periods are divided in 0:00-11:59, 12:00-23:59. The assumption
+ * is that if there are two short stops in the same 12-hour period, they are
+ * treated the same way (either they are late change or they are not).
+ */
+%short_stop_per_start% =
+  round_down(leg.%activity_scheduled_start_time_hb%, 12:00);
+%short_stop_per_end% =
+  %short_stop_per_start% + 12:00;
+%_starts_on_first_half_of_day% =
+  time_of_day(leg.%activity_scheduled_start_time_hb%) < 12:00;
+
+/* The number of short stops currently on the roster
+   for the current, next and previous period */
+%cur_short_stops_in_this_period% =
+  %_cur_short_stops_in_period%(%short_stop_per_start%, %short_stop_per_end%);
+%cur_short_stops_in_next_period% =
+  %_cur_short_stops_in_period%(%short_stop_per_end%, %short_stop_per_end% + 12:00);
+%cur_short_stops_in_prev_period% =
+  %_cur_short_stops_in_period%(%short_stop_per_start%-12:00, %short_stop_per_start%);
+
+/* The number of short stops on the roster in any given time period */
+%_cur_short_stops_in_period%(Abstime start_hb, Abstime end_hb) =
+  count(leg(chain))
+  where(leg.%activity_scheduled_start_time_hb% >= start_hb
+        and rest.%is_short%
+        and leg.%activity_scheduled_start_time_hb% < end_hb);
+  
+/*
+ * The number of informed but not late-flagged stops in 12-hour periods.
+ */
+%inf_short_stops_in_this_period% = 
+  if %_starts_on_first_half_of_day%
+  then if %dt_inf_any_flag%(%flag_short_stop_1%, %short_stop_per_start%)
+          and not %dt_inf_any_flag%(%flag_late_change_short_stop_1%,
+                                    %short_stop_per_start%)
+       then 1
+       else 0
+  else if %dt_inf_any_flag%(%flag_short_stop_2%, %short_stop_per_start%)
+          and not %dt_inf_any_flag%(%flag_late_change_short_stop_2%, 
+                                    %short_stop_per_start%)
+       then 1
+  else 0;
+  
+%inf_short_stops_in_next_period% = 
+  if %_starts_on_first_half_of_day%
+  then if %dt_inf_any_flag%(%flag_short_stop_2%, %short_stop_per_start%)
+           and not %dt_inf_any_flag%(%flag_late_change_short_stop_2%,
+                                     %short_stop_per_start%)
+       then 1
+       else 0
+  else if %dt_inf_any_flag%(%flag_short_stop_1%, %short_stop_per_end% + 12:00)
+          and not %dt_inf_any_flag%(%flag_late_change_short_stop_1%,
+                                    %short_stop_per_end% + 12:00)
+       then 1
+  else 0;
+  
+%inf_short_stops_in_prev_period% = 
+  if %_starts_on_first_half_of_day%
+  then if %dt_inf_any_flag%(%flag_short_stop_2%, %short_stop_per_start% - 12:00)
+          and not %dt_inf_any_flag%(%flag_late_change_short_stop_2%,
+                                    %short_stop_per_start% - 12:00)
+        then 1
+        else 0
+  else if %dt_inf_any_flag%(%flag_short_stop_1%, %short_stop_per_start%)
+          and not %dt_inf_any_flag%(%flag_late_change_short_stop_1%,
+                                    %short_stop_per_start%)
+        then 1
+  else 0;
+
+export %do_not_update_prev_inf_duty_time% = "False";
+
+/* Redefined in _cct */
+export %duty_J3_code% = "---";

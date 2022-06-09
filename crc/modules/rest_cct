@@ -1,0 +1,81 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains rest definitions and calculations for scheduled times
+ *   versus actual times, needed in Tracking.
+ *
+ * Sections:
+ *
+ * Created by:
+ *   Hugo Vazquez, 2009-01-15
+ *
+ * Major changes:
+ *
+ */
+ 
+module rest_cct inherits rest_ccr
+
+redefine export %in_24hrs_scheduled% =
+  let stop = %_in_24hrs_stop_scheduled%,
+      start = %_in_24_hrs_start_scheduled%;
+  nmax(
+    nmin(stop - start, leg.%rest_time_scheduled%),
+    default(stop - next(leg(trip), leg.%duty_end_scheduled_UTC%) 
+                   where (leg.%duty_end_scheduled_UTC% > start), 0:00));
+redefine %_in_24hrs_stop_scheduled% = 
+  first(leg(duty), duty.%start_utc% 
+                   + leg.%duty_time_standby_rest_reduction_scheduled%(false)
+                   + 24:00);
+
+/* After first leg departs, min rest on homebase is reduced
+** by 2:00 (to 12:00). */
+redefine %_min_rest_reduction_hb_skd_cc% =
+  if duty.%end_utc% > duty.%end_scheduled_utc% then 2:00 else 0:00;
+  
+  
+redefine export %minimum_time_cc_scheduled%  =
+  if not duty.%k4exng_cc_sp5_1_valid%(trip.%start_day%) and
+     duty.%region% = "SKD" and not %short_haul_rest%  and not  duty.%is_charter% then
+    nmax(%min_at_station_lh_scheduled%(%lh_trip_to_west%,true),12:00)
+  else
+    %_minimum_time_scheduled_cc%;
+                                 
+export %min_at_station_lh_scheduled%(Bool double_slipping, Bool use_tz) =
+  (if use_tz then abs(duty.%start_time_zone% - duty.%end_time_zone%) else 0:00) +
+  (if double_slipping then 2 else 1) * duty.%block_time_scheduled%;
+  
+table scheduled_rest_time_limits_cc =
+  %short_haul_rest%,
+  leg.%arrives_at_homebase% ->
+    %_minimum_time_scheduled_cc%;
+  
+    -  , true  -> nmax(13:00,oma16.%scheduled_duty_time_affecting_rest%);
+  true , false -> oma16.%min_rest_after_dp%;
+  false, false -> 15:00;
+  
+    -  ,   -   -> %minimum_time_cc%;
+end
+
+redefine %_end_previous_min_rest% =
+  if duty.%is_standby_callout% and
+     first(leg(duty), leg.%is_callout_from_standby%) and
+     prev(duty(chain),duty.%is_single_leg_standby_callout% and
+                      not %minimum_rest_satisfied%) then
+    prev(duty(chain), duty.%start_utc%)
+    where (duty.%is_single_leg_standby_callout%)
+  else
+    %__end_previous_min_rest%;
+
+/* special rest for flight */
+redefine export %additional_rest_for_flight_after% =
+    0:00;
+
+redefine export %additional_rest_for_flight_before% =
+    0:00;
+    
+redefine export %use_additional_rest% = False;
+
+/* end of file */
+

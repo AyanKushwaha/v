@@ -1,0 +1,395 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   Create functions/variables used by Output_reports: RosterDataOutput (previously TypeofDuty).
+ *
+ * Created by:
+ *   F. Skaarman and lars Andersson, 16-sep-2010
+ * Updated with roster cost of one day, 01nov2018. By Lars Andersson
+ * Updated with manual setting of report star and end, improved costcalc. dec2020
+ *
+ */
+/* root*/ 
+module report_typeofduty
+
+import fundamental;
+import levels;
+import pp;
+import base_product;
+import trip;
+import duty_period;
+import duty;
+import crew;
+import leg;
+import crew_pos;
+import oma16;
+import oma16_defs;
+import task;
+import trip_cost;
+import freedays;
+import roster;
+/* Block time calendar month, LH/SH legs, SIM instr duties, Lifus legs to FTECalcOutput report
+*/
+export %block_time_calendar_month% =
+  roster.%block_time_in_period_caa%(round_down_month(%pp_start%+0:01), round_up_month(%pp_start%+0:01));
+export %block_time_calendar_month_long_haul% =
+  roster.%block_time_in_period_long_haul%(round_down_month(%pp_start%+0:01), round_up_month(%pp_start%+0:01));
+  
+export %long_haul_legs_in_calendar_month% =
+  roster.%long_haul_legs_in_period%(round_down_month(%pp_start%+0:01), round_up_month(%pp_start%+0:01));
+
+export %short_haul_legs_in_calendar_month% =
+  roster.%short_haul_legs_in_period%(round_down_month(%pp_start%+0:01), round_up_month(%pp_start%+0:01));
+  
+export %sim_instr_duties_in_calendar_month% =
+    roster.%nr_sim_duty_as_tr%(round_down_month(%pp_start%+0:01), round_up_month(%pp_start%+0:01));
+
+export %nr_lifus_legs_as_instr_in_calendar_month% =
+    roster.%nr_lifus_legs_as_instr%(round_down_month(%pp_start%+0:01), round_up_month(%pp_start%+0:01));
+
+export %nr_lc_legs_as_instr_in_calendar_month% =
+    roster.%nr_lc_legs_as_instr%(round_down_month(%pp_start%+0:01), round_up_month(%pp_start%+0:01));
+    
+/* Added RosterCost in the report */
+%report_cost_of_a_roster_day% = (%cost_of_salary_day% + (trip_cost.%trip_soft_costs%/trip.%days%));
+
+set loa_codes = "IL12","IL8" 
+remark "LOA Tasks not included i taskgroup_LOA, used in RosterData report.";
+
+%cost_of_salary_day% = 
+if duty.%group_code% = "LOA" or duty.%group_code% = "PFR" or duty.%code% in loa_codes
+then 0
+else %cost_of_calendar_day%;
+
+%cost_of_calendar_day% = parameter 2000
+remark "Cost of every day in RosterDataOutput (excl.LOA and other non payd days)";
+
+/* empno = extperkey. If not found ths means crew is Retired and id is shown instead */ 
+%empno% = default(crew.%extperkey%, concat("R",crew.%id%));
+
+/*report start and end*/
+%set_report_date_manually% = parameter false
+Remark "If FALSE: Default for RosterDataOutput will be calendar month";
+
+%rdo_man_start_date% = parameter "2020-01-01"
+Remark "Manually set start_date in RosterDataOutput(Must be in this format)";
+%rdo_man_end_date% = parameter "2020-01-01"
+Remark "Manually set end_date in RosterDataOutput(Must be in this format)";
+
+%format_per_start% = 
+if %set_report_date_manually% = false
+then format_time(round_down_month(fundamental.%pp_start%+0:05),"%Y-%02m-%02d")
+else %rdo_man_start_date%;
+
+%format_per_end% = 
+if %set_report_date_manually% = false
+then format_time(round_up_month(fundamental.%pp_start% + 0:05),"%Y-%02m-%02d")
+else %rdo_man_end_date%;
+/**/
+/** Instructor qual**/
+export %instructor_qual%(Abstime date) =
+  if crew.%is_tre_any_qual%(date) then
+    "TRE"
+  else if crew.%is_sfe_any_qual%(date) then
+    "SFE"
+  else if crew.%is_tri_any_qual%(date) then
+    "TRI"
+  else if crew.%is_sfi_any_qual%(date) then
+    "SFI"
+  else if crew.%is_lifus_instr%(date) then
+    "LIFUS" 
+  else if crew.%is_sup_any_qual%(date) then
+    "SUP"
+  else if crew.%is_ol_any_qual%(date) then
+    "OL"
+  else if crew.%is_line_check%(date) then
+    "LCP"    
+  else if crew.%is_crm_any_qual%(date) then
+    "CRM"  
+  /* Cabin crew */
+  else if crew.%is_linst_instr%(date) then
+    "LINST"
+  else if crew.%is_as_instr%(date) then
+    "AS INSTR"
+  else if crew.%is_rec_instr%(date) then
+    "REC"
+  else if crew.%is_chief_pilot%(date) then
+    "CP"
+  else if crew.%is_base_chief_pilot%(date) then
+    "BCP"
+  else
+    "";
+
+%instructor_qual_pp_start% = default(%instructor_qual%(%pp_start%), "");
+
+%fullname% = default(crew.%fullname%, "");
+
+%is_mff% = default(crew.%is_mff%, false);
+
+%rank_duty_start% = default(crew.%rank_at_date%(duty.%start_lt%), "-");
+
+%rank% = default(crew.%rank%, "-");
+
+%homebase% = default(crew.%homebase%, "-");
+
+%region% = default(crew.%region%, "-");
+
+%ac_qual% = default(crew.%aircraft_qlns%, "-");
+
+%is_temporary% = default(crew.%is_temporary%, false);
+
+%pt_factor_pp_start% = default(crew.%part_time_factor_pp_start%, 0);
+
+%group_at_pp_start% = default(crew.%group_at_pp_start%, "-");
+
+%base_at_duty_start% = default(crew.%base_at_date%(duty.%start_lt%), "-");  
+
+%region_at_date% = default(crew.%region_at_date%(duty.%start_lt%), "-");
+
+%ac_quals_at_date% = default(crew.%ac_qlns_at_date%(duty.%start_lt%), "-");
+
+%group_at_date% = default(crew.%ac_qlns_at_date%(duty.%start_lt%), "-");
+
+
+%nof_duties_at_date% =
+  let thisdate = round_down(duty.%start_lt%,24:00);
+  count(duty(chain)) where (round_down(duty.%start_lt%,24:00) = thisdate);
+  
+
+%several_duties_start_same_date% =
+ if (round_down(duty.%start_lt%,24:00) = default(next(duty(chain),round_down(duty.%start_lt%,24:00)), 01jan1986)) then
+    true
+ else
+    false;
+
+%nof_next_duties_at_date% =
+  let thisdate = round_down(duty.%start_lt%,24:00);
+  if not duty_period.%is_last_duty_in_duty_period% then 1
+  else if (thisdate = default(next(duty(chain), next(duty(chain), next(duty(chain),round_down(duty.%start_lt%,24:00)))) , 01jan1986)) then
+    3
+  else if (thisdate = default(next(duty(chain), next(duty(chain),round_down(duty.%start_lt%,24:00))) , 01jan1986)) then
+    2
+  else if (thisdate = default(next(duty(chain),round_down(duty.%start_lt%,24:00)), 01jan1986)) then
+    1
+  else 0;
+  
+%next_duty_codes_at_date% =
+  if %nof_next_duties_at_date% = 2 then
+    concat( default(next(duty(chain),duty.%code%), ""), "-",   + default(next(duty(chain), next(duty(chain),duty.%code%)) , ""))
+  else if %nof_next_duties_at_date% = 1 then
+    default(next(duty(chain),duty.%code%), "")  
+  else "";
+
+%any_ill_at_date% =
+  let date = round_down(duty.%start_lt%,24:00);
+  if any(leg(chain), leg.%code% = "IL7") where (round_down(leg.%start_lt%,24:00) = date) then
+    "IL7"
+  else if any(leg(chain), leg.%code% = "LA91")  where (round_down(leg.%start_lt%,24:00) = date) then
+    "LA91"
+  else if any(leg(chain), leg.%code% = "LA92")  where (round_down(leg.%start_lt%,24:00) = date) then
+    "LA92"
+  else if any(leg(chain), leg.%group_code% = "ILL")  where (round_down(leg.%start_lt%,24:00) = date) then
+    "IL*"
+  else "-";
+  
+%any_sb_at_date% =
+  let date = round_down(duty.%start_lt%,24:00);
+  if any(leg(chain), leg.%group_code% = "SBH") where (round_down(leg.%start_lt%,24:00) = date) then
+    "SBH"
+  else if any(leg(chain), leg.%group_code% = "SBA")  where (round_down(leg.%start_lt%,24:00) = date) then
+    "SBA"
+  else if any(leg(chain), leg.%group_code% = "SBL")  where (round_down(leg.%start_lt%,24:00) = date) then
+    "SBL"  /*Standby line */
+  else if any(leg(chain), substr(leg.%group_code%,1,2) = "SB")  where (round_down(leg.%start_lt%,24:00) = date) then
+    "SB"
+  else "-";
+  
+  
+
+%date_is_bought% = 
+   let date = round_down(duty.%start_lt%,24:00);
+   if not any(leg(duty), leg.%is_bought%) then
+        false
+   else if any(leg(duty), leg.%is_bought%) where (leg.%start_date% = leg.%end_date%) then
+        true
+   else if any(leg(duty), leg.%is_bought%) where ( prev(leg(chain),leg.%start_date%) <> date ) then
+        true /* there is no previous leg, hence this day is bought. */
+   else false;
+    
+    
+%all_leg_in_duty_same_code% =
+ let code = first(leg(duty), leg.%code%);
+ all(leg(duty), leg.%code% = code );
+
+
+%part_il_fact_at_date% =
+    crew.%crew_contract_part_time_factor_at_date%(duty.%start_lt%) - 
+    default(crew.%_spec_sched_limit_int_to%("PartTime", duty.%start_lt%),
+            crew.%crew_contract_part_time_factor_at_date%(duty.%start_lt%));
+
+
+%next_duty_start% =
+ default(next(duty(chain), format_time(duty.%start_lt%, "%Y-%02m-%02d")), "-999");
+
+ 
+/****** SCHED DUTY CALCULATION *****/
+%duty_time_subq% =
+  oma16.%duty_period_duty_time_caa%;
+
+%duty_time_union% =
+  oma16.%duty_period_duty_time_union%;
+
+%block_time_at_date% =
+  let thisdate = round_down(duty.%start_lt%,24:00);
+  if duty_period.%is_first_duty_in_duty_period% then
+    sum(duty(chain),duty.%block_time%) where (round_down(duty_period.%start_lt%,24:00) = thisdate)
+  else 0:00;
+
+%active_flight_at_date%(Abstime date) =
+if any(leg(duty),overlap(date, date + 24:00,leg.%start_lt%, leg.%end_lt%) > 0:00)
+    where (leg.%is_active_flight%) then true
+    else false;  
+    
+%main_duty_code_at_date% =
+  if %active_flight_at_date%(round_down(duty.%start_lt%,24:00)) then "FLT"
+  else duty.%code%;
+  
+%main_group_code_at_date% =
+  if %active_flight_at_date%(round_down(duty.%start_lt%,24:00)) then "FLT"
+  else duty.%group_code%;
+
+
+%next_duty_code% =
+ default(next(duty(chain), duty.%code%), "-999");
+ 
+%next_duty_groupcode% =
+ default(next(duty(chain), duty.%group_code%), "-999"); 
+
+  
+%long_haul_at_date% =
+let date = round_down(duty.%start_lt%,24:00);
+if any(duty(chain), overlap(date, date + 24:00,duty.%start_lt%, duty.%end_lt%) > 0:00)
+    where (duty.%is_long_haul%) then "LH"
+    else "-";  
+    
+ 
+%first_duty_start_at_date% = 
+  let thisdate = round_down(duty.%start_lt%,24:00);
+  format_time(min(duty(chain),duty.%start_lt%) where (round_down(duty.%start_lt%,24:00) = thisdate),"%02H:%02M");
+
+%trips_last_duty_is_lh% =
+ let date = round_down(last(duty(trip),duty.%start_lt%),24:00);
+ any(duty(trip), duty.%is_long_haul%) where (round_down(duty.%start_lt%,24:00) = date);
+
+%is_last_in_trip% =
+  duty.%start_lt% = last(duty(trip), duty.%start_lt%);
+
+%start_date_lt% = format_time(round_down(duty.%start_lt%,24:00),"%Y-%02m-%02d");
+%end_date_lt% = format_time(round_down(duty.%end_lt%-00:01,24:00),"%Y-%02m-%02d");
+
+
+%start_lt% = format_time(duty.%start_lt%, "%02H:%02M");
+
+%end_lt% = format_time(duty.%end_lt%, "%02H:%02M");
+
+%duty_ends_after_midnight_not_lh% = 
+ let my_duty_end = duty.%end_lt% - round_down(duty.%end_lt%,24:00),
+     start_date = round_down(duty.%start_lt%,24:00),
+     end_date = round_down(duty.%end_lt%-00:01,24:00);
+ if not duty.%is_long_haul% and my_duty_end > 00:00 and my_duty_end < 20:00 and end_date > start_date then true else false;
+ 
+%my_duty_end% = duty.%end_lt% - round_down(duty.%end_lt%,24:00);
+
+ 
+%days_to_next_duty% =
+  default((round_down(next(duty(chain),duty.%start_lt%), 24:00) - 
+  round_down(duty.%end_lt%, 24:00))/24:00, 0);
+  
+%days_to_next_real_duty% =  /* special case for handling LA92 and IL7 over midnight */
+  let date = round_down(duty.%start_lt%,24:00);
+      /* end_date = round_down(duty.%end_lt%,24:00); */ 
+  default( (next(duty(chain),round_down(duty.%start_lt%, 24:00)) where (round_down(duty.%start_lt%, 24:00) > date)
+  - date )/24:00, -999);
+   
+%space_to_next_duty_date% =
+  let start_date = round_down(duty.%start_lt%,24:00),
+      end_date = default(last(duty(chain), round_down(duty.%end_lt%-00:01,24:00) - (if %duty_ends_after_midnight_not_lh% then 24:00 else 00:00)) 
+                      where ( round_down(duty.%start_lt%,24:00) = start_date), start_date);
+
+  default( (next(duty(chain),round_down(duty.%start_lt%, 24:00)) where (round_down(duty.%start_lt%, 24:00) > start_date)
+  - end_date )/24:00, -999);
+  
+%is_long_haul_over_midnight% =
+  let date = round_down(duty.%start_lt%,24:00);
+  if any(leg(chain), round_down(leg.%start_lt%,24:00) = date and round_down(leg.%end_lt%-00:01,24:00) > date)
+     where (leg.%is_long_haul%) then true
+  else false;  
+    
+    
+    
+
+%duty_days% = /* do not count check out after midnight as 2 duty days */
+ let date = round_down(duty.%start_lt%,24:00);
+ max(duty(chain),(round_down(duty.%end_lt% - 00:01, 24:00) - round_down(duty_period.%start_lt%, 24:00))/24:00 +
+     (if %duty_ends_after_midnight_not_lh% then 0 else 1) )
+    where (round_down(duty_period.%start_lt%,24:00) = date);
+    
+%nof_deadhead% =
+  let date = round_down(duty.%start_lt%,24:00);
+  count(leg(chain)) where (leg.%is_deadhead% and round_down(leg.%start_lt%,24:00) = date);
+  
+%f_or_v_at_date% = default(crew.%group_at_date%(round_down(duty.%start_lt%,24:00)), "-");
+
+export %is_extended_fdp% =
+  oma16.%is_extended_fdp%;
+
+export %duty_first_day% =
+   oma16.%duty_time_in_interval_calc%(caa, round_down(duty_period.%start_hb%, 24:00), round_up(duty_period.%start_hb%, 24:00));
+export %duty_second_day% =
+  if %twodays_dutyperiod% then
+     if duty_period.%is_split% and duty_period.%is_first_duty_in_duty_period%
+     then next(duty(chain), oma16.%duty_time_in_interval_calc%(caa, round_down(duty_period.%end_hb%, 24:00), round_up(duty_period.%end_hb%, 24:00)) )
+     else oma16.%duty_time_in_interval_calc%(caa, round_down(duty_period.%end_hb%, 24:00), round_up(duty_period.%end_hb%, 24:00))
+  else 0:00;
+
+%_leg_blh_dutyday1% =
+  if leg.%is_deadhead% then 0:00
+  else overlap(leg.%start_utc%, leg.%end_utc%, round_down(duty_period.%start_utc%, 24:00), round_up(duty_period.%start_utc%, 24:00));
+
+%_leg_blh_dutyday2% =
+  if leg.%is_deadhead% then 0:00
+  else overlap(leg.%start_utc%, leg.%end_utc%, round_down(duty_period.%end_utc%, 24:00), round_up(duty_period.%end_utc%, 24:00));
+
+export %leg_block_time_dutyday1% =
+  if leg.%is_flight_duty% or leg.%is_ground_transport% or task.%block_time%(leg.%code%) < 0:00
+  then %_leg_blh_dutyday1%
+  else leg.%block_time%;
+
+export %leg_block_time_dutyday2% =
+  if leg.%is_flight_duty% or leg.%is_ground_transport% or task.%block_time%(leg.%code%) < 0:00
+  then %_leg_blh_dutyday2%
+  else leg.%block_time%;
+
+export %blh_day1% = sum(leg(duty), %leg_block_time_dutyday1%);
+export %blh_day2% =
+  if %twodays_dutyperiod% then
+     if duty_period.%is_split% then next(duty(chain), duty.%block_time%)
+     else sum(leg(duty), %leg_block_time_dutyday2%)
+  else 0:00;
+
+%twodays_dutyperiod% =
+  round_down(duty_period.%start_utc%,24:00) <> round_down(duty_period.%end_utc%,24:00);
+
+
+export %fte_calculation% =
+    freedays.%fte_contract_calculation_summed%;
+    
+export %crew_category% =
+if crew.%is_pilot% 
+    then "Flight Deck"
+  else if crew.%is_cabin%
+    then "Cabin Crew"
+else "Other";
+/* end of file */

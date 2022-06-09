@@ -1,0 +1,186 @@
+/* -*- crc -*- */
+root module report_training_fc
+
+import base_utils;
+import oma16_defs;
+import oma16;
+import leg;
+import trip;
+import wop;
+import levels;
+import fundamental;
+import crew;
+import training;
+import training_log;
+import theme_prod;
+import freedays;
+
+%training_leg_to_concider% =
+    (leg.%is_training% or leg.%is_simulator%) and (leg.%arrival_airport_name% in training_airports_to_consider);
+%trip_to_concider% =
+    ((trip.%is_training% or trip.%is_simulator%) /*and (%trip_has_night_stop%)*/) and any(leg(trip),%training_leg_to_concider%) and 
+    wop.%in_pp%;
+    
+%crew_trip_home_station% =
+    leg.%homeairport%;
+    
+%trip_has_night_stop% = trip.%has_layover% or %trip_is_followed_by_night_stop% or %trip_is_preceded_by_night_stop%;
+%trip_is_followed_by_night_stop% = (not (trip.%end_station% = %crew_trip_home_station%)) and (%night_stop_trips_fwd%);
+%trip_is_preceded_by_night_stop% = (not (trip.%start_station% = %crew_trip_home_station%)) and (%night_stop_trips_bwd%);
+
+%night_stop_trips_fwd% =
+  default((next(trip(roster), trip.%start_utc%) - (trip.%end_utc%)) > 6:00, False); 
+
+%night_stop_trips_bwd% =
+  default((prev(trip(roster), trip.%end_utc%) - (trip.%start_utc%)) > 6:00, False); 
+  
+set training_airports_to_consider =
+    parameter "TXL", "FRA", "BRD"
+    remark "Airport to consider from Crew Training report"; 
+    
+%wop_to_consider% =
+    any(trip(wop), %trip_to_concider%);
+    
+%wop_to_consider_report% =
+    %wop_to_consider% and ((%wop_training_departure% - %wop_training_arrival%) > 14:00);
+    
+%wop_to_consider_has_training_hotel% =
+    any(trip(wop), %trip_to_concider% and %trip_has_night_stop%);
+    
+%crew_to_concider% =
+    any(wop(roster), %wop_to_consider%);
+    
+iterator crew_training_set_set =
+  partition(roster)
+  by(%crew_to_concider%);
+end
+
+iterator wop_training_set_set =
+  partition(wop)
+  by(%wop_to_consider%, %wop_training_arrival%, %wop_training_arrival_flight%, %wop_training_departure%, %wop_training_departure_flight%);
+end
+
+%first_training_start% =
+    default((first(wop(roster), %wop_training_arrival%) where (%wop_to_consider%)), 31Dec2036);
+    
+%leg_transport_to_training% =
+    (leg.%is_flight_duty% or leg.%is_ground_transport%) and (leg.%arrival_airport_name% in training_airports_to_consider) and
+    next(leg(wop), %training_leg_to_concider%);
+    
+%leg_transport_from_training% =
+    (leg.%is_flight_duty% or leg.%is_ground_transport%) and (leg.%departure_airport_name% in training_airports_to_consider) and
+    prev(leg(wop), %training_leg_to_concider%) where (not leg.%is_standby%);
+    
+%arrival_leg% = %wop_to_consider% and not leg.%arrives_at_homebase%
+    and is_first(leg(wop)) where (%leg_transport_to_training%);
+    
+%min_hotel_transport_time% = parameter 3:00
+    remark "Min time for a transport to hotel/ else to sim";
+    
+%time_to_training% =
+    next(leg(chain),leg.%ci_start_lt%) where (%training_leg_to_concider%) - leg.%co_end_lt%;
+    
+%arrival_transport_to_hotel% =
+    %time_to_training% >= %min_hotel_transport_time%;
+                              
+%time_from_training% =
+    leg.%ci_start_lt% - prev(leg(chain),leg.%co_end_lt%) where (%training_leg_to_concider%);
+    
+%departure_transport_from_hotel% =
+    %time_from_training% >= %min_hotel_transport_time%;
+    
+%departure_leg% = %wop_to_consider% and not leg.%departs_from_homebase%
+    and is_last(leg(wop)) where (%leg_transport_from_training%) /*and not trip.%has_active_flight%*/;
+
+%wop_training_station% =
+    first(leg(wop), leg.%arrival_airport_name%) where (%arrival_leg%);
+    
+%wop_training_arrival% =
+    first(leg(wop), leg.%end_lt%) where (%arrival_leg%);
+    
+%wop_training_arrival_flight% =
+    first(leg(wop), leg.%flight_name%) where (%arrival_leg%);
+    
+%wop_training_arrival_transport_to_hotel% =
+    first(leg(wop), %arrival_transport_to_hotel%) where (%arrival_leg%);
+
+%wop_training_departure% =
+    last(leg(wop), leg.%start_lt%) where (%departure_leg%);
+    
+%wop_training_departure_flight% =
+    last(leg(wop), leg.%flight_name%) where (%departure_leg%);
+    
+%wop_training_departure_transport_from_hotel% =
+    last(leg(wop), %departure_transport_from_hotel%) where (%departure_leg%);
+
+/* self study courses */
+
+export %missing_any_self_trg% =
+  training.%missing_any_self_trg%;
+
+export %self_trg_type_ix_max% =
+  training.%self_trg_type_ix_max%;
+
+export %self_trg_valid%(Int trg_type_ix) =
+  training.%self_trg_valid%(trg_type_ix);
+
+export %self_trg_missing%(Int trg_type_ix) =
+  training.%self_trg_missing%(trg_type_ix);
+
+export %self_trg_code%(Int trg_type_ix) =
+  training.%self_trg_code%(trg_type_ix);
+
+export %self_trg_duration%(Int trg_type_ix) =
+  training.%self_trg_duration%(trg_type_ix);
+
+%web_trg_valid% =
+   training.%web_trg_valid%;
+
+%web_trg_needed% =
+  training.%web_trg_needed%;
+
+%web_trg_assigned% =
+  training.%web_trg_assigned%;
+
+%web_trg_code% =
+  training.%wt_code%;
+
+export %wop_on_duty% =
+  wop.%in_pp% and not void(wop.%start_day%) and not void(wop.%end_day%) and wop.%is_on_duty%;
+
+export %wop_start_day% =
+  wop.%start_day%;
+
+export %wop_end_day% =
+  wop.%end_day%;
+
+export %wop_hole_day% =
+  if freedays.%wop_singlef_hole1_allowed_pp% = base_utils.%abstimemin% then
+     wop.%hole_1_date%
+  else base_utils.%abstimemin%;
+
+%rest_need_before_self_study% =
+    oma16_defs.%min_rest_before_duty_starting_at_homebase% + oma16.%rest_after_duty_buffer%;
+
+%rest_need_after_self_study% =
+    oma16_defs.%min_rest_before_duty_starting_at_homebase%;
+
+export %wop_rest_before% =
+  let ret = theme_prod.%vduty_any_end_before_wop%;
+  if ret>=%pp_start% then ret
+  else base_utils.%abstimemin%; 
+
+export %wop_rest_after% =
+  let ret = theme_prod.%vduty_any_start_after_wop%;
+  if ret < round_up_month(%pp_start%+0:01) then ret
+  else base_utils.%abstimemin%;
+
+export %wop_rest_in_hole% =
+  let ret = if freedays.%wop_singlef_hole1_allowed_pp% = base_utils.%abstimemin% then
+         theme_prod.%vduty_any_start_after_time%(wop.%hole_1_time%)
+      else base_utils.%abstimemin%;
+  if ret< round_up_month(%pp_start% + 0:01) then ret
+  else base_utils.%abstimemin%;
+
+
+/* eof */

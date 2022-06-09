@@ -1,0 +1,1876 @@
+/* -*- crc -*-
+ *
+ * Purpose: 
+ *   To define fundamental duty level oriented definitions and variables.
+ *   Definitions and variable mirrors other level module definitions and variables
+ *   to enforce caching and reuse of names.
+ *
+ * Created by:
+ *   Extracted from the Carmen Standard User, 07-Dec-2005
+ *
+ * Major changes:
+ *
+ */
+
+root module duty
+import fundamental;
+import base_utils;
+import system_db_parameters;
+import parameters;
+import crew_pos;
+import levels;
+import leg;
+import per_diem;
+import base_product;
+import rest;
+import task;
+import oma16_defs;
+
+
+/*
+** Basic Definitions
+*/
+/* only used in DutyPointsReport.py */
+export %time_to_next_duty% =
+  next(duty(chain),duty.%start_UTC%)
+       where (%is_on_duty% and not %has_no_duty_time_contribution%) - duty.%end_UTC%;
+  
+/* only used in DutyPointsReport.py */
+
+export %next_duty_is_flight_duty% =
+  default(next(duty(chain), %is_flight_duty% and %is_on_duty% and not %has_no_duty_time_contribution%), false);
+  
+export %is_dummy% = first(leg(duty), leg.%is_dummy%);
+export %is_closed% = true;
+export %start_is_closed% = true;
+export %end_is_closed% = true;
+
+export %is_bought% = any(leg(duty), leg.%is_bought%);
+
+export %is_on_duty% = any(leg(duty), leg.%is_on_duty%);
+export %is_off_duty% = not %is_on_duty%;
+export %is_active_flight% = %is_flight_duty% and any(leg(duty), not leg.%is_deadhead%);
+export %is_on_duty_not_rest% = %is_on_duty% and not %is_rest%;
+
+/* planned rest time = rest time except blank days. Makes it possible to use blank days for on duty later on. Not much used though */
+export %is_planned_rest% = all(leg(duty), leg.%is_planned_rest%);
+
+export %planned_rest_time% =
+  %len_hb_selection_possible%(%duty_sel_planned_rest%);
+
+export %planned_rest_days% =
+  %days_selection_possible_after%(%duty_sel_planned_rest%,%abstimemax%);
+
+/* a try to define active flight duties and other similar duties not allowed before tireing trips,
+   like single slip to far away. The function reflects union defintion of active.
+   In tracking, unused standbys is allowed.
+*/
+export %is_active_union_def% = 
+  any(leg(duty), leg.%is_active_flight% or (not leg.%is_flight_duty% and leg.%is_on_duty% and not task.%is_compensation_day%(leg.%code%))); 
+
+
+/* duty.%is_flight_duty%
+   This is a classic problem in rostering systems. It is very hard to define
+   what duties that shall be considered "flight_duties". A trip with deadheads to
+   a course and deadhead back shall not be considered a flight_duty-trip. However,
+   the single leg duties with deadheads might be considered flight_duties.
+   
+   Rules that shall only be checked on complete and real flight duties shall therefor
+   use the trip.%has_only_flight_duty% also when the rule is on duty-level, it is ok to
+   ask certain questions on a higher level.
+   
+   Standby-duties are considered flight-duties. This is mainly to allow for
+   standby-callouts. No other ground-duties can be combined with flight-duty without
+   invalidating the duty/trip as flight_duty. This has the effect that a single 
+   standby-duty is also considered a flight_duty. This is good since the standby
+   is there to be exchanged for flight_duty. However it might be counted twice
+   in balance reports and other statistics that add flight_duties and standby
+   separately.
+*/
+
+export %is_flight_duty% = all(leg(duty), leg.%is_considered_as_flight_duty%);
+export %has_flight_duty% = any(leg(duty), leg.%is_considered_as_flight_duty%);
+export %has_active_flight% = any(leg(duty), leg.%is_active_flight%);
+export %has_active_long_haul% = any(leg(duty), leg.%is_active_long_haul%);
+export %has_active_short_haul% = any(leg(duty), leg.%is_active_short_haul%);
+
+export %is_deadhead% = all(leg(duty), leg.%is_deadhead%);
+export %has_deadhead% = any(leg(duty), leg.%is_deadhead%);
+export %ends_with_deadhead% = last(leg(duty), leg.%is_deadhead%);
+export %start_with_deadhead% = first(leg(duty), leg.%is_deadhead%);
+
+export %is_standby% = 
+  (not %is_standby_callout%) and all(leg(duty), leg.%is_standby%);
+
+export %is_standby_callout% = false;
+export %is_single_leg_standby_callout% = false;
+
+export %is_standby_line% =
+  %is_standby% and first(leg(duty), leg.%is_standby_line%);
+
+export %is_standby_long_haul% =
+  %is_standby% and first(leg(duty), leg.%is_standby_long_haul%);
+  
+export %is_standby_at_home% =
+  %is_standby% and first(leg(duty), leg.%is_standby_at_home%);
+
+export %is_standby_at_hotel% = 
+  %is_standby% and first(leg(duty), leg.%is_standby_at_hotel%);
+
+export %is_standby_at_airport% =
+  %is_standby% and first(leg(duty),leg.%is_standby_at_airport%);
+
+export %has_waiting_at_airport% = false;
+export %waiting_time_at_airport_in_duty% = void_reltime;
+export %start_first_flight_duty% = first(leg(duty), leg.%start_utc%) where (leg.%is_flight_duty%);
+export %ci_start_utc_first_flight_duty% = first(leg(duty), leg.%ci_start_utc%) where (leg.%is_flight_duty%); /*TODO*/
+export %ci_orig_default_start_utc_first_flight_duty% = first(leg(duty), leg.%ci_orig_default_start_utc%) where (leg.%is_flight_duty%);
+export %start_first_simulator_leg% = first(leg(duty), leg.%start_utc%) where (leg.%is_simulator%);
+
+export %is_standby_with_rest% =
+  %is_standby% and first(leg(duty),leg.%is_standby_with_rest%);
+
+/* this one is true also after a callout */
+export %was_standby_with_rest% =
+  first(leg(duty), leg.%is_standby_with_rest%);
+  
+export %is_summer_va_or_loa% =
+       all(leg(duty),leg.%in_summer_vacation_codes%) or
+       %is_loa%;
+
+
+export %starts_with_standby_with_rest% = 
+  first(leg(duty), leg.%is_standby_with_rest%);
+
+export %has_production% =
+    (%has_flight_duty% or %has_standby% or %is_blank_day%)
+    and not %is_training_blank_day%;
+
+export %has_standby_at_airport% = any(leg(duty),leg.%is_standby_at_airport%);
+export %has_standby_at_hotel% = any(leg(duty),leg.%is_standby_at_hotel%);
+export %has_standby% = any(leg(duty), leg.%is_standby%);
+export %has_first_leg_standby% = first(leg(duty), leg.%is_standby%);
+export %is_scattered_standby_at_home% = all(leg(duty), leg.%is_scattered_standby_at_home%);
+export %has_scattered_standby_at_home% = any(leg(duty), leg.%is_scattered_standby_at_home%);
+export %is_scattered_standby% = all(leg(duty), leg.%is_scattered_standby%);
+export %is_sby_manual_duty_break% = false; /* Redefined in CCT */
+export %is_privately_traded% = false; /* Redefined in CCR */
+export %has_standby_line% = any(leg(duty), leg.%is_standby_line%);
+export %has_cancellation_standby% = any(leg(duty), leg.%is_cancellation_standby%);
+
+export %is_simulator% = any(leg(duty), leg.%is_simulator%);
+export %is_zftt_simulator% = any(leg(duty), leg.%is_zftt_simulator%);
+export %is_blank_day% = all(leg(duty), leg.%is_blank_day%);
+export %is_training_blank_day% = all(leg(duty), leg.%is_training_blank_day%);
+export %is_F7S% = all(leg(duty), leg.%is_F7S%);
+export %is_F7% = all(leg(duty), leg.%is_F7%);
+export %is_F0% = all(leg(duty), leg.%is_F0%);
+export %is_F3% = all(leg(duty), leg.%is_F3%);
+export %is_F32% = all(leg(duty), leg.%is_F32%);
+export %is_F3S% = all(leg(duty), leg.%is_F3S%);
+export %is_FS% = all(leg(duty), leg.%is_FS%);
+export %is_FS1% = all(leg(duty), leg.%is_FS1%);
+export %previous_is_FS% = default(prev(duty(wop), %is_FS%), false);
+export %is_FW% = all(leg(duty), leg.%is_FW%);
+export %is_f31% = all(leg(duty), leg.%is_f31%);
+export %is_f36% = all(leg(duty), leg.%is_f36%);
+export %is_f89% = all(leg(duty), leg.%is_f89%);
+export %is_f9% = all(leg(duty), leg.%is_f9%);
+export %is_course_office_duty% = all(leg(duty), leg.%is_course_office_duty%);
+export %is_course% = all(leg(duty),leg.%is_course%);
+export %is_pr% = first(leg(duty), leg.%code% = "PR");
+
+export %is_opc% = task.%is_opc%(duty.%recurrent_code%);
+export %is_pc%  = task.%is_pc%(duty.%recurrent_code%);
+export %is_pc_or_opc% = %is_pc% or %is_opc%;
+
+export %has_recurrent% = default(any(leg(duty), task.%is_recurrent%(leg.%code%)), false);
+export %has_cc_rec_web% = any(leg(duty), leg.%is_cc_rec_web%);
+export %has_cc_rec_cx7% = any(leg(duty), leg.%is_cc_rec_cx7%);
+export %has_cc_rec% = %has_cc_rec_web% or %has_cc_rec_cx7%;
+export %is_ast% = task.%is_ast%(duty.%recurrent_code%);
+export %is_pgt% = task.%is_pgt%(duty.%recurrent_code%);
+export %is_crm% = task.%is_crm%(duty.%recurrent_code%);
+export %is_crmc% = task.%is_crmc%(duty.%recurrent_code%);
+export %is_ground_duty% = not %is_flight_duty% and task.%is_on_duty%(%code%);
+
+export %is_only_ground_duty% =
+  all(leg(duty),leg.%is_on_duty% and
+                not (leg.%is_considered_as_flight_duty% or leg.%is_blank_day%));
+
+export %has_recurrent_leg% =
+  any(leg(duty),leg.%is_simulator% and task.%is_recurrent%(leg.%code%));
+
+export %is_gnd% = all(leg(duty), task.%is_ground_duty%(task.%code%));
+export %is_cmp% = all(leg(duty), task.%is_compensation_day%(task.%code%));
+export %is_military% = duty.%code% = "MI";
+
+/* redefined in duty_ccr */
+export %is_on_duty_illness% = false;
+export %is_freeday_illness% = false;
+export %is_illness_during_duty% = false;
+export %is_child_illness% = false;
+export %is_child_illness_during_duty% = false;
+export %is_unfit_during_duty% = false;
+export %is_longterm_illness% = false;
+export %is_loa_la12% = false;
+export %has_unfit_for_flight_star% = any(leg(duty), leg.%is_unfit_for_flight_star%);
+export %has_illness% = any(leg(duty), leg.%is_illness%);
+export %is_freeday% = not %is_flight_duty% and task.%is_freeday%(%code%);
+export %is_followed_by_freeday% = default(next(duty(chain), %is_freeday%), false);
+
+export %is_followed_by_planned_rest_not_UF_ILL% =
+    default(
+        next(duty(chain),
+            (%is_planned_rest% and not (%has_unfit_for_flight_star%  or %has_illness%)))
+        , false);
+
+export %is_vacation% = void_bool;
+export %is_la% = void_bool;
+export %is_loa% = void_bool;
+
+
+/* Crew is on loan to other region */
+export %crew_is_on_loan% = false;
+export %region_crew_is_on_loan_to% = %region%;
+export %passive_plus_reduction%(Abstime a1, Abstime a2) =
+  0:00;
+
+
+/* Jira SKPROJ-446 */
+export %is_gd% = all(leg(duty), leg.%is_gd_duty%);
+export %is_cd% = all(leg(duty), leg.%is_cd%);
+export %is_kd% = all(leg(duty), leg.%is_kd_duty%);
+export %is_sd% = all(leg(duty), leg.%is_sd_duty%);
+/* End Jira SKPROJ-446 */
+
+/* Jira SKPROJ-495 for SKN only */
+
+export %active_duty_within_15x24_bwd% =
+  let p_start = duty.%period_start_15x24_bwd%;
+  any(duty(chain),duty.%is_active_flight% or
+                    duty.%is_ground_duty% or duty.%has_unfit_for_flight_star%)
+  from (current) backwards
+  while (duty.%start_day% > p_start);
+  
+export %period_start_15x24_bwd% = 
+  let p_count = duty.%count_consecutive_sick%,
+      extra_hrs = p_count * 24:00;
+  duty.%start_day% - 360:00 - extra_hrs;
+
+export %count_consecutive_sick% = 
+  let s_start = duty.%start_day% - 360:00;
+  count(duty(chain))
+  from (current) backwards
+  while (duty.%start_day% > s_start and (duty.%is_child_illness% or duty.%is_on_duty_illness%));
+
+/* End Jira SKPROJ-495 */
+
+export %has_no_duty_time_contribution% =
+  not %has_flight_duty% and task.%has_no_duty_time_contribution%(%code%);
+
+export %category_code% = task.%category%(%group_code%);
+
+export %group_code_description% =
+  if %code% = "FLT" then 
+    "FLT - Flight duty"
+  else
+    task.%group_description%(%code%);
+	
+export %group_code% = task.%group%(%code%);
+
+/* The duty code look-up is done in several steps,
+   First check if there is a code other than flight-duty or sim briefing.
+   If no such leg is found, we return the first non-flt leg (which can be a SIB)
+   and last we return FLT */
+export %code% = 
+  default(first(leg(duty), leg.%code%)
+          where (not (leg.%is_flight_duty% or 
+                      leg.%is_ground_transport% or
+                      leg.%group_code% = "SIB")), 
+          default(first(leg(duty), leg.%code%)
+                  where (not (leg.%is_flight_duty% or
+                              leg.%is_ground_transport%)),
+                  "FLT"));
+  
+export %recurrent_code% =
+  default(first(leg(duty),leg.%code%) where (leg.%is_recurrent%),%code%);
+  
+export %F7S_or_BL% = %is_F7S% or %is_blank_day%;
+
+export %has_ac_qln%(String ac_qln) = 
+  any(leg(duty), leg.%qual% = ac_qln) where (leg.%is_active_flight%);
+ 
+export %qual% =
+  first(leg(duty), leg.%qual%)
+    where (not leg.%is_deadhead% and not (leg.%qual% = ""));
+
+/* AlertServer failobjects */
+export %failobject_start% =
+  first(leg(duty), leg.%failobject_departure%);
+  
+export %failobject_end% =
+  last(leg(duty), leg.%failobject_departure%);
+
+export %failobject_next_start% = 
+  default(next(duty(chain), %failobject_start%), %failobject_end%); 
+
+export %failobject_next_end% = 
+  default(next(duty(chain), %failobject_end%), %failobject_end%); 
+
+
+/*
+** Early Start / Late End
+*/
+/* JAR-ops stuff - sas relevant ??? */
+%early_start_od% = 
+  parameter 07:00 
+  remark "(STD) Early duty period starts before";
+
+%late_end_od% = 
+  parameter 00:59
+  remark "(STD) Late duty period ends after";
+
+export %is_early_start% = 
+  time_of_day(%start_lt%) < %early_start_od%;
+
+export %is_late_end% =
+  not %is_early_start% and 
+  ( scale_time(%start_lt%,  %end_lt%, 0,
+               %late_end_od%, %early_start_od%, 1) > 0:00);
+
+export %is_early_or_late% = 
+  %is_early_start% or %is_late_end%;
+
+export %check_out_after_midnight% = 
+  last(leg(duty), leg.%duty_cross_midnight%);
+  
+export %ends_at_midnight_hb%  = time_of_day(duty.%end_hb%) = 0:00;
+
+%rest_buffer_early_start_late_finish%(AbsTime reference_time) =
+  default(system_db_parameters.%oma16_rest_transition_late_early_buffer%(reference_time), 0:00);
+
+  
+/*
+** Day/Night duty
+*/
+
+/* Agreement: FC 1:17 2.3Ac, NKF/SBK 8.2 */
+export %night_duty_start_od% = %_night_duty_start_od% - %homebase_tz_corrector%;
+export %night_duty_end_od% = %_night_duty_end_od% - %homebase_tz_corrector%;
+
+/* Only CC SKD/SKN and FC has defined limits */
+%_night_duty_start_od% = 
+  if %cabin_crew% and duty.%is_SKN% then 02:00 else 24:00;
+  
+%_night_duty_end_od% = 
+  if %cabin_crew% and duty.%is_SKN% then
+    if parameters.%k11_skn_cc_sp10_7_valid%(%pp_start%) then
+      06:00
+    else
+      04:00
+  else 05:00;
+
+%day_duty_start_od% = 
+  parameter 8:30 
+  remark "Start of day duty time";
+
+%day_duty_end_od% = 
+  parameter 18:30 
+  remark "End of day duty time";
+
+export %is_day_duty_lt% =
+  let stop = %start_lt% + ((%end_lt% - %start_lt%) MOD 24:00);
+  %is_on_duty% and
+  scale_time(%start_lt%, stop,
+             1, %day_duty_start_od%, %day_duty_end_od%, 0) =  0:00;
+
+export %is_day_duty% =
+  let stop = %start_hb% + ((%end_hb% - %start_hb%) MOD 24:00);
+  %is_on_duty% and
+  scale_time(%start_hb%, stop,
+             1, %day_duty_start_od%, %day_duty_end_od%, 0) =  0:00;  
+
+export %is_night_duty_lt% = 
+  let stop = %start_lt% + ((%end_lt% - %start_lt%) MOD 24:00);
+  %is_on_duty% and not %is_blank_day% and
+  scale_time(%start_lt%, stop,
+             0, %night_duty_start_od%, %night_duty_end_od%, 1) > 0:00;
+
+export %has_late_co% = 
+  duty.%start_day% <> duty.%end_scheduled_day% and
+  time_of_day(duty.%end_scheduled_hb%) >= 02:00 and
+  time_of_day(duty.%end_scheduled_hb%) <= 05:30;
+
+/* Applicable to short-haul and other on-duty ground duties, but not
+ * duties wih attribute no duty time contribution (e.g. BL, F7S etc). */
+export %is_night_duty% =
+  (duty.%is_short_haul% or duty.%is_standby% or
+  (duty.%is_ground_duty% and not duty.%has_no_duty_time_contribution%)) and
+  %valid_interval%;
+  
+/* oma16 definitions */
+	
+/* redefined for CCT */
+%valid_interval% =
+  let night_duty_time = scale_time(%start_UTC%, %end_UTC%, 0, 
+                                   %night_duty_start_od%, %night_duty_end_od%, 1),
+      k11_skn_cc = %cabin_crew% and %is_skn% and
+                   parameters.%k11_skn_cc_sp10_7_valid%(%pp_start%);
+    (k11_skn_cc and
+     night_duty_time > 1:00) or
+    (not k11_skn_cc and
+     night_duty_time > 0:00);
+
+export %is_day_stop% = 
+  not %is_last_in_trip% and 
+  %start_day% = next(duty(trip), %start_day%);
+
+%next_end_at_station%(Abstime start_time, String station) =
+  min(duty(trip), %end_hb%)  where (%start_hb%>=start_time and %end_station% = station);
+
+/* 
+** days away from homebase is calculated with break time 02:00; before 02:00 times are counted as previous day.
+*/
+export %days_away_0200%(String station) =
+  if %start_station%<>station then void_int
+  else (round_down(%next_end_at_station%(%start_hb%,station)-2:01, 24:00) - round_down(%start_hb%-2:00, 24:00) + 24:00) / 24:00; 
+
+/* not used
+**export %days_away%(String station) =
+**  if %start_station%<>station then void_int
+**  else (round_down(%next_end_at_station%(%start_hb%,station)-0:01, 24:00) - round_down(%start_hb%, 24:00) + 24:00) / 24:00;
+*/
+
+export %days_away_matching%(String station, Int min_val, Int max_val) =
+  let d = %days_away_0200%(station);
+  d >= min_val and d<=max_val;
+
+export %is_long_charter_duty_cc_sks% =
+  duty.%nr_active_charter_legs% >= 2 and
+  duty.%duty_time_scheduled%(duty.union, False) > 10:30 and
+  last(leg(duty),leg.%end_country%) where (leg.%is_charter%) = "SE";
+  
+/*
+** Duty Start/End/Time
+*/
+
+/*
+In order to minimize the heavy check-in and check-out calculation the following
+logic is applied to check if a duty is inside the pp:
+1 - Checks the duty starts and ends inside pp
+2 - Checks if the duty finishes 24h before pp_start or starts 24h after pp_end
+3 - Checks the duty check-in starts and check-out ends inside pp
+*/
+
+export %is_operating% =
+    true;
+
+
+export %in_pp% =
+  if (%end_hb_level% >= %pp_start% and %start_hb_level% <= %pp_end%) then true
+  else if (%end_hb_level% < %pp_start_less_24h% or %start_hb_level% > %pp_end_plus_24h%) then false
+  else if (%end_hb% >= %pp_start% and %start_hb% <= %pp_end%) then true
+  else false;
+  
+export %in_pp_extended% =
+  if (%end_hb_level% >= %pp_start% and %start_hb_level% <= %pp_end_extended%) then true
+  else if (%end_hb_level% < %pp_start_less_24h% or %start_hb_level% > %pp_end_extended_plus_24h%) then false
+  else if (%end_hb% >= %pp_start% and %start_hb% <= %pp_end_extended%) then true
+  else false;
+  
+export %in_publ_period% = 
+  if (%end_hb_level% >= %pp_start% and %start_hb_level% <= %publ_period_end%) then true
+  else if (%end_hb_level% < %pp_start_less_24h% or %start_hb_level% > %publ_period_end_plus_24h%) then false
+  else if (%end_hb% >= %pp_start% and %start_hb% <= %publ_period_end%) then true
+  else false;
+  
+export %completely_in_pp% = 
+  %start_hb% >= %pp_start% and
+  %end_hb% <= %pp_end%;
+
+export %starts_in_pp% =
+  %start_hb_level% >= %pp_start% and %start_hb_level% < %pp_end%;
+
+/* True if rest ends inside PP. 
+** This variable should be used in valid statement for rest rules
+** to make sure we do not create illegal rosters in the "skarv".
+*/  
+export %rest_ends_in_pp% =
+  %rest_end% >= %pp_start% and %rest_end% < %pp_end%;
+  
+export %start_station% = first(leg(duty),leg.%start_station%);
+export %start_base% = first(leg(duty),leg.%start_base%);
+export %start_time_zone% = first(leg(duty),leg.%start_time_zone%);
+export %end_station% = last(leg(duty),leg.%end_station%);
+export %end_time_zone% = last(leg(duty),leg.%end_time_zone%);
+export %start_country% = first(leg(duty),leg.%start_country%);
+export %end_country% = last(leg(duty),leg.%end_country%);
+export %start_hb_level% = first(leg(duty), leg.%start_hb%);
+export %start_hb% = first(leg(duty), leg.%ci_start_hb%);
+export %start_scheduled_hb% = first(leg(duty), leg.%ci_default_start_hb%);
+export %start_od% = time_of_day(%start_hb%);
+export %end_hb_level% = last(leg(duty),leg.%end_hb%);
+export %end_hb% = last(leg(duty), leg.%co_end_hb%);
+export %end_scheduled_hb% = last(leg(duty), leg.%co_end_scheduled_hb%);
+export %end_od% = time_of_day(%end_hb%); 
+export %end_scheduled_od% = time_of_day(%end_scheduled_hb%);
+export %time% = %end_utc% - %start_utc%; /* Due to DST */
+export %scheduled_time% = %end_scheduled_utc% - %start_utc%;
+export %start_weekday% = time_of_week(%start_hb%) / 24:00 + 1;
+export %end_weekday% = time_of_week(%end_hb%) / 24:00 + 1;
+export %start_day% = round_down(%start_hb%, 24:00);
+export %start_scheduled_day% = round_down(%start_scheduled_hb%, 24:00);
+/* Use %homeairport% instead of %homebase% since STO is not a station */
+export %start_day_hb_utc% = station_utctime(leg.%homeairport%, %start_day%);
+export %end_day_hb_utc% = station_utctime(leg.%homeairport%, %end_day%);
+/* Subtracted 0:01 to cover for duties ending 24:00, HenrikA 05oct2006 */
+export %end_day% = round_down(%end_hb%-0:01,24:00);
+export %end_scheduled_day% = round_down(%end_scheduled_hb% - 0:01, 24:00); 
+export %days% = (%end_day% - %start_day%) / 24:00 + 1;
+/* Added 24:00 due to the subtraction in %end_day%, HenrikA 05oct2006 */
+export %pp_days% = %days_in_period%(%pp_start%,%pp_end%);
+
+export %planning_group_voidy% =
+    first(leg(duty), leg.%planning_group%)
+               where(leg.%determines_trip_planning_group%);
+
+export %days_in_period%(Abstime PStart, Abstime PEnd) =
+  overlap(PStart,PEnd,%start_day%,%end_day%+24:00)/24:00;
+
+
+export %days_in_period_scheduled%(Abstime PStart, Abstime PEnd) =
+  overlap(PStart, PEnd, %start_scheduled_day%, %end_scheduled_day% + 24:00) / 24:00;
+
+export %start_lt% = first(leg(duty), leg.%ci_start_lt%);
+export %end_lt% = last(leg(duty), leg.%co_end_lt%);
+export %end_scheduled_lt% = last(leg(duty), leg.%co_end_scheduled_lt%);
+export %start_utc% = first(leg(duty), leg.%ci_start_utc%);
+export %end_utc% = last(leg(duty), leg.%co_end_utc%);
+export %start_utc_7x24% = %start_utc% + 7 * 24:00;
+export %start_scheduled_utc% = first(leg(duty), leg.%ci_default_start_utc%);
+export %start_orig_scheduled_utc% = first(leg(duty), leg.%ci_orig_default_start_utc%);
+export %checkin_utc_after_sb_w_rest% =
+  first(leg(duty), next(leg(duty), leg.%ci_start_utc%));
+
+export %end_scheduled_utc% =
+  last(leg(duty), leg.%activity_scheduled_end_time_utc% +
+                  leg.%check_out_scheduled%);
+  
+/*export %start_acclim% = %start_utc% + %acclim_tz_corrector_duty_start%;
+export %end_acclim% = %end_utc% + %acclim_tz_corrector_duty_start%;
+export %start_scheduled_acclim% = %start_scheduled_utc% + %acclim_tz_corrector_duty_start%;
+export %end_scheduled_acclim% = %end_scheduled_utc% + %acclim_tz_corrector_duty_start%;
+*/
+
+ /*Private Passive */ 
+export %start_UTC_private% = first(leg(duty), leg.%ci_start_utc_private%);
+export %end_UTC_private% = last(leg(duty), leg.%co_end_utc_private%);
+export %start_scheduled_UTC_private% = %start_UTC_private%;
+export %end_scheduled_UTC_private% = last(leg(duty), leg.%co_end_scheduled_utc_private%);
+
+export %start_block_utc% = first(leg(duty), leg.%duty_departure_utc%);
+export %end_scheduled_block_utc% = last(leg(duty), leg.%duty_arrival_utc%);
+export %end_actual_block_utc% = last(leg(duty), leg.%duty_end_block_utc%);
+
+export %start_day_lt% = round_down(%start_lt%,24:00);
+export %end_day_lt% = round_up(%end_lt% - 0:01,24:00);
+export %start_od_lt% = time_of_day(%start_lt%);
+export %end_od_lt% = time_of_day(%end_lt%);
+export %block_on% = last(leg(duty), leg.%end_utc%);
+export %block_off% = first(leg(duty), leg.%start_utc%);
+
+export %scheduled_block_off_utc% = 
+  first(leg(duty), leg.%activity_scheduled_start_time_utc%);
+
+export %last_active_block_on% =
+  default(last(leg(duty), leg.%end_utc%)
+	        where (not leg.%is_deadhead% and leg.%is_active_flight%),
+          %start_utc%);
+
+export %last_active_scheduled_block_on% =
+  default(last(leg(duty), leg.%activity_scheduled_end_time_utc%)
+	  where (not leg.%is_deadhead% and leg.%is_active_flight%), %start_utc%);
+
+export %departs_from_homebase% = first(leg(duty),leg.%departs_from_homebase%);
+export %arrives_at_homebase% = last(leg(duty),leg.%arrives_at_homebase%);
+export %any_leg_arrives_at_homebase% = any(leg(duty),leg.%arrives_at_homebase%);
+export %any_leg_arrives_at_SH_base% = any(leg(duty),leg.%arrives_at_SH_base%);
+export %departs_from_scand_base% = first(leg(duty),leg.%departure_is_interscand%);
+export %arrives_at_scand_base% = last(leg(duty),leg.%arrival_is_interscand%);
+
+export %layover_station% = %end_station%; /* !!!! Consider removing */
+export %layover_country% = %end_country%; /* !!!! Consider removing */
+
+export %is_international_layover% = 
+  %end_country% <> first(leg(trip),leg.%start_country%);
+
+export %is_national_layover% = not %is_international_layover%;
+
+/* 
+** First / Last
+*/
+/* Month start/end for duty start hb */
+export %start_month_start% = round_down_month(%start_hb%);
+export %start_month_end% = round_up_month(%start_hb% + 0:01);
+export %month_days% = (%start_month_end% - %start_month_start%) / 24:00;
+
+/* Week start/end for duty start hb */
+export %start_week_start% = round_down_week(%start_hb%);
+export %start_week_end% = round_up_week(%start_hb%);
+
+export %is_last_on_duty_in_week% =
+  %is_on_duty% and
+  default(next(duty(chain), round_down_week(%start_utc%)) 
+          where (%is_on_duty%)
+          > round_down_week(%start_utc%),
+  true);
+
+export %is_last_on_duty_in_week_utc% = 
+  %is_on_duty% and
+  default(next(duty(chain), %start_week_start%) where (%is_on_duty%)
+          > %start_week_start%,
+  true);
+  
+export %is_last_on_duty_in_month% = 
+  %is_on_duty% and
+  default(next(duty(chain), round_down_month(%start_utc%))
+          where (%is_on_duty%) 
+          > round_down_month(%start_utc%),
+  true);
+
+export %is_last_on_duty_before_pp% =
+  %is_on_duty% and duty.%start_hb% < %pp_start%
+  and default(next(duty(chain), duty.%start_hb% >= %pp_start%) 
+              where(%is_on_duty% and
+                    not %has_no_duty_time_contribution%), true);
+
+/*
+** Rest 
+*/
+export %rest_start_after_duty%(Reltime tz_corrector) =
+  %end_utc% + tz_corrector;
+export %rest_end_after_duty%(Reltime tz_corrector) =
+  default(
+    next(duty(chain), %start_utc% + tz_corrector) where (not %is_rest%),
+    %end_utc% + 900:00
+  );
+export %rest_start_before_duty%(Reltime tz_corrector) =
+  default(
+    prev(duty(chain), %end_utc% + tz_corrector) where (not %is_rest%),
+    %start_utc% - 900:00
+  );
+export %rest_end_before_duty%(Reltime tz_corrector) =
+  %start_utc% + tz_corrector;
+export %scheduled_rest_start_after_duty%(Reltime tz_corrector) = %rest_start_after_duty%(tz_corrector); /* in planning */
+export %scheduled_rest_end_after_duty%(Reltime tz_corrector) = %rest_end_after_duty%(tz_corrector); /* in planning */
+
+%scheduled_start_utc% = first(leg(duty), leg.%ci_start_utc%);
+%scheduled_end_utc% = last(leg(duty), leg.%co_end_scheduled_utc%);
+
+export %oma16_scheduled_rest_start_after_duty%(Reltime tz_corrector) =
+  %scheduled_end_utc% + tz_corrector;
+  
+export %oma16_scheduled_rest_end_after_duty%(Reltime tz_corrector) =
+  default(
+    next(duty(chain), %scheduled_start_utc% + tz_corrector) where (not %is_rest%),
+    %scheduled_end_utc% + 900:00
+  );
+
+export %oma16_rest_time_scheduled% =
+  %oma16_scheduled_rest_end_after_duty%(0:00) - %oma16_scheduled_rest_start_after_duty%(0:00);
+  
+  
+export %rest_start% = %rest_start_after_duty%(%homebase_tz_corrector%);
+export %rest_end% = %rest_end_after_duty%(%homebase_tz_corrector%);
+export %rest_start_scheduled% = %scheduled_rest_start_after_duty%(%homebase_tz_corrector%);
+
+export %rest_start2% = %end_hb%;
+export %rest_start2_scheduled% = %end_hb%;
+
+export %rest_end2% = 
+  next(duty(chain), %start_hb%) where (not %is_rest%);
+
+export %rest_start_utc% = %rest_start_after_duty%(0:00);
+export %rest_end_utc% = %rest_end_after_duty%(0:00);
+
+export %rest_start_lt% = %rest_start_after_duty%(%arrival_station_tz_corrector%);
+export %rest_end_lt% = %rest_end_after_duty%(%arrival_station_tz_corrector%);
+
+export %rest_start_scheduled_UTC% = %scheduled_rest_start_after_duty%(0:00);
+export %rest_end_scheduled_UTC% = %scheduled_rest_end_after_duty%(0:00);
+
+export %rest_time% = %rest_end_after_duty%(0:00) - %rest_start_after_duty%(0:00);
+export %rest_time_before_duty% = %rest_end_before_duty%(0:00) - %rest_start_before_duty%(0:00);
+
+export %rest_time_scheduled% =
+  %scheduled_rest_end_after_duty%(0:00) - %scheduled_rest_start_after_duty%(0:00);
+
+export %is_rest% = task.%is_rest%(%group_code%) and not (%code% = "W");
+
+/* Rest with private passive extension , RFI08 */
+export %private_passive_original_end_utc% =
+  last(leg(duty), leg.%activity_private_passive_original_end_utc% + %check_out%);
+
+export %private_passive_original_start_utc% =
+  first(leg(duty), leg.%activity_private_passive_original_start_utc% - %check_in%);
+
+export %rest_start_scheduled_UTC_private% = %private_passive_original_end_utc%;
+
+export %rest_end_scheduled_UTC_private% = 
+  next(duty(chain), %private_passive_original_start_utc%) where (not %is_rest%);
+
+export %rest_time_scheduled_private% =
+  default(%rest_end_scheduled_UTC_private% - %rest_start_scheduled_UTC_private%, 900:00);
+
+
+/* This is for crg_info to be used in dynamic flight info report */
+%connection_start_utc% = %end_scheduled_block_utc%;
+%connection_end_utc% = next(duty(trip), %start_block_utc%);
+export %connection_time% = %connection_end_utc% - %connection_start_utc%;
+
+export %rest_in_period%(Abstime t1, Abstime t2) = 
+  nmax(0:00, nmin(%rest_end_UTC%, t2) - nmax(%rest_start_UTC%, t1));
+
+export %rest_station% =
+  next(duty(trip), first(leg(duty), leg.%start_station%));
+
+export %rest_city% =
+  next(duty(trip), first(leg(duty), departure_airport_city));
+
+export %rest_base% =
+ next(duty(trip), first(leg(duty), leg.%departure_airport_base%));
+
+export %is_split_duty_exception% =     
+  last(leg(duty), leg.%is_split_duty_exception%);
+        
+/*
+** Domestic / Interscand / European / International
+*/
+export %is_domestic% = all(leg(duty),leg.%is_domestic%);
+export %is_interscand% = all(leg(duty),leg.%is_interscand%);
+export %is_european% = all(leg(duty),leg.%is_european%);
+export %is_intercont% = any(leg(duty),leg.%is_intercont%);
+export %is_norwegian_domestic% = all(leg(duty),leg.%is_norwegian_domestic%);
+
+/* 
+** Region / homebase 
+*/
+
+/* Region is a CREW property determining Agreement */
+export %region% =
+  default(first(leg(duty), leg.%region%) where (leg.%is_active_flight%),
+          first(leg(duty), leg.%region%));
+
+export %is_SKD% = %region% = "SKD";
+export %is_SKN% = %region% = "SKN";
+export %is_SKS% = %region% = "SKS";
+export %is_SKI% = %region% = "SKI";
+export %is_SKJ% = %region% = "SKJ";
+export %is_SKK% = %region% = "SKK";
+%is_asian% =
+  %is_SKJ% or %is_SKK%;
+
+/* The employer, for a flight, see leg module */
+export %is_ac_employer_sks% = any(leg(duty), leg.%is_ac_employer_sks%); 
+export %is_ac_employer_skd% = any(leg(duty), leg.%is_ac_employer_skd%); 
+export %is_ac_employer_skn% = any(leg(duty), leg.%is_ac_employer_skn%); 
+export %is_ac_employer_qa% =  any(leg(duty), leg.%is_ac_employer_qa%) ;
+export %is_ac_employer_svs% = any(leg(duty), leg.%is_ac_employer_svs%);
+export %is_ac_employer_ski% = any(leg(duty), leg.%is_ac_employer_ski%); 
+export %is_ac_employer_sk% = any(leg(duty), leg.%is_ac_employer_sk%); 
+export %is_ac_employer_sk_sh% = any(leg(duty), leg.%is_ac_employer_sk_sh%);
+
+/* CJ Flight Deck sign; (SKCMS-745) */
+export %is_qa_fd% = %is_ac_employer_qa% and fundamental.%flight_crew%;
+
+/* this focus and agmt_group when available (in redefine), but is valid also in pairing.*/
+export %is_regarded_sks_agmt% =
+  %is_ac_employer_sks%;
+export %is_regarded_skd_agmt% =
+  %is_ac_employer_skd%;
+export %is_regarded_skn_agmt% =
+  %is_ac_employer_skn%;
+export %is_regarded_ski_agmt% =
+  %is_ac_employer_ski%;
+export %is_regarded_sk_sh_agmt% =
+  %is_regarded_sks_agmt% or 
+  %is_regarded_skd_agmt% or
+  %is_regarded_skn_agmt%;
+export %is_regarded_qa_agmt% =
+  %is_ac_employer_qa%;
+
+/*
+** Long / Short haul
+*/
+export %is_short_haul% = not %is_long_haul% and duty.%has_active_flight%; /*all(leg(duty),leg.%is_short_haul%);*/
+export %is_long_haul% = any(leg(duty),leg.%is_long_haul%);
+export %with_short_haul_ac% = not %with_long_haul_ac%;
+export %with_short_haul_ac_family% = any(leg(duty), leg.%with_short_haul_ac_family%) where (leg.%is_active_flight%);
+export %with_long_haul_ac% = any(leg(duty),leg.%with_long_haul_ac%);
+export %is_LH_with_NX_ac% = any(leg(duty), leg.%is_LH_with_NX_ac%);
+
+export %is_west_bound% = 
+  first(leg(duty), leg.%is_west_bound%)
+  where (leg.%is_long_haul% and leg.%departs_from_a_base%);
+  
+export %is_east_bound% = 
+  first(leg(duty), leg.%is_east_bound%)
+  where (leg.%is_long_haul% and leg.%departs_from_a_base%);
+
+export %is_preceded_by_short_haul% =
+  default(prev(duty(trip), %is_short_haul%) where (duty.%has_active_flight%), false);
+
+export %duty_to_NRT% = any(leg(duty), leg.%leg_to_NRT%);
+
+
+/*
+** Check in/out
+*/
+
+export %check_out% = last(leg(duty), leg.%check_out%);
+export %check_in% = first(leg(duty), leg.%check_in%);
+export %requires_cio% = any(leg(duty), leg.%requires_cio%);
+
+export %has_delayed_check_out% = false; 
+
+/*
+** Unregular production
+*/
+export %is_test_duty% =
+  %has_active_flight% and
+  all(leg(duty), leg.%is_test_flight%)
+  where (not leg.%is_deadhead%);
+
+export %is_school_duty% =
+  %has_active_flight% and
+  all(leg(duty), leg.%is_school_flight%)
+  where (not leg.%is_deadhead%);
+
+export %has_school_flight% = any(leg(duty), leg.%is_school_flight%);  
+  
+export %has_charter% = 
+  any(leg(duty),leg.%is_charter%) where(leg.%is_active_flight%);
+
+export %has_charter_inclusive_passive_legs% = 
+  any(leg(duty),leg.%is_charter%);
+
+export %is_charter% =
+  %has_active_flight% and
+  all(leg(duty), leg.%is_charter%)
+  where (leg.%is_active_flight%);
+  
+export %has_ferry% = any(leg(duty), leg.%is_ferry_flight%);
+
+/* Agreement: Greenland 2 */
+export %is_one_day_greenland_return% =
+  let day = last(leg(duty), leg.%end_date%);
+  last(leg(duty), leg.%start_country% = "GL" and
+       prev(leg(duty), leg.%has_check_in%) where
+       (leg.%start_date% = day));
+
+/* Agreement: CAU K06 L. */
+export %is_long_haul_charter_skd% = any(leg(duty), leg.%is_long_haul_charter_skd%);
+
+/*
+** Block time
+*/
+export %block_time% = sum(leg(duty),leg.%block_time%);
+/*If a leg returns to rap we use the actual block time otherwise the
+  scheduled block time*/
+export %block_time_scheduled% = sum(leg(duty), %_leg_block_time%);
+export %block_time_sched_active_legs% = sum(leg(duty), %_leg_block_time%) where (leg.%is_active_flight%);
+
+%_leg_block_time% = 
+  if leg.%returned_to_ramp% then
+    leg.%block_time% 
+  else
+    leg.%block_time_scheduled%;
+
+export %block_time_in_period%(Abstime a1, Abstime a2) =
+  if any(leg(duty), leg.%is_bought%) then
+    0:00
+  else if %end_utc% <= a1 or %start_utc% >= a2 then 
+    0:00
+  else if %start_utc% >= a1 and %end_utc% <= a2 then 
+    %block_time%
+  else 
+    sum(leg(duty),leg.%block_time_in_period%(a1,a2));
+    
+export %block_time_in_period_caa%(Abstime a1, Abstime a2) =
+  if %end_UTC% <= a1 or %start_UTC% >= a2 then 
+    0:00
+  else if %start_UTC% >= a1 and %end_UTC% <= a2 then 
+    %block_time%
+  else 
+    sum(leg(duty),leg.%block_time_in_period%(a1,a2));
+
+export %block_time_of_ac_qual_in_period_caa%(Abstime start, Abstime stop, String acqual) =
+  if %end_UTC% <= start or %start_UTC% >= stop then
+    0:00
+  else
+    sum(leg(duty),leg.%block_time_in_period%(start,stop)) where (leg.%qual% = acqual);
+
+/* Next/prev duty start/end day */
+
+export %next_duty_start_day% = next(duty(chain), duty.%start_day%);
+
+export %prev_duty_end_day% = prev(duty(chain), duty.%end_day%);
+
+/* Followed/preceded by empty days, freedays, production */
+
+export %is_followed_by_empty_day% = next(duty(chain), duty.%start_day%) - duty.%end_day% > 24:00;
+
+export %is_preceded_by_empty_day% = duty.%start_day% - prev(duty(chain), duty.%end_day%) > 24:00;
+
+/*******************************************************************************
+** Duty time
+********************************************************************************/
+
+global export enum DutyCalculation =
+  union;
+  overtime;
+  caa;
+  net_skj;
+  union_scheduled; /* like union, but used scheduled c/o in tracking */
+end
+
+export %is_salary%(DutyCalculation dutycalc) = dutycalc = overtime;
+
+export %is_net_skj%(DutyCalculation dutycalc) = dutycalc = net_skj;
+
+%is_union_scheduled%(DutyCalculation dutycalc) = dutycalc = union_scheduled;
+
+export %homebase_tz_corrector% = %start_hb% - %start_UTC%;
+export %arrival_station_tz_corrector% = %end_lt% - %end_UTC%;
+export %departure_station_tz_corrector% = %start_lt% - %start_UTC%;
+export %night_upg_factor% = leg.%night_upg_factor%;
+export %outbound% = %homebase_tz_corrector% = %departure_station_tz_corrector%; 
+
+%tz_diff%(Reltime tz1,Reltime tz2) = /* -12:00 - 11:59 */
+  let ret = 24:00 + tz2 -tz1;
+  if ret>=36:00 then ret-48:00
+  else if ret>=12:00 then ret-24:00
+  else ret;
+
+   
+export %tz_diff_duty% = %tz_diff%(%departure_station_tz_corrector%, %arrival_station_tz_corrector%);
+
+%tz_diff_arrival%(Reltime ref) = %tz_diff%(ref, %arrival_station_tz_corrector%);
+ 
+/*
+** sub_trip, aka rotation, is a series of duties starting and ending in homebase, but no start or stops
+*/
+export %sub_trip_start_utc% =
+  let st = %start_utc%;
+  last(duty(trip), %start_utc%)
+    where  (%start_utc% <= st and %departs_from_homebase%);
+
+export %sub_trip_departure_tz_corrector% =
+  let st = %start_utc%;
+  last(duty(trip), %departure_station_tz_corrector%)
+    where  (%start_utc% <= st and %departs_from_homebase%);
+
+export %sub_trip_duration% = 
+  %end_utc% - %sub_trip_start_utc%;
+
+/* helper for values of duties */
+table duty_values_tbl(Int function, reltime ref) =
+  function -> %duty_value_rel%;
+  /*2 -> %abs_reltime%(%tz_diff_duty%); / * absolut value tz diff 0:00-12:00 hrs*/
+  /*3 -> %tz_diff_duty%;                / *  tz_diff eastward (<0 = westward*/
+  /*4 -> -%tz_diff_duty%;               / * tz_diff westward (<0 = eastward */
+  5 -> %abs_reltime%(%tz_diff_arrival%(ref)); /* absolute value of tz diff vs ref */  
+  6 -> %tz_diff_arrival%(ref);        /* tz diff easttward vs ref (<0 = westward) */  
+  7 -> -%tz_diff_arrival%(ref);       /* tz diff westward vs ref (<0 = eastward) */  
+end
+  
+/* traverse duties from current to first in sub_trip, taking max values of reltimes */
+%sub_trip_rel_value_bwd%(Int function,Reltime ref) =
+  let st = duty.%start_utc%;
+  max(duty(trip), %duty_value_rel%(function,ref))
+    from (current) backwards
+    while (%start_utc% = st or not %arrives_at_homebase%);
+
+/* traverse duties from current to last in sub_trip, taking max values of reltimes */
+%sub_trip_rel_value_fwd%(Int function,Reltime ref) =
+  let st = duty.%start_utc%;
+  max(duty(trip), %duty_value_rel%(function,ref))
+    from (current)  
+    while (%start_utc% = st or not %arrives_at_homebase%);
+
+/* max abs value of time zone difference to homebase until start of sub trip */
+export %sub_trip_max_abs_tzd_ref_bwd% =
+  %sub_trip_rel_value_bwd%(5,%homebase_tz_corrector%);
+
+/* max values of eastward tzd to hb in sub trip, until end of sub trip. <0 for westward */
+export %sub_trip_max_east_tzd_hb_fwd% =
+  %sub_trip_rel_value_fwd%(6,%homebase_tz_corrector%);
+
+/* max values of westward tzd to hb in sub trip, until end of sub trip. <0 for eastward */
+export %sub_trip_max_west_tzd_hb_fwd% =
+  %sub_trip_rel_value_fwd%(7,%homebase_tz_corrector%);
+
+/* max values of eastward tzd to hb in sub trip, until start of sub trip. <0 for westward */
+export %sub_trip_max_east_tzd_hb_bwd% =
+  %sub_trip_rel_value_bwd%(6,%homebase_tz_corrector%);
+
+export %abs_tzd_from_hb% =
+  %duty_value_rel%(5,%homebase_tz_corrector%);
+
+/* A b2b sub trip (=ending at homebase) has a time zone difference that should require
+** longer rest according to OMA16, but has not enough rest after for acclimatization.
+** Such a sub trip is allowed under certain circumstances, which are tested in certain rules. At this place the validity is not
+** tested, it's taken for granted to be a b2b if the rest is small than 2 local nights.
+** The limit 2 local nights it's the limit for shorter sub trips; a shorter sub trip will never be allowed unless counted as B2B.
+** A B2B sub trip with longer rests at homebase would be possible, but understood as rather useless.
+*/
+export %is_first_in_b2b_subtrip% =
+  %arrives_at_homebase%
+  and %sub_trip_max_abs_tzd_ref_bwd% >= oma16_defs.%tz_diff_lh_rest%
+  and oma16_defs.%counted_local_nights%(%rest_time%, %end_lt%)< 2;
+
+%_is_second_in_b2b_subtrip% =
+  not %is_rest%
+  and %sub_trip_max_abs_tzd_ref_bwd% >= oma16_defs.%tz_diff_lh_rest%
+  and oma16_defs.%counted_local_nights%(%rest_time%, %end_lt%)< 2;
+
+export %is_second_in_b2b_subtrip% =
+  %departs_from_homebase%
+  and default(prev(duty(chain), %_is_second_in_b2b_subtrip%), false);
+ 
+
+/* max values of westward tzd to hb in sub trip, until start of sub trip. <0 for eastward */
+export %sub_trip_max_west_tzd_hb_bwd% =
+  %sub_trip_rel_value_bwd%(7,%homebase_tz_corrector%);
+
+
+/*
+** Duty time. ***** POISON *****
+** These duty time functions are not up to date and conform to oma16 defintions. It will take some time to replace
+** the use of them.
+**
+** Please use oma16 functions instead, the ones with word "indep" in them work well over a hole or part of roster,
+** %duty_period... handles logical duties (in case of split duties = a pair) in efficient way
+** and uses same duty_calc control allowing for caa or union calculations, and some special. night_upg has no
+** meaning since a while and can be ignored (always false).
+*/
+  
+/* Local time at homebase */
+export %night_upg_start% = first(leg(duty), leg.%night_upg_start%);
+
+/* Different times for FC, depending on european production with long haul ac vs normal. */
+export %night_upg_end% = first(leg(duty), leg.%night_upg_end%);
+
+
+%duty_time_standby_reduction_16_if_was%(Abstime start, Abstime stop) =
+    let
+        sb_start = %start_utc%,
+        callout_start = %checkin_utc_after_sb_w_rest%;
+    oma16_defs.%standby_duty_time_reduction%(callout_start - sb_start, true);
+
+
+export %duty_time_standby_reduction_16%(Abstime start, Abstime stop) =
+  if %is_standby_with_rest% then
+      oma16_defs.%standby_duty_time_reduction%(overlap(duty.%start_utc%, duty.%end_utc%, start, stop), true)
+  else if  %was_standby_with_rest% then
+    %duty_time_standby_reduction_16_if_was%(start, stop)
+  else
+    0:00;
+
+export %duty_time_spec_sched%(DutyCalculation dutycalc, Bool night_upg) =
+  %duty_time%(dutycalc, night_upg);
+
+export %duty_time%(DutyCalculation dutycalc, Bool night_upg) =
+  /* 1. off-duty activities contribute with zero as well as
+        tasks defined as no duty time contribution */
+  if %is_salary%(dutycalc) and %duty_is_not_valid_overtime% then
+    0:00
+  else if (not %is_on_duty%) or duty.%has_no_duty_time_contribution%  then 
+    0:00
+   /* 2. Flight-duty or combined ground / flight duties
+        with or with-out night-upgrade and reduced by
+        standby-rest or duty-free-breaks */
+  else if %is_union_scheduled%(dutycalc) then
+      (%scheduled_end_UTC% - %scheduled_start_UTC%) +
+       %short_stop_duty_time_contribution% -
+       %duty_time_standby_reduction_16%(%scheduled_start_UTC%, %scheduled_end_UTC%)
+  else
+   (%end_UTC% - %start_UTC%) +
+   %short_stop_duty_time_contribution% -
+   %duty_time_standby_reduction_16%(%start_UTC%, %end_UTC%);
+
+
+%_duty_time_night_upg_factor%(Abstime start, Abstime stop) =       
+    %reltime_round_off%(
+          scale_time(start, stop, %night_upg_factor%,
+                     %night_upg_start%, %night_upg_end%, %night_upg_factor% + 1),
+          %night_upg_factor%);      
+
+%_duty_time_night_upg_factor_in_period%(Abstime start, Abstime stop, Abstime a1, Abstime a2) =     
+    %reltime_round_off%(
+          scale_time(nmax(a1, start), nmin(a2, stop), %night_upg_factor%,
+                     %night_upg_start%, %night_upg_end%, %night_upg_factor% + 1),
+          %night_upg_factor%);
+
+
+
+export %duty_time_scheduled%(DutyCalculation dutycalc, Bool night_upg) =
+  %duty_time%(dutycalc, night_upg);
+  
+export %has_standby_with_rest% = any(leg(duty), leg.%is_standby_with_rest%);
+
+%_min_rest_fc% = last(leg(duty), rest.%minimum_time_fc%);
+    
+/*
+** Short stop duty time contribution
+** CR 463B: FD SH SKS and FD SH SKD should count duty time on short stops
+** not at homebase
+*/
+export %short_stop_duty_time_contribution% =
+  if %short_stop_duty_time_contribution_valid% and %has_short_stop_after% then
+    duty.%rest_time%
+  else 
+    0:00;
+
+%short_stop_duty_time_contribution_in_period%(Abstime start, Abstime stop) =
+  if %short_stop_duty_time_contribution_valid% and
+    duty.%start_utc% < stop and
+    duty.%end_utc% > start 
+  then
+    %_short_stop_duty_time_contribution_in_period%(start, stop)
+  else if default(prev(duty(wop), duty.%end_utc% <= start and
+                       %short_stop_duty_time_contribution_valid%),
+                   false)
+  then
+    prev(duty(wop), %_short_stop_duty_time_contribution_in_period%(start, stop))
+  else
+    0:00;
+
+%prev_duty_short_stop_contribution_in_period%(Abstime start, Abstime stop) = 
+  if default(prev(duty(wop), duty.%end_utc% <= start and
+                       %short_stop_duty_time_contribution_valid%), false)
+  then
+    prev(duty(wop), %_short_stop_duty_time_contribution_in_period%(start, stop))
+  else
+    00:00;
+
+/* Will be redefined for CCR and CCT */
+%short_stop_duty_time_contribution_valid% = 
+  %flight_crew%
+  and (duty.%is_sks% or duty.%is_skd% or duty.%is_skn%)     
+  and not duty.%is_long_haul%
+  and not is_last(duty(wop))
+  and %is_on_duty_not_rest% and next(duty(wop), %is_on_duty_not_rest%)
+  and parameters.%short_stop_duty_time_valid%(duty.%start_utc%);
+
+export %has_short_stop_after% = 
+  %rest_time% < %_min_rest_fc%;
+  
+%_short_stop_duty_time_contribution_in_period%(AbsTime start, AbsTime stop) =
+  if %has_short_stop_after% then
+    overlap(%rest_start_utc%, %rest_end_utc%, start, stop)
+  else if default(prev(duty(chain), %has_short_stop_after% and %is_on_duty_not_rest%), false) then
+    default(overlap(prev(duty(chain), %rest_start_utc%), prev(duty(chain), %rest_end_utc%), start, stop), 00:00)
+  else    
+    00:00;
+
+export %duty_time_in_pp% =
+  %duty_time_in_period%(%pp_start%, %pp_end%, fundamental.%night_upg%, union);
+export %duty_time_in_publ% =
+  %duty_time_in_period%(%pp_start%, %publ_period_end%, fundamental.%night_upg%, union);
+
+/* Try to use as many cached values as possible. */
+export %duty_time_in_period%(Abstime a1, Abstime a2, Bool night_upg, DutyCalculation dutycalc) =
+  if default(%rest_end_UTC%, %end_utc%) <= a1 or %start_UTC% >= a2 or
+     duty.%is_bought% or duty.%is_privately_traded% then 
+    0:00
+  else if %start_UTC% >= a1 and default(%rest_end_UTC%, %end_utc%) <= a2 then
+    %duty_time%(dutycalc, night_upg)
+    + %prev_duty_short_stop_contribution_in_period%(a1, a2)
+  else if not %is_on_duty% or duty.%has_no_duty_time_contribution% then
+    0:00
+  else 
+    overlap(%start_UTC%, %end_UTC%, a1, a2) + 
+    %short_stop_duty_time_contribution_in_period%(nmax(a1,%start_UTC%),a2) -   /* SASCMS-6461 HiQ 2014-05-20 */
+    %duty_time_standby_rest_buffer_in_period%(a1, a2, night_upg) -
+    %net_reduction_skj_overlap%(a1,a2,dutycalc);
+
+/*
+** NET duty time reduction for Japanese CC
+**
+** This definition is used by %duty_time_in_period% to check duty periods that
+** are not completely within the period being calculated for, so it has to check
+** for overlap.
+**
+** The normal (Gross) duty time is reduced as follows:
+**
+** Active flight where at least 5:00 of the leg is within the period being
+** calculated for: - 2:00
+**
+** Ground duty, excluding standby, where at least 5:00 of the duty period is
+** within the period being calculated for: - 1:00
+*/
+
+%net_reduction_skj_overlap%(Abstime a1, Abstime a2,DutyCalculation dutycalc) =
+  if %is_net_skj%(dutycalc) then
+    if any(leg(duty),leg.%is_active_flight% and
+                     overlap(leg.%start_UTC%,leg.%end_UTC%, a1, a2) > 
+                     %min_duty_for_net_reduction_skj%) then
+      %net_duty_reduction_flight_duty_skj%
+    else
+      if any(leg(duty),not (leg.%is_flight_duty% or
+                            leg.%is_standby%)) and
+         overlap(duty.%start_UTC%, duty.%end_UTC%, a1, a2) >
+         %min_duty_for_net_reduction_skj% then
+        %net_duty_reduction_ground_duty_skj%
+      else
+        0:00
+  else
+    0:00;
+
+/*
+** NET duty time reduction for Japanese CC
+**
+** This definition is used by %duty_time%, which is checking duty periods that
+** are already known to be completely within the period being calculated for,
+** so it doesn't need to check for overlap again.
+**
+** The normal (Gross) duty time is reduced as follows:
+**
+** Active flight: - 2:00
+**
+** Ground duty, excluding standby: - 1:00
+*/
+
+%net_reduction_skj%(DutyCalculation dutycalc) =
+  if %is_net_skj%(dutycalc) then
+    if any(leg(duty),leg.%is_active_flight% and
+                     leg.%block_time% > %min_duty_for_net_reduction_skj%) then
+      %net_duty_reduction_flight_duty_skj%
+    else
+      if any(leg(duty),not (leg.%is_flight_duty% or
+                            leg.%is_standby%)) and
+         %time% > %min_duty_for_net_reduction_skj% then
+        %net_duty_reduction_ground_duty_skj%
+      else
+        0:00
+  else
+    0:00;
+
+/*
+** NET duty time reduction for Japanese CC
+**
+** This definition is used by oma16 implementation of duty time, replacing the previous ones.
+** net_skj has no functional correlation with caa duty time rules, but the implementation of all duty time
+** calculations are integrated in a bunch of functions mainly in oma16 modules.
+** 
+** It's not really known what net_skj reduction is, but the code seems to be active.
+** 
+** The normal (Gross) duty time is reduced as follows:
+**
+** Active flight: - 2:00
+**
+** Ground duty, excluding standby: - 1:00
+*/
+
+export %net_reduction_skj_oma16%(Abstime start_utc, Abstime end_utc) =
+  
+  if duty.%start_utc% >= start_utc and duty.%end_utc% <= end_utc then
+    /* duty within limits */
+    if any(leg(duty),leg.%is_active_flight% and
+                     leg.%block_time% > %min_duty_for_net_reduction_skj%) then
+      %net_duty_reduction_flight_duty_skj%
+    else
+      if any(leg(duty),not (leg.%is_flight_duty% or
+                            leg.%is_standby%)) and
+         %time% > %min_duty_for_net_reduction_skj% then
+        %net_duty_reduction_ground_duty_skj%
+      else
+        0:00
+  else
+    if any(leg(duty),leg.%is_active_flight% and
+                     overlap(leg.%start_UTC%,leg.%end_UTC%, start_utc, end_utc) >
+                     %min_duty_for_net_reduction_skj%) then
+      %net_duty_reduction_flight_duty_skj%
+    else
+      if any(leg(duty),not (leg.%is_flight_duty% or
+                            leg.%is_standby%)) and
+         overlap(duty.%start_UTC%, duty.%end_UTC%, start_utc, end_utc) >
+         %min_duty_for_net_reduction_skj% then
+        %net_duty_reduction_ground_duty_skj%
+      else
+        0:00;
+
+
+%min_duty_for_net_reduction_skj% = 5:00;
+%net_duty_reduction_flight_duty_skj% = 2:00;
+%net_duty_reduction_ground_duty_skj% = 1:00;
+
+
+export %duty_time_bought_days_skd_in_period%(Abstime a1, Abstime a2, Bool night_upg, DutyCalculation dutycalc) =
+  0:00;
+
+
+export %duty_time_in_period_scheduled%(Abstime start, Abstime stop, Bool night_upg, DutyCalculation dutycalc) =
+  if (not %is_on_duty%) or %has_no_duty_time_contribution% or
+      %end_scheduled_UTC% <= start or %start_scheduled_UTC% >= stop then
+    0:00
+  else if not %has_standby_with_rest% then
+    overlap(%start_scheduled_UTC%, %end_scheduled_UTC%, start, stop)
+  else
+    %duty_time_scheduled%(dutycalc, night_upg);
+
+
+%duty_time_standby_rest_buffer_in_period%(Abstime a1, Abstime a2, Bool night_upg) =
+  if %has_standby_with_rest%
+  then sum(leg(duty), leg.%duty_time_standby_rest_reduction_in_period%(a1, a2, night_upg))
+  else 0:00;
+
+/*
+** Countings
+*/
+export %is_first_in_trip% =
+    is_first(duty(trip));
+export %is_last_in_trip% =
+    is_last(duty(trip));
+export %num_legs% = count(leg(duty));
+export %num_flight_legs% = count(leg(duty)) where (leg.%is_flight_duty%);
+/* Return to ramp legs should not be considered as active legs according to
+ * Bill Hemsworth. /AO 2010-11-11 */
+export %num_active_legs% = 
+  count(leg(duty)) where (leg.%is_active_flight% and not leg.%returned_to_ramp%);
+  
+export %num_deadheads% = count(leg(duty)) where (leg.%is_deadhead%);
+export %num_ac_changes% = 
+  count(leg(duty)) where (leg.%is_ac_change% and %is_short_ac_change%);
+
+export %num_ac_changes_not_dh% = 
+  count(leg(duty)) where (leg.%is_ac_change_and_not_dh% and
+                          %is_short_ac_change%);
+
+/*** %is_short_ac_change% is added. It's not relevant to consider AC_change */
+/*** on long cnx since crew leave the AC anyways */
+
+/*** Consider only short cnx as AC-change */
+%short_ac_change_P% = parameter 5:00
+remark "Minimum cnx-time to consider as AC-Change in rule and cost";
+
+export %is_short_ac_change% =
+       (next(leg(duty), departure) - arrival) < %short_ac_change_P%;
+                                
+/*
+** Nr active pilots
+*/
+/* default statement is there to catch the case of a single deadhead leg
+   duty (most likely the case of a base variant) */
+export %active_pilots% =
+  default(max(leg(duty), crew_pos.%total_flight_crew_need%)
+          where (leg.%is_active_flight%),
+          0);
+  
+export %nr_active_charter_legs% =
+  count(leg(duty)) where (leg.%is_charter% and
+                          leg.%is_active_flight% and
+                          not leg.%returned_to_ramp%); 
+  
+/*
+** Deadhead
+*/
+  
+export %deadhead_in_roundtrip% = any(leg(duty), leg.%deadhead_in_roundtrip%);
+
+export %num_deadhead_roundtrips% = 
+  count(leg(duty)) where (leg.%deadhead_in_roundtrip%); 
+
+export %num_middle_duty_deadheads% = 
+  count(leg(duty)) where (leg.%is_middle_duty_deadhead%);
+                                     
+export %has_one_middle_duty_deadhead% = 
+  if %num_middle_duty_deadheads% = 1 then true else false;
+
+export %has_several_middle_duty_deadheads% =
+  if %num_middle_duty_deadheads% > 1 then true else false;
+
+/*
+ * These definitions below are probably not needed in SAS CMS
+ */
+
+/*
+** Deadhead time
+*/
+/* Possibly not SAS relevant ??? */
+export %deadhead_time% = sum(leg(duty), leg.%deadhead_time%);
+
+/*
+** Air time
+*/
+/* SAS relevant ??? */
+export %air_time% = sum(leg(duty), leg.%air_time%);
+
+/****************************************************************
+ * Section 1: Per Diem definitins & rules
+ * Per Diem always reported in 1/4
+ ***************************************************************/
+
+/* Flight per diem defintion */
+export %flight_per_diem% = any(leg(duty), leg.%flight_per_diem%)
+                           and not %course_per_diem%;
+
+/* Course per diem definition */
+export %course_per_diem% = any(leg(duty), leg.%course_per_diem%)
+                       and not any(leg(duty), leg.%flight_per_diem% 
+                                   and not leg.%is_deadhead%);
+
+/* Is duty entitled per diem */
+export %per_diem_entitled% = 
+  %per_diem_amount% > 0 and
+  (%flight_per_diem% or %course_per_diem%);
+
+/* Amount of entitled per diem in 1/4. */
+export %per_diem_amount% = %per_diem_leg_amount% + %per_diem_duty_amount%;
+
+/* Amount of entitled per diem in 1/4 for all legs. (mealstops) */
+export %per_diem_leg_amount% = sum(leg(duty), leg.%per_diem_amount%);
+
+/* Amount of entitled per diem in 1/4 for a duty. (stopover) */
+export %per_diem_duty_amount% =
+  per_diem.%per_diem_amount%(default(%per_diem_rest_time%, 0:00), %cabin_crew%, %is_SKN%, %end_UTC%)
+  * first(leg(duty), leg.%per_diem_assigned_crew_amount%);
+  
+export %per_diem_start_UTC% =
+  first(leg(duty), leg.%per_diem_start_utc%) where (leg.%is_per_diem%);
+  
+export %per_diem_end_UTC% = 
+  last(leg(duty), leg.%per_diem_end_UTC%) where (leg.%is_per_diem%);
+  
+/* Time to calculate per diem for. */
+export %per_diem_time% = default(%per_diem_end_UTC% - %per_diem_start_UTC%, 0:00);
+
+/* Amount of Per diem in 1/4. */
+export %per_diem_total% =
+  per_diem.%per_diem_amount%(default(%per_diem_time%, 0:00), %cabin_crew%, %is_SKN%, %end_UTC%)
+  * 
+  default(first(leg(duty), leg.%per_diem_assigned_crew_amount%)
+  where(leg.%flight_per_diem% or leg.%course_per_diem% or leg.%is_standby_at_airport%), 0);
+
+/* Stop time for per diem. */
+export %per_diem_rest_time% = %per_diem_rest_end_scheduled% - %per_diem_rest_start%;
+export %per_diem_rest_time_actual% = %per_diem_rest_end% - %per_diem_rest_start%;
+
+/* Rest start for per diem. */
+%per_diem_rest_start% = last(leg(duty), leg.%end_utc%);
+
+/* Rest end for per diem. */
+%per_diem_rest_end% = next(duty(trip), first(leg(duty),leg.%start_utc%));
+%per_diem_rest_end_scheduled% = next(duty(trip), first(leg(duty),leg.%activity_scheduled_start_time_utc%));
+
+/*
+** Estimated cost of Per Diem.
+** Unit is used since because of rave decimal handling.
+** Duty and legs
+*/
+export %per_diem_compensation% =
+  if %per_diem_entitled% then
+    %per_diem_leg_compensation% + %per_diem_duty_compensation%
+  else
+    0;
+
+/*
+** Estimated cost of Per Diem.
+** Unit is used since because of rave decimal handling.
+** Legs
+*/
+%per_diem_leg_compensation% =
+  if %per_diem_leg_amount% > 0 then
+    sum(leg(duty), leg.%per_diem_amount%
+        * per_diem.%per_diem_compensation_converted%(leg.%stop_country%,
+                                                     %end_day%,
+						     %flight_per_diem%))
+    / 4
+  else
+    0;
+    
+/*
+** Estimated cost of Per Diem.
+** Unit is used since because of rave decimal handling.
+** Duty
+*/
+%per_diem_duty_compensation% =
+  if %per_diem_duty_amount% > 0 then
+    (%per_diem_duty_amount%
+     * per_diem.%per_diem_compensation_converted%(%layover_country%,
+                                                  %end_day%,
+						  %flight_per_diem%))
+    / 4
+  else
+    0;
+
+
+/*********************************************************************
+ * Standby qualification code
+ *********************************************************************/
+export %standby_code_with_qualification% = 
+  any(leg(duty), leg.%standby_code_with_qualification%);
+  
+  
+/****************************************************************************
+ * Parameter and variables for hard/heavy duty. Used only for optimization
+ ****************************************************************************/
+
+export %heavy_duty_min_p% =
+  parameter 08:30
+  remark "1.7.1      Definition of heavy duty";  
+  
+export %is_heavy% =  
+  default(%duty_time%(union, True) > %heavy_duty_min_p%, false);
+
+/* Variables needed in CCP and CCR */
+export %has_lc% = false;
+export %has_ilc% = false;
+export %has_any_pilot_on_lc_or_ilc% = false;
+export %is_recurrent% = false;
+
+/* CR290 */
+export %is_training% = %is_ground_training%;
+
+export %is_ground_training% =
+    default(first(leg(duty), task.%is_training%(leg.%code%))
+            where (not (task.%is_passive_transfer%(leg.%code%)
+                        or leg.%is_deadhead%
+                        or leg.%is_standby%)), false);
+
+export %is_fdp_training% = %is_ground_fdp_training%;
+
+export %is_ground_fdp_training% =
+    default(first(leg(duty), task.%is_fdp_training%(leg.%code%))
+            where (not (task.%is_passive_transfer%(leg.%code%)
+                        or leg.%is_deadhead%
+                        or leg.%is_standby%)), false);
+
+/* SASCMS-2711 */
+export %is_next_duty_in_next_day% = duty.%end_day% < next(duty(chain), duty.%start_day%);
+
+/*
+** Overtime duty time (some restrictions)
+*/
+export %duty_is_not_valid_overtime% = False;  
+
+/*
+** Agreement validity
+*/
+
+export %k4exng_cc_sp5_1_valid%(Abstime start) =
+  %agreement_valid%("K4ExNG_cc_sp5.1",start) and
+  default(%cabin_crew%, true) and not %is_asian%;
+
+/* SASCMS-5920 */
+export %split_duty_cc_all_valid%(Abstime start) =
+  %agreement_valid%("split_duty_cc_all_valid",start) and
+  default(%cabin_crew%, true) and not %is_asian%;
+
+export %has_sb_duty_time_override% =
+    %consider_calculated_sb_duty_time% and not base_product.%is_tracking%
+    /*and count(leg(duty)) where (not void(leg.%sb_duty%) and leg.%is_standby%) > 0*/;
+
+export %consider_calculated_sb_duty_time% =
+ duty.%is_standby% and not duty.%is_standby_line% and parameters.%_consider_calculated_sb_duty_time%;
+
+export %sb_duty% =
+  let sb_duty_default = if %is_standby_at_airport% then parameters.%airport_sb_default_duty_time% else parameters.%sb_default_duty_time%;
+  default(nmax(sb_duty_default, %_sb_duty%), sb_duty_default);
+
+  
+
+%_sb_duty% = sum(leg(duty), leg.%sb_duty%);
+/* SASCMS-5920 */
+
+/* defined duty selections */
+export %duty_sel_freeday% = 1;
+export %duty_sel_off_duty% = 2;
+export %duty_sel_freedays_mix% = 3;
+export %duty_sel_planned_rest% = 4; /* freedays, compensation etc, but not blanks, as they might be production */
+export %duty_sel_blank_days% = 5;
+export %duty_sel_blank_days_4exng% = 6;
+export %duty_sel_blank_days_grp% = 7;
+export %duty_sel_duty_btw_weekly_rests% = 8;
+export %duty_sel_duty_btw_weekly_rests_incl_standby% = 9;
+export %duty_sel_sh% = 10;
+export %duty_sel_sh_possible% = 11;
+export %duty_sel_fs_unfriendly% = 12;
+export %duty_sel_active_union% = 13;
+export %duty_sel_is_fs_disallow% = 14;
+export %duty_sel_lh%          = 20;
+export %duty_sel_freedays_disqual% = 30;
+export %duty_sel_summer_va_or_loa% = 31;
+export %duty_sel_freedays_disqual_vacation% = 32;
+export %duty_sel_freedays_disqual_not_vacation% = 33;
+export %duty_sel_fte_disqual% = 34;
+export %duty_sel_any% = 98;
+export %duty_sel_noone% = 99;
+
+/* 
+ * General selections of duty. 
+ * duty_selection: see description
+ * period_st: start of period, allows for different selections after a period of time
+ */
+table duty_sel_table(Int duty_selection, Abstime period_st) =
+  duty_selection, %start_hb%-period_st -> export String %duty_sel_descr%, export Bool %duty_selected%;
+  1 , -       -> "Standard freeday",            (%is_freeday% and not %is_f0%) or (%is_freeday_illness% and system_db_parameters.%weekly_covid19_process%(period_st));
+  2 , -       -> "Standard Off duty",           not %is_on_duty%; 
+  3 , <48:00  -> "Freedays mix, first 2 days",  %is_freeday%;
+  3 , >=48:00 -> "Freedays mix, rest days",     not %is_on_duty%;
+  4,  -       -> "Planned rest",                %is_planned_rest%;
+  5,  -       -> "BL day",                      all(leg(duty),task.%is_blank_day_BL%(task.%code%));
+  6,  -       -> "Blank day as 4ExNG",          all(leg(duty),task.%is_blank_day_4exng%(task.%code%));
+  7,  -       -> "Blank days group",            all(leg(duty),task.%is_blank_day%(task.%code%));
+  8,  -       -> "Duty between weekly rests",   not %is_rest% and not %is_standby_line%;
+  9,  -       -> "Duty between weekly rests including standby line",   not %is_rest%;
+  10, -       -> "Short haul prod",             %is_short_haul%;
+  11, -       -> "Possible short haul",         %_possible_short_haul%;
+  12, -       -> "All duties, except F14/F",    any(leg(duty), not task.%is_fs_friends%(task.%code%));
+  13, -       -> "Active duty union def",       %is_active_union_def%;
+  14, -       -> "Duties disallow FS",          all(leg(duty), task.%is_fs_disallow%(task.%code%));
+  20, -       -> "Long haul production",        %is_long_haul%;
+  30, -       -> "Freedays disqualifying",      all(leg(duty), task.%is_freedays_disqual%(task.%code%)) and not ((duty.%is_on_duty_illness% or duty.%is_freeday_illness%) and system_db_parameters.%weekly_covid19_process%(period_st));
+  31, -	      -> "Summer Vac incl loa",		%is_summer_va_or_loa%;
+  32, -       -> "Freedays disqualifying vacation", all(leg(duty), task.%is_freedays_disqual%(task.%code%)) and duty.%is_vacation%;
+  33, -       -> "Freedays disqualifying not vacation", all(leg(duty), task.%is_freedays_disqual%(task.%code%)) and 
+                                                          not (duty.%is_vacation% or ((duty.%is_on_duty_illness% or duty.%is_freeday_illness%) and system_db_parameters.%weekly_covid19_process%(period_st)));
+  34, -       -> "FTE disqualifying",           all(leg(duty), task.%is_fte_disqual%(task.%code%)) and not ((duty.%is_on_duty_illness% or duty.%is_freeday_illness%));
+  98, -       -> "Always match",                True;
+  99, -       -> "Never match",                 False;
+end
+
+/* SKCMS-731. In SKCMS1136 changed to all Groups */
+ %_possible_short_haul% =
+   (%is_on_duty% and not %is_long_haul%);
+
+%_is_next_consec_duty%(Int duty_selection, Abstime period_st, Abstime prev_end_time) =
+  %duty_selected%(duty_selection,period_st) and %start_hb%<=(prev_end_time+0:01); /* allow 1 min diff */
+
+%_is_previous_consec_duty%(Int duty_selection,Abstime period_st, Abstime next_start_time) =
+   %duty_selected%(duty_selection,period_st) and %end_hb%>=(next_start_time-0:01);/* allow 1 min diff */
+  
+%_is_not_followed_by_consec_duty%(Int duty_selection, Abstime period_st) =
+  let cur_end_time = %end_day% + 24:00;
+  default(
+    next(duty(chain),not %_is_next_consec_duty%(duty_selection, period_st, cur_end_time))
+  ,
+    true
+  );
+
+%_is_not_preceeded_by_consec_duty%(Int duty_selection, Abstime period_st)=
+  let cur_start_time = %start_day%;
+  default(
+     prev(duty(chain), not %_is_previous_consec_duty%(duty_selection,period_st,cur_start_time)),
+        true);
+
+%_end_of_consec_period%(Int duty_selection, Abstime period_st) =
+  next(duty(chain),%end_hb%)
+    where (%_is_not_followed_by_consec_duty%(duty_selection, period_st)) /* skip duties until last consecutive */
+  ;
+%_start_of_consec_period%(Int duty_selection, Abstime period_st) =
+  prev(duty(chain),%start_hb%)
+  where (%_is_not_preceeded_by_consec_duty%(duty_selection, period_st));
+
+/* end time of last duty in consecutive series fulfilling duty_selection, folowing current duty */
+export %end_of_consec_period_after%(Int duty_selection) =
+  let period_st = %end_day% + 24:00;  
+  if %_is_not_followed_by_consec_duty%(duty_selection,period_st) then
+    period_st 
+  else 
+    default(
+      %_end_of_consec_period%(duty_selection, period_st)
+    ,
+      period_st /* if no such date, return start of period. Should not occur, caught by 'if' */
+    );
+
+/* end time of last duty in consecutive series fulfilling duty_selection, start on current day */
+export %end_of_consec_period%(Int duty_selection) =
+  if %duty_selected%(duty_selection, %start_day%) then
+    if %_is_not_followed_by_consec_duty%(duty_selection, %start_day%) then
+      %end_hb% /* current is selected, but not following */
+    else 
+      %_end_of_consec_period%(duty_selection, %start_day%)
+  else
+    %start_day% /* current is not selected */
+  ;
+
+export %start_of_consec_period%(Int duty_selection) =
+  if %duty_selected%(duty_selection,%start_day%) then
+    if %_is_not_preceeded_by_consec_duty%(duty_selection,%start_day%) then
+      %start_hb%
+    else
+      %_start_of_consec_period%(duty_selection,%start_day%)
+  else
+    %end_day%;
+
+/* number of consecutive days with selection, starting after current duty */
+export %consec_days_after%(Int duty_selection) =
+  (%end_of_consec_period_after%(duty_selection) +0:01 - %end_day% - 24:00) / 24:00;
+
+/* number of consecutive days with selection, starting with current duty */
+export %consec_days_forward%(Int duty_selection) =
+  (%end_of_consec_period%(duty_selection) + 0:01 - %start_day%) / 24:00;
+
+/* Total number of consecutuve days, counting before and after current duty */
+export %consec_days_total%(Int duty_selection) =
+ ((%end_of_consec_period%(duty_selection) + 0:01) - (%start_of_consec_period%(duty_selection) - 0:01)) / 24:00;
+
+/* check if current duty together with consecutive duties cover a time interval. Assumed current fulfils selection */
+export %consec_duty_selection_covers_interval%(Int duty_selection, Abstime start_t, Abstime end_t) =
+  ( 
+    if %start_hb%<= start_t then true
+    else %start_of_consec_period%(duty_selection) <= start_t
+  ) and (
+    if %end_hb% >= end_t then true
+    else %end_of_consec_period%(duty_selection) >= end_t 
+  );
+
+%_end_selection_possible%(Int duty_selection, Abstime period_st) =
+  next(duty(chain), %start_day%) where (not %duty_selected%(duty_selection, period_st));
+
+/* end time of period which can be filled to satisfy selection to satisfy */
+export %end_selection_possible%(Int duty_selection) =
+  if %duty_selected%(duty_selection, %start_day%) then
+    default(
+      %_end_selection_possible%(duty_selection, %start_day%)
+    ,
+      %abstimemax%
+    )
+  else
+    %start_day%
+  ;
+
+/* end time of period starting after current duty, that can be filled to satisfy selection to satisfy */
+export %end_selection_possible_after%(Int duty_selection) =
+  default(
+    %_end_selection_possible%(duty_selection, %end_day% + 24:00)
+  ,
+    %abstimemax%
+  );
+
+
+export %days_selection_possible%(Int duty_selection, Abstime limit) =
+  (nmin(%end_selection_possible%(duty_selection),limit) + 0:01 - %start_day%) / 24:00;
+  
+export %days_selection_possible_after%(Int duty_selection, Abstime limit) =
+  (nmin(%end_selection_possible_after%(duty_selection),limit) + 0:01 - %end_day% - 24:00) / 24:00;
+
+%_end_hb_selection_possible%(Int duty_selection, Abstime st) =
+  next(duty(chain), %start_hb%) where (not %duty_selected%(duty_selection, st));
+
+export %end_hb_selection_possible%(Int duty_selection) =
+  if %duty_selected%(duty_selection, %start_hb%) then
+    default(
+      %_end_hb_selection_possible%(duty_selection, %end_hb%),
+      %abstimemax%)
+  else %start_hb%;
+
+export %end_hb_selection_possible_after%(Int duty_selection) =
+  default(
+    %_end_hb_selection_possible%(duty_selection, %end_hb%),
+    %abstimemax%);
+    
+export %len_hb_selection_possible%(Int duty_selection) =
+  %end_hb_selection_possible_after%(duty_selection) - %end_hb%;
+
+export %any_selection_since_duty_end%(Int duty_selection, Abstime s) =
+	any(duty(chain), %duty_selected%(duty_selection, %start_day%))
+	from (current) backwards
+	while (duty.%end_utc% >= s);
+	
+export %days_with_selection%(Int duty_selection, Abstime s, Abstime e) =
+  sum(duty(chain), (nmin(round_down(%end_hb%,24:00),e)-nmax(round_down(%start_hb%,24:00),s))/24:00)
+    where (%end_hb%>s and %start_hb%<e and %duty_selected%(duty_selection, %end_hb%));
+    
+export %days_with_selection_calendar_month%(Int duty_selection, Abstime s) =
+  %days_with_selection%(duty_selection, round_down_month(s), round_up_month(s+0:01));    
+    
+/* count number of days with selection or can get selection */ 
+export %days_with_selection_possible%(Int duty_selection, Abstime s, Abstime e) =
+  default(
+    sum(duty(chain), %days_selection_possible_after%(duty_selection, e))
+      where (not %duty_selected%(duty_selection,%end_hb%) and %end_hb% < e and %end_hb%>= s)
+    +
+    first(duty(chain), nmax(nmin(e - s, %start_hb% - s)/ 24:00,0))
+      where (not %duty_selected%(duty_selection,%end_hb%) /*and %end_hb < e */ and %end_hb%>=s), 
+    (e-s) / 24:00);
+
+/* count number of days with selection or can get selection */ 
+export %days_with_selection_possible_calendar_month%(Int duty_selection, Abstime s) =
+  %days_with_selection_possible%(duty_selection, round_down_month(s), round_up_month(s+0:01));
+
+export %is_last_in_month_with_selection%(Int duty_selection) =
+  let st_month = %start_month_start%;
+  default(
+    next(duty(chain), %start_month_start% > st_month) where (%duty_selected%(duty_selection,%end_hb%)),
+    %duty_selected%(duty_selection,%end_hb%));
+
+/*
+ * count number of duties within current wop fulfilling selection. If s or e is set to other than
+ * wop.%start_hb% / wop.%end_hb%, only duties fully within the interval are counted.
+ */
+export %count_wop_duties_within_interval%(Int duty_selection, Abstime s, Abstime e) =
+  count(duty(wop)) where (%start_hb%>= s and %end_hb% <= e and %duty_selected%(duty_selection,%end_hb%) and duty.%is_short_haul%);
+ 
+%_count_single_days_in_period%(Int duty_selection) =
+  if %days_selection_possible_after%(duty_selection, %end_hb% + 72:00) = 1 then 1
+  else 0;
+ 
+export %count_single_days_in_period%(Int duty_selection, Abstime s, Abstime e) =
+  sum(duty(chain), %_count_single_days_in_period%(duty_selection))
+  where (duty.%end_hb% >= s - 24:00 and duty.%end_hb% <= e - 24:00 and not %duty_selected%(duty_selection,%end_hb%));
+
+%duty_num_in_trip% = count(duty(trip)) from(first) to(current);
+
+/************************************
+ * Slipping
+** Single slipp: Rest shall be at leat 08:00 between 
+** 22:00 and 08:00 local time
+*************************************/
+export %follows_by_single_slipp% =
+  let duty_end_day_lt = round_down(duty.%end_lt%,24:00),
+      single_slipp_start_lt = duty_end_day_lt + 22:00,
+      single_slipp_end_lt   = duty_end_day_lt + 22:00 + 10:00;
+
+  if %is_long_haul% and (not %arrives_at_homebase%) and 
+      (not %follows_by_double_slipp%) then
+     overlap(single_slipp_start_lt,single_slipp_end_lt,
+             duty.%end_lt%,next(duty(trip),duty.%start_lt%)) >= 08:00
+  else
+    false;
+/************************************
+ * Slipping
+** Double slipp: Rest shall be at leat 08:00 between 
+** 22:00 and 08:00 next day at local time
+*************************************/
+export %follows_by_double_slipp% =
+  let duty_end_day_lt = round_down(duty.%end_lt%,24:00),
+      single_slipp_start_lt = duty_end_day_lt + 22:00 + 24:00,
+      single_slipp_end_lt   = duty_end_day_lt + 22:00 + 10:00 + 24:00;
+
+  if %is_long_haul% and not %arrives_at_homebase% then
+     overlap(single_slipp_start_lt,single_slipp_end_lt,
+             duty.%end_lt%,next(duty(trip),duty.%start_lt%)) >= 08:00
+  else
+    false;
+    
+/**** 
+ ** Needed to get flight leg attributes for a duty.
+****/
+export %duty_cfd_abs%(String attr) = void_abstime;
+   
+export %duty_cfd_rel%(String attr) = void_reltime;
+
+export %duty_cfd_int%(String attr) = void_string;
+
+export %is_agmt_group_qa_or_cc_employer_qa% = void_bool;
+export %is_agmt_group_sks_cc_ag% = void_bool;
+export %has_agmt_group_sks% = void_bool;
+export %has_agmt_group_skn% = void_bool;
+
+/*end of file */
+
+

@@ -1,0 +1,192 @@
+/* -*- crc -*-
+
+The base constraints duty days table is mostly only relevant for pairing. The only exception is that
+the table can be exported from rostering studio.
+
+The variables in this module are used by a Python script to fill the rows of the table.
+
+See also: carmusr/lib/python/carmusr/process/steps/ctf_export_for_pairing.py
+
+This module is only loaded in Studio.
+
+*/
+module base_constraints_jcr
+
+import crew;
+import crew_pos;
+import fundamental;
+import freedays;
+import iterators;
+import keywords;
+import levels;
+import pp;
+import roster;
+import trip;
+import base_constraints_common_definitions;
+
+
+/********************************************
+ * Monthly availability
+ ********************************************/
+group base_constraints_parameter =
+    %base_constraints_parameter_header%,
+    %base_monthly_availability_scale_percent_p%,
+    %base_constraints_duty_days_table_excess_cost_p%,
+    %base_constraints_trip_duty_days_table_excess_cost_p%;
+
+%base_monthly_availability_scale_percent_p% =
+    parameter 50
+    remark "Percentage of monthly base availability to be exported.";
+
+%base_constraints_parameter_header% =
+    parameter ""
+    remark "Base Constraint Parameters#HEADER#";
+
+/********************************************
+ * Daily availability
+ ********************************************/
+
+%position_at_base_available_on_day%(Int daynum, String pos_code, String base) =
+    %variable_group_position_at_base_available_on_day%(daynum, pos_code, base)
+    + %fixed_group_position_at_base_available_on_day%(daynum, pos_code, base);
+
+%variable_group_position_at_base_available_on_day%(Int daynum, String pos_code, String base) =
+    count(roster_set)
+    where(crew.%homestation% = base
+          and %crew_code_matches%(pos_code)
+          and crew.%in_variable_group%(%day_start_hb%(daynum))
+          and %available_on_day%(daynum));
+
+%fixed_group_position_at_base_available_on_day%(Int daynum, String pos_code, String base) =
+    count(roster_set)
+    where(crew.%homestation% = base
+          and %crew_code_matches%(pos_code)
+          and crew.%in_fixed_group%(%day_start_hb%(daynum))
+          and %available_on_day%(daynum));
+
+/*
+Crew are calculated in the export to be available a day except:
+- the days they are not employed (void days)
+- they have an assignment that is not a valid pairing (so the assignment can not be exported to pairing)
+
+As opposed to the export for the whole planning period, days-off are not taken into account.
+*/
+
+%available_on_day%(Int day_num_in_pp) =
+not (%day_is_void_day%(day_num_in_pp) or %day_is_invalid_pairing_day%(day_num_in_pp));
+
+%day_is_void_day%(Int day_num_in_pp) =
+    let date = fundamental.%pp_start_day% + (day_num_in_pp - 1) * 24:00;
+     %num_void_days_in_period%(date, date) = 1;
+
+%day_start_hb%(Int day_num_in_pp) = fundamental.%pp_start_day% + (day_num_in_pp - 1) * 24:00;
+
+/********************************************
+ * Common definitions
+ ********************************************/
+%num_employed_days_overlap%(Abstime period_start_date, Abstime period_end_date,
+                            Abstime trip_start_date, Abstime trip_end_date) =
+    let new_period_start_date = nmax(period_start_date, crew.%employment_date%),
+        new_period_end_date = nmin(period_end_date, crew.%employment_end%(new_period_start_date));
+    overlap(new_period_start_date, new_period_end_date + 24:00,
+            trip_start_date, trip_end_date + 24:00) / 24:00;
+
+%trip_num_adjusted_days_that_touches_period%(Abstime start_date, Abstime end_date) =
+    %num_employed_days_overlap%(start_date, end_date, %trip_adjusted_start_date_hb%, %end_date_hb%);
+
+%end_date_hb% = round_down(trip.%end_hb% - 00:01, 24:00);
+
+export %trip_adjusted_start_date_hb% =
+    if %trip_starts_on_same_cal_day_as_prev_trip_ends% then
+        trip.%start_date_hb% + 24:00
+    else
+        trip.%start_date_hb%;
+
+export %trip_starts_on_same_cal_day_as_prev_trip_ends% =
+    default(trip.%start_date_hb% = prev(trip(roster), %end_date_hb%),
+            false);
+
+%day_is_invalid_pairing_day%(Int day_num_in_pp) =
+    let date = fundamental.%pp_start_day% + (day_num_in_pp - 1) * 24:00;
+    %num_invalid_pairing_days_in_period%(date, date) = 1;
+
+%num_invalid_pairing_days_in_pp% =
+    %num_invalid_pairing_days_in_period%(fundamental.%pp_start_day%, fundamental.%pp_end_day%);
+
+%num_invalid_pairing_days_in_period%(Abstime start_date, Abstime end_date) =
+    sum(trip(roster), %trip_num_adjusted_days_that_touches_period%(start_date, end_date))
+    where(start_date <= %end_date_hb%
+          and trip.%start_date_hb% <= end_date
+          and not %trip_is_relevant_ctf_export_for_pairing%);
+
+%crew_code_matches%(String pos_code) =
+    if pos_code = "AH" then
+        /*  In the cabin crew rostering plans we also have some crew with rank AS (which is a Long Haul position),
+            but in the context of availability for pairings and short haul production, they should be counted as AH. */
+        pos_code = "*" or crew.%ce_has_rank_in_pp%("AH") or crew.%ce_has_rank_in_pp%("AS")
+    else
+        pos_code = "*"
+        or crew.%ce_has_rank_in_pp%(pos_code);
+
+%base_constraints_table_number_of_days_to_export% = pp.%days%;
+
+%base_constraints_duty_days_maxprodtotal_type% = "MaxProdTotal";
+%base_constraints_duty_days_maxdayprod_type% = "MaxProdDaily";
+%base_constraints_duty_days_table_excess_cost%(Int limit) =
+    if limit = 0 then 999999 else %base_constraints_duty_days_table_excess_cost_p%;
+
+%base_constraints_duty_days_table_excess_cost_p% =
+    parameter 10000
+    remark "Base constraints duty days table excess cost";
+
+%trip_is_relevant_ctf_export_for_pairing% =
+    trip.%end_hb% > fundamental.%pp_start_day%
+    and %is_valid_pairing%
+    and trip.%has_flight_duty%;
+    
+/********************************************
+ * Calculation utility, mostly from days_off,
+ * module in recent OTS
+ ********************************************/
+ 
+ export %num_void_days_in_period%(Abstime start_date, Abstime end_date) =
+    %num_days_in_period%(start_date, end_date)
+    - %num_employed_days_in_period%(start_date, end_date);
+
+%num_days_in_period%(Abstime start_date, Abstime end_date) =
+    (end_date - start_date) / 24:00 + 1;
+    
+export %num_employed_days_in_period%(Abstime start_date, Abstime end_date) =
+    let new_start_date = nmax(start_date, crew.%employment_date%),
+        new_end_date = nmin(end_date, crew.%employment_end%(start_date));
+    if new_end_date < new_start_date then
+        0
+    else
+        nmax(0, %num_days_in_period%(new_start_date, new_end_date));    
+
+export %is_valid_pairing% =
+    not void(crr_identifier)
+    and not %pairing_is_pact_or_dummy%;
+
+%pairing_is_dummy% =
+    first(leg(trip), keywords.%activity_type% = ""
+                     and keywords.%departure% = 01Jan1986 00:00);
+
+%pairing_is_pact_or_dummy% =
+    %pairing_is_pact% or %pairing_is_dummy%;
+
+%pairing_is_pact% =
+    trip.%is_pact%;
+
+/*********************************************
+* Trip duty days constraint export definitions
+**********************************************/
+
+%base_constraints_trip_duty_days_maxtripstotal_type% = "MaxTripsTotal";
+
+%base_constraints_trip_duty_days_table_excess_cost%(Int limit) =
+    if limit = 0 then 999999 else %base_constraints_trip_duty_days_table_excess_cost_p%;
+
+%base_constraints_trip_duty_days_table_excess_cost_p% =
+    parameter 10000
+    remark "Base constraints trip duty days table excess cost";

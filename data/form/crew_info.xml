@@ -1,0 +1,1374 @@
+<!-- $Header$ -->
+
+<!--
+    [acosta:08/095@12:24] Added Profile tab, the parts marked with XXX (handling
+    last flown) are commented out.
+-->
+
+<views style.resize="true" help.id="CrewInfo.pdf">
+  
+<head>
+  
+  <title>Crew Info</title>
+  
+<alias id="valid_contracts" source="crew_contract_valid"/>
+<alias id="contract_employment" source="tmp_cbi_crew_employment"/>
+<alias id="valid_stations" source="tmp_cbi_station_set"/>
+<alias id="valid_civicstations" source="tmp_cbi_civicstation_set"/>
+<alias id="valid_quals" source="crew_qualification_set"/>
+<alias id="filtered_quals" source="crew_qualification_set"/>
+<alias id="unfiltered_crew_quals" source="tmp_cbi_crew_qualification"/>
+<alias id="cms_views_crewinfo" source="cms_views"/>
+<!-- Needed for datepicker -->
+<alias id="period_start_view" 
+       source="tmp_wave_values" 
+       filter="(key='period_start')"/>
+<alias id="period_end_view" 
+       source="tmp_wave_values"
+       filter="(key='period_end')"/>
+
+<on-loaded>
+  setEventEnabled(on-changed,false);
+  model("init_wave_client", "cbi_initiate_tables");
+</on-loaded>
+
+<on-opened>
+  setEventEnabled(on-changed,false);
+  init_helper_data();
+  setFilter("cms_views_crewinfo","(&amp;(cms_view=crewinfo)(cms_role=${app_role}))");
+  setFontSize("status_bar","11");
+  setFontSize("address_list", "11");      
+  setFontSize("contact_list", "11");      
+  setFontSize("contract_list", "11");     
+  setFontSize("document_list", "11");     
+  setFontSize("employment_list", "11");   
+  setFontSize("crew_profile", "11");      
+  setFontSize("prohibited_list", "11");   
+  setFontSize("qualification_list", "11");
+  setFontSize("qual_acqual_list", "11");  
+  setFontSize("restr_acqual_list", "11"); 
+  setFontSize("crew_profile", "11");      
+  setFontSize("restriction_list", "11");  
+  setFontSize("seniority_list", "11");  
+  setFontSize("spec_sched_list", "11");
+  setValue("tabbed_view", "tmp_cbi_crew_employment");
+  setup_table_view_filters();
+  setValue("crew_select", "${tmp_cbi_crew_summary[0,empno]}");
+  setValue("crew_to_refresh", "${tmp_cbi_crew_summary[0,empno]}");
+  setup_qual_filter();
+  setup_limited_qual_filter();
+  show_status();
+  setEventEnabled(on-changed,true);
+</on-opened>
+
+<on-closing>
+  close_form_conditionally();
+</on-closing>
+
+<script><![CDATA[
+cbi_tabview = {}
+class CbiTable:
+  def __init__(self, id, source):
+    global cbi_tabview
+    self.id = id
+    self.source = source
+    cbi_tabview[id] = self
+CbiTable("address_list",       "tmp_cbi_crew_address")
+CbiTable("contact_list",       "tmp_cbi_crew_contact")
+CbiTable("contract_list",      "tmp_cbi_crew_contract")
+CbiTable("document_list",      "tmp_cbi_crew_document")
+CbiTable("employment_list",    "tmp_cbi_crew_employment")
+CbiTable("crew_profile",       "tmp_cbi_crew_profile")
+CbiTable("prohibited_list",    "tmp_cbi_crew_not_fly_with")
+CbiTable("qualification_list", "tmp_cbi_crew_qualification")
+CbiTable("qual_acqual_list",   "tmp_cbi_crew_qual_acqual")
+CbiTable("restr_acqual_list",  "tmp_cbi_crew_restr_acqual")
+CbiTable("restriction_list",   "tmp_cbi_crew_restriction")
+CbiTable("seniority_list",     "tmp_cbi_crew_seniority")
+CbiTable("spec_sched_list",    "tmp_cbi_special_schedules")
+
+def cbi_exists(context, table, key, value):
+  for row in range(int(context.sm.resolve("${%s._rowcount}" % table))):
+    if context.sm.resolve("${%s[%d,%s]}" % (table, row, key)) == value:
+      return True
+  return False
+
+def cbi_validate_form_time(context):
+  form_time = context.sm.resolve("${form_time}")
+  # If the field contents are invalid, reset to last known valid value
+  context.action('setValue', 'form_time', form_time)
+  if form_time == 'NULL':
+     context.action('setFocus', 'form_time')
+     context.action('set_status', 'Time setting may not be empty','red')
+     return False
+  return True    
+]]></script>
+
+<action name="init_helper_data" args=""><![CDATA[
+global cbi_rank2main
+try:
+  cbi_rank2main
+except:
+  cbi_rank2main = {}
+  for row in range(int(context.sm.resolve("${crew_rank_set._rowcount}"))):
+    rank = context.sm.resolve("${crew_rank_set[%d,id]}" % row)
+    cat = context.sm.resolve("${crew_rank_set[%d,maincat]}" % row)
+    cbi_rank2main[rank] = cat
+]]></action>
+
+<action name="deselect_all_table_entries" args=""><![CDATA[
+for tabview in cbi_tabview:
+  context.action('clearSelection', tabview)
+]]></action>
+
+<!-- Create a new row using cbi_create_new_row, and select it -->
+<action name="create_new_row" args="table_id"><![CDATA[
+def tv(k): return context.sm.resolve("${%s[%s]}" % (table_id,k))
+
+if not cbi_validate_form_time(context):
+  return
+
+model_source = cbi_tabview[table_id].source
+view = context.sm.getContext().getView(model_source, context.comp)
+running_nos = [row['running_no'] for row in view.getEntityIterator(0)]
+context.action('model', 'cbi_create_new_row', model_source)
+context.action('model', 'cbi_reset_status_message')
+context.action('show_status')
+
+row_ix = 0
+for row in view.getEntityIterator(0):
+  if row['running_no'] not in running_nos:
+    # row@row_ix is the one that was added.
+    context.action('setFocus', table_id, str(row_ix), '0')
+    
+    # Special validation of created row
+    if table_id == 'contract_list':
+      # The created contract is a copy of the previous contract.
+      # Check if it's still valid.
+      cid = (((tv("contract") or "") + "+").split("+"))[0]
+      if cid and cid != 'NULL' \
+      and not cbi_exists(context, 'valid_contracts', 'contract', cid):
+        context.action('setTableValue', view.name, str(row_ix), 'contract', 'NULL')
+        context.action('setFocus', table_id, str(row_ix), '2')
+        context.action('set_status', \
+                       'Contract "%s" not valid in period %s to %s.' \
+                       % (cid, tv('validfrom'), tv('validto')), 'red')
+    break
+  row_ix += 1
+]]></action>
+
+<!-- Remove selected rows, select first row after removed rows -->
+<action name="remove_selected_rows" args="table_id"><![CDATA[
+model_source = cbi_tabview[table_id].source
+view = context.sm.getContext().getView(model_source, context.comp)
+running_nos_before = [row['running_no'] for row in view.getEntityIterator(0)]
+context.action('deleteRow', table_id)
+context.action('model', 'cbi_reset_status_message')
+context.action('show_status')
+running_nos_after = [row['running_no'] for row in view.getEntityIterator(0)]
+for ix in range(len(running_nos_before), 0, -1):
+  if running_nos_before[ix-1] not in running_nos_after:
+    if ix < len(running_nos_before):
+      row_after_ix = running_nos_after.index(running_nos_before[ix])
+      context.action('setFocus', table_id, str(row_after_ix), '0')
+    break
+]]></action>
+
+<!-- Save function. Checks for unsaved changes -->
+
+<action name="save_conditionally" args=""><![CDATA[
+if context.sm.resolve("${forms.messages.local.any}") != '0':
+  context.action('set_status', 
+    "Error in user input."
+    +" Erroneous data outlined in red."
+    +" Note: The error may be located in another tab.", 
+    "red")
+  return
+  
+context.action('lockInput', 'true')
+context.action('setEventEnabled', 'on-changed', 'false')
+context.action('model', 'submit_trans')
+context.action('model', 'cbi_check_for_changes', 'true')
+context.action('refreshClient')
+if context.sm.resolve("${tmp_cbi_form_info[0,unsaved_changes]}") != "true":
+  context.action('set_status', "No changes were made.", "transparent")
+else:
+  empno = context.sm.resolve("${tmp_cbi_crew_summary[0,empno]}")
+  context.action('model', 'submit_opaq', "Crew Info %s" % empno)
+  context.action('model', 'cbi_save_changes')
+  context.action('show_status')
+context.action('setEventEnabled', 'on-changed', 'true')
+context.action('lockInput', 'false')
+]]></action>
+
+<!-- Exit function. Checks for unsaved changes -->
+
+<action name="close_form_conditionally" args=""><![CDATA[
+context.action('setEventEnabled', 'on-changed', 'false')
+context.action('model', 'submit_trans')
+context.action('model', 'cbi_check_for_changes')
+context.action('refreshClient')
+context.action('setEventEnabled', 'on-changed', 'true')
+if context.sm.resolve("${tmp_cbi_form_info[0,unsaved_changes]}") == "true":
+  current_empno = context.sm.resolve("${tmp_cbi_crew_summary[0,empno]}")
+  msg1 = "There are unsaved changes for crew %s." % current_empno
+  msg2 = "Do you want to discard them and exit anyway?"
+  context.action('openForm', 'warn.xml', 'modal',
+                 "title=Crew Info: Unsaved Changes",
+                 "msg=<B>%s</B><P>%s" % (msg1, msg2))
+else:
+  context.action('closeForm')
+]]></action>
+
+<!-- Search new crew. Checks for unsaved changes -->
+
+<action name="get_crew_data" args=""><![CDATA[
+id = context.sm.resolve("${crew_select}")
+
+id = id.strip()
+try:
+    int(id)
+except Exception, err:
+    print err
+    return
+if id in ('NULL', ''):
+  return
+
+context.action('setEventEnabled', 'on-changed', 'false')
+context.action('setValue', 'warn_yes', 'true')
+current_crewid = context.sm.resolve("${tmp_cbi_crew_summary[0,crewid]}")
+if current_crewid != 'NULL':
+  context.action('model', 'submit_trans')
+  context.action('model', 'cbi_check_for_changes')
+  context.action('refreshClient')
+  if context.sm.resolve("${tmp_cbi_form_info[0,unsaved_changes]}") == "true":
+    current_empno = context.sm.resolve("${tmp_cbi_crew_summary[0,empno]}")
+    msg1 = "There are unsaved changes for crew %s." % current_empno
+    if id in (current_crewid, current_empno):
+      msg2 = "Do you want to revert to previous values?"
+    else:
+      msg2 = "Do you want to discard them and select crew %s instead?" % id
+    context.action('setValue', 'warn_yes', 'false')
+    context.action('openForm', 'warn.xml', 'modal',
+                   "title=Crew Info: Unsaved Changes",
+                   "msg=<B>%s</B><P>%s" % (msg1, msg2),
+                   "ifyes=parent.setValue(warn_yes,true)")
+                   
+if context.sm.resolve("${warn_yes}") == 'true':
+  context.action('lockInput', 'true')
+  context.action('setValue', 'crew_to_refresh', 'NULL')
+  context.action('model', 'cbi_get_new_crew', id)
+  context.action('model', 'cbi_refresh_profile')
+  context.action('deselect_all_table_entries')
+  context.action('setup_table_view_filters')
+  context.action('show_status')
+  if context.sm.resolve("${tmp_cbi_form_info[0,status_color]}") == 'red':
+    context.action('setValue', 'crew_select', 'NULL')
+  else:
+    context.action('setValue', 'crew_to_refresh', context.sm.resolve("${crew_select}"))
+  context.action('lockInput', 'false')
+context.action('setEventEnabled', 'on-changed', 'true')
+]]></action>
+
+<!-- Set current crew info status -->
+
+<action name="set_status" args="message,color"><![CDATA[
+context.action('refreshClient')
+context.action('setValue', 'status_bar', message)
+context.action('setProperty', 'status_bar', 'style.backgroundColor', color)
+]]></action>
+
+<!-- Visualize current crew info status -->
+
+<action name="show_status" args=""><![CDATA[
+context.action('refreshClient')
+context.action('setProperty', 'status_bar', 'style.backgroundColor', 
+               context.sm.resolve("${tmp_cbi_form_info[0,status_color]}"))
+context.action('setValue', 'status_bar',
+               context.sm.resolve("${tmp_cbi_form_info[0,status_message]}"))
+error_table = context.sm.resolve("${tmp_cbi_form_info[0,error_table]}")
+if error_table != 'NULL':
+  context.action('setSelectedTab', error_table)
+  context.action('setTableValue','tmp_cbi_form_info','0','error_table','NULL')
+]]></action>
+
+<!-- Set the filter for view -->
+<!--Send all filter-expressions for the filters to action on the on-changed event -->
+
+<action name="setup_table_view_filters" args=""><![CDATA[
+cbi_validate_form_time(context)
+tabview = context.sm.resolve("${tabbed_view}")
+timeFilterEnabled = context.sm.resolve("${filter_enabled}")=="true"
+timeFilterValue = context.sm.resolve("${form_time}")
+specFilterEnabled = False
+if tabview == "tmp_cbi_crew_qualification":
+  specFilterEnabled = context.sm.resolve("${qual_filter}")=="true"
+  specFilterColumn = "qual.typ" 
+  specFilterValue = "=" + context.sm.resolve("${qualification}")
+elif tabview == "tmp_cbi_crew_document":
+  specFilterEnabled =  context.sm.resolve("${doc_filter}")=="true"
+  specFilterColumn = "doc.typ"
+  specFilterValue = "=" + context.sm.resolve("${document}")
+elif tabview == "tmp_cbi_crew_restriction":
+  specFilterEnabled = context.sm.resolve("${res_filter}")=="true"
+  specFilterColumn = "rest.typ"
+  specFilterValue = "=" + context.sm.resolve("${restriction}")
+elif tabview == "tmp_cbi_special_schedules":
+  timeFilterEnabled = False
+  specFilterEnabled = context.sm.resolve("${filter_enabled}")=="true"
+  specFilterColumn = "validto"
+  specFilterValue = ">=" + timeFilterValue
+elif tabview == "tmp_cbi_crew_seniority":
+  specFilterEnabled = context.sm.resolve("${sen_filter}")=="true"
+  specFilterColumn = "grp.id"
+  specFilterValue = "=" + context.sm.resolve("${seniority}")
+elif tabview == "tmp_cbi_crew_profile":
+  specFilterEnabled = False
+  timeFilterEnabled = False
+
+if timeFilterEnabled or specFilterEnabled:
+  filter = "(&(!(si=__hidden_row__))"
+else:
+  filter = "(!(si=__hidden_row__))"
+
+if timeFilterEnabled:
+  filter += "(" + "validto>=%s)" %timeFilterValue
+
+if specFilterEnabled:
+  filter += "(" + specFilterColumn + "%s)" %specFilterValue #Operator included in string
+
+if filter and (timeFilterEnabled or specFilterEnabled):
+  filter += ")"
+
+#set the filter
+try:
+  context.action('setFilter',tabview,filter)
+  if tabview=="tmp_cbi_crew_qualification":
+    context.action('setFilter','tmp_cbi_crew_qual_acqual',filter.replace(specFilterColumn,'acqqual.typ'))
+    context.action('setFilter','tmp_cbi_crew_restr_acqual',filter)
+except Exception, err:
+  print 'crew_info.xml::Exception in jython code'
+  print 'crew_info.xml::', str(err)
+]]></action>  
+
+
+<action name="refresh_tab_contents" args=""><![CDATA[
+tabview = context.sm.resolve("${tabbed_view}")
+if tabview == "tmp_cbi_crew_profile":
+  context.action('model', 'submit_trans')
+  context.action('model', 'cbi_refresh_profile')
+  context.action('refreshClient')
+]]></action>  
+
+<!-- Setup qualification filter -->
+<action name="setup_qual_filter" args=""><![CDATA[
+found_quals = []
+filter = ""
+view = context.sm.getContext().getView('unfiltered_crew_quals', context.comp)
+for row in view.getEntityIterator(0):
+    (typ, subtype) = (str(row['qual'])+"+").split('+')[0:2]
+    if (typ, subtype) != ('ACQUAL', 'AWB') and (typ, subtype) not in found_quals:
+      found_quals.append((typ, subtype))
+
+for qual in found_quals:
+  filter += '(&(typ=%s)(subtype=%s))' % qual
+
+filter = '(|(&' + '(!(typ=AIRPORT))' + '(!(&(typ=INSTRUCTOR)(subtype=LIFUS)))' + '(!(&(typ=ACQUAL)(subtype=AWB)))' + '(!(typ=BIDS_*))' + ')%s)' % filter
+context.action('setFilter','filtered_quals',filter)
+
+]]></action>
+
+<!-- Setup limited and restriction qualification filter -->
+<action name="setup_limited_qual_filter" args=""><![CDATA[
+found_quals = []
+filter = ""
+view = context.sm.getContext().getView('unfiltered_crew_quals', context.comp)
+for row in view.getEntityIterator(0):
+    (typ, subtype) = (str(row['qual'])+"+").split('+')[0:2]
+    if typ == 'ACQUAL' and subtype and subtype not in found_quals:
+      found_quals.append(subtype)
+
+for qual in found_quals:
+  filter += ('(subtype='+qual+')')
+if filter:
+  filter = '(&(typ=ACQUAL)(|' + filter + '))'
+  context.action('setFilter','valid_quals',filter)
+
+]]></action>
+<!-- Set contract selection filters -->
+
+<action name="setup_contract_filters" args=""><![CDATA[
+
+# Filter 'contract_employment' as employments valid for the contract period.
+# (This is a view used for filtering of 'valid_contracts' below.)
+
+context.action('setFilter', 'contract_employment',
+               "(!(|(validfrom>${contract_list[validto]})" \
+                 "(validto<${contract_list[validfrom]})))")
+                 
+# Filter 'valid_contracts' as contract types valid for the currently selected
+# crew contract row's validity period and its corresponding employment(s).
+
+vc_filter = "(&(validfrom<=${contract_list[validfrom]})" \
+              "(validto>=${contract_list[validfrom]})"
+cemp_count = int(context.sm.resolve("${contract_employment._rowcount}"))
+
+if cemp_count <= 0:
+  # Special case; crew has no employment, only allow "retirement" (or similar).
+  vc_filter += "(base=NULL)(maincat=NULL)"
+else:
+  # Normal case; allow matching base+maincat+company contracts
+  global cbi_rank2main
+
+  maincat = {}
+  contract_validfrom = context.sm.resolve("${contract_list[validfrom]}")
+  contract_validto = context.sm.resolve("${contract_list[validto]}")
+
+  if not (contract_validfrom == "NULL" and contract_validto == "NULL"):
+    contract_validfrom = com.carmensystems.common.util.AbsDate(contract_validfrom)
+    contract_validto = com.carmensystems.common.util.AbsDate(contract_validto)
+  else:
+    contract_validfrom = com.carmensystems.common.util.AbsDate(context.sm.resolve("${tmp_cbi_crew_contract[0,validfrom]}"))
+    contract_validto = com.carmensystems.common.util.AbsDate(context.sm.resolve("${tmp_cbi_crew_contract[0,validto]}"))
+    base = context.sm.resolve("${contract_employment[0,base]}")
+    company = context.sm.resolve("${contract_employment[0,company]}")
+
+  for row in range(cemp_count):
+     employment_validfrom = com.carmensystems.common.util.AbsDate(context.sm.resolve("${contract_employment[%d,validfrom]}" % row))
+     employment_validto = com.carmensystems.common.util.AbsDate(context.sm.resolve("${contract_employment[%d,validto]}" % row))
+
+     # If contract period touches employment period
+     if employment_validfrom.compareTo(contract_validto) < 0 and contract_validfrom.compareTo(employment_validto) < 0:
+        base = context.sm.resolve("${contract_employment[%d,base]}" % row)
+        company = context.sm.resolve("${contract_employment[%d,company]}" % row)
+
+     try:
+        maincat[cbi_rank2main[context.sm.resolve("${contract_employment[%d,crewrank]}" % row)]] = ""
+     except:
+        pass
+  vc_filter += "(|(base=%s) (base=NULL))" % base
+  vc_filter += "(|(company=%s)(company=NULL))" % company
+  vc_filter += "(|(maincat=NULL)%s)" % ''.join(["(maincat=%s)" % k for k in maincat])
+
+context.action('setFilter', 'valid_contracts', vc_filter+")")
+]]></action>
+
+<!-- Run a report and return actions (openURL) -->
+
+<action name="run_report" args="report,format,args"><![CDATA[
+args = args.split(',')
+context.action('model', 'run_report', '${connection.properties[modelserver.url, value]}', report, format, *args)
+]]></action>
+
+<!-- Open document in web browser -->
+
+<action name="show_document" args="path"><![CDATA[
+context.action('model', 'show_document', '${connection.properties[modelserver.url, value]}', path)
+]]></action>
+
+<action name="show_audit_trail" args=""><![CDATA[
+context.action('setValue', 'warn_yes', 'false')
+context.action('openForm', 'form_datepicker.xml', 'modal',
+               "title=Select Period for Audit Trail",
+               "msg=<B>Please enter times when change introduced!</B>" ,
+               "ok_action=parent.setValue(warn_yes,true)")
+if context.sm.resolve("${warn_yes}") == "true":
+  context.action('run_report',
+                 "report_sources.hidden.CrewInfoAuditTrailReport",
+		 "PDF",
+		 "crewid=${tmp_cbi_crew_summary[0,crewid]},period_start=${period_start_view[0,abs_v]},period_end=${period_end_view[0,abs_v]}")
+]]></action>
+
+</head>
+
+<!-- Top menu -->
+
+<menu-bar>
+  <menu label="File">
+    <menu-item ref="refresh_button"/>
+    <menu-item ref="save_button"/>
+    <menu-item label="Errors...">
+      <on-click>openForm("crew_info_errors.xml",frame)</on-click>
+    </menu-item>
+    <menu-item label="Audit Trail..." filter.enabled="(!(${tmp_cbi_crew_summary[0,crewid]}=[[NULL]]))">
+      <on-click>
+	show_audit_trail();
+      </on-click>
+    </menu-item>
+    <menu-item ref="exit_button"/>
+  </menu>
+  
+  <menu label="Help">
+    <menu-item label="Help" accelerator="F1">
+      <on-click>
+        show_document("data/doc/CrewInfo.pdf");
+      </on-click>
+    </menu-item>  
+  </menu>
+</menu-bar>
+
+<!-- Helpers (hidden) -->
+
+<hbox visible="false">
+  <table-cell id="app_role" source="tmp_cbi_form_info" row="0" column="user_role"/>
+  <table-cell id="app_access" source="cms_views_crewinfo" row="0" column="cms_view_acl"/>
+  <check-box id="warn_yes" value="false"/>
+  <text-field id="crew_to_refresh"/>
+</hbox>
+
+<!-- Main layout area -->
+
+<box style.orientation="border" style.width="1200" style.height="800" style.border="empty">
+  <box style.constraints="North" style.orientation="border" style.width="300" style.border="empty">
+
+    <!-- Crew Selection and Time Filter boxes -->
+    
+    <box style.constraints="West" style.border="empty" style.orientation="border">
+      <vbox label="Select Crew" style.constraints="North">
+        <text-field id="crew_select" label="Crew Emp No:">
+          <on-changed>get_crew_data()</on-changed>
+        </text-field>
+        <button label="Get _I_nformation" filter.enabled="(!(crew_select=[[NULL| *]]))">
+          <on-click>get_crew_data()</on-click>
+        </button>
+      </vbox>
+      <vbox label="Time Setting" style.constraints="South">
+        <table-cell id="form_time" label="From Time" editable="true"
+                    source="tmp_cbi_form_info" row="0" column="time">
+          <on-changed>
+            model("submit_trans");
+            setup_table_view_filters();
+          </on-changed>
+        </table-cell>
+        <hbox>
+          <check-box label="Use 'From Time' as Filter" id="filter_enabled" value="true">
+            <on-changed>setup_table_view_filters()</on-changed>
+          </check-box>
+        </hbox>
+        <!--<text value="" style.height="20"/>  Adjust height of this box, so the summary fits... -->
+      </vbox> 
+    </box>
+    
+    <!-- Crew Summary box -->
+    
+    <hbox label="Crew Summary" style.constraints="Center"
+          filter.visible="(|(app_role=Administrator)(app_access=6)(app_access=4))">
+      <custom>
+        <template id="cs_cell" source="tmp_cbi_crew_summary" row="0"
+                  style.left="85" editable="false"/>
+      </custom>
+      <vbox style.border="empty">
+        <table-cell ref="cs_cell" column="id"         label="Emp. No:"      />
+        <table-cell ref="cs_cell" column="name"       label="Name:"         />
+        <table-cell ref="cs_cell" column="surname"    label="Surname:"      />
+        <table-cell ref="cs_cell" column="forename"   label="First Names:"  />
+        <table-cell ref="cs_cell" column="ph_primary" label="Phone 1:"   />
+        <table-cell ref="cs_cell" column="ph_secondary" label="Phone 2:"   />
+        <table-cell ref="cs_cell" column="gender"     label="Gender:"       />
+      </vbox>                     
+      <vbox style.border="empty"> 
+        <table-cell ref="cs_cell" column="rank"       label="Rank:"         />
+        <table-cell ref="cs_cell" column="seniority"  label="Seniority:"    />
+        <table-cell ref="cs_cell" column="base"       label="Base:"         />
+        <table-cell ref="cs_cell" column="station"    label="Station:"      />
+        <table-cell ref="cs_cell" column="pg_desc"    label="Planning Group:" />
+        <table-cell ref="cs_cell" column="acqual"     label="A/C Qual:"     />
+        <table-cell ref="cs_cell" column="retday"     label="Retirement:"   />
+      </vbox>                     
+      <vbox style.border="empty"> 
+        <table-cell ref="cs_cell" column="contract"   label="Contract:"
+                    id="cs_col3"  style.left="100"/>
+        <!--table-cell ref="cs_col3" column="bxmodule"   label=" Module:"         />-->
+        <table-cell ref="cs_col3" column="cyclestart" label=" Cycle Start:"     />
+        <table-cell ref="cs_col3" column="pattern"    label=" Pattern:"         />
+        <table-cell ref="cs_col3" column="grouptype"  label=" Group Type:"      />
+        <!--table-cell ref="cs_col3" column="laborunion" label=" Labour Union:"   /-->
+        <table-cell ref="cs_col3" column="birthday"   label="Date of Birth:"    />
+        <table-cell ref="cs_col3" column="bcity"      label=" City of Birth:"   />
+        <table-cell ref="cs_col3" column="bcountry"   label=" Country of Birth:"/>
+      </vbox>
+    </hbox>
+  </box>
+  
+  <!-- Tabbed View -->
+  
+  <tabbed-box id="tabbed_view" style.constraints="Center" style.border="empty"
+              filter.visible="(|(app_role=Administrator)(app_access=6)(app_access=4))">
+  
+    <!-- Tab: Address info -->
+    
+    <box id="tmp_cbi_crew_address" label="Address" style.orientation="border">
+      <box style.constraints="Center">
+        <table id="address_list" source="tmp_cbi_crew_address"
+            columns="validfrom,validto,street,city,state,postalcode,country,
+                     street1,city1,state1,postalcode1,country1,si"
+            sort.column="validfrom" sort.ascending="false" 
+            filter.visible="(|(app_role=Administrator)(app_access=6)(app_access=4))"
+            editable="false"
+            style.border="line" style.border.width="1" style.border.color="grayLight" style.height="9999">
+          <columninfo column="validfrom" label="Valid From"
+              tooltip="Start date of the validity period of the address."/>
+          <columninfo column="validto" label="Valid To"
+              tooltip="End date of the validity period for the address."/>
+          <columninfo column="street" label="Street"
+              tooltip="The street name of the first address."/>    
+          <columninfo column="city" label="City"
+              tooltip="The city name of the first address."/>
+          <columninfo column="state" label="State"
+              tooltip="The state name of the first address."/>
+          <columninfo column="postalcode" label="Postal Code"
+              tooltip="The postal code of the first address."/>
+          <columninfo column="country" label="Country"
+              tooltip="The country name of the second address."/>
+          <columninfo column="street1" label="Second Street"
+              tooltip="The street name of the second address."/>    
+          <columninfo column="city1" label="Second City"
+              tooltip="The city name of the second address."/>
+          <columninfo column="state1" label="Second State"
+              tooltip="The state name of the second address."/>
+          <columninfo column="postalcode1" label="Second Postal Code"
+              tooltip="The postal code of the second address."/>
+          <columninfo column="country1" label="Second Country"
+              tooltip="The country name of the second address."/>
+          <columninfo column="si" label="SI"
+              tooltip="Supplementary information."/>
+        </table>
+      </box>
+    </box>
+  
+    <!-- Tab: Contact Info -->
+    
+    <box id="tmp_cbi_crew_contact" label="Contact" style.orientation="border">
+      <box style.constraints="Center">
+        <table id="contact_list" source="tmp_cbi_crew_contact" 
+            columns="typ,which,val,si" 
+            filter.visible="(|(app_role=Administrator)(app_access=6)(app_access=4))"
+            editable="false"
+            style.border="line" style.border.width="1" style.border.color="grayLight" style.height="9999">
+          <columninfo column="typ" label="Type"
+              tooltip="The type of contact i.e. telephone number, mobile phone number, e-mail address, pager number and so on."/>
+          <columninfo column="which" label="Location"
+              tooltip="A description of the expected location of the contact, i.e. home, work or similar."/>
+          <columninfo column="val" label="Number"
+              tooltip="The contact number/address."/>
+          <columninfo column="si" label="SI"
+              tooltip="Supplementary information."/>
+        </table>
+      </box>
+    </box>
+
+    <!-- Tab: Contract Info -->
+    
+    <box id="tmp_cbi_crew_contract" label="Contract" style.orientation="border">
+      <box style.constraints="Center">
+        <table id="contract_list" source="tmp_cbi_crew_contract" 
+            columns="validfrom,validto,contract,cyclestart,endreason,si" 
+            sort.column="validfrom" sort.ascending="false"
+            filter.visible="(|(app_role=Administrator)(app_access=6)(app_access=4))"
+            style.border="line" style.border.width="1" style.border.color="grayLight" style.height="9999">
+          <columninfo column="validfrom" label="Valid From"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="Start date of the validity period for the contract."/>
+          <columninfo column="validto" label="Valid To"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="End date of the validity period for the contract."/>
+          <columninfo column="contract" label="Contract"
+              width="200"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              column.view="valid_contracts"
+              style.display.column="${contract.id} (${contract.descshort},${contract.agmtgroup})"
+              tooltip="A short description of the contract."/>
+          <columninfo column="cyclestart" label="Cycle Start"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The start day of a F-contract cycle."/>
+          <columninfo column="endreason" label="End Reason"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The reason the contract was ended."/>
+          <columninfo column="si" label="SI"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="Supplementary information. "/>
+          <on-changed>
+            model("cbi_show_details", "tmp_cbi_crew_contract", "${contract_list[contract]}");
+            refreshClient();
+            setup_contract_filters();
+          </on-changed>
+          <on-selection-changed>
+            model("cbi_show_details", "tmp_cbi_crew_contract", "${contract_list[contract]}");
+            refreshClient();
+            setup_contract_filters();
+          </on-selection-changed>
+        </table>
+      </box>
+      <vbox style.constraints="South">
+        <hbox label="Details">
+          <vbox style.border="empty" style.width="200">
+            <table-cell label="Contract:" source="tmp_cbi_crew_contract_details" row="0"
+                        column="id" style.left="90" editable="false"
+                        tooltip="The contract name of the selected row."/>
+            <table-cell label="Duty Percent:" source="tmp_cbi_crew_contract_details" row="0"
+                        column="dutypercent" style.left="90" editable="false"
+                        tooltip="The contract percentile."/>
+            <table-cell label="Pattern:" source="tmp_cbi_crew_contract_details" row="0" 
+                        column="pattern" style.left="90" editable="false"
+                        tooltip="A reference to the pattern list"/>
+          </vbox>
+          <text value="   "/>
+          <vbox style.border="empty" style.width="300">
+            <table-cell label="Short Desc:" source="tmp_cbi_crew_contract_details" row="0"
+                        column="descshort" style.left="100" editable="false"
+                        tooltip="A short description of the contract."/>
+            <table-cell label="Group:" source="tmp_cbi_crew_contract_details" row="0"
+                        column="grouptype" style.left="100" editable="false"
+                        tooltip="An indicator of contract type: V or F."/>
+            <table-cell label="Agmt Group:" source="tmp_cbi_crew_contract_details" row="0"
+                        column="agmtgroupdesc" style.left="100" editable="false"
+                        tooltip="Agreement group"/>
+          </vbox>
+          <text value="   "/>
+          <vbox style.border="empty" style.width="225">
+            <table-cell label="Module:" source="tmp_cbi_crew_contract_details" row="0"
+                        column="bxmodule" style.left="90" editable="false"/>
+            <table-cell label="Labour Union:" source="tmp_cbi_crew_contract_details" row="0"
+                        column="laborunion" style.left="90" editable="false"/>
+            <table-cell label="VA Days SUMMER:" source="tmp_cbi_crew_contract_details" row="0"
+                        column="noofvadays" style.left="115" editable="false"
+                        tooltip="The max number of vacation days in summer associated with contract."/>
+          </vbox>
+        </hbox>
+        <hbox filter.visible="(|(app_role=Administrator)(app_access=6))">
+          <button label="Crea_t_e" style.width="75">
+            <on-click>create_new_row("contract_list")</on-click> 
+          </button>
+          <button label="Remo_v_e" style.width="75" filter.enabled="(!(${contract_list}=NULL))">
+            <on-click>remove_selected_rows("contract_list")</on-click>
+          </button>
+        </hbox>
+      </vbox>
+    </box>
+  
+    <box id="tmp_cbi_crew_document" label="Document" style.orientation="border">
+      <box style.constraints="Center">
+        <table id="document_list" source="tmp_cbi_crew_document" 
+            columns="validfrom, validto, doc, maindocno, docno_masked, ac_qual, issuer, si"
+            sort.column="validfrom" sort.ascending="false"
+            filter.visible="(|(app_role=Administrator)(app_access=6)(app_access=4))"
+            style.border="line" style.border.width="1" style.border.color="grayLight" style.height="9999">
+          <columninfo column="validfrom" label="Valid From"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="Start date of the validity period for the document."/>
+          <columninfo column="validto" label="Valid To"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="End date of the validity period for the document."/>
+          <columninfo column="doc" label="Document"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The type of document."/>
+          <columninfo column="maindocno" label="Main Document Number"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="If the document type is dependant on another document, this document number is provided."/>
+          <columninfo column="docno_masked" label="Document Number"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The number of this document."/>
+          <columninfo column="ac_qual" label="Aircraft Qual"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="Aircraft qual connected to e.g. REC+PGT "/>
+          <columninfo column="issuer" label="Issuer"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The authority that issued the document."/>
+          <columninfo column="si" label="SI"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="Supplementary information. "/>
+        </table>
+      </box>
+  
+      <vbox style.constraints="South">
+        <hbox>
+          <vbox label="Document Filter" style.width="250">
+            <table-column id="document" style.left="0" editable="true"
+                        source="crew_document_set" column="typ">
+              <on-changed>setup_table_view_filters()</on-changed>
+            </table-column>
+            <check-box id="doc_filter" label="Filter Enabled">
+              <on-changed>
+                setup_table_view_filters();
+              </on-changed>
+            </check-box>
+          </vbox>
+          <box/>
+        </hbox>
+        <hbox filter.visible="(|(app_role=Administrator)(app_access=6))">
+          <button label="Crea_t_e" style.width="75"
+                  filter.enabled="(!(${tmp_cbi_crew_summary[0,crewid]}=[[NULL| *]]))">
+            <on-click>create_new_row("document_list")</on-click> 
+          </button>
+          <button label="Remo_v_e" style.width="75" filter.enabled="(!(${document_list}=NULL))">
+            <on-click>remove_selected_rows("document_list")</on-click>
+          </button>
+        </hbox>
+      </vbox>
+    </box>
+    
+    <!-- Tab: Employment Info -->
+    
+    <box id="tmp_cbi_crew_employment" label="Employment" style.orientation="border">
+      <box style.constraints="Center"> 
+        <table id="employment_list" source="tmp_cbi_crew_employment" 
+            columns="validfrom,validto,carrier,company,base,country,titlerank,
+                     crewrank,planning_group,region,civicstation, station,extperkey,si"
+            sort.column="validfrom" sort.ascending="false"
+            filter.visible="(|(app_role=Administrator)(app_access=6)(app_access=4))"
+            style.border="line" style.border.width="1" style.border.color="grayLight" style.height="9999">
+          <columninfo column="validfrom" label="Valid From"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="Start date of the validity period for the employment."/>
+          <columninfo column="validto" label="Valid To"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="End date of the validity period for the employment."/>
+          <columninfo column="carrier" label="Carrier"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The carrier the crew works for."/>
+          <columninfo column="company" label="Company"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The employment company."/>
+          <columninfo column="base" label="Base"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The employment base."/>
+          <columninfo column="country" label="Employ. Country"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The employment country."/>
+          <columninfo column="titlerank" label="Title Rank"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The rank the crew is employed as."/>
+          <columninfo column="crewrank" label="Crew Rank"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The rank of the crew."/>
+          <columninfo column="planning_group" label="Plannning Group"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The planning group the crew currently belongs to."/>
+          <columninfo column="region" label="Region"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The region the crew currently belongs to."/>
+          <columninfo column="civicstation" label="Civic Station" column.view="valid_civicstations"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The civic station the crew is currently operating from."/>
+          <columninfo column="station" label="Station" column.view="valid_stations"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The station the crew is currently operating from."/>
+          <columninfo column="extperkey" label="External Perkey"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The employment number of the crew."/>
+          <columninfo column="si" label="SI"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="Supplementary information. "/>
+          <on-changed>
+            setFilter("valid_stations","(validto>${employment_list[validfrom]})");
+            setFilter("valid_civicstations","(validto>${employment_list[validfrom]})");
+            setup_contract_filters();
+          </on-changed>
+          <on-selection-changed>
+            setFilter("valid_stations","(validto>${employment_list[validfrom]})");
+            setFilter("valid_civicstations","(validto>${employment_list[validfrom]})");
+          </on-selection-changed>
+        </table>
+      </box>
+  
+      <box style.constraints="South"> 
+        <hbox filter.visible="(|(app_role=Administrator)(app_access=6))">
+          <button label="Crea_t_e" style.width="75"
+                  filter.enabled="(!(${tmp_cbi_crew_summary[0,crewid]}=[[NULL| *]]))">
+            <on-click>
+              model("submit_trans"); <!-- Creation depends on existing rows -->
+              create_new_row("employment_list"); 
+            </on-click> 
+          </button>
+          <button label="Remo_v_e" style.width="75" filter.enabled="(!(${employment_list}=NULL))">
+            <on-click>remove_selected_rows("employment_list")</on-click>
+          </button>
+        </hbox>
+      </box>
+    </box>
+  
+    <!-- Tab: Profile -->
+    
+    <box id="tmp_cbi_crew_profile" label="Profile" style.orientation="border">
+      <box style.constraints="Center">
+        <!-- XXX columns="start_date,title_rank,crew_rank,qual_1,qual_2,rest_1,rest_2,qual_3,qual_4,last_flown_1,last_flown_fam_1,last_flown_2,last_flown_fam_2,contract,grouptype,cyclestart,station,base" -->
+        <table id="crew_profile" source="tmp_cbi_crew_profile" 
+               columns="start_date,title_rank,crew_rank,qual_1,qual_2,qual_3,qual_4,rest_1,rest_2,agmtgroup,contract,grouptype,cyclestart,station,base,planning_group,region"
+               sort.column="start_date"
+               sort.ascending="false"
+               filter.visible="(|(app_role=Administrator)(app_access=6)(app_access=4))"
+               editable="false"
+               style.border="line" style.border.width="1" style.border.color="grayLight" style.height="9999">
+          <columninfo column="start_date" label="Start Date" width="100"
+              tooltip="Start date of the property row"/>
+          <columninfo column="title_rank" label="Title Rank" width="80"
+              tooltip="Title Rank from Crew Employment"/>
+          <columninfo column="crew_rank" label="Crew Rank" width="80"
+              tooltip="Crew Rank from Crew Employment"/>
+          <columninfo column="qual_1" label="Q1"
+              tooltip="Valid Qualifications"/>
+          <columninfo column="qual_2" label="Q2"
+              tooltip="Valid Qualifications"/>
+          <columninfo column="qual_3" label="Q3"
+              tooltip="Valid Qualifications"/>
+          <columninfo column="qual_4" label="Q4"
+              tooltip="Valid Qualifications"/>
+          <columninfo column="rest_1" label="Restr. 1"
+              tooltip="Crew Restrictions"/>
+          <columninfo column="rest_2" label="Restr. 2"
+              tooltip="Crew Restrictions"/>
+          <columninfo column="agmtgroup" label="Agreement Group" width="250"
+              tooltip="Agreement Group, from contract"/>
+          <columninfo column="contract" label="Contract" width="150"
+              tooltip="Crew Contract"/>
+          <columninfo column="grouptype" label="Group Type"
+              tooltip="Contract Group Type"/>
+          <columninfo column="cyclestart" label="Cycle Start"
+              tooltip="Contract Cycle Start"/>
+          <columninfo column="station" label="Station"
+              tooltip="Station from Crew Employment"/>
+          <columninfo column="base" label="Base"
+              tooltip="Base from Crew Employment"/>
+          <columninfo column="planning_group" label="Planning Group"
+              tooltip="Planning group from Crew Employment"/>
+          <columninfo column="region" label="Region"
+              tooltip="Region"/>
+        </table>
+      </box>
+      <hbox style.constraints="South">
+        <table-cell id="modelserver.url" editable="false" visible="false" source="connection.properties" row="modelserver.url" column="value"/>
+        <button label="Print" 
+                id="print_button"
+                filter.visible="(|(app_role=Administrator)(app_access=6)(app_access=4))"
+                filter.enabled="(${tmp_cbi_form_info[0,status_color]}=transparent)"
+                style.width="75">
+          <on-click>
+            progress(true);
+            model("submit_trans");
+	    run_report("report_sources.hidden.CrewProfile", "PDF", "CREWID=${tmp_cbi_crew_summary[0, crewid]}");
+            show_status();
+            progress(false);
+          </on-click> 
+        </button>
+      </hbox>
+    </box>
+  
+    <!-- Tab: Prohibited Info -->
+    
+    <box id="tmp_cbi_crew_not_fly_with" label="Prohibited" style.orientation="border">
+      <box style.constraints="Center">
+        <table id="prohibited_list" source="tmp_cbi_crew_not_fly_with" 
+            columns="validfrom,validto,crew2,si"
+            sort.column="validfrom" sort.ascending="false"
+            filter.visible="(|(app_role=Administrator)(app_access=6)(app_access=4))"
+            style.border="line" style.border.width="1" style.border.color="grayLight" style.height="9999">
+          <columninfo column="validfrom" label="Valid From"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="Start date of the validity period for the prohibition."/>
+          <columninfo column="validto" label="Valid To"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="End date of the validity period for the prohibition."/>
+          <columninfo column="crew2" label="Emp. No." style.display.column="extperkey"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="Employment number of the crew who is prohibited to fly with the crew displayed in the crew information application."/>
+          <columninfo column="si" label="SI"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="Supplementary information. "/>
+          <on-changed>
+            model("cbi_show_details", "tmp_cbi_crew_not_fly_with", "${prohibited_list[crew2]}");
+            refreshClient();
+          </on-changed>
+          <on-selection-changed>
+            model("cbi_show_details", "tmp_cbi_crew_not_fly_with", "${prohibited_list[crew2]}");
+            refreshClient();
+          </on-selection-changed>
+        </table>
+      </box>
+  
+      <vbox style.constraints="South">
+        <vbox label="Details">
+          <table-cell source="tmp_cbi_prohibited_details" column="id" row="0"
+                      label="Emp. No:" style.left="70" editable="false" value=" "
+		              tooltip="Employment number of crew, and crew id in brackets."/>
+          <table-cell source="tmp_cbi_prohibited_details" column="name" row="0" 
+                      label="Name:" style.left="70" editable="false" value=" "
+		              tooltip="Name of the crew."/>
+        </vbox>
+        
+        <hbox filter.visible="(|(app_role=Administrator)(app_access=6))">
+          <button label="Crea_t_e" style.width="75"
+                  filter.enabled="(!(${tmp_cbi_crew_summary[0,crewid]}=[[NULL| *]]))">
+            <on-click>create_new_row("prohibited_list")</on-click> 
+          </button>
+          <button label="Remo_v_e" style.width="75" filter.enabled="(!(${prohibited_list}=NULL))">
+            <on-click>remove_selected_rows("prohibited_list")</on-click>
+          </button>
+        </hbox>
+      </vbox>
+    </box>
+  
+    <!-- Tab: Qualification Info -->
+    
+    <box id="tmp_cbi_crew_qualification" label="Qualification" style.orientation="border">
+      <vbox style.constraints="Center">
+        <box label="Crew Qualifications" style.orientation="border" style.collapse="true">
+          <box style.constraints="Center">
+            <table id="qualification_list" source="tmp_cbi_crew_qualification" 
+                columns="validfrom,validto,qual,si"
+                sort.column="validfrom" sort.ascending="false"
+                filter.visible="(|(app_role=Administrator)(app_access=6)(app_access=4))"
+                style.border="line" style.border.width="1" style.border.color="grayLight" style.height="9999">
+              <columninfo column="validfrom" label="Valid From"
+                  filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+                  tooltip="Start date of the validity period for the qualification."/>
+              <columninfo column="validto" label="Valid To"
+                  filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+                  tooltip="End date of the validity period for the qualification."/>
+              <columninfo column="qual" label="Qualification"
+                  filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+                  column.view="filtered_quals"
+                  tooltip="The type of qualification."/>
+              <columninfo column="si" label="SI"
+                  filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+                  tooltip="Supplementary information"/>
+              <on-changed>
+                setup_qual_filter()
+                setup_limited_qual_filter()
+              </on-changed>
+            </table>
+          </box>
+          <hbox style.constraints="South"
+                filter.visible="(|(app_role=Administrator)(app_access=6))">
+            <button label="Crea_t_e Qualification"
+                    filter.enabled="(!(${tmp_cbi_crew_summary[0,crewid]}=[[NULL| *]]))">
+              <on-click>create_new_row("qualification_list")</on-click> 
+            </button>
+            <button label="Remo_v_e Qualification" filter.enabled="(!(${qualification_list}=NULL))">
+              <on-click>
+                remove_selected_rows("qualification_list");
+                setup_qual_filter()
+                setup_limited_qual_filter()
+              </on-click>
+            </button>
+          </hbox>
+        </box>
+        <box label="Limited Qualifications" style.orientation="border" style.collapse="true">
+          <box style.constraints="Center">
+            <table id="qual_acqual_list" source="tmp_cbi_crew_qual_acqual" 
+                columns="validfrom,validto,acqqual,qual,si"
+                sort.column="validfrom" sort.ascending="false"
+                filter.visible="(|(app_role=Administrator)(app_access=6)(app_access=4))"
+                style.border="line" style.border.width="1" style.border.color="grayLight" 
+                style.height="9999">
+              <columninfo column="validfrom" label="Valid From"
+                  filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+		              tooltip="Start date of the validity period for the qualification."/>
+              <columninfo column="validto" label="Valid To"
+                  filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+                  tooltip="End date of the validity period for the qualification."/>
+              <columninfo column="acqqual" label="Qualification"
+                  filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+    		          tooltip="The type of qualification."/> 
+              <columninfo column="qual" label="Limitation"
+                  filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+                  column.view="valid_quals"
+		              tooltip="The (ac) qualification for which the qualification applies."/>
+              <columninfo column="si" label="SI"
+                  filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+		              tooltip="Supplementary information"/>
+            </table>
+          </box>
+          <hbox style.constraints="South"
+                filter.visible="(|(app_role=Administrator)(app_access=6))">
+            <button label="Create _L_imited Qualification"
+                    filter.enabled="(!(${tmp_cbi_crew_summary[0,crewid]}=[[NULL| *]]))">
+              <on-click>create_new_row("qual_acqual_list")</on-click> 
+            </button>
+            <button label="Remove Li_m_ited Qualification" filter.enabled="(!(${qual_acqual_list}=NULL))">
+              <on-click>remove_selected_rows("qual_acqual_list")</on-click>
+            </button>
+          </hbox>
+        </box>
+        <box label="Qualification Restrictions" style.orientation="border" style.collapse="true">
+          <box style.constraints="Center">
+            <table id="restr_acqual_list" source="tmp_cbi_crew_restr_acqual" 
+                columns="validfrom,validto,acqrestr,qual,si"
+                sort.column="validfrom" sort.ascending="false"
+                filter.visible="(|(app_role=Administrator)(app_access=6)(app_access=4))"
+                style.border="line" style.border.width="1" style.border.color="grayLight" style.height="9999">
+              <columninfo column="validfrom" label="Valid From"
+                  filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+		              tooltip="Start date of the validity period for the qualification."/>
+              <columninfo column="validto" label="Valid To"
+                  filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+		              tooltip="End date of the validity period for the qualification."/>
+              <columninfo column="acqrestr" label="Restriction"
+                  filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+		              tooltip="The type of restriction."/>
+              <columninfo column="qual" label="Qualification"
+                  filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+                  column.view="valid_quals"
+		  tooltip="The (ac) qualification for which the restriction applies."/>
+              <columninfo column="si" label="SI"
+                  filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+		              tooltip="Supplementary information"/>
+            </table>
+          </box>
+          <hbox style.constraints="South"
+                filter.visible="(|(app_role=Administrator)(app_access=6))">
+            <button label="Create _Q_ualification Restriction"
+                    filter.enabled="(!(${tmp_cbi_crew_summary[0,crewid]}=[[NULL| *]]))">
+              <on-click>create_new_row("restr_acqual_list")</on-click> 
+            </button>
+            <button label="Remove Q_u_alification Restriction" filter.enabled="(!(${restr_acqual_list}=NULL))">
+              <on-click>remove_selected_rows("restr_acqual_list")</on-click>
+            </button>
+          </hbox>
+        </box>
+      </vbox>
+      <vbox style.constraints="South">
+        <hbox>
+          <vbox label="Qualification Filter" style.width="250">
+            <table-column id="qualification" style.left="0" editable="true"
+                          source="crew_qualification_set" column="typ">
+              <on-changed>setup_table_view_filters()</on-changed>
+            </table-column>
+            <check-box id="qual_filter" label="Filter Enabled">
+              <on-changed>setup_table_view_filters() </on-changed>
+            </check-box>
+          </vbox>
+        </hbox>
+      </vbox>
+    </box>
+  
+    <!-- Tab: Restriction Info -->
+  
+    <box id="tmp_cbi_crew_restriction" label="Restriction" style.orientation="border">
+      <box style.constraints="Center">
+        <table id="restriction_list" source="tmp_cbi_crew_restriction" 
+            columns="validfrom,validto,rest, si"
+            sort.column="validfrom" sort.ascending="false"
+            filter.visible="(|(app_role=Administrator)(app_access=6)(app_access=4))"
+            style.border="line" style.border.width="1" style.border.color="grayLight" style.height="9999">
+          <columninfo column="validfrom" label="Valid From"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="Start date of the validity period for the restriction."/>
+          <columninfo column="validto" label="Valid To"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="End date of the validity period for the restriction."/>
+          <columninfo column="rest" label="Restriction"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The type of restriction."/>
+          <columninfo column="si" label="SI"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="Supplementary information"/>
+          <on-changed>
+            model("cbi_show_details", "tmp_cbi_crew_restriction", "${restriction_list[rest]}");
+            refreshClient();
+          </on-changed>
+          <on-selection-changed>
+            model("cbi_show_details", "tmp_cbi_crew_restriction", "${restriction_list[rest]}");
+            refreshClient();
+          </on-selection-changed>
+        </table>
+      </box>
+  
+      <vbox style.constraints="South">
+        <hbox style.border="empty">
+          <vbox label="Restriction Filter" style.width="250">
+            <table-column id="restriction" style.left="0" editable="true"
+                          source="crew_restriction_set" column="typ">
+              <on-changed>setup_table_view_filters()</on-changed>
+            </table-column>
+            <check-box id="res_filter" label="Filter Enabled">
+              <on-changed>setup_table_view_filters()</on-changed>
+            </check-box>
+          </vbox>
+          <box/>
+          <hbox label="Details">
+            <vbox style.width="200">
+              <table-cell label="Type:" source="tmp_cbi_restriction_details" 
+                          row="0" column="typ" editable="false" style.left="60"
+		                  tooltip="The restriction type."/>
+              <table-cell label="Subtype:" source="tmp_cbi_restriction_details" 
+                          row="0" column="subtype" editable="false" style.left="60"
+		                  tooltip="The restriction sub type."/>
+            </vbox>
+            <text value="   "/>
+            <vbox style.width="300">
+              <table-cell label="Short Desc:" source="tmp_cbi_restriction_details" 
+                          row="0" column="descshort" editable="false" style.left="70"
+		                  tooltip="A short description of the restriction."/>
+              <table-cell label="Long Desc:" source="tmp_cbi_restriction_details" 
+                          row="0" column="desclong" editable="false" style.left="70"
+		                  tooltip="A long description of the restriction."/>
+              <table-cell label="SI:" source="tmp_cbi_restriction_details"
+                          row="0" column="si" editable="false" style.left="70"
+		                  tooltip="Supplementary information"/>
+            </vbox>
+          </hbox>
+        </hbox>
+        
+        <hbox filter.visible="(|(app_role=Administrator)(app_access=6))">
+          <button label="Crea_t_e" style.width="75"
+                  filter.enabled="(!(${tmp_cbi_crew_summary[0,crewid]}=[[NULL| *]]))">
+            <on-click>create_new_row("restriction_list")</on-click> 
+          </button>
+          <button label="Remo_v_e" style.width="75" filter.enabled="(!(${restriction_list}=NULL))">
+            <on-click>remove_selected_rows("restriction_list")</on-click>
+          </button>
+        </hbox>
+      </vbox>
+    </box>
+  
+    <!-- Tab: Seniority Info -->
+    
+    <box id="tmp_cbi_crew_seniority" label="Seniority" style.orientation="border">
+      <box style.constraints="Center">
+        <table id="seniority_list" source="tmp_cbi_crew_seniority" 
+            columns="validfrom,validto,grp,seniority,si"
+            sort.column="validfrom" sort.ascending="false"
+            filter.visible="(|(app_role=Administrator)(app_access=6)(app_access=4))"
+            style.border="line" style.border.width="1" style.border.color="grayLight" style.height="9999">
+          <columninfo column="validfrom" label="Valid From"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="Start date of the validity period for the seniority."/>
+          <columninfo column="validto" label="Valid To"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="End date of the validity period for the seniority."/>
+          <columninfo column="grp" label="Seniority List"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The seniority list/group the seniority value belongs to."/>
+          <columninfo column="seniority" label="Seniority"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The seniority value."/>
+          <columninfo column="si" label="SI"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="Supplementary information"/>
+        </table>
+      </box>
+  
+      <vbox style.constraints="South">
+        <hbox>
+          <vbox label="Seniority Filter" style.width="250">
+            <table-column id="seniority" style.left="0" editable="true" 
+                        source="crew_sen_grp_set" column="id">
+              <on-changed>setup_table_view_filters()</on-changed>
+            </table-column>
+            <check-box id="sen_filter" label="Filter Enabled">
+              <on-changed>setup_table_view_filters()</on-changed>
+            </check-box>
+          </vbox>
+        </hbox>
+        <hbox filter.visible="(|(app_role=Administrator)(app_access=6))">
+          <button label="Crea_t_e" style.width="75"
+                  filter.enabled="(!(${tmp_cbi_crew_summary[0,crewid]}=[[NULL| *]]))">
+            <on-click>create_new_row("seniority_list")</on-click> 
+          </button>
+          <button label="Remo_v_e" style.width="75" filter.enabled="(!(${seniority_list}=NULL))">
+            <on-click>remove_selected_rows("seniority_list")</on-click>
+          </button>
+        </hbox>
+      </vbox>
+    </box>
+  
+    <!-- Tab: Special Schedule Info -->
+    
+    <box id="tmp_cbi_special_schedules" label="Special Schedule" style.orientation="border">
+      <box style.constraints="Center">
+        <table id="spec_sched_list" source="tmp_cbi_special_schedules" 
+            columns="validfrom,validto,typ,str_val,int_from,int_to,time_val,si"
+            sort.column="validfrom" sort.ascending="false"
+            filter.visible="(|(app_role=Administrator)(app_access=6)(app_access=4))"
+            style.border="line" style.border.width="1" style.border.color="grayLight" style.height="9999">
+          <columninfo column="validfrom" label="Valid From"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="Start date of the validity period for the restriction."/>
+          <columninfo column="validto" label="Valid To"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="End date of the validity period for the restriction."/>
+          <columninfo column="typ" label="Type"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="The type of special schedule."/>
+          <columninfo column="str_val" label="Note"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="See Help"/>
+          <columninfo column="int_from" label="From"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="See Help"/>
+          <columninfo column="int_to" label="To"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="See Help"/>
+          <columninfo column="time_val" label="Time"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="See Help"/>
+          <columninfo column="si" label="SI"
+              filter.editable="(|(${app_role}=Administrator)(${app_access}=6))"
+              tooltip="Supplementary information"/>
+        </table>
+      </box>
+      
+      <box style.constraints="South">
+        <hbox filter.visible="(|(app_role=Administrator)(app_access=6))">
+          <button label="Crea_t_e" style.width="75"
+                  filter.enabled="(!(${tmp_cbi_crew_summary[0,crewid]}=[[NULL| *]]))">
+            <on-click>create_new_row("spec_sched_list")</on-click> 
+          </button>
+          <button label="Remo_v_e" style.width="75" filter.enabled="(!(${spec_sched_list}=NULL))">
+            <on-click>remove_selected_rows("spec_sched_list")</on-click>
+          </button>
+        </hbox>
+      </box>
+    </box>
+    
+    <!-- When the tab selection changes -->
+    <on-changed>
+      deselect_all_table_entries();
+      setup_table_view_filters();
+      refresh_tab_contents();
+    </on-changed>
+  </tabbed-box>
+  
+  <!-- Functional buttons and status bar at the bottom -->
+  
+  <vbox style.constraints="South">
+    <hbox>
+      <button id="save_button"
+              style.width="75"
+              label="${tmp_wave_values[save_label,v]}" 
+              filter.visible="(|(app_role=Administrator)(app_access=6))"
+              filter.enabled="(!(${tmp_cbi_crew_summary[0,crewid]}=[[NULL| *]]))">
+        <on-click>save_conditionally()</on-click>
+      </button>
+      
+      <button label="${tmp_wave_values[exit_label,v]}" id="exit_button" style.width="75">
+        <on-click>close_form_conditionally()</on-click>
+      </button>
+      
+      <text value="     "/>
+      
+      <button label="_R_efresh" id="refresh_button" style.width="75"
+              filter.visible="(|(app_role=Administrator)(app_access=6)(app_access=4))"
+              filter.enabled="(!(crew_to_refresh=[[NULL| *]]))">
+        <on-click>
+          setValue("crew_select", "${crew_to_refresh}");
+          get_crew_data();
+        </on-click>
+      </button>
+      <button label="_P_rofile"
+              filter.visible="(|(app_role=Administrator)(app_access=6)(app_access=4))">
+        <on-click>
+          openForm("crew_info_profile.xml", frame);
+        </on-click>
+      </button>
+    </hbox>
+    
+    <box id="statusbox"> 
+      <text-field id="status_bar" value="" editable="false"/>
+    </box>
+  </vbox>
+</box>
+
+</views>
+
+<!-- vim: set ts=2 sw=2 et: -->

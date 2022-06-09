@@ -1,0 +1,662 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module is a GUI only module containing the definitions needed for
+ *   updating the crew training log application. 
+ *
+ *   The activity codes stored are very similar but does not have to be
+ *   identical to the attributes assigned on flights. Therefor an almost
+ *   one-to-one mapping takes place.
+ *
+ * Sections:
+ *   1. The training-log tab with all training activities
+ *   2. The booked / unbooked lookups
+ *   3. Functions needed for automatic extension of airport qualification
+ *   4. Functions needed for automatic extension of recurrent document
+ *
+ * Created by:
+ *   David Hellerstrom, 10Apr2007
+ *
+ * Major changes:
+ *
+ * Note 2016-12-07. Today model_training module has beend created, and could contain much of the basic stuff from this module,
+ * including database access for the table. Modules traing and training_log have become rather messy, some are
+ * available in optimzier but not all for instance (with good reasons, but the structure of the code is difficult).
+ *
+ */
+root module training_log
+
+import fundamental;
+import levels;
+import leg;
+import duty_code;
+import trip;
+import crew;
+import crew_pos;
+import qualification;
+import training;
+import attributes;
+import model_training;
+import parameters;
+import system_db_parameters;
+import base_utils;
+import task;
+
+/****************************************************************
+ * Section 1: Training activities
+ ***************************************************************/
+
+/* ENH: This check should be one a more basic level */
+set lifus_instr_duty_codes = "I", "X", "Z", "ZX";
+set lcp_instr_duty_codes = "B", "BLL", "BU", "Z", "LZ", "LLZ", "UZ", "ZX";
+set lcp_supernum_duty_codes = "BU", "UZ";
+set fam_flt_instr_duty_codes = "C", "CL";
+
+%active_flight_log_type% =
+    /* Flight-training, the default is same log-type as attribute */
+    if leg.%has_training_code% then
+        if leg.%is_fbf% and crew_pos.%lower_rank% then "FBF LCP"
+        else leg.%training_code%
+    else if crew.%is_pilot% and qualification.%restricted_airport_is_extended%(false) and not crew.%is_instructor_leg_start% then
+        "FLIGHT AIRPORT"
+    else if crew.%is_cabin% and leg.%is_new% then
+        "NEW"
+    else if crew.%is_pilot% and crew.%is_instructor_leg_start% and
+            default(training.%leg_instructor_duty_code%, "") in fam_flt_instr_duty_codes then
+	"FLIGHT INSTR"
+    else if crew.%is_pilot% and (not leg.%is_school_flight%) and
+            (crew.%is_instructor_leg_start% or crew.%has_qln_lcp_leg_start%) then
+        /* FD instructors */
+        if  crew.%has_qln_lcp_leg_start% and 
+            (training.%leg_instructor_duty_code% in lcp_instr_duty_codes) then
+            if training.%leg_instructor_duty_code% in lcp_supernum_duty_codes then
+                "LCP SUPERNUM"
+            else
+                "LCP"
+        else if (training.%leg_instructor_duty_code% in lifus_instr_duty_codes) then
+            "LIFUS INSTR"
+        else if default(training.%leg_instructor_duty_code%, "") = "E" then
+            "FLIGHT INSTR"
+        else void_string
+    else if default(training.%leg_instructor_duty_code%, "") <> "" then
+       /* CC and FD instructors in general */
+       "FLIGHT INSTR"
+    /* School flights */
+    else if leg.%is_school_flight% then
+        if crew.%is_instructor_leg_start% then
+            "SCHOOLFLIGHT INSTR"
+        else
+            "SCHOOLFLIGHT"
+    else
+      void_string;
+
+/* Sets containing codes that should be shown in the training log. */
+set fc_course_codes = "TH1", "TH8", "SQ", "EL", "BTLB", "OMA", "OMB", "OMC", "PERF", "WB", "WT", "PWB", "SOP", "AC", "TW", "PD", "FMST", "LRSB";
+set fc_course_ntc17 = "OMA2", "OMA3", "SOP2", "SOP3", "SOP4", "SOP6", "PERF2", "PERF3", "PERF4", "PERF6", "ICB", "ICC", "ICCR", "CCS", "CFU", "TCAM", "LROC", "LROP", "LIFUSB", "ETOPS";
+
+set fc_seminar_codes = "OA7", "OA8", "OA9";
+set apt_sims = "FNC", "LCY", "INN", "HMV", "UAK";
+
+export %ground_log_type% =
+    /* Ground training, Flight Deck */
+    if crew.%is_pilot% then %_ground_log_type_FD%
+    /* Ground training, Cabin */
+    else
+       if system_db_parameters.%new_training_codes_17_CC_valid%(leg.%start_utc%)
+       then %_ground_log_type_cc_new%
+       else %_ground_log_type_cc_old%;
+
+%_ground_log_type_FD% =
+        if %is_first_sim_leg% then
+            if leg.%is_valid_sim% then
+                /* We log one time per simulator duty */
+                if leg.%is_sim_instr_supervis% then
+                    "SIM INSTR SUPERVIS"
+                else if leg.%is_sim_supervis% then
+                    "SIM SUPERVIS"
+                else if leg.%is_sim_instr% then
+                     "SIM INSTR"
+                else if leg.%is_sim_supernum% then
+                     "SIM SUPERNUM"
+                else if leg.%is_sim_assist_landings% then
+                     "SIM ASSIST LANDINGS"
+                else if training.%assigned_as_assist% then
+                     "SIM ASSIST"
+                else if training.%leg_is_pc% or training.%leg_is_opc% then
+                     %_pc_opc_str%
+                else if leg.%is_ast% then
+                     "AST"
+                else if leg.%is_asf% then
+                     "ASF"
+                else if leg.%is_airport_sim% then
+                     "SIM AIRPORT"
+                else if leg.%is_ffs% then
+                     "FFS"
+                else
+                     "SIM"
+            else
+                "SIM"
+        else if leg.%is_crm% then
+           "CRM"
+        else if leg.%is_pgt% then
+             "PGT"
+        else if leg.%is_emg_pgt% then
+             "EMG PGT"
+        else if leg.%code% = "AC" then /* should not interfer with ACx */
+             void_string
+        else if leg.%is_fmst% then
+            "FMST"
+        else if %_is_typ_COURSE_FD% then
+             "COURSE"
+        else if substr(leg.%code%, 1, 3) in fc_seminar_codes then
+            "SEMINAR"
+        else
+             void_string;
+
+%_pc_opc_str% =
+    if system_db_parameters.%new_training_codes_17_FD_valid%(leg.%start_utc%) then
+        if training.%leg_is_pc% and leg.%is_skill_test% then
+            concat("PC ", default(attributes.%leg_training_code%, " VOID"))
+        else if training.%leg_is_pc% then
+            %_leg_training_code_unless_void_or_TESTRUN%("PC")
+        else if training.%leg_is_opc% then
+            %_leg_training_code_unless_void_or_TESTRUN%("OPC")
+        else "problemPC1"
+    else
+        if training.%leg_is_pc% then
+            /* This includes Z (Skill test) */
+            "PC"
+        else if training.%leg_is_opc% then
+            "OPC"
+        else
+            "problemPC2";
+
+%_leg_training_code_unless_void_or_TESTRUN%(string default_value) =
+    if void (attributes.%leg_training_code%) or attributes.%leg_training_code% = "TEST RUN" then
+        default_value
+    else
+        attributes.%leg_training_code%;
+
+%_is_typ_COURSE_FD% =
+   (system_db_parameters.%new_training_codes_17_FD_valid%(leg.%start_utc%) and %leg_typ_COURSE_nct17%)
+   or
+   (leg.%code% in fc_course_codes or substr(leg.%code%, 1, 2) in fc_course_codes);
+
+%leg_typ_COURSE_nct17% = leg.%code% in fc_course_ntc17;
+
+%_ground_log_non_STD_courses% =
+   default(%cabin_course%, %_ground_log_non_STD_courses_new%);
+
+%_ground_log_non_STD_courses_new% =
+   if task.%group%(leg.%code%) = "COD"
+   then "COURSE"
+   else void_string;
+
+%_ground_log_type_cc_new% =
+   if leg.%is_cc_instr_ausc% then "CC INSTR AUSC"
+   else if leg.%is_cc_instr_exam% then "CC INSTR EXAM"
+   else if leg.%is_crm% then "CRM"
+   else if leg.%is_cc_inst_activity_ntc17% then void_string /*CC instructor code should not be logged*/
+   else default(%_ground_log_type_cc_special_old%, %_ground_log_non_STD_courses%);
+
+%_ground_log_type_cc_old% = default(%_ground_log_type_cc_special_old%, %cabin_course%);
+
+%_ground_log_type_cc_special_old% =
+   if training.%leg_is_crb% then
+        "CONVERSION REFRESHER B"
+    else if training.%leg_is_cra% then
+        "CONVERSION REFRESHER A"
+    else if training.%leg_is_recref% then
+        "RECURRENT REFRESHER"
+    else if training.%leg_is_ref% then
+        "REFRESHER"
+    else if training.%leg_is_conv% then
+        "CONVERSION"
+    /* This variable catches wether the REC was of valid type */
+    else if training.%leg_is_cc_rec_web% then
+        "REC"
+    else if leg.%is_cc_rec_cx7% then
+        "REC CX"
+    else if leg.%is_ol123_supervis% then
+        "SUPERVISOR"
+    else if leg.%is_ol123_instr% then
+        "SUPERVISION"
+    else
+        void_string;
+
+/* 20141217 skcms-151 added WD Karin Mattsson HiQ*/
+table cabin_courses =
+    substr(leg.%code%, 1, 2) 
+                    -> %cabin_course%;
+    "TW"            -> "COURSE WEB";
+    "CC"            -> "COURSE SCC";
+    "OK"            -> "COURSE";
+    "CS"            -> "COURSE";
+    "CX"            -> "COURSE";
+    "SQ"            -> "COURSE";
+    "EL"            -> "COURSE";
+    "NG"            -> "COURSE";
+    "WD"            -> "COURSE";
+    "PD"            -> "COURSE";
+    -               -> void_string;
+end
+
+%code_file% = %etab_path%("crew_training_log_codes.etab");
+
+/* This table was added to make it easier to add more training
+   codes to Crew Training. It is checked before all old
+   training code log logic, so codes added in this table will
+   always take precedence. */
+table added_codes =
+    leg.%code% -> String %code_type%;
+    external %code_file%;
+    code -> type;
+    - -> void_string;
+end
+
+%is_first_sim_leg% =
+    leg.%is_simulator% and
+    is_first(leg(duty))
+    where (leg.%is_simulator%);
+  
+/* The second release is the start of the qualification.
+   If they have had the qualification before, then it's a requal. */
+export %leg_is_qual_start% =
+  %is_second_release% and
+  not %has_had_or_had_qual_45_days_ago%;
+export %leg_is_requal_start% =
+  %is_second_release% and
+  %has_had_or_had_qual_45_days_ago%;
+
+%is_second_release% =
+  leg.%is_release% and
+  default(prev(leg(trip),
+               is_first(leg(trip)) where (leg.%is_release%)),
+          false);
+
+/* 45 days is just a number. The qualification is given before the release
+   flight so we need to check a few days back, but we cannot check too far
+   back since they might not have gotten the qualification back then.*/
+%has_had_or_had_qual_45_days_ago% =
+  crew.%last_ac_qln_expiry_date%(leg.%qual%, trip.%start_utc% - 45*24:00) >
+  01Jan1986;
+ 
+export %leg_type% =
+    default(%code_type%,
+    if leg.%is_active_flight% then
+        %active_flight_log_type%
+    else
+        %ground_log_type%);
+
+export %leg_type2% =
+    /* In some cases we log more than one item per leg */
+    if %leg_is_qual_start% then "QUAL START"
+    else if %leg_is_requal_start% then "REQUAL START"
+    /* I don't want to mess with regular logging of RELEASE flights, so for 
+       those valid for airport qualification, we log them twice /EKG 090513 */
+    else if leg.%is_release% and 
+        qualification.%leg_extends_restricted_airport%(false) then "RELEASE AIRPORT"
+    else if (crew.%is_sks% or crew.%is_skd%) and %is_first_sim_leg% and 
+            training.%pc_opc_deadhead% then "SIM DEADHEAD"
+    else if crew.%is_pilot% and qualification.%restricted_airport_is_extended%(false) then
+        "FLIGHT AIRPORT"
+    else void_string;
+        
+export %leg_code% =
+  if leg.%is_flight_duty% then
+    leg.%qual%
+  else
+    default(training.%leg_code_redefined%,leg.%code%);
+
+export %airport_qual_ac_qual_code% =
+  if(leg.%place%(leg.%end_station%) = "US") then
+    "AWB"
+  else
+    %_airport_qual_ac_qual_code%;
+
+export %_airport_qual_ac_qual_code% =
+  let acqual = %leg_code%;
+  if acqual = "A3" or acqual = "A4" or acqual = "A5" then
+    "AWB"
+  else
+    acqual;
+
+export %leg_attr% =
+  if (trip.%is_ground_duty% and
+      training.%trip_is_opc% and
+      crew_pos.%trip_lower_rank%) then 
+     "LOWER"
+  else if leg.%is_fam_flt% then
+      attributes.%assignment_attr_si%("TRAINING")
+  else if training.%leg_is_cabin_training% then
+      training.%leg_is_for_quals%
+  else if leg.%is_cc_rec_web% then
+      training.%rec_quals%
+  else if leg.%is_airport_sim% then
+       leg.%airport_sim%
+  else if qualification.%restricted_airport_is_extended%(true) then
+       leg.%place%(leg.%end_station%)
+  else if leg.%is_release% then
+    leg.%release_attr%
+  else if training.%leg_is_own_sim% and training.%has_acceptable_companion% then
+    training.%acceptable_companion_id%
+  else if leg.%is_ol123_supervis% or leg.%is_ol123_instr% then
+    duty_code.%leg_code%
+  else
+      "";
+
+export %leg_is_valid% = 
+  not void(%leg_type%) and 
+  leg.%start_hb% >= fundamental.%plan_start% and
+  leg.%start_hb% < fundamental.%plan_end% and
+  not leg.%returned_to_ramp%;
+
+ 
+/****************************************************************
+ * Section 3: Functions for airport qualification extension
+              and creation.
+ ***************************************************************/
+%crew_has_leg_extending_airport% =
+    any(leg(roster), %leg_extends_airport_qual% <> "");
+    
+%leg_extends_airport_qual% =
+  if crew.%is_FC_SKN_SKS_SKD_FD_AG% and training.%is_lifus_airport% and not %fc_lower_exception% then
+    default(
+      if not qualification.%leg_already_extended_airport_rank% then
+          qualification.%leg_extending_airport_rank%
+      else void_string, "")
+  else
+    default(
+      if not qualification.%leg_already_extended_airport% then
+          qualification.%leg_extending_airport%
+      else void_string, "");
+  
+%fc_lower_exception% =
+  leg.%arrival_airport_name% = "ALF" and
+  %flight_crew% and
+  crew_pos.%lower_rank% and
+  not crew.%is_SKN%;
+  
+  
+%leg_airport_qual_validfrom% = 
+  default(crew.%airport_qual_validfrom%(%leg_extends_airport_qual%,leg.%start_date%),1jan1986);
+    
+%leg_extends_airport_qual_extension% = 
+    qualification.%extended_qual_date_at_airport%(leg.%end_station%);
+
+%apt_upd_debug% =
+    if %leg_extends_airport_qual% <> "" then
+        concat(%leg_extends_airport_qual%, " extended to ",
+               %expiry_date_inclusive%(%leg_extends_airport_qual_extension%))
+    else "";
+
+/* Creating airport qualification for training flights or A2LR to US
+   Used by airport accumulator */
+export %training_leg_should_create_apt_qual% =
+    crew.%titlerank_at_date%(leg.%end_hb%) = "FC" and
+    (leg.%is_release% or leg.%is_any_lifus% or
+      leg.%qual% = "A2" and leg.%place%(leg.%end_station%) = "US" or
+      crew.%is_FC_SKN_SKS_SKD_FD_AG% and training.%is_lifus_airport% and not %fc_lower_exception%) and
+    qualification.%enough_release_flights%(leg.%end_station%) and
+    qualification.%arr_airport_is_restricted_rank% and
+    qualification.%crew_is_unqualified_for_apt%;
+
+
+/****************************************************************
+ * Section 4: Functions for recurrent document extension
+ ***************************************************************/
+/* Simple variable to find what sort of attribute should be created */
+table rec_leg_values =
+   leg.%is_flight_duty%, leg.%is_ground_duty_leg%, leg.%is_pact% ->
+   %rec_leg_type%, %rec_leg_time%, %rec_leg_code%;
+   true, false, false -> "FD", leg.%udor%, leg.%flight_descriptor%;
+   false, true, false -> "GD", leg.%udor%, leg.%uuid%;
+   false, false, true -> "ACT", leg.%start_utc%, leg.%code%;
+   -, -, -            -> "NONE", 1Jan1986, "NONE";
+end
+
+%crew_has_planned_recurrent%(Abstime date) =
+    default(any(leg(roster), %leg_extends_any_recurrent_doc%(date))
+            where(leg.%end_date% < date), false);
+    
+%crew_has_planned_recurrent_pp_end% =
+    %crew_has_planned_recurrent%(%pp_end%);
+    
+%update_is_done% =
+    if %is_for_temp_licence% then
+        false
+    else  
+        attributes.%assignment_has_attr%("RECURRENT") 
+        or %leg_has_already_extended_expiry%;    
+    
+%leg_can_extend_recurrent_doc% =
+    if leg.%is_any_lc% then
+        leg.%is_flight_duty% and is_first(leg(trip)) where (leg.%is_any_lc%)
+    else if (%new_REC% or training.%leg_is_rehearsal%) then
+        true
+    else if (leg.%is_pc_or_opc% and leg.%is_valid_sim% or
+             leg.%is_pgt% or leg.%is_crm% or leg.%is_crmc% or leg.%is_cc_rec_cx7%) then
+        leg.%is_ground_duty_leg%
+    else false;
+
+export %rec_not_yet_tpms%(Abstime d) =
+  not system_db_parameters.%tpms_import_valid_17%(d); 
+
+%leg_extends_any_recurrent_doc%(Abstime date) =
+    %leg_can_extend_recurrent_doc% and (not %update_is_done%) and
+    (is_first(leg(duty)) where (%leg_can_extend_recurrent_doc%))
+    and not (training.%assigned_as_assist% or leg.%is_sim_instr% or leg.%is_sim_instr_supervis%)
+    /* Any non-rec trip is automatically ok for updating. Rec trips are composed
+       of N* + CX* so we need to check if it's considered performed. */
+    and (not leg.%is_cc_rec_cx7% or
+         training.%recurrent_performed%(%rec_type%, %any_ac_qual%, date));
+    
+%rec_docs_updated_by_leg%(Abstime date) =
+    if %leg_extends_any_recurrent_doc%(date) then
+        count(times(4)) where (not void(%_leg_doc_validto_ix%(%times_index_0%)))
+    else 0;
+
+%leg_month% = round_up_month(leg.%start_date% + 0:01);
+%leg_date% = leg.%start_date%;
+%rec_type% = training.%rec_type%;
+
+%leg_recurrent_extension%(String type, Bool new) =
+  if (new or void(%leg_old_expiry%(type))) then
+    /* We are moving the document OR No valid record to extend -> new record */
+    add_months(%leg_month%, %leg_extension%(type))
+  else if (%leg_assigned_in_period%(type)) then
+    /* We are performing the activity on time -> extend the original deadline */
+    add_months(%leg_old_expiry%(type), %leg_extension%(type)) + %crm_offset%(type)
+  else void_abstime;
+ 
+/* SASCMS-4024 - If the type is CRM, then the new date is the last date of
+   the current month */
+%crm_offset%(String doc_type) =
+    if doc_type = "CRM" or doc_type = "CRMC" then
+	    round_up_month(%leg_old_expiry%(doc_type)) - %leg_old_expiry%(doc_type)
+	else
+	    0:00;
+
+/* OPC is special. 
+   - When creating new documents the initial validto is in 6 months.
+   - When doing an OPC validto is extended 1 year.
+   - When doing a PC we only check validto */
+%leg_opc_extension%(String type) =
+    if %crew_qual_check%(type, %leg_date%) then
+    add_months(if %new_PC_OPC% then 
+                 %leg_month% 
+               else 
+                 %leg_old_expiry%(training.%rec_type%), 
+               6)
+    else void_abstime;
+
+%leg_recurrent_extension_no_move% =
+    %leg_recurrent_extension%(%rec_type%, false);
+
+%leg_recurrent_extension_move% =
+    %leg_recurrent_extension%(%rec_type%, true);
+    
+%leg_extension%(String type) =
+    training.%validity%(type, %leg_date%);
+
+%leg_old_expiry%(String type) =
+    let exp = training.%recurrent_type_expiry_date%(type, %any_ac_qual%, %leg_date%);
+    default(first(times(100), add_years(exp, %times_index_0% - 1))
+            where (add_years(exp, %times_index_0%) >= %leg_date%),
+            exp);
+
+%crew_qual_check%(string type, abstime check_date) =
+    if locate("A4",type)>0 
+    then crew.%has_ac_qln%(check_date, "A4")
+    else if locate("A3",type)>0 
+    then crew.%has_ac_qln%(check_date, "A3")
+    else
+        true;
+
+%leg_has_already_extended_expiry% =
+    default(%leg_old_expiry%(%rec_type%) >= %leg_doc_validto%(1),false);
+
+/* For some types assignment after expiry should trigger the default behavior */
+set types_not_extending_after_expiry = "CRM", "CRMC";
+
+%leg_assigned_in_period%(String type) =
+    (trip.%start_day% >= training.%earliest_rec_assignment_incl_perf%(type, %any_ac_qual%, trip.%start_day%, false)
+     and
+	 %cc_rec_within_calendar_year%(type)
+	 and
+    (type not in types_not_extending_after_expiry or 
+     trip.%start_day% < %leg_old_expiry%(type)));
+
+%cc_rec_within_calendar_year%(String type) =
+    type <> "REC" or trip.%start_day% < add_months(%leg_old_expiry%("REC"), 12);
+
+
+/* For SKN SH PC/OPC the PC is always performed on the same type, and the OPC on 
+   the other. This variable is used to find the acqual on the OPC doc when
+   performing a PC. */
+%special_rec_qual% =
+    if crew.%is_skn_double_qualified_at_date%(trip.%start_hb%)
+    then if parameters.%sim_pass_classic_req%(trip.%start_hb%)
+         then if leg.%qual% = "37" then "38" else "37"
+         else "38"
+    else leg.%qual%;
+
+%special_rec_qual2% =
+    if crew.%is_skn_double_qualified_at_date%(trip.%start_hb%)
+    then if parameters.%sim_pass_classic_req%(trip.%start_hb%)
+         then leg.%qual%
+         else "38"
+    else leg.%qual%;
+
+%new_doc% =
+    (leg.%is_pc_or_opc% and %new_PC_OPC%)
+    or
+    (leg.%is_pgt% and training.%trip_is_pgt_ref%)
+    or
+    leg.%is_ilc%
+    or
+    /* This means we're reacquiring an old qual */
+    leg.%is_lc% and void(%leg_old_expiry%("LC"))
+    or
+    (%new_REC% and default(%leg_old_expiry%(%rec_type%) < %leg_date%, true));
+    
+%new_PC_OPC% = (leg.%is_pc_change_month% or leg.%is_skill_test%);
+    
+/* It is only allowed to move a REC document for CC if the activity is any
+   of CRA, CRB, or RECREF */
+%new_REC% = training.%leg_creates_rec%;
+
+/* SASCMS-3410.  Only create a "Temp PC" licence on completion of a Z Skill
+   activity */
+
+%leg_temp_licence_extension% = leg.%start_date% + (56 * 24:00);
+
+%is_for_temp_licence% =
+    default(substr(training.%leg_code_redefined%, 1, 1), "") = "Z";
+
+table rec_doc_extension_table(Int i) =
+    training.%rec_type%, %is_for_temp_licence%, i ->
+    %leg_doc%,
+    %leg_doc_validto%,
+    %leg_doc_acqual%,
+    %leg_doc_init%;
+    /*******************************************
+     * Flight crew 
+     *******************************************/
+    "CRM", -, 1      -> "CRM",   %leg_recurrent_extension_no_move%, "", false;
+
+    "CRMC", -, 1     -> "CRMC",   %leg_recurrent_extension_no_move%, "", false;
+    
+    "PGT", -, 1      -> "PGT",   %leg_recurrent_extension%("PGT", %new_doc%), "", %new_doc%;
+    
+    "LC",  -, 1      -> "LC",    %leg_recurrent_extension%("LC", %new_doc%), leg.%qual%, %new_doc%;
+        
+    "PC",  -, 1      -> "PC",    %leg_recurrent_extension%("PC", %new_doc%), %special_rec_qual2%, %new_doc%;
+    "PC",  -, 2      -> "OPC",   %leg_opc_extension%("OPC"), %special_rec_qual%, %new_doc%;
+	"PC",  true, 3   -> "Temp PC", %leg_temp_licence_extension%, leg.%qual%, %new_doc%;
+    
+    "PCA3",  -, 1    -> "PCA3",  %leg_recurrent_extension%("PCA3", %new_doc%), "", %new_doc%;
+    "PCA3", -, 2     -> "OPCA3", %leg_opc_extension%("OPCA3"), "", %new_doc%;
+    "PCA3", -, 3     -> "OPCA4", %leg_opc_extension%("OPCA4"), "", leg.%is_skill_test%;
+	"PCA3", true, 4  -> "Temp PC", %leg_temp_licence_extension%, leg.%qual%, %new_doc%;
+    
+    "PCA4", -, 1     -> "PCA4",  %leg_recurrent_extension%("PCA4", %new_doc%), "", %new_doc%;
+    "PCA4", -, 3     -> "OPCA3", %leg_opc_extension%("OPCA3"), "", leg.%is_skill_test%;
+    "PCA4", -, 2     -> "OPCA4", %leg_opc_extension%("OPCA4"), "", %new_doc%;
+	"PCA4", true, 4  -> "Temp PC", %leg_temp_licence_extension%, leg.%qual%, %new_doc%;
+    
+    "OPC", -, 1      -> "OPC",   %leg_recurrent_extension_no_move%, leg.%qual%, false;
+    
+    "OPCA3", -, 1    -> "OPCA3", %leg_recurrent_extension_no_move%, "", false;
+    "OPCA3", -, 2    -> "OPCA4", %leg_opc_extension%("OPCA4"), "", false;
+    
+    "OPCA4", -, 2    -> "OPCA3", %leg_opc_extension%("OPCA3"), "", false;
+    "OPCA4", -, 1    -> "OPCA4", %leg_recurrent_extension_no_move%, "", false;
+    
+    /*******************************************
+     * Cabin crew 
+     *******************************************/
+    "REC", -, 1      -> "REC", %leg_recurrent_extension%("REC", %new_rec%), "", %new_doc%;
+    
+    -, -, -          -> void_string, void_abstime, void_string, void_bool;
+end
+
+%_leg_doc_ix%(Int ix) =
+    %leg_doc%(ix);
+%_leg_doc_validto_ix%(Int ix) =
+    if %_leg_doc_ix%(ix)="Temp PC" or %rec_not_yet_tpms%(leg.%start_hb%) then
+        %leg_doc_validto%(ix)
+    else 
+        void_abstime; /* updated from tpms instead */
+
+%_leg_doc_acqual_ix%(Int ix) =
+    %leg_doc_acqual%(ix);
+%_leg_doc_init_ix%(Int ix) =
+    %leg_doc_init%(ix);
+
+/* these variables are only used in python (CrewTableHandler.py)*/
+%leg_doc_ix% =
+    %leg_doc%(%py_index%);
+%leg_doc_validto_ix% =
+    %_leg_doc_validto_ix%(%py_index%);
+%leg_doc_acqual_ix% =
+    %leg_doc_acqual%(%py_index%);
+%leg_doc_init_ix% =
+    %leg_doc_init%(%py_index%);
+
+%rec_upd_debug% =
+    cat(times(%rec_docs_updated_by_leg%(%pp_end%)),
+        concat(if %_leg_doc_init_ix%(%times_index_0%) then "Init: "
+               else "",
+               %_leg_doc_ix%(%times_index_0%), " ", 
+               %expiry_date_inclusive%(%_leg_doc_validto_ix%(%times_index_0%))," ",
+               %_leg_doc_acqual_ix%(%times_index_0%),"\n "));
+
+
+/* Cached */
+%any_ac_qual% = training.%any_ac_qual%;
+    
+/* end of file */
+

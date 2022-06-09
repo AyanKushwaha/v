@@ -1,0 +1,106 @@
+/* -*- crc -*-
+ *
+ *  
+ *
+ * Purpose:
+ *   This module adds/redefines variables for Tracking.
+ *
+ * Sections:
+ *  3:     Python report support
+ *  3.1 :    Iterators
+ *
+ * Created by:
+ *   Hasse Eliasson, 15May2009
+ *
+ * Major changes:
+ * Date   Name             Comment
+*/
+
+module report_meal_cct inherits report_meal
+
+import crew;
+import fundamental;
+import parameters;
+
+
+/****************************************************************
+ * Section 1: Python report support
+              Contains what's needed for the python reports like:
+              iterators, variables, parameters,
+ ***************************************************************/
+
+/****************************************************************
+ * Section 1.1 : Iterators
+ ***************************************************************/
+ /* Definitions that can't exist in Pairing */
+%crew_id% = crew.%id%;
+
+/* Load supplier iterator */
+export iterator crew_id_set =
+  partition(leg)
+  by(%crew_id%);
+end
+
+/* Opt-out iterator */
+export iterator opt_out_set =
+  partition(leg)
+  by(%opted_in_crew%);
+end
+
+%meal_flight_opt_out_table% = %etab_path%(%meal_flight_opt_out_table_p%);
+
+%meal_flight_opt_out_table_p% =
+  parameter "meal_flight_opt_out"
+  remark "Meal flight opt_out table";
+
+table opt_out_table_on_flight =
+	crew.%id% ,leg.%flight_descriptor%,leg.%start_date% ->
+	Int %opt_out_crew_on_flight%;
+	external %meal_flight_opt_out_table%;
+	"ID","FLIGHT_ID_FD","FLIGHT_ID_UDOR" -> count("row_number");
+end
+
+%has_crew_opted_out_on_flight% = if %opt_out_crew_on_flight% =1 then True
+                            else False;
+
+%month% = trip.%start_month_number%;
+%year%  = base_utils.%year_nr%(trip.%start_lt%);
+
+%meal_opt_out_table% = %etab_path%(%meal_opt_out_table_p%);
+%meal_opt_out_table_p% =
+  parameter "meal_opt_out"
+  remark "Meal: Meal opt_out table";
+
+table opt_out_table_on_month (int month,int year) =
+	crew.%id% ,month,year ->
+	Int %opt_out_crew_on_month%;
+	external %meal_opt_out_table%;
+	"ID","MONTH","YEAR" -> count("row_number");
+end
+
+%has_crew_opted_out_on_month% = if %opt_out_crew_on_month%(%month%,%year%) =1 then True
+                            else False;
+
+redefine export %opted_in_crew% = leg.%is_short_haul% or ( not(%has_crew_opted_out_on_flight%) and not(%has_crew_opted_out_on_month%) );
+
+export %special_meal_code% = crew.%special_meal_code%(leg.%start_hb%);
+
+/* Iterator with special meal codes */
+export iterator special_meal_code_set =
+    partition(leg)
+    by(%special_meal_code%, %crew_id%);
+end
+
+/* Relative time before load leg when updating meal orders
+ * Meal orders are updated automatically. This parameter determines when the update is carried out
+ */
+%meal_order_update_horizon% = 
+  system_db_parameters.%meal_order_update_horizon%(%now%);
+
+/* Relative time before and after the update horizon that will be processed
+ * This parameter must be update when the update meal period is changed
+ */
+%meal_order_update_offset% = 
+  system_db_parameters.%meal_order_update_offset%(%now%);
+
+/* end of file */

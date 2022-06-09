@@ -1,0 +1,87 @@
+jboss setup steps:
+
+Prepare folders:
+1. Create folder called "crewportal" (e.g. "$JBOSS_HOME/standalone/crewportal"). Will be used by the deployment script to copy bid specific configuration.
+    
+    Owner: jboss
+    Group: carm
+    
+    Create with write acess for group.
+
+
+    Change group ownership on folder $JBOSS_HOME/standalone/deployments to "carm" and add write permissions. 
+
+
+2. Create folder called "user-directory-import" (e.g. "/opt/Carmen/CARMDATA/carmdata/crewportal/datasource/import/user-directory-import/"). This will be used by the import job to provide a copy of the crew data import file to the user-directory-import application.
+
+Added modules to jboss (can be found $CARMUSR/bids_user/jboss-files/modules)
+
+1. Added ojdbc driver to $JBOSS_HOME/modules 
+2. Added jeppesensystems module to $JBOSS_HOME/modules (The path used defined in this module.xml should be a relative path to the crewportal folder created in step 1 in prepare folders)
+
+
+Added to standalone.xml
+Note: Some values needs to be tweaked dependent on environment (e.g. datasource connection-url)
+
+	1. Added datasource definition.
+		<datasource jndi-name="java:jboss/datasources/CrewWebDS" pool-name="CrewWebDS" enabled="true" use-java-context="true">
+			<connection-url>jdbc:oracle:thin:@h1cms90a.net.sas.dk:1521:CPT</connection-url>
+			<driver>OracleJDBCDriver</driver>
+			<security>
+				<user-name>crewweb</user-name>
+				<password>crewweb</password>
+			</security>
+		</datasource>
+					
+	2. Added datasource oracle driver.
+		<driver name="OracleJDBCDriver" module="com.oracle.ojdbc7">
+			<xa-datasource-class>oracle.jdbc.OracleDriver</xa-datasource-class>
+		</driver>
+		
+	3. Added JNDI bindings
+		<subsystem xmlns="urn:jboss:domain:naming:1.4">
+			<bindings>
+				<simple name="java:global/crewweb/resources" value="/usr/java/jboss-eap/standalone/crewportal/"/>
+				<simple name="java:global/jcms/cacspolicy/path" value="file:///usr/java/jboss-eap/standalone/crewportal/cacspolicy.xml"/>
+				<simple name="java:global/jcms/uisupport/logo" value="img/sas.png"/>
+				<simple name="java:global/jcms/web/cache/defaultcontrollevel" value="no-cache"/>
+				<simple name="java:global/jcms/web/cache/extensions" value=".js;.html;.htm;.png;.css;.gif;.jpg"/>
+				<simple name="java:global/jcms/web/cache/extensions/controllevel" value="private"/>
+				<simple name="java:global/jcms/web/cache/duration-hours" value="168"/>
+				<simple name="java:global/jcms/customization/sas/portal-appl-sessID-param" value="WA_UID"/>
+				<simple name="java:global/jcms/customization/sas/allow-form-based-login" value="true"/>
+				<simple name="java:global/jcms/customization/sas/allow-empty-password" value="false"/>
+				<simple name="java:global/jcms/customization/user-directory-import" value="/opt/Carmen/CARMDATA/carmdata/crewportal/datasource/import/user-directory-import/"/>
+			</bindings>
+			<remote-naming/>
+		</subsystem>
+		
+	4. Added security domain (Bid application is now looking for a security domain called "other" but can be changed in jboss-web.xml in SAS.bid)
+			<security-domain name="other" cache-type="default">
+				<authentication>
+					<login-module code="com.sas.authentication.LoginModuleWithRolesInDatabase" flag="required">
+						<module-option name="dsJndiName" value="java:jboss/datasources/CrewWebDS"/>
+						<module-option name="principalsQuery" value="select password from userdirectory where userid = ?"/>
+						<module-option name="rolesQuery" value="Select Concat(Userdirroles.Roletype,Concat(':',Concat(Userdirroles.Name, Concat(':',Userdirroles.Value)))), 'Roles' From Userdirroles,Users Where Userdirroles.Userid=Users.Loginid and Userdirroles.Userid=? and Users.Inactive IS NULL"/>
+						<module-option name="password-stacking" value="useFirstPass"/>
+					</login-module>
+					<login-module code="com.jeppesen.jcms.wpf.jboss.loginmodule.CacsAttributeMapping" flag="required">
+						<module-option name="attributePrefix" value="ou=attributes,dc=cacs,DC=jcms,DC=jeppesen,DC=com"/>
+						<module-option name="rolePrefix" value="ou=roles,dc=cacs,dc=jcms,dc=jeppesen,dc=com"/>
+						<module-option name="crewIdAttributeName" value="crewIdentity"/>
+						<module-option name="rolesFormat" value="simple-db"/>
+					</login-module>
+					<login-module code="com.jeppesen.jcms.wpf.jboss.loginmodule.CacsRoleMapping" flag="required">
+						<module-option name="replaceRole" value="false"/>
+					</login-module>
+				</authentication>
+			</security-domain>
+	
+
+	5. Change the public interface to all 	
+  
+	   <interface name="public">
+		      <inet-address value="${jboss.bind.address:0.0.0.0}"/>
+	    </interface>
+
+

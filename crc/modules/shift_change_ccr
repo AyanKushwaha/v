@@ -1,0 +1,133 @@
+/* -*- crc -*-
+ *
+ * Shift Change Module CCR
+ *
+ * Redefines basic Shift Change module for wop level
+ *
+ */
+
+module shift_change_ccr inherits shift_change
+
+import wop;
+import rule_exceptions;
+
+
+/* 0. Fundamentals */
+
+/* Nothing redefined */
+
+
+/* 1. Shift Changes */
+/* wop versions */
+
+%followed_by_early_shift_wop% =
+    default(next(duty(wop), %early_shift%)
+                where (not %neutral_shift%),
+            false);
+
+%followed_by_late_shift_wop% =
+    default(next(duty(wop), %late_shift%)
+                where (not %neutral_shift%),
+            false);
+
+%early_shift_followed_by_late_shift_wop% =
+    %early_shift% and
+    %followed_by_late_shift_wop%;
+
+%late_shift_followed_by_early_shift_wop% =
+    %late_shift% and
+    %followed_by_early_shift_wop%;
+
+%shift_change_wop% =
+    %early_shift_followed_by_late_shift_wop% or
+    %late_shift_followed_by_early_shift_wop%;
+
+export %number_of_shift_changes_wop% =
+    count(duty(wop))
+        where (%shift_change_wop%);
+
+
+/* 2. Rule */
+
+/* Redefine parameter texts to reference wop instead of trip */
+redefine export %minimum_days_to_check% =
+    parameter _ remark "Check shift change on wops of at least x days long";
+
+redefine export %maximum_number_of_shift_changes% =
+    parameter _ remark "Maximum number of shift changes in a wop";
+
+/* Redefine rule for text and exception possibility */
+redefine rule maximum_number_of_shift_changes =
+    valid not %use_cost% and
+          %maximum_number_of_shift_changes_valid%;
+
+    %number_of_shift_changes_wop% <= %maximum_number_of_shift_changes% +
+                                     rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+
+    startdate = wop.%start_UTC%;
+    remark "Maximum number of shift changes in a wop";
+    failtext %maximum_number_of_shift_changes_failtext%;
+end
+
+/* Redefine valid statement for ccr to check wop instead of trip
+    - Wop needs to be in pp
+    - Wop is not wholly a standby
+    - Wop is at least as long as the minimum days to check
+    - Wop is NOT long haul
+    - More than one trip with a shift change, as changes inside a trip
+      in ccr should not block assignment of them on rosters, but combination
+      of trips must be checked.
+     OR
+    - A shift change between two trips in the wop
+*/
+redefine export %maximum_number_of_shift_changes_valid% =
+    wop.%in_pp% and
+    not wop.%is_standby% and
+    wop.%days% >= %minimum_days_to_check% and
+    not wop.%is_long_haul% and
+    (%number_of_trips_in_wop_with_shift_change% > 1 or
+     %any_shift_change_in_wop_between_trips%);
+
+%number_of_trips_in_wop_with_shift_change% =
+    count(trip(wop))
+        where (%number_of_shift_changes% > 0);
+
+%any_shift_change_in_wop_between_trips% =
+    any(duty(wop), %shift_change_wop%)
+        where (is_last(duty(trip)));
+
+/* 3. Cost */
+
+/* Redefine cost parameter text */
+redefine export %cost_for_shift_change% =
+    parameter _ remark "4.26     Cost for breaking shift change maximum";
+
+export %roster_number_of_excess_shift_changes% =
+    count(wop(roster))
+    where (not wop.%is_locked% and
+           %maximum_number_of_shift_changes_valid% and
+           %number_of_shift_changes_wop% > %maximum_number_of_shift_changes%);
+
+export %roster_cost% =
+    if %use_cost% and
+       %cost_for_shift_change% > 0
+    then
+        %roster_number_of_excess_shift_changes% * %cost_for_shift_change%
+    else
+        0;
+
+
+/* 4. KPI */
+
+export %roster_number_of_shift_changes% =
+    sum(wop(roster), %number_of_shift_changes_wop%)
+    where (wop.%in_pp% and
+           not wop.%is_standby% and
+           not wop.%is_long_haul%);
+
+export %roster_number_of_shift_changes_checked% =
+    sum(wop(roster), %number_of_shift_changes_wop%)
+    where (wop.%in_pp% and
+           not wop.%is_standby% and
+           not wop.%is_long_haul% and
+           wop.%days% >= %minimum_days_to_check%);

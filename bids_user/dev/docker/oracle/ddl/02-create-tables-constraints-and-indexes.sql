@@ -1,0 +1,672 @@
+
+create table USERS
+(
+  USERID VARCHAR2(32) not null
+    primary key,
+  LOGINID VARCHAR2(32) not null
+    constraint USERS_UK1
+    unique,
+  PASSWORD VARCHAR2(128),
+  FIRSTNAME VARCHAR2(64),
+  LASTNAME VARCHAR2(64),
+  MESSAGESLASTREAD TIMESTAMP(6),
+  INACTIVE DATE
+)
+/
+
+create table GROUPS
+(
+  GROUPID NUMBER not null
+    primary key,
+  GROUPNAME VARCHAR2(32) not null
+    constraint GROUPS_UK1
+    unique,
+  DESCRIPTION VARCHAR2(128)
+)
+/
+
+create table USERGROUPS
+(
+  USERGROUPID NUMBER not null
+    primary key,
+  GROUPID NUMBER not null
+    constraint USERGROUPS_GROUPS_FK2
+    references GROUPS,
+  USERID VARCHAR2(32) not null
+    constraint USERGROUPS_USERS_FK1
+    references USERS,
+  STARTDATE TIMESTAMP(6) not null,
+  ENDDATE TIMESTAMP(6) not null,
+  constraint USERGROUPS_UNIQUE
+  unique (GROUPID, USERID, STARTDATE, ENDDATE)
+)
+/
+
+create table QUALIFICATIONS
+(
+  QUALID NUMBER not null
+    primary key,
+  QUALNAME VARCHAR2(32) not null
+    constraint QUALIFICATIONS_UK1
+    unique,
+  DESCRIPTION VARCHAR2(128)
+)
+/
+
+create table USERQUALIFICATIONS
+(
+  USERQUALID NUMBER not null
+    primary key,
+  QUALID NUMBER not null
+    constraint USERQUALIFICATIONS_USERS_FK2
+    references QUALIFICATIONS,
+  USERID VARCHAR2(32) not null
+    constraint USERQUALIFICATIONS_USERS_FK1
+    references USERS,
+  STARTDATE TIMESTAMP(6) not null,
+  ENDDATE TIMESTAMP(6) not null,
+  constraint USERQUALIFICATIONS_UNIQUE
+  unique (QUALID, USERID, STARTDATE, ENDDATE)
+)
+/
+
+create table PERIODS
+(
+  PERIODID NUMBER not null
+    primary key,
+  GROUPID NUMBER not null
+    constraint PERIODS_GROUPS_FK1
+    references GROUPS,
+  OPENDATE DATE not null,
+  CLOSEDATE DATE not null,
+  STARTDATE DATE not null,
+  ENDDATE DATE not null,
+  TYPE VARCHAR2(32) not null
+)
+/
+
+create table NOTIFICATIONS
+(
+  NOTIFICATIONID NUMBER not null
+    primary key,
+  RESOURCEID VARCHAR2(32) not null,
+  RESOURCETYPE VARCHAR2(32) not null,
+  RESOURCEREVISIONDATE TIMESTAMP(6),
+  DESCRIPTION VARCHAR2(1024),
+  MESSAGECODE VARCHAR2(256),
+  STATUS VARCHAR2(32)
+)
+/
+
+create table NOTIFICATIONMESSAGEPARAMETERS
+(
+  NOTIFICATIONID NUMBER not null
+    constraint FK_NOTIFICATIONS
+    references NOTIFICATIONS
+    on delete cascade,
+  PARAMETERINDEX NUMBER not null,
+  PARAMETERVALUE VARCHAR2(1024),
+  primary key (NOTIFICATIONID, PARAMETERINDEX)
+)
+/
+
+create table KEYLOCK
+(
+  LOCKKEY VARCHAR2(20) not null
+    primary key,
+  FOO VARCHAR2(20) not null
+)
+/
+
+create table USERROLES
+(
+  USERROLEID NUMBER not null
+    primary key,
+  USERID VARCHAR2(32) not null
+    constraint USERROLES_USERS_FK1
+    references USERS,
+  ROLEID VARCHAR2(32) not null,
+  constraint USERROLES_UNIQUE
+  unique (USERID, ROLEID)
+)
+/
+
+create table USERATTRIBUTES
+(
+  USERATTRIBUTEID NUMBER not null
+    primary key,
+  USERID VARCHAR2(32) not null
+    constraint USERATTRIBUTES_USERS_FK1
+    references USERS,
+  ATTRIBUTENAME VARCHAR2(32) not null,
+  ATTRIBUTEVALUE VARCHAR2(256),
+  STARTDATE TIMESTAMP(6),
+  ENDDATE TIMESTAMP(6),
+  constraint USERATTRIBUTES_UNIQUE
+  unique (USERID, ATTRIBUTENAME)
+)
+/
+
+create table BIDGROUPS
+(
+  REVISIONDATE TIMESTAMP(6) not null,
+  BIDGROUPID NUMBER not null,
+  USERID VARCHAR2(32) not null,
+  NAME VARCHAR2(256) not null,
+  DESCRIPTION VARCHAR2(256),
+  CATEGORY VARCHAR2(16) not null,
+  TYPE VARCHAR2(32) not null,
+  SUBMITTED TIMESTAMP(6),
+  STARTDATE TIMESTAMP(6) not null,
+  ENDDATE TIMESTAMP(6),
+  CREATEDBY VARCHAR2(32) not null,
+  CREATED TIMESTAMP(6) not null,
+  UPDATEDBY VARCHAR2(32),
+  UPDATED TIMESTAMP(6),
+  INVALID TIMESTAMP(6),
+  CACHEMARK NUMBER,
+  primary key (REVISIONDATE, BIDGROUPID)
+)
+/
+
+create table BIDGROUPORDER
+(
+  BIDGROUPID NUMBER not null,
+  REVISIONDATE TIMESTAMP(6) not null,
+  ROWINDEX NUMBER not null
+)
+/
+
+create table BIDS
+(
+  BIDSEQUENCEID NUMBER not null
+    primary key,
+  REVISIONDATE TIMESTAMP(6) not null,
+  BIDID NUMBER not null,
+  BIDTYPE VARCHAR2(32) not null,
+  NAME VARCHAR2(256),
+  BIDGROUPID NUMBER not null,
+  STARTDATE TIMESTAMP(6),
+  ENDDATE TIMESTAMP(6),
+  CREATEDBY VARCHAR2(32) not null,
+  CREATED TIMESTAMP(6) not null,
+  UPDATEDBY VARCHAR2(32),
+  UPDATED TIMESTAMP(6),
+  INVALID TIMESTAMP(6),
+  constraint BID_UNIQUE_REVISION
+  unique (REVISIONDATE, BIDID)
+)
+/
+
+create table BIDORDER
+(
+  BIDID NUMBER not null,
+  REVISIONDATE TIMESTAMP(6) not null,
+  ROWINDEX NUMBER not null
+)
+/
+
+create table BIDPROPERTIES
+(
+  BIDPROPERTYID NUMBER not null
+    primary key,
+  BIDSEQUENCEID NUMBER not null
+    constraint BIDPROPERTIES_BIDSEQUENCEID_FK
+    references BIDS,
+  SORTORDER NUMBER not null,
+  BIDPROPERTYTYPE VARCHAR2(32) not null,
+  constraint BIDPROPERTIES_UNIQUE_ORDER
+  unique (BIDSEQUENCEID, SORTORDER)
+)
+/
+
+create table BIDPROPERTYENTRIES
+(
+  BIDPROPERTYENTRYID NUMBER not null
+    primary key,
+  BIDPROPERTYID NUMBER not null
+    constraint BPE_BIDPROPERTYID_FK
+    references BIDPROPERTIES
+    on delete cascade,
+  ENTRYKEY VARCHAR2(32) not null,
+  ENTRYVALUE VARCHAR2(1024)
+)
+/
+
+create table TRIPSEARCHES
+(
+  TRIPSEARCHID NUMBER not null
+    primary key,
+  NAME VARCHAR2(256) not null,
+  USERID VARCHAR2(32) not null
+)
+/
+
+create table SEARCHPROPERTIES
+(
+  SEARCHPROPERTYID NUMBER not null
+    primary key,
+  TRIPSEARCHID NUMBER not null
+    constraint SP_TRIPSEARCHID_FK
+    references TRIPSEARCHES,
+  SORTORDER NUMBER not null,
+  SEARCHPROPERTYTYPE VARCHAR2(32) not null,
+  constraint SP_UNIQUE_ORDER
+  unique (TRIPSEARCHID, SORTORDER)
+)
+/
+
+create table SEARCHPROPERTYENTRIES
+(
+  SEARCHPROPERTYENTRYID NUMBER not null
+    primary key,
+  SEARCHPROPERTYID NUMBER not null
+    constraint SPE_SEARCHPROPERTYID_FK
+    references SEARCHPROPERTIES
+    on delete cascade,
+  ENTRYKEY VARCHAR2(32) not null,
+  ENTRYVALUE VARCHAR2(64)
+)
+/
+
+create table USERSETTINGS
+(
+  USERID VARCHAR2(32) not null,
+  SETTINGID VARCHAR2(32) not null,
+  SETTINGKEY VARCHAR2(32) not null,
+  SETTINGVALUE VARCHAR2(32),
+  primary key (USERID, SETTINGID, SETTINGKEY)
+)
+/
+
+create table BATCHJOBS
+(
+  ID VARCHAR2(32) not null
+    primary key,
+  JOBNAME VARCHAR2(32) not null,
+  JOBGROUP VARCHAR2(32) not null,
+  DESCRIPTION VARCHAR2(32) not null,
+  STARTTIME TIMESTAMP(6),
+  ENDTIME TIMESTAMP(6)
+)
+/
+
+create table QRTZ_JOB_LISTENERS
+(
+  JOB_NAME VARCHAR2(200) not null,
+  JOB_GROUP VARCHAR2(200) not null,
+  JOB_LISTENER VARCHAR2(200) not null,
+  primary key (JOB_NAME, JOB_GROUP, JOB_LISTENER)
+)
+/
+
+create table QRTZ_SIMPLE_TRIGGERS
+(
+  TRIGGER_NAME VARCHAR2(200) not null,
+  TRIGGER_GROUP VARCHAR2(200) not null,
+  REPEAT_COUNT NUMBER(7) not null,
+  REPEAT_INTERVAL NUMBER(12) not null,
+  TIMES_TRIGGERED NUMBER(7) not null,
+  primary key (TRIGGER_NAME, TRIGGER_GROUP)
+)
+/
+
+create table QRTZ_CRON_TRIGGERS
+(
+  TRIGGER_NAME VARCHAR2(200) not null,
+  TRIGGER_GROUP VARCHAR2(200) not null,
+  CRON_EXPRESSION VARCHAR2(120) not null,
+  TIME_ZONE_ID VARCHAR2(80),
+  primary key (TRIGGER_NAME, TRIGGER_GROUP)
+)
+/
+
+create table QRTZ_TRIGGER_LISTENERS
+(
+  TRIGGER_NAME VARCHAR2(200) not null,
+  TRIGGER_GROUP VARCHAR2(200) not null,
+  TRIGGER_LISTENER VARCHAR2(200) not null,
+  primary key (TRIGGER_NAME, TRIGGER_GROUP, TRIGGER_LISTENER)
+)
+/
+
+create table QRTZ_PAUSED_TRIGGER_GRPS
+(
+  TRIGGER_GROUP VARCHAR2(200) not null
+    primary key
+)
+/
+
+create table QRTZ_FIRED_TRIGGERS
+(
+  ENTRY_ID VARCHAR2(95) not null
+    primary key,
+  TRIGGER_NAME VARCHAR2(200) not null,
+  TRIGGER_GROUP VARCHAR2(200) not null,
+  IS_VOLATILE VARCHAR2(1) not null,
+  INSTANCE_NAME VARCHAR2(200) not null,
+  FIRED_TIME NUMBER(13) not null,
+  PRIORITY NUMBER(13) not null,
+  STATE VARCHAR2(16) not null,
+  JOB_NAME VARCHAR2(200),
+  JOB_GROUP VARCHAR2(200),
+  IS_STATEFUL VARCHAR2(1),
+  REQUESTS_RECOVERY VARCHAR2(1)
+)
+/
+
+create table QRTZ_SCHEDULER_STATE
+(
+  INSTANCE_NAME VARCHAR2(200) not null
+    primary key,
+  LAST_CHECKIN_TIME NUMBER(13) not null,
+  CHECKIN_INTERVAL NUMBER(13) not null
+)
+/
+
+create table QRTZ_LOCKS
+(
+  LOCK_NAME VARCHAR2(40) not null
+    primary key
+)
+/
+
+create table REQUESTLOGS
+(
+  ID NUMBER not null
+    primary key,
+  USERID VARCHAR2(32) not null,
+  REQUESTCATEGORY VARCHAR2(256) not null,
+  TYPE VARCHAR2(256) not null,
+  STATUS VARCHAR2(256),
+  REASON VARCHAR2(256),
+  DECISIONTIME TIMESTAMP(6)
+)
+/
+
+create table REQUESTLOGDETAILS
+(
+  ID NUMBER not null,
+  REQUESTLOGID NUMBER not null
+    constraint RL_REQUESTLOGID_FK
+    references REQUESTLOGS,
+  DETAILSKEY VARCHAR2(256) not null,
+  DETAILSVALUE VARCHAR2(1024),
+  primary key (ID, REQUESTLOGID)
+)
+/
+
+create table REQUESTLOGERRORS
+(
+  ID NUMBER not null,
+  REQUESTLOGID NUMBER not null
+    constraint RLE_REQUESTLOGID_FK
+    references REQUESTLOGS,
+  DETAILS VARCHAR2(1024),
+  primary key (ID, REQUESTLOGID)
+)
+/
+
+create table AUDITTRAILS
+(
+  ID NUMBER not null
+    primary key,
+  USERID VARCHAR2(32) not null,
+  EVENTTIME TIMESTAMP(6) not null,
+  EVENTTYPE VARCHAR2(32) not null,
+  DESCRIPTION CLOB,
+  STATUS VARCHAR2(32)
+)
+/
+
+create table USERMESSAGES
+(
+  MESSAGEID NUMBER not null
+    primary key,
+  GROUPID NUMBER not null
+    constraint USERMESSAGE_FK1
+    references GROUPS,
+  MESSAGETEXT CLOB not null,
+  STARTTIME TIMESTAMP(6) not null,
+  ENDTIME TIMESTAMP(6) not null,
+  CREATED TIMESTAMP(6) not null,
+  UPDATED TIMESTAMP(6) not null
+)
+/
+
+create table BACKENDREQUESTS
+(
+  ID NUMBER not null
+    primary key,
+  REQUESTTYPE VARCHAR2(32) not null,
+  USERID VARCHAR2(32) not null,
+  STARTTIME TIMESTAMP(6) not null,
+  ENDTIME TIMESTAMP(6),
+  ESTIMATEDENDTIME TIMESTAMP(6),
+  RESOURCEREFERENCE VARCHAR2(32) not null,
+  BACKENDREQUESTID VARCHAR2(256),
+  REQUESTDATA CLOB,
+  REFERENCEDATA CLOB,
+  REQUESTRESULT CLOB,
+  LASTACCESSED TIMESTAMP(6),
+  BACKENDSERVER VARCHAR2(256) default NULL
+)
+/
+
+create table QRTZ_JOB_DETAILS
+(
+  JOB_NAME VARCHAR2(200) not null,
+  JOB_GROUP VARCHAR2(200) not null,
+  DESCRIPTION VARCHAR2(250),
+  JOB_CLASS_NAME VARCHAR2(250) not null,
+  IS_DURABLE VARCHAR2(1) not null,
+  IS_VOLATILE VARCHAR2(1) not null,
+  IS_STATEFUL VARCHAR2(1) not null,
+  REQUESTS_RECOVERY VARCHAR2(1) not null,
+  JOB_DATA BLOB,
+  primary key (JOB_NAME, JOB_GROUP)
+)
+/
+
+create table QRTZ_TRIGGERS
+(
+  TRIGGER_NAME VARCHAR2(200) not null,
+  TRIGGER_GROUP VARCHAR2(200) not null,
+  JOB_NAME VARCHAR2(200) not null,
+  JOB_GROUP VARCHAR2(200) not null,
+  IS_VOLATILE VARCHAR2(1) not null,
+  DESCRIPTION VARCHAR2(250),
+  NEXT_FIRE_TIME NUMBER(13),
+  PREV_FIRE_TIME NUMBER(13),
+  PRIORITY NUMBER(13),
+  TRIGGER_STATE VARCHAR2(16) not null,
+  TRIGGER_TYPE VARCHAR2(8) not null,
+  START_TIME NUMBER(13) not null,
+  END_TIME NUMBER(13),
+  CALENDAR_NAME VARCHAR2(200),
+  MISFIRE_INSTR NUMBER(2),
+  JOB_DATA BLOB,
+  primary key (TRIGGER_NAME, TRIGGER_GROUP),
+  foreign key (JOB_NAME, JOB_GROUP) references QRTZ_JOB_DETAILS
+)
+/
+
+create table QRTZ_BLOB_TRIGGERS
+(
+  TRIGGER_NAME VARCHAR2(200) not null,
+  TRIGGER_GROUP VARCHAR2(200) not null,
+  BLOB_DATA BLOB,
+  primary key (TRIGGER_NAME, TRIGGER_GROUP),
+  foreign key (TRIGGER_NAME, TRIGGER_GROUP) references QRTZ_TRIGGERS
+)
+/
+
+create table QRTZ_CALENDARS
+(
+  CALENDAR_NAME VARCHAR2(200) not null
+    primary key,
+  CALENDAR BLOB not null
+)
+/
+
+create table USERDIRROLES
+(
+  USERID VARCHAR2(32 char) not null,
+  ROLETYPE VARCHAR2(9 char) not null,
+  NAME VARCHAR2(32 char) not null,
+  VALUE VARCHAR2(64 char) not null,
+  constraint PK_USERDIRROLES
+  primary key (USERID, ROLETYPE, NAME, VALUE)
+)
+/
+
+create table USERDIRECTORY
+(
+  USERID VARCHAR2(32 char) not null
+    primary key,
+  PASSWORD VARCHAR2(128 char),
+  FIRSTNAME VARCHAR2(64 char),
+  LASTNAME VARCHAR2(64 char)
+)
+/
+
+create index BIDGROUPS_IX2
+  on BIDGROUPS (USERID, REVISIONDATE)
+/
+
+create index BIDGROUPS_IX3
+  on BIDGROUPS (USERID, CATEGORY, INVALID, STARTDATE)
+/
+
+create index BIDGROUPS_USERID_IX
+  on BIDGROUPS (USERID)
+/
+
+create index BIDGROUPORDER_IX2
+  on BIDGROUPORDER (BIDGROUPID, REVISIONDATE)
+/
+
+alter table BIDGROUPORDER
+  add primary key (REVISIONDATE, BIDGROUPID)
+/
+
+create index BIDGROUPORDER_BGID_IX
+  on BIDGROUPORDER (BIDGROUPID)
+/
+
+create index BIDS_BIDID_IX4
+  on BIDS (BIDID)
+/
+
+create index BIDS_BGID_REVDATE_IX2
+  on BIDS (BIDGROUPID, REVISIONDATE)
+/
+
+create index BIDS_BGID_INVALID_IX3
+  on BIDS (BIDGROUPID, INVALID)
+/
+
+create index BIDS_BGID_IX1
+  on BIDS (BIDGROUPID)
+/
+
+create index BIDORDER_BIDID_REVDATE_IX2
+  on BIDORDER (BIDID, REVISIONDATE)
+/
+
+alter table BIDORDER
+  add primary key (REVISIONDATE, BIDID)
+/
+
+create index BIDORDER_BIDID_IX1
+  on BIDORDER (BIDID)
+/
+
+create index BIDPROPS_BIDSEQID_IX1
+  on BIDPROPERTIES (BIDSEQUENCEID)
+/
+
+create index BIDPROPENTRIES_BIDPROPID_IX1
+  on BIDPROPERTYENTRIES (BIDPROPERTYID)
+/
+
+create index IDX_QRTZ_FT_TRIG_NM_GP
+  on QRTZ_FIRED_TRIGGERS (TRIGGER_NAME, TRIGGER_GROUP)
+/
+
+create index IDX_QRTZ_FT_TRIG_NAME
+  on QRTZ_FIRED_TRIGGERS (TRIGGER_NAME)
+/
+
+create index IDX_QRTZ_FT_TRIG_GROUP
+  on QRTZ_FIRED_TRIGGERS (TRIGGER_GROUP)
+/
+
+create index IDX_QRTZ_FT_TRIG_VOLATILE
+  on QRTZ_FIRED_TRIGGERS (IS_VOLATILE)
+/
+
+create index IDX_QRTZ_FT_TRIG_INST_NAME
+  on QRTZ_FIRED_TRIGGERS (INSTANCE_NAME)
+/
+
+create index IDX_QRTZ_FT_JOB_NAME
+  on QRTZ_FIRED_TRIGGERS (JOB_NAME)
+/
+
+create index IDX_QRTZ_FT_JOB_GROUP
+  on QRTZ_FIRED_TRIGGERS (JOB_GROUP)
+/
+
+create index IDX_QRTZ_FT_JOB_STATEFUL
+  on QRTZ_FIRED_TRIGGERS (IS_STATEFUL)
+/
+
+create index IDX_QRTZ_FT_JOB_REQ_RECOVERY
+  on QRTZ_FIRED_TRIGGERS (REQUESTS_RECOVERY)
+/
+
+create index IDX_REQUESTLOGD_KEY
+  on REQUESTLOGDETAILS (DETAILSKEY)
+/
+
+create index AUDITTRAIL_EVENTTYPE_IDX
+  on AUDITTRAILS (EVENTTYPE)
+/
+
+create index IDX_QRTZ_J_REQ_RECOVERY
+  on QRTZ_JOB_DETAILS (REQUESTS_RECOVERY)
+/
+
+alter table QRTZ_JOB_LISTENERS
+  add foreign key (JOB_NAME, JOB_GROUP) references QRTZ_JOB_DETAILS
+/
+
+create index IDX_QRTZ_T_VOLATILE
+  on QRTZ_TRIGGERS (IS_VOLATILE)
+/
+
+create index IDX_QRTZ_T_NFT_ST
+  on QRTZ_TRIGGERS (NEXT_FIRE_TIME, TRIGGER_STATE)
+/
+
+create index IDX_QRTZ_T_NEXT_FIRE_TIME
+  on QRTZ_TRIGGERS (NEXT_FIRE_TIME)
+/
+
+create index IDX_QRTZ_T_STATE
+  on QRTZ_TRIGGERS (TRIGGER_STATE)
+/
+
+alter table QRTZ_SIMPLE_TRIGGERS
+  add foreign key (TRIGGER_NAME, TRIGGER_GROUP) references QRTZ_TRIGGERS
+/
+
+alter table QRTZ_CRON_TRIGGERS
+  add foreign key (TRIGGER_NAME, TRIGGER_GROUP) references QRTZ_TRIGGERS
+/
+
+alter table QRTZ_TRIGGER_LISTENERS
+  add foreign key (TRIGGER_NAME, TRIGGER_GROUP) references QRTZ_TRIGGERS
+/
+*/

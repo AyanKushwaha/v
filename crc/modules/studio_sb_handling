@@ -1,0 +1,708 @@
+/* -*- crc -*-
+ *
+ * Purpose:
+ *   This module contains common standby handling definitions for 
+ *   flight and cabin crew
+ *   used in distribution and creation of sb activities.
+ *
+ * Sections:
+ *   1. Fundamentals
+ *   2. Functions
+ *   3. Variables
+ *   4. Failtexts & crew warnings
+ *
+ * Created by:
+ *   Niklas Johansson, 15Feb2013
+ *
+ * Major changes:
+ */
+root module studio_sb_handling
+
+import leg;
+import duty;
+import trip;
+import duty_period;
+import fdp;
+import oma16;
+import iterators;
+import fundamental;
+import levels;
+import crew_pos;
+import sb_handling;
+import parameters;
+import task;
+import planning_area;
+
+
+group sb_handling =
+    sb_handling.%sb_base%,
+    %sb_travel_time%,
+    %sb_length%,
+    %ap_sb_length%,
+    %double_ap_sb_margin%,
+    sb_handling.%time_interval%,
+    %sb_code%,
+    %ap_sb_code%,
+    %tailored_sb_code%,
+    %sb_last_sb_delay_buffer%,
+    critical_qual_station_set,
+    %critical_sb_fdp_buffer%,
+    parameters.%sb_default_duty_time%,
+    parameters.%sb_default_block_time%,
+    parameters.%_consider_calculated_sb_duty_time%,
+    leg.%consider_calculated_sb_block_time%,
+    parameters.%sb_line_default_block_time%,
+    parameters.%consider_sb_line_default_block_time%,
+    parameters.%override_ground_duty_code%,
+    sb_handling.%use_sb_need_etable%,
+    sb_handling.%use_default_need_values%,
+    sb_handling.%default_upper_need%,
+    sb_handling.%default_lower_need%,
+    sb_handling.%use_sb_length_override%,
+    sb_handling.%use_sb_length_etable%,
+    sb_handling.%max_sb_connection_time%,
+    sb_handling.%show_only_wrongly_placed_sb_with_must%,
+    leg.%error_check_in_time%,
+    sb_handling.%sb_duty_time_to_have_extended_rest%,
+    sb_handling.%min_sb_connection_time%;
+    
+group sb_handling_tables =
+    sb_handling.%sb_handling_table_p%,
+    %sb_daily_spread_factor_table_p%,
+    sb_handling.%sb_type_compostion_table_p%,
+    sb_handling.%sb_daily_length_table_p%,
+    fundamental.%sb_activity_details_p%,
+    %sb_daily_min_coverage_table_p%,
+    /*sb_handling.%table_standby_need_p%,*/
+    %sb_predefined_start_table_p%,
+    sb_handling.%sb_daily_length_override_table_p%;
+
+export %ac_type% =
+    planning_area.%planning_area_trip_ac_fam%;
+
+%sb_travel_time% = parameter 1:30 remark "SB travel time";
+%sb_length% = parameter 10:00 remark "Normal SB length";
+
+%ap_sb_length% = parameter 4:00 remark "Airport SB length";
+
+%double_ap_sb_margin% = parameter 0:20 remark "Double Airport SB Margin";
+
+%sb_code% = parameter "R" remark "Default SB code";
+%ap_sb_code% = parameter "A" remark "Airport SB code";
+%tailored_sb_code% = parameter "R3S" remark "Tailored SB code";
+
+%sb_last_sb_delay_buffer% = parameter 1:00 remark "Last SB delay buffer";
+    
+%upper_cat% = sb_handling.%upper_cat%;
+%lower_cat% = sb_handling.%lower_cat%;
+
+%trip_has_correct_home_base% =
+    if sb_handling.%sb_base% in leg.SAS_base_set then
+        trip.%homebase% = sb_handling.%sb_base%
+    else
+        true;
+
+/*SBs must be considered as they will reduce the total need on that day*/
+%consider_duty_for_sb_calculation% =
+    planning_area.%trip_is_in_planning_area% and duty.%has_flight_duty% and duty.%in_pp_extended% and not duty.%is_long_haul% and trip.%homebase% = sb_handling.%sb_base% and
+    last(leg(duty), leg.%starts_in_pp%) and (%duty_num_active_legs% > 0 or %duty_is_sh_standby%);
+    
+%duty_is_sh_standby% =
+    duty.%is_standby% and not duty.%is_standby_line%;
+ 
+%duty_num_active_legs% = 
+  count(leg(duty)) where (%leg_is_active_flight% and not leg.%returned_to_ramp%);
+  
+%leg_is_active_flight% = 
+  leg.%is_flight_duty% and not %leg_is_deadhead%;
+
+%leg_is_deadhead% = default(deadhead or oag or ground_transport, false);
+
+%consider_trip_for_sb_calculation% =
+    any(duty(trip), %consider_duty_for_sb_calculation%) and not trip.%is_long_haul%;
+    
+export iterator sb_alt_date_set = 
+  partition(duty)
+  by(sb_handling.%duty_start_date%, %consider_duty_for_sb_calculation%);
+end
+
+export iterator sb_critical_alt_set = 
+  partition(duty)
+  by(%duty_is_sb_critical%, %sb_start_time%, %sb_end_time%, %Special_sb_code%, %Special_sb_exists%);
+end
+
+export iterator sb_alt_set = 
+  partition(leg)
+  by(sb_handling.%leg_start_time%, leg.%is_flight_duty%, leg.%is_standby%, leg.%is_deadhead%, %leg_starts_at_sb_base%);
+end
+
+export iterator sb_alt_set_new =
+  partition(leg)
+  by(%leg_start_time_new%, leg.%is_flight_duty%, leg.%is_standby%, leg.%is_deadhead%, %leg_starts_at_sb_base%);
+end
+
+%no_crew_assigned_for% =
+    sum(leg_set,%_no_crew_assigned_for%) where 
+    (leg.%is_flight_duty% and not leg.%is_standby% and not leg.%is_deadhead% and studio_sb_handling.%leg_starts_at_sb_base%);
+    
+%_no_crew_assigned_for% =
+    crew_pos.%leg_assigned_pos%(%py_index%) * %scale_factor%;
+    
+set critical_qual_station_set = parameter "INS", "GZP" remark "Special qual station";
+
+%leg_has_critical_qual% = leg.%end_station% in critical_qual_station_set;
+
+%critical_sb_fdp_buffer% = parameter 2:00 remark "Critical FDP buffer for SB creation";
+%duty_starts_at_sb_base% = (duty.%start_base% = sb_handling.%sb_base%);
+%leg_starts_at_sb_base% = (leg.%start_base% = sb_handling.%sb_base%);
+
+%duty_is_existing_SB% =
+    %duty_starts_at_sb_base% and %duty_is_sh_standby%;
+
+%duty_is_fdp_critical% =
+   default(%duty_starts_at_sb_base% and duty_period.%is_last_duty_in_duty_period% and
+   (oma16.%max_daily_fdp% - fdp.%time% < %critical_sb_fdp_buffer%), false);
+   
+%duty_needs_airport_sb% =
+    %duty_is_fdp_critical% and (duty.%num_active_legs% = 2) and (duty.%num_deadheads% = 0) and %max_leg_lenght_duty% > 4:00;
+
+%max_leg_lenght_duty% =
+    max(leg(duty), leg.%block_time%);
+
+%duty_has_critical_qual% =
+    any(leg(duty), %leg_has_critical_qual%);
+    
+%duty_is_sb_critical% =
+    not (%duty_special_sb_type% = NoneType) and %is_sb_type_active%;
+    
+%sb_duty_start% =
+    (if %duty_starts_at_sb_base% then
+        sb_handling.%duty_start%
+    else
+        first(leg(duty), sb_handling.%leg_start%) where (%leg_starts_at_sb_base%));
+
+%sb_duty_end% =
+    sb_handling.%duty_end%;
+
+%sb_duty_start_inc_travel% =
+    %sb_duty_start% - 
+    %sb_travel_time%;
+    
+    
+%_last_possible_sb_start% =
+    max(duty_set, %sb_start_for_last_normal_duty%) where (not duty.%is_standby%);
+
+%first_possible_sb_start% =
+    min(duty_set, %sb_start_time%) where (not duty.%is_standby%);
+
+%first_possible_sb_start_new% =
+    min(duty_set, %sb_duty_start_inc_travel%) where (not duty.%is_standby%);
+/*error here*/
+%last_possible_sb_start% =
+    nmax(%_last_possible_sb_start%, %first_possible_sb_start%);
+
+%sb_start_time% = 
+    if %duty_special_sb_type% = FirstAP or %duty_special_sb_type% = SpecialFDP or %duty_special_sb_type% = Specialfdpspecialstation then
+        %sb_duty_start%
+    else if %duty_special_sb_type% = ExistingSB then
+        sb_handling.%duty_start%
+    else if %duty_special_sb_type% = SpecialPreDefined then
+        %predefined_sb_start_time%
+    else if %duty_special_sb_type% = SpecialStation or %duty_special_sb_type% = Specialstationlateend then
+        %sb_duty_start_inc_travel%
+    else if %duty_special_sb_type% = LastNormal then
+        last(leg(duty), sb_handling.%leg_start%) where (%leg_starts_at_sb_base%) - %sb_length% - %sb_travel_time% + %sb_last_sb_delay_buffer%
+    else
+    /*It is only possible to make a dedicated SB start earlier than ci - travel time or it will not cover though production*/
+        default(nmax(%sb_duty_start_inc_travel%, round_up(%sb_duty_end% - oma16.%max_daily_fdp% , 0:10)), %sb_duty_start_inc_travel%);
+
+%latest_possible_sb_start_time% =
+    default(nmin(%sb_start_time%, round_up(%sb_duty_end% - oma16.%max_daily_fdp% , 0:10)), %sb_start_time%);
+/*A sb should never end after midnight*/
+%sb_end_time% =
+    let midnight = round_up(%sb_start_time%, 24:00);
+    if %duty_special_sb_type% = ExistingSB then
+        duty.%end_lt%
+    else if %duty_special_sb_type% = SpecialPreDefined then
+        %predefined_sb_end_time%
+    else
+    nmin(%sb_start_time% +
+    (if %is_airport_sb_type%(%duty_special_sb_type%) then
+        %ap_sb_length%
+     else
+        %sb_length%), midnight- 0:05);
+
+%sb_start_for_last_normal_duty% = 
+    last(leg(duty), sb_handling.%leg_start%) where (%leg_starts_at_sb_base%) + %sb_last_sb_delay_buffer% - %sb_travel_time% - %sb_length%;    
+
+/*%sb_start_for_last_normal_duty% =
+    nmax(%_sb_start_for_last_normal_duty%, %sb_start_time%);*/
+
+%sb_start_for_last_duty% = 
+    nmax(last(leg(duty), sb_handling.%leg_start%) where (%leg_starts_at_sb_base%) + %sb_last_sb_delay_buffer% - %sb_travel_time%, %min_coverage_end%) - %sb_length%;
+
+/*%sb_start_for_last_duty% =
+  nmax(%_sb_start_for_last_duty%, %sb_start_time%);*/
+
+/*It is important that sb info and sb_start_time are in synk or it will not give info from correct trip*/
+%sb_special_station_ix% =
+    void_string;
+
+%sb_info_ix% =
+    let sb_start = %sb_start_time_ix%;
+    if %duty_special_sb_type_ix% = FirstAP or %duty_special_sb_type_ix% = SpecialFDP then
+        (min(duty_set, %sb_info_func%(%duty_special_sb_type_ix%)) where (not duty.%is_standby% and sb_start = %_sb_start_time_ix%))
+    else if %duty_special_sb_type_ix% = LastNormal then
+        (max(duty_set, %sb_info_func%(%duty_special_sb_type_ix%)) where (not duty.%is_standby% and sb_start = %_sb_start_time_ix%))
+    else if %duty_special_sb_type_ix% = FirstOrFDPAP then
+        (min(duty_set, %sb_info_func%(%duty_special_sb_type_ix%)) where (not duty.%is_standby% and sb_start = %_sb_start_time_ix%))
+    else
+        (min(duty_set, %sb_info_func%(%duty_special_sb_type_ix%)) where (not duty.%is_standby% and sb_start = %_sb_start_time_ix%));
+
+
+
+%consider_duty_for_sb_calculation_no_sb% = %consider_duty_for_sb_calculation% and not duty.%is_standby%;
+%sb_start_time_ix% = 
+    let minSBStart = min(duty_set, %_sb_start_time_ix%) where (%consider_duty_for_sb_calculation_no_sb%);
+    if %duty_special_sb_type_ix% = FirstAP or %duty_special_sb_type_ix% = SpecialFDP or %duty_special_sb_type_ix% = Specialfdpspecialstation then
+        minSBStart
+    else if %duty_special_sb_type_ix% = LastNormal then
+        /*Last normal should never be before first SB*/
+        nmax(max(duty_set, %_sb_start_time_ix%) where (%consider_duty_for_sb_calculation_no_sb%), 
+             min(duty_set, %sb_duty_start_inc_travel%) where (%consider_duty_for_sb_calculation_no_sb%))
+    else if %duty_special_sb_type_ix% = FirstOrFDPAP then
+        default((min(duty_set, %sb_duty_start%) where (%duty_special_sb_type% = SpecialFDP)),
+                minSBStart)
+    else
+        nmin(minSBStart, %min_coverage_start%);
+
+%_sb_start_time_ix% =
+    %sb_start_time_func_ix%(%duty_special_sb_type_ix%);
+
+/*Must be for hard duties to be covered by standby as they must start close to duty start as is normally the case set to fake value to work*/
+%latest_possible_sb_start_time_ix% =
+    01Jan1986;
+
+%sb_start_time_func_ix% (special_sb_type comp_type) =
+    if comp_type = FirstAP or comp_type = SpecialFDP or comp_type = Specialfdpspecialstation then
+        %sb_duty_start%
+    else if comp_type = LastNormal then
+        %sb_start_for_last_duty%
+    else if comp_type = FirstOrFDPAP then
+        %sb_duty_start%
+    else
+        %sb_duty_start_inc_travel%;
+
+%sb_end_time_ix% =
+    let midnight = round_up(%sb_start_time_ix%, 24:00);
+    nmin(%sb_start_time_ix% +
+    (if %is_airport_sb_type%(%duty_special_sb_type_ix%) then
+        %ap_sb_length%
+     else
+        %sb_length%), midnight-0:05);
+    
+%is_airport_sb_type%(special_sb_type type) =
+    if type = FirstAP or type = SpecialFDP or type = FirstOrFDPAP or type = Specialfdpspecialstation then
+        true
+    else
+        false;
+    
+%sb_type% =
+    if %duty_needs_airport_sb% then
+        "A"
+    else
+        "RT";
+        
+%duty_sb_start% = first(leg(duty), sb_handling.%leg_start%);
+%duty_sb_start_time% = first(leg(duty), sb_handling.%leg_start_time%);
+        
+%is_First_AP% =  min(duty_set, %duty_sb_start%) = %duty_sb_start%;
+%is_First_Normal% =  min(duty_set, %duty_sb_start_time%) = %duty_sb_start_time%;
+%is_Last_Normal%  = max(duty_set, %duty_sb_start_time%) = %duty_sb_start_time%;
+
+%from_end%(special_sb_type sb_type) = 
+    true;
+        
+
+table special_sb_type_table(int ix) =
+  ix ->
+    special_sb_type %_special_sb_type%;
+  1 -> FirstAP;
+  2 -> FirstOrFDPAP;
+  3 -> FirstNormal;
+  4 -> LastNormal;
+  - -> NoneType;
+end
+
+%duty_special_sb_type% =
+    if %duty_needs_predefined_sb% then
+        SpecialPreDefined
+    else if %duty_needs_airport_sb% then
+        if %duty_has_critical_qual% then
+            SpecialFDPSpecialStation
+        else
+            SpecialFDP
+    else if %duty_has_critical_qual% then
+        if duty.%check_out_after_midnight% then
+            Specialstationlateend
+        else
+            SpecialStation
+    else if %duty_is_existing_SB% then
+        ExistingSB
+    else
+        NoneType;
+
+
+%Special_sb_code% =
+    if %duty_special_sb_type% = ExistingSB then
+        duty.%code%
+    else
+        %code%(%duty_special_sb_type%);
+
+%is_sb_type_active% = %sb_active%(%duty_special_sb_type%);   
+
+%sb_block_time% = 
+    if %check_block_time%(%duty_special_sb_type%) then
+        duty.%block_time_scheduled%
+    else
+        void_reltime;
+        
+%sb_duty_time% = 
+    if %check_duty_time%(%duty_special_sb_type%) then
+        duty.%duty_time%(union, True)
+    else
+        void_reltime;
+        
+%sb_special_station% =
+    if %duty_special_sb_type% = Specialstation or %duty_special_sb_type% = Specialfdpspecialstation or %duty_special_sb_type% = SpecialStationLateend or %duty_has_critical_qual% then
+        first(leg(duty), leg.%end_station%) where (%leg_has_critical_qual%)
+    else
+        void_string;
+
+%sb_placement% = sb_handling.%duty_sb_placement_func%(%duty_special_sb_type%);
+%sb_info% = %sb_info_func%(%duty_special_sb_type%);
+%Special_sb_upper_comp% =
+        %upper_comp%(%duty_special_sb_type%);
+
+%Special_sb_lower_comp% = %lower_comp%(%duty_special_sb_type%);
+%Special_sb_priority% = %priority%(%duty_special_sb_type%);
+%Special_sb_from_end% = %from_end%(%duty_special_sb_type%);
+%Special_sb_exists% = %sb_exists%(%duty_special_sb_type%);
+    
+%Special_sb_code_ix% =  %code%(%duty_special_sb_type_ix%);
+%is_sb_type_active_ix% = %sb_active%(%duty_special_sb_type_ix%) and not void(%sb_start_time_ix%);
+%sb_duty_time_ix% = 
+    if %check_duty_time%(%duty_special_sb_type_ix%) then
+        duty.%duty_time%(union, True)
+    else
+        void_reltime;
+        
+%sb_block_time_ix% = 
+    if %check_block_time%(%duty_special_sb_type_ix%) then
+        duty.%block_time_scheduled%
+    else
+        void_reltime;
+
+/*Must be used in iteration in order to work properly*/
+%sb_placement_ix% =
+    sb_handling.%duty_sb_placement_func%(%duty_special_sb_type_ix%);
+    
+%Special_sb_upper_comp_ix% = %upper_comp%(%duty_special_sb_type_ix%);
+%Special_sb_lower_comp_ix% = %lower_comp%(%duty_special_sb_type_ix%);
+%Special_sb_priority_ix% = %priority%(%duty_special_sb_type_ix%);
+%Special_sb_from_end_ix% = %from_end%(%duty_special_sb_type_ix%);
+%Special_sb_exists_ix% = %sb_exists%(%duty_special_sb_type_ix%);
+%sb_exists%(special_sb_type sb_type) = 
+    if sb_type = ExistingSB then
+        true
+    else
+        false;
+%sb_daily_spread_factor_table_p% = parameter "SBDailySpreadFactor.etab" remark "SB spread factor table";
+
+table sb_daily_spread_factor(String base, String category, String weekday, reltime tod) =
+  base, category, weekday,tod  -> export Int %__scale_factor%;
+    external %sb_daily_spread_factor_table_p%;
+    "Base","Cat", "WeekDay", ("Strart", "End"( ->
+"Faktor";
+  -, -, -, - -> void_int;
+end
+
+%sb_daily_min_coverage_table_p% = parameter "SBDailyCoverageIntervals.etab" remark "SB daily min coverage table";
+
+table sb_daily_min_coverage(String base, String category, String weekday) =
+  base, category, weekday   -> Reltime %__min_coverage_start%, Reltime %__min_coverage_end%, bool %__min_coverage_valid%;
+    external %sb_daily_min_coverage_table_p%;
+    "Base","Cat", "WeekDay" -> "Strart", "End", "Valid";
+  -, -, - -> void_reltime, void_reltime, false;
+end
+%scale_factor% = default(%_scale_factor%(sb_handling.%sb_base%), %_scale_factor%("*")); 
+
+
+
+%_scale_factor%(string base) = default(%__scale_factor%(base, fundamental.%main_cat%, sb_handling.%leg_start_wd%, sb_handling.%leg_start_tod%), %__scale_factor%(base, fundamental.%main_cat%, "*", sb_handling.%leg_start_tod%));
+%min_coverage_start% = 
+    sb_handling.%duty_start_date% +
+    (if %min_coverage_valid% then
+        default(%_min_coverage_start%(sb_handling.%sb_base%), %_min_coverage_start%("*"))
+    else
+        24:00);
+%_min_coverage_start%(string base) = default(%__min_coverage_start%(base, fundamental.%main_cat%, sb_handling.%duty_start_wd%), %__min_coverage_start%(base, fundamental.%main_cat%, "*"));
+%min_coverage_end% = 
+    sb_handling.%duty_start_date% +
+    (if %min_coverage_valid% then
+        default(%_min_coverage_end%(sb_handling.%sb_base%), %_min_coverage_end%("*"))
+    else
+        0:00);
+%min_coverage_valid% =
+    default(%_min_coverage_valid%(sb_handling.%sb_base%), %_min_coverage_valid%("*"));
+%_min_coverage_valid%(string base) = 
+    default(%__min_coverage_valid%(base, fundamental.%main_cat%, sb_handling.%duty_start_wd%), 
+            %__min_coverage_valid%(base, fundamental.%main_cat%, "*"));
+    
+%_min_coverage_end%(string base) = 
+    default(%__min_coverage_end%(base, fundamental.%main_cat%, sb_handling.%duty_start_wd%), 
+            %__min_coverage_end%(base, fundamental.%main_cat%, "*"));
+
+%upper_comp%(special_sb_type comp_type) =
+    if comp_type = ExistingSB then
+        sum(trip_set,crew_pos.%trip_assigned_func%(%upper_cat%))
+    else if comp_type = SpecialPreDefined then
+        default(%predefined_upper_comp%(sb_handling.%duty_start_wd%, sb_handling.%duty_sb_need_for_date%),
+            %predefined_upper_comp%("*", sb_handling.%duty_sb_need_for_date%))
+    else
+        default(%normal_upper_comp%(comp_type, sb_handling.%duty_start_wd%, sb_handling.%duty_sb_need_for_date%),
+            %normal_upper_comp%(comp_type, "*", sb_handling.%duty_sb_need_for_date%));
+
+%normal_upper_comp%(special_sb_type comp_type, string weekDay, int sbNeed) =
+        default(sb_handling.%_upper_comp%(sb_handling.%sb_base%, fundamental.%main_cat%, comp_type, weekDay, sbNeed),
+                sb_handling.%_upper_comp%("*", fundamental.%main_cat%, comp_type, weekDay, sbNeed));
+
+%lower_comp%(special_sb_type comp_type) =
+    if comp_type = ExistingSB then
+        sum(trip_set,crew_pos.%trip_assigned_func%(%lower_cat%))
+    else if comp_type = SpecialPreDefined then
+        default(%predefined_lower_comp%(sb_handling.%duty_start_wd%, sb_handling.%duty_sb_need_for_date%),
+            %predefined_lower_comp%("*", sb_handling.%duty_sb_need_for_date%))
+    else
+        default(%normal_lower_comp%(comp_type, sb_handling.%duty_start_wd%, sb_handling.%duty_sb_need_for_date%),
+            %normal_lower_comp%(comp_type, "*", sb_handling.%duty_sb_need_for_date%));
+
+%normal_lower_comp%(special_sb_type comp_type, string weekDay, int sbNeed) =
+        default(sb_handling.%_lower_comp%(sb_handling.%sb_base%, fundamental.%main_cat%, comp_type, weekDay, sbNeed),
+                sb_handling.%_lower_comp%("*", fundamental.%main_cat%, comp_type, weekDay, sbNeed));
+
+%priority%(special_sb_type comp_type) =
+    if comp_type = ExistingSB then
+        0
+    else if comp_type = SpecialPreDefined then
+        default(%predefined_priority%(sb_handling.%duty_start_wd%, sb_handling.%duty_sb_need_for_date%),
+            %predefined_priority%("*", sb_handling.%duty_sb_need_for_date%))
+    else
+        default(%normal_priority%(comp_type, sb_handling.%duty_start_wd%, sb_handling.%duty_sb_need_for_date%),
+            %normal_priority%(comp_type, "*", sb_handling.%duty_sb_need_for_date%));
+
+%normal_priority%(special_sb_type comp_type, string weekDay, int sbNeed) =
+        default(sb_handling.%sb_type_priority%(sb_handling.%sb_base%, fundamental.%main_cat%, comp_type, weekDay, sbNeed),
+                sb_handling.%sb_type_priority%("*", fundamental.%main_cat%, comp_type, weekDay, sbNeed));
+
+%code%(special_sb_type comp_type) =
+        %_sb_code%(%code_type%(comp_type));
+    /*default(%_code%(comp_type, sb_handling.%duty_start_wd%, sb_handling.%duty_sb_need_for_date%),
+            %_code%(comp_type, "*", sb_handling.%duty_sb_need_for_date%));*/
+
+/*%_code%(special_sb_type comp_type, string weekDay, int sbNeed)   =
+    default(sb_handling.%_code%(sb_handling.%sb_base%, fundamental.%main_cat%, comp_type, weekDay, sbNeed),
+                                               sb_handling.%_code%("*", fundamental.%main_cat%, comp_type, weekDay, sbNeed));*/
+%code_type%(special_sb_type comp_type) =
+    if comp_type = SpecialPreDefined then
+        %predefined_code_type%(comp_type)
+    else
+        %normal_code_type%(comp_type);
+
+%normal_code_type%(special_sb_type comp_type) =
+    let ct = %_code_type%(comp_type, sb_handling.%duty_start_wd%, sb_handling.%duty_sb_need_for_date%);
+    if ct = NoneCodeType then
+            %_code_type%(comp_type, "*", sb_handling.%duty_sb_need_for_date%)
+    else
+        ct;
+
+%_code_type%(special_sb_type comp_type, string weekDay, int sbNeed)   =  
+    let ct = sb_handling.%_code_type%(sb_handling.%sb_base%, fundamental.%main_cat%, comp_type, weekDay, sbNeed);
+    if ct = NoneCodeType then
+        sb_handling.%_code_type%("*", fundamental.%main_cat%, comp_type, weekDay, sbNeed)
+    else
+        ct;
+        
+table sb_code_type_lookup(SBCodeType ct) =
+    ct -> string %_sb_code%;
+    NormalSB -> %sb_code%;
+    AirportSB -> %ap_sb_code%;
+    TailoredSB -> %tailored_sb_code%;
+    QualSpecAB -> %calculated_sb_code%;
+    NoneCodeType -> "R4";
+end
+/*Tode do real implementation*/
+%calculated_sb_code% = "R";
+%sb_active%(special_sb_type comp_type) =
+    if comp_type = ExistingSB then
+        true
+    else
+        default(default(%_sb_active%(comp_type, sb_handling.%duty_start_wd%, sb_handling.%duty_sb_need_for_date%),
+            %_sb_active%(comp_type, "*", sb_handling.%duty_sb_need_for_date%)), false);
+    
+%_sb_active%(special_sb_type comp_type, string weekDay, int sbNeed) =
+    default(sb_handling.%_active%(sb_handling.%sb_base%, fundamental.%main_cat%, comp_type, weekDay, sbNeed), 
+                                                            sb_handling.%_active%("*", fundamental.%main_cat%, comp_type, weekDay, sbNeed));
+
+
+
+%sb_info_func%(special_sb_type comp_type) = 
+    if comp_type = FirstAP or comp_type = FirstNormal or comp_type = LastNormal or comp_type = FirstOrFDPAP then
+        cat(leg(duty), leg.%flight_name%, ", ")
+    else if comp_type = SpecialPreDefined then
+        "Pre defined"
+    else if comp_type = SpecialFDPspecialstation then
+        concat(
+               concat("SpS: ", first(leg(duty), leg.%end_station%) where (%leg_has_critical_qual%)), 
+                      cat(leg(duty), leg.%flight_name%, ", "))
+    else if comp_type = SpecialFDP then
+        concat("FDP: ", cat(leg(duty), leg.%flight_name%, ", "))
+    else if comp_type = SpecialStation or comp_type = SpecialStationLateend then
+        concat("SpS: ", first(leg(duty), leg.%end_station%) where (%leg_has_critical_qual%))
+    else
+        void_string;
+        
+%check_block_time%(special_sb_type comp_type) =
+    default(
+            default(%_check_block_time%(comp_type, sb_handling.%duty_start_wd%, sb_handling.%duty_sb_need_for_date%),
+                    %_check_block_time%(comp_type, "*", sb_handling.%duty_sb_need_for_date%)),
+            false);
+%_check_block_time%(special_sb_type comp_type, string weekDay, int sbNeed) = 
+    default(
+            sb_handling.%_sb_block_limitation%(sb_handling.%sb_base%, fundamental.%main_cat%, comp_type, weekDay, sbNeed), 
+            sb_handling.%_sb_block_limitation%("*", fundamental.%main_cat%, comp_type, weekDay, sbNeed));
+
+%check_duty_time%(special_sb_type comp_type) = 
+    default(
+            default(%_check_duty_time%(comp_type, sb_handling.%duty_start_wd%, sb_handling.%duty_sb_need_for_date%),
+                    %_check_duty_time%(comp_type, "*", sb_handling.%duty_sb_need_for_date%)),
+            false);
+    
+%_check_duty_time%(special_sb_type comp_type, string weekDay, int sbNeed) = 
+            default(
+                    sb_handling.%_sb_duty_limitation%(sb_handling.%sb_base%, fundamental.%main_cat%, comp_type, weekDay, sbNeed), 
+                    sb_handling.%_sb_duty_limitation%("*", fundamental.%main_cat%, comp_type, weekDay, sbNeed));
+
+export iterator sb_trip_length_date_set = 
+  partition(trip)
+  by(trip.%days%, trip.%start_base%, trip.%start_scheduled_day%, %consider_trip_for_sb_calculation%);
+end
+%assigned_cat_name_ix_to_consider% =
+    (%assigned_cat_name_ix% = %upper_cat%) or (%assigned_cat_name_ix% = %lower_cat%);
+
+%assigned_cat_name_ix% =
+    crew_pos.%pos2func%(%py_index%);
+
+%no_assigned_for_pos_ix% =
+    crew_pos.%trip_assigned_pos%(%py_index%);
+    
+%tot_no_assigned_for_pos_ix% =
+    sum(trip_set,%no_assigned_for_pos_ix%);
+
+
+/*Predefined code added by Niklas 20140528*/
+
+%duty_needs_predefined_sb% =
+    default(%_duty_needs_predefined_sb%, false);
+
+%_duty_needs_predefined_sb% =
+    default(
+                sb_handling.%predefined_active%(duty.%start_base%, fundamental.%main_cat%, sb_handling.%duty_predefined_flight_nr%, sb_handling.%duty_predefined_departure%, sb_handling.%duty_weekday%, sb_handling.%duty_sb_need%),
+                sb_handling.%predefined_active%(duty.%start_base%, fundamental.%main_cat%, sb_handling.%duty_predefined_flight_nr%, sb_handling.%duty_predefined_departure%, "*", sb_handling.%duty_sb_need%));
+
+
+
+
+%predefined_sb_end_time% =
+    duty.%start_day_lt% + default(
+                sb_handling.%predefine_sb_end%(duty.%start_base%, fundamental.%main_cat%, sb_handling.%duty_predefined_flight_nr%, sb_handling.%duty_predefined_departure%, sb_handling.%duty_weekday%, sb_handling.%duty_sb_need%),
+                sb_handling.%predefine_sb_end%(duty.%start_base%, fundamental.%main_cat%, sb_handling.%duty_predefined_flight_nr%, sb_handling.%duty_predefined_departure%, "*", sb_handling.%duty_sb_need%));
+
+%predefined_sb_start_time% =
+    duty.%start_day_lt% + default(
+                sb_handling.%predefine_sb_start%(duty.%start_base%, fundamental.%main_cat%, sb_handling.%duty_predefined_flight_nr%, sb_handling.%duty_predefined_departure%, sb_handling.%duty_weekday%, sb_handling.%duty_sb_need%),
+                sb_handling.%predefine_sb_start%(duty.%start_base%, fundamental.%main_cat%, sb_handling.%duty_predefined_flight_nr%, sb_handling.%duty_predefined_departure%, "*", sb_handling.%duty_sb_need%));
+
+%duty_special_sb_type_ix% = %_special_sb_type%(%py_index%);
+
+
+%predefined_code_type%(special_sb_type comp_type) =
+    let code_type =
+                sb_handling.%predefined_code_type%(duty.%start_base%, fundamental.%main_cat%, sb_handling.%duty_predefined_flight_nr%, sb_handling.%duty_predefined_departure%, sb_handling.%duty_weekday%, sb_handling.%duty_sb_need%);
+    if code_type = NoneCodeType then
+                sb_handling.%predefined_code_type%(duty.%start_base%, fundamental.%main_cat%, sb_handling.%duty_predefined_flight_nr%, sb_handling.%duty_predefined_departure%, "*", sb_handling.%duty_sb_need%)
+    else
+        code_type;
+
+%predefined_upper_comp%(string weekDay, int sbNeed) =
+        default(sb_handling.%predefined_upper_comp%(duty.%start_base%, fundamental.%main_cat%, sb_handling.%duty_predefined_flight_nr%, sb_handling.%duty_predefined_departure%, weekDay, sbNeed),
+                sb_handling.%predefined_upper_comp%("*", fundamental.%main_cat%, sb_handling.%duty_predefined_flight_nr%, sb_handling.%duty_predefined_departure%, weekDay, sbNeed));
+
+%predefined_lower_comp%(string weekDay, int sbNeed) =
+        default(sb_handling.%predefined_lower_comp%(duty.%start_base%, fundamental.%main_cat%, sb_handling.%duty_predefined_flight_nr%, sb_handling.%duty_predefined_departure%, weekDay, sbNeed),
+                sb_handling.%predefined_lower_comp%("*", fundamental.%main_cat%, sb_handling.%duty_predefined_flight_nr%, sb_handling.%duty_predefined_departure%, weekDay, sbNeed));
+
+%predefined_priority%(string weekDay, int sbNeed) =
+        default(sb_handling.%predefined_priority%(duty.%start_base%, fundamental.%main_cat%, sb_handling.%duty_predefined_flight_nr%, sb_handling.%duty_predefined_departure%, weekDay, sbNeed),
+                sb_handling.%predefined_priority%("*", fundamental.%main_cat%, sb_handling.%duty_predefined_flight_nr%, sb_handling.%duty_predefined_departure%, weekDay, sbNeed));
+
+export %leg_start_time_new% = sb_handling.%leg_start_date% + %_leg_start_time_new%;
+export %leg_end_time_new% = sb_handling.%leg_start_date% + %predefined_sb_end_from_start%(%_leg_start_time_new%);
+/*Niklas*/
+%_leg_start_time_new% = %convert_to_predefined_time%(%earlist_sb_start_tod_to_cover_leg%);
+%earlist_sb_start_to_cover_leg% =  %sb_duty_start_inc_travel%;
+%earlist_sb_start_tod_to_cover_leg% =
+    time_of_day(%earlist_sb_start_to_cover_leg%);
+%number_of_sb_intervals% = 10;
+
+/*The default is used as a safety and will be converted to first possible SB start in SB calculator*/
+%convert_to_predefined_time%(Reltime start) =
+    default(max(times(%number_of_sb_intervals%), %predefined_sb_start_ix%) where (start > %predefined_sb_start_ix%),
+            0:00);
+
+
+%sb_predefined_start_table_p% = parameter "SBPredefinedStarts.etab" remark "Predefined Standbys";
+
+table sb_predefined_starts(String base, String category, String weekday, int match) =
+  base, category, weekday,match  -> export Reltime %__predefined_sb_start%, export Reltime %__predefined_sb_end%;
+    external %sb_predefined_start_table_p%;
+    "Base","Cat", "WeekDay", match_number -> "Strart", "End";
+  -, -, -, - -> void_reltime, void_reltime;
+end
+
+table sb_predefined_starts_from_start(String base, String category, String weekday, reltime start) =
+  base, category, weekday,start  -> export Reltime %___predefined_sb_end_from_start%;
+    external %sb_predefined_start_table_p%;
+    "Base","Cat", "WeekDay", "Strart" -> "End";
+  -, -, -, - -> void_reltime;
+end
+%predefined_sb_start_1% = %predefined_sb_start%(1);
+%predefined_sb_start_2% = %predefined_sb_start%(2);
+%predefined_sb_end_1% = %predefined_sb_end%(1);
+%predefined_sb_end_2% = %predefined_sb_end%(2);
+%predefined_sb_start_ix% = %predefined_sb_start%(%times_index_0%);
+%predefined_sb_start_ix_plus% = %predefined_sb_start%(%times_index_0% + 1);
+%predefined_sb_start%(int match) = default(%_predefined_sb_start%(sb_handling.%sb_base%, match), %_predefined_sb_start%("*", match));
+
+%_predefined_sb_start%(string base, int match) = default(%__predefined_sb_start%(base, fundamental.%main_cat%, sb_handling.%leg_start_wd%, match), %__predefined_sb_start%(base, fundamental.%main_cat%, "*", match));
+
+%predefined_sb_end_ix% = %predefined_sb_end%(%times_index_0%);
+
+%predefined_sb_end%(int match) = default(%_predefined_sb_end%(sb_handling.%sb_base%, match), %_predefined_sb_end%("*", match));
+
+%_predefined_sb_end%(string base, int match) = default(%__predefined_sb_end%(base, fundamental.%main_cat%, sb_handling.%leg_start_wd%, match), %__predefined_sb_end%(base, fundamental.%main_cat%, "*", match));
+%predefined_sb_end_from_start%(reltime start) = default(%_predefined_sb_end_from_start%(start), start + %sb_length%);
+%_predefined_sb_end_from_start%(reltime start) = default(%__predefined_sb_end_from_start%(sb_handling.%sb_base%, start), %__predefined_sb_end_from_start%("*", start));
+
+%__predefined_sb_end_from_start%(string base, reltime start) = default(%___predefined_sb_end_from_start%(base, fundamental.%main_cat%, sb_handling.%leg_start_wd%, start), %___predefined_sb_end_from_start%(base, fundamental.%main_cat%, "*", start));
+

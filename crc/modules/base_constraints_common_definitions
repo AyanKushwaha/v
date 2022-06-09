@@ -1,0 +1,135 @@
+/*  -*- crc -*- */
+
+/*
+ * Common definitions for the base constraint modules.
+ */
+
+root module base_constraints_common_definitions
+
+import pp;
+import crew_pos;
+import levels;
+import keywords;
+import trip;
+import fundamental;
+
+
+global export %unexpected_void_abstime% = 31Jan1901;
+global export %unexpected_void_int% = 99999;
+global export %unexpected_void_str% = "Unexpected void";
+
+/*File name for etab, used in rostering and pairing for file handling and in the base constraints module */
+export %bc_duty_days_table_name_p% =
+    parameter "base_constraints_duty_days"
+    remark "(BC D.p0) External table for duty days constraints";
+
+export %bc_trip_duty_days_table_name_p% =
+    parameter "base_constraints_trip_duty_days.etab"
+    remark "(BC T.p0): External table for trip duty days constraints";
+
+global export %chain_homebase% =
+    keywords.%homebase%;
+
+/* Having a pos_code of "*" is treated as a sort of wildcard */
+global export
+%bc_assigned_by_name%(String pos_code) =
+    if pos_code = "*" then
+        crew_pos.%trip_assigned%
+    else
+        crew_pos.%trip_assigned_func%(pos_code);
+
+
+/**************************************************************************
+ * 2. Period Definition
+ * --------------------
+ **************************************************************************/
+
+/* The default statements here is used to force the variables to be
+   non-voidy. */
+global export
+%bc_is_dated_mode% = default(keywords.%global_is_dated_mode%, false);
+
+/* To avoid creating constraints for days outside the local plan period
+   we use the intersection of the validity periods in the table and
+   the local plan period.
+ */
+global export
+%bc_period_start_date% =
+    default(round_down(keywords.%global_lp_period_start%, 24:00),
+            %unexpected_void_abstime%);
+
+/* Studio sets global_lp_period_end to end_date + offset + 23:59 which
+   is why we need the extra minute */
+global export
+%bc_period_end_date% =
+    default(round_down(keywords.%global_lp_period_end% + 00:01 - 24:00, 24:00),
+            %unexpected_void_abstime%);
+
+global export
+%bc_lp_period_length% =
+    round_up(keywords.%global_lp_period_end% - keywords.%global_lp_period_start%, 24:00);
+
+
+/* Dates outside the local plan period are adjusted to the start/end
+   of the local plan period. The exceptions are (in dated mode):
+   * 01Jan1901 as start date --> start of planning period
+   * 31Dec2099 as end date --> end of planning period
+*/
+
+global export
+%bc_common_from_date_adjusted%(Abstime date) =
+    default(%_bc_common_from_date_adjusted%(date),
+            %unexpected_void_abstime%);
+
+%_bc_common_from_date_adjusted%(Abstime date) =
+    let rdate = round_down(date, 24:00);
+    if %bc_is_dated_mode% and rdate = 01Jan1901 then
+        fundamental.%pp_start_day%
+    else
+        nmax(rdate, %bc_period_start_date%);
+
+global export
+%bc_common_to_date_adjusted%(Abstime date) =
+    default(%_bc_common_to_date_adjusted%(date),
+            %unexpected_void_abstime%);
+
+%_bc_common_to_date_adjusted%(Abstime date) =
+    let rdate = round_down(date, 24:00);
+    if %bc_is_dated_mode% and rdate = 31Dec2099 then
+        fundamental.%pp_end_day%
+    else
+        nmin(rdate, %bc_period_end_date%);
+
+
+/*************************************************************
+ * Alias definitions
+ ************************************************************/
+export %abstime2day_number_in_week%(Abstime date) =
+    time_of_week(date) / 24:00 + 1;
+
+global export
+%bc_output_day_name%(Abstime day) =
+    default(if %bc_is_dated_mode% then
+               format_time(day, "%02d%b")
+            else
+               concat("Day: ", format_int(%abstime2day_number_in_week%(day), "%d")),
+            "Magic");
+
+/*************************************************************
+ * Misc
+ *************************************************************/
+
+global export
+%base_indicator_function%(String base) =
+    if trip.%homebase% = base then 100 else 0;
+
+/*************************************************************
+ trick to compile for studio/matador:
+ wrap the apc map variables
+**************************************************************/
+export %_trip_start_date_hb% = first(leg(chain), trip.%start_date_hb%);
+
+export %_trip_duty_days_hb% = first(leg(chain), trip.%duty_days_hb%);
+
+export %_assigned_by_name_chain%(String pos_code) =
+    first(leg(chain), %bc_assigned_by_name%(pos_code));

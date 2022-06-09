@@ -1,0 +1,563 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   Definitions for studio operations
+ *   Help variables and functions used by python scripts in studio.
+ *
+ * Sections:
+ *   1. Crew sickness definitions
+ *   2. Move assignments, 
+ *   3. Command line specific definitions
+ *   4. Rest planning definitions
+ *   5: Crew notifications
+ *   6: Menu States
+ *
+ * Created by:
+ *   Leo Wentzel, 08-Jun-2006
+ *
+ * Major changes:
+ *
+ */
+
+module studio_process_cct inherits studio_process
+
+import levels;
+import trip;
+import duty;
+import leg;
+import crew_pos;
+import crew;
+import task;
+import fundamental;
+import iterators;
+import standby;
+import accumulators;
+import report_crewlists;
+import report_illness;
+import compdays;
+import studio_kpi;
+import annotations;
+
+/******************************************************************************
+ * Section 1: Crew sickness definitions (see ReportSickFunctions.py)
+ *****************************************************************************/
+
+%crew_leg_at%(AbsTime start_hb) =
+  first(leg(roster), leg_identifier)
+    where(leg.%start_hb% = start_hb);
+    
+%leg_safe_check_in_at_utc% =
+  nmin(leg.%ci_start_utc%, leg.%start_utc%);
+
+%leg_safe_check_in_at_hb% =
+  %leg_safe_check_in_at_utc% + leg.%homebase_tz_corrector%;
+
+%leg_safe_check_out_at_utc% =
+   leg.%co_end_utc%;
+
+%leg_safe_check_out_at_hb% =
+  %leg_safe_check_out_at_utc% + leg.%homebase_tz_corrector_end%;   
+
+export %report_sick_auto_inform_start%(AbsTime startTime, AbsTime endTime) =
+  crew.%hb_date%(startTime);
+
+export %report_sick_auto_inform_end%(AbsTime startTime, AbsTime endTime) =
+   crew.%hb_date_end%(endTime);
+
+/*
+** ReportSickFunctions.reportSick()
+** Current object is a roster.
+** The user has clicked on a start and and end time (in utc).
+*/
+
+/* Crew's home station corresponding to homebase at given date. */
+%crew_base_station_at_date%(Abstime time_utc) =
+  let stn = crew.%station_at_date%(time_utc);
+  if stn = "STO" then "ARN" else stn;
+  
+/* Are there any locked activities during the clicked-on period? */
+%crew_any_locked_in_period%(Abstime start_utc, Abstime end_utc) =
+  any(leg(roster), leg.%is_locked%)
+    from(first where(leg.%time_in_period_utc%(start_utc,end_utc) > 0:00))
+    while(leg.%time_in_period_utc%(start_utc,end_utc) > 0:00); 
+
+/* Sickness starting point calculated from clicked-on starting point.
+*   If the starting point is on a fix-length leg, or between two legs on the
+*   clicked-on day, then end time of the leg before will be returned.
+*   Otherwise: start of the day. */
+%crew_startpoint_hb_adjusted_to_legs%(Abstime startpoint_utc) =
+  let startpoint_utc_adjusted = %_adjusted_startpoint_utc%(startpoint_utc),
+      stn = %crew_base_station_at_date%(startpoint_utc_adjusted),
+      startpoint_hb = station_localtime(stn, startpoint_utc_adjusted),
+      startdate_hb = round_down(startpoint_hb, 24:00);
+  default(max(leg(roster), %leg_safe_check_out_at_hb%)
+            where(leg.%end_date% = startdate_hb
+              and leg.%end_hb% <= startpoint_hb)
+         , startdate_hb);
+
+  /* Click startpoint adjusted to leg start if clicked-on a fix-length leg */  
+  %_adjusted_startpoint_utc%(Abstime click_utc) =
+    default(min(leg(roster), leg.%start_utc%)
+              where(not leg.%is_pact%
+                and leg.%time_in_period_utc%(click_utc, click_utc+0:01) > 0:00)
+           , click_utc);
+  
+/* Sickness end point calculated from clicked-on end point.
+*   If the end point is on a fix-length leg, or between two legs on the
+*   clicked-on day, then start time of the leg after will be returned.
+*   Otherwise: start of the next day. */
+%crew_endpoint_hb_adjusted_to_legs%(Abstime endpoint_utc) =
+  let endpoint_utc_adjusted = %_adjusted_endpoint_utc%(endpoint_utc),
+      stn = %crew_base_station_at_date%(endpoint_utc_adjusted),
+      endpoint_hb = station_localtime(stn, endpoint_utc_adjusted),
+      lastdate_hb = round_down(endpoint_hb, 24:00);
+  default(min(leg(roster), %leg_safe_check_in_at_hb%)
+            where(leg.%start_date% = lastdate_hb
+              and leg.%start_hb% >= endpoint_hb)
+         , lastdate_hb + 24:00);
+
+  /* Click endpoint adjusted to leg end if clicked-on a fix-length leg */  
+  %_adjusted_endpoint_utc%(Abstime click_utc) =
+    default(max(leg(roster), leg.%end_utc%)
+              where(not leg.%is_pact%
+                and leg.%time_in_period_utc%(click_utc-0:01, click_utc) > 0:00)
+           , click_utc);
+    
+/* Indicates at what station the sickness is reported.
+*   If it's not the home station, a dh may be inserted to fix that. */ 
+%crew_prev_arrival_station_before%(Abstime timepoint_utc) =
+  let legid = default(%crew_leg_before%(timepoint_utc), 0);
+  if legid = 0 then
+    %crew_base_station_at_date%(timepoint_utc)
+  else
+    first(leg(roster), arrival_airport_name)
+    where(leg_identifier = legid);
+
+/* Leg_identifier of leg prior to the given time.
+*   Used as startpoint for deadhead selection. */
+%crew_leg_before%(Abstime timepoint_utc) =
+  last(leg(roster), leg_identifier)
+    where(leg.%end_utc% <= timepoint_utc);
+
+/* Start time of first leg after given time.
+*    Used to determine if and when a dh home has been assigned. */
+%crew_leg_after_start_hb%(Abstime timepoint_hb) =
+  default(first(leg(roster), leg.%start_hb%)
+          where(leg.%start_hb% >= timepoint_hb)
+         ,round_up(%pp_end%, 24:00));
+
+/* To determine which type of illness code(s) to lay out at report-sick:
+*
+*  String where each character represents the currently rostered
+*  activity on a a day within the given period.
+* 
+*  Each day can be:
+*    "L" Any type of activity after 14/16 consecutive days of illness.
+*    "D" On-duty activity (including on-duty-illness).
+*    "-" Off-duty day.
+*  Long-term illness begins after 14 days (16 for norwegian crew).
+* 
+*  (This function is not optimized for performance, but it's certainly
+*   good enough to use in a interactive function for one crew at a time.)
+*/
+%crew_duty_day_types_in_hb_period%(Abstime pstart_hb, Abstime pend_hb) =
+  let start_date_hb = round_down(pstart_hb, 24:00),
+      end_date_hb = round_up(pend_hb, 24:00),
+      days = (end_date_hb - start_date_hb) / 24:00,
+      ill_days_before = %_ill_days_before%(start_date_hb);
+  cat(times(days), %_duty_day_type_ix%(start_date_hb, ill_days_before));
+  
+  %_crew_long_term_illness_limit% =
+    if crew.%employment_country% = "NO"
+    then 16
+    else 14;
+  
+  %_duty_day_type_ix%(Abstime start_date_hb, Int ill_days_before) =
+    let ix_date = start_date_hb + ((%times_index_0%-1) * 24:00);
+    if (%times_index_0% + ill_days_before) > %_crew_long_term_illness_limit%
+    then "L"
+    else if any(trip(roster), trip.%is_on_duty%
+                              or trip.%is_on_duty_illness%
+                              or trip.%is_child_illness%)
+            where(trip.%time_in_period%(ix_date, ix_date+24:00) > 0:00)
+         then "D"
+    else "-";
+          
+  %_is_long_term_ill_day%(Abstime start_date_hb) =
+    any(leg(roster), leg.%code% = "IL12")
+    where(leg.%time_in_period%(start_date_hb, start_date_hb+24:00) > 0:00);
+    
+  %_ill_days_before%(Abstime start_date_hb) =
+    if %_is_long_term_ill_day%(start_date_hb-24:00)
+    then %_crew_long_term_illness_limit%
+    else count(times(%_crew_long_term_illness_limit%))
+           where(%_is_ill_day_before_ix%(start_date_hb))
+           while(%_is_ill_day_before_ix%(start_date_hb));
+    
+  %_is_ill_day_before_ix%(Abstime start_date_hb) =
+    let ix_date = start_date_hb - (%times_index_0% * 24:00);
+    any(leg(roster), leg.%is_illness%)
+      where(leg.%time_in_period%(ix_date, ix_date+24:00) > 0:00);
+      
+/* When a dh has been inserted in a sickness period, the starting point for
+*   sickness must be adjusted to after the dh. This is the adjusted value. */
+%crew_startpoint_hb_adjusted_to_added_dh%(Abstime startpoint_hb, Abstime endpoint_hb) =
+  default(last(leg(roster), %leg_safe_check_out_at_hb%)
+            where(leg.%end_hb% > startpoint_hb and leg.%end_hb% <= endpoint_hb)
+         , startpoint_hb);
+ 
+/* For preparation of an sickness period: legs that are covered by the period
+* will be removed or start-adjusted to make room for deadheads and ill-pacts.
+* These functions give the leg_identifier:s of any such legs .
+* Please note that the start and end times should be values that already have
+* been adjusted using the "xx_end/startpoint_adjusted" found in this section.
+*/
+%crew_legs_to_remove_in_hb_period%(Abstime start_time, Abstime end_time) =
+  cat(leg(roster), format_int(leg_identifier, "%d,"))
+  where(leg.%start_hb% >= start_time
+        and leg.%end_hb% <= end_time);
+%crew_legs_to_cut_in_hb_period%(Abstime start_time, Abstime end_time) =
+  cat(leg(roster), format_int(leg_identifier, "%d,"))
+  where(leg.%is_pact%
+        and leg.%start_hb% >= start_time
+        and leg.%start_hb% < end_time
+        and leg.%end_hb% > end_time);
+  
+/*
+** Variables for "Toggle Report-back".
+** Current object is a roster.
+** We're interested in the activity at the clicked-on time.
+** (The basic variables are general in nature, so they can be used for other
+**  purposes when the object-of-interest is a clicked-on-leg on a roster.)
+*/
+
+%click_date_hb%(AbsTime click_utc) =
+  let stn = %crew_base_station_at_date%(click_utc);
+  round_down(station_localtime(stn, click_utc), 24:00);
+ 
+%click_leg_identifier%(AbsTime click_utc) = 
+  first(leg(roster), leg_identifier)
+  where(leg.%start_utc% <= click_utc and leg.%end_utc% > click_utc);
+ 
+%click_day_start%(AbsTime click_utc) =
+  let clicked_leg_identifier = %click_leg_identifier%(click_utc);
+  nmax(%click_date_hb%(click_utc),
+       default(first(leg(roster), leg.%start_hb%)
+               where(leg_identifier = clicked_leg_identifier), 1Jan1901));
+ 
+%click_day_end%(AbsTime click_utc) =
+  let clicked_leg_identifier = %click_leg_identifier%(click_utc);
+  nmin(%click_date_hb%(click_utc) + 24:00,
+       default(first(leg(roster), leg.%end_hb%)
+               where(leg_identifier = clicked_leg_identifier), 31Dec2099));
+    
+%click_is_object%(AbsTime click_utc) =
+  not void(%click_leg_identifier%(click_utc));
+   
+%click_is_locked%(AbsTime click_utc) =
+  let clicked_leg_identifier = %click_leg_identifier%(click_utc);
+  first(leg(roster), leg.%is_locked%)
+  where(leg_identifier = clicked_leg_identifier);
+   
+%click_is_illness_or_loa%(AbsTime click_utc) =
+  let clicked_leg_identifier = %click_leg_identifier%(click_utc);
+  first(leg(roster), leg.%is_illness% or leg.%is_loa%)
+  where(leg_identifier = clicked_leg_identifier);
+  
+%click_code%(AbsTime click_utc) =
+  let clicked_leg_identifier = %click_leg_identifier%(click_utc);
+  first(leg(roster), leg.%code%)
+  where(leg_identifier = clicked_leg_identifier);
+
+%click_station%(AbsTime click_utc) =
+  let clicked_leg_identifier = %click_leg_identifier%(click_utc);
+  first(leg(roster), leg.%start_station%)
+  where(leg_identifier = clicked_leg_identifier);
+   
+%click_toggled_report_back_code%(AbsTime click_utc) =
+  let clicked_leg_identifier = %click_leg_identifier%(click_utc);
+  first(leg(roster), if leg.%is_report_back% then
+                       task.%report_back_base_code%
+                     else if leg.%can_report_back% then
+                       task.%report_back_code%
+                     else
+                       void_string
+                     )
+  where(leg_identifier = clicked_leg_identifier);
+   
+%click_is_report_back%(AbsTime click_utc) =
+  let clicked_leg_identifier = %click_leg_identifier%(click_utc);
+  first(leg(roster), leg.%is_report_back%)
+  where(leg_identifier = clicked_leg_identifier);
+   
+%click_can_report_back%(AbsTime click_utc) =
+  let clicked_leg_identifier = %click_leg_identifier%(click_utc);
+  first(leg(roster), leg.%can_report_back%)
+  where(leg_identifier = clicked_leg_identifier);
+  
+
+/*******************************************************************************
+ * Section 2: Move assignments, 
+ ******************************************************************************/
+
+/*
+** The variables %assignment_pact_cut_start% and %assignment_pact_cut_end% are
+**   used in the assignment post functionality to cut personal activities
+**   correctly after assignment. See carmusr/tracking/DragDrop.py::postFunction.
+** The carmsys will cut the pacts just enough to fit the leg, but there should
+**   also  be room for brief/debrief (plus transport after standby callout).
+** Full day activities should be cut at midnight, homebase time.
+**
+** NOTE: The studio functionality based on the resources
+**   gpc:config:MoveAssignmentsPactStart and gpc:config:MoveAssignmentsPactEnd 
+**   is not (and should not be) used any more, as  it affects the entire roster.
+**   The postFunction only affects the touched pacts.
+*/
+
+/* The new start and end times of a pact that has been overlapped by moving or
+*  copying a leg onto it. 
+*  Note that these variables are used *after* carmsys has made a "preliminary"
+*  cut operation. The code must take into account the current pact start/end
+*  may be different from what it was before the copy/move operation started.
+*/
+%assignment_pact_cut_start% =
+  if is_first(leg(chain))
+  then leg.%start_utc%
+  else nmax(prev(leg(chain), %leg_cuts_following_pact_utc%),
+            leg.%start_utc%);
+ 
+%assignment_pact_cut_end% =
+  if is_last(leg(chain))
+  then leg.%end_utc%
+  else nmin(next(leg(chain), %leg_cuts_preceding_pact_utc%),
+            leg.%end_utc%);
+
+%leg_cuts_preceding_pact_utc% =
+  if is_first(leg(chain)) then
+    leg.%start_utc%
+  else if prev(leg(chain), leg.%is_standby%) then
+     %leg_safe_check_in_at_utc% 
+     - prev(leg(chain), standby.%local_transport_time%)
+  else if prev(leg(chain), leg.%is_pact% and
+                           (leg.%days% > 1 or leg.%starts_at_midnight_hb%)) then
+    round_down(%leg_safe_check_in_at_hb%, 24:00) - leg.%homebase_tz_corrector%
+  else
+    %leg_safe_check_in_at_utc%;
+
+%leg_cuts_following_pact_utc% =
+  if is_last(leg(chain)) then
+    leg.%end_utc%
+  else if next(leg(chain), leg.%is_pact% and
+                           (leg.%days% > 1 or leg.%ends_at_midnight_hb%)) then
+    round_up(%leg_safe_check_out_at_hb%, 24:00) - leg.%homebase_tz_corrector_end%
+  else
+    %leg_safe_check_out_at_utc%;
+    
+/* Used in DragDrop.py, to determine which legs are allowed
+* to deassign or cut when move/assign causes overlaps.
+*/
+%leg_is_deassignable% = 
+  leg.%is_flight_duty% or
+  leg.%is_ground_transport% or
+  leg.%is_standby% or
+  leg.%is_illness% or
+  leg.%is_child_illness% or
+  leg.%is_whole_hb_day_pact%;
+
+/*
+* Used by TrackingGuiExt.py::getCategory()
+*/
+%assignable_position%(String rank) = 
+  let pos = crew_pos.%func2pos%(rank);
+  if crew_pos.%trip_assigned_pos%(pos) > 0 then rank
+  else if %assignable_position_ap_exception%(rank) then
+    "AP"
+  else %assignable_position_alt%(rank);
+
+%assignable_position_ap_exception%(String rank) =
+  /* Cabin AH and AS should be assigned is AP pos if needed to cover   */
+  /* AP need according to WP FAT-CCT 264. This as SCC should always be */
+  /* assigned in AP position.                                          */
+  (rank = "AS" or rank = "AH") and
+  crew_pos.%trip_assigned_func%(rank) = 0 and 
+  crew_pos.%trip_assigned_func%("AP") > 0;
+    
+%assignable_position_alt%(String rank) = 
+  let pos = crew_pos.%func2pos%(rank);
+  first(times(10), crew_pos.%pos2func%(%times_index_0%))
+  where(%times_index_0% > pos and
+        crew_pos.%trip_assigned_pos%(%times_index_0%) > 0 and
+        (crew_pos.%pos2cat%(%times_index_0%) = "T" or 
+         crew_pos.%func2cat%(rank) = crew_pos.%pos2cat%(%times_index_0%)));
+
+/*
+* Used in Standby.py::convertToStandby:
+* The standby pact:s must not overlap non-converted legs.
+*/
+%replacing_standby_cut_start_utc% =
+  default(prev(leg(roster), %leg_safe_check_out_at_utc%), 01Jan1901);
+  
+%replacing_standby_cut_end_utc% =
+  default(next(leg(roster), %leg_safe_check_in_at_utc%), 31Dec2099 23:59);
+  
+%replacing_standby_start_station% =
+  if is_first(leg(trip)) then crew.%homeairport% else leg.%start_station%;
+  
+/*
+* SKS cabin crew should always use the shorthaul logic when converting to standby.
+*/
+%convert_to_standby_long_haul% = trip.%is_long_haul% and not (crew.%is_SKS% and crew.%is_cabin%); 
+  
+/****************************************************************
+ * Section 3: Command line functions and variables
+              Rave functions and variables specificly defined for 
+              the command line functionality.
+ ***************************************************************/
+ 
+/* Function detecting if a crew has a name starting with 'namestart'. */
+%crew_name_start_with%(String namestart) = locate(namestart, crew.%surname%) = 1;
+
+%pp_start_fmt% =
+    format_time(fundamental.%pp_start%, "%02d%b%Y");
+
+/* Function converting employee number to crr_crew_id. */
+%crew_employnr_to_crew_id%(String nr, Abstime date) = 
+  default(crew.%extperkey_to_id_at_date%(nr, date), nr);
+
+%crew_employnr_to_crew_id_no_date%(string nr) =
+  default(crew.%extperkey_to_id%(nr), nr);
+
+    
+/* Function for selecting crew with a specified qualification given from 
+ * the commandline provided in studio.*/
+%has_airport_or_aircraft_qln%(String qual) = 
+  crew.%has_qln_in_pp%("AIRPORT", qual) or
+  crew.%has_qln_in_pp%("ACQUAL", qual);
+  
+/* Function for testing if a crew has the specified rank at a given date. If
+ * CC or FD is given as rank, the test is for main category (FD: F, CC: A). */
+%has_rank_at_date%(String rank, Abstime date) = 
+  let r = (if rank = "CC" then "C" else if rank = "FD" then "F" else rank); 
+  if length(r) = 1 then 
+    crew.%maincat_for_rank%(crew.%rank_at_date%(date)) = r
+  else 
+    crew.%rank_at_date%(date) = r;
+
+/*Sorting functions used when selecting flights. */
+%sort_flight_select_dep%(Int flight_nr, Abstime date) =
+  default(first(leg(roster), leg.%start_utc%)
+  where (leg.%start_utc% >= date and flight_nr = leg.%flight_nr%), 31Dec2099);
+
+/* Function for selecting crew on a specific airport on a specific time. */
+export %is_on_airport_now%(String ap, Abstime starttime, Bool use_time) = 
+  any(trip(roster), %_is_on_airport_now%(ap, starttime, use_time))
+  from (first where(trip.%end_utc% > starttime))
+  while (trip.%start_utc% < %airport_select_end%(starttime, use_time));
+
+%_is_on_airport_now%(String ap, Abstime starttime, Bool use_time) = 
+  any(leg(trip), leg.%end_station% = ap)
+  from (first where(default(next(leg(chain), 
+                                 leg.%start_utc% > starttime), 
+                            false)))
+  while (leg.%end_utc% < %airport_select_end%(starttime, use_time))
+
+  or any(leg(trip), leg.%is_standby_at_airport%
+            and leg.%end_station% = ap 
+            and overlap(leg.%start_utc%, leg.%end_utc%, 
+               starttime, %airport_select_end%(starttime, use_time) + 0:01) > 0:00);
+
+%airport_select_end%(Abstime startime, Bool use_time) = 
+  if use_time then startime + 1:00 else startime + 24:00;
+
+%sort_airport_select%(String ap, Abstime starttime, Bool use_time) = 
+  first(trip(roster), %_sort_airport_select%(ap, starttime, use_time))
+  where(trip.%start_UTC% < %airport_select_end%(starttime, use_time) and 
+        trip.%end_UTC% > starttime);
+%_sort_airport_select%(String ap, Abstime starttime, Bool use_time) = 
+  first(leg(trip), leg.%end_UTC%)
+  where(leg.%end_UTC% < %airport_select_end%(starttime, use_time) and 
+        default(next(leg(trip), leg.%start_UTC%)>starttime, false)
+        and leg.%end_station% = ap);
+  
+/* Validate date given in command line to be inside the extended opened period. */
+%inside_opened_period%(Abstime date) = 
+  date >= fundamental.%loaded_data_period_start% and date <= fundamental.%loaded_data_period_end%;
+
+/****************************************************************
+ * Section 4: Rest Planning 
+ ***************************************************************/
+%cabin_crew_need% = 
+  crew_pos.%ac_need_in_pos%(5) + crew_pos.%ac_need_in_pos%(6) + 
+  crew_pos.%ac_need_in_pos%(7) + crew_pos.%ac_need_in_pos%(8);
+
+export %number_of_crew_bunks_FC% = leg.%nr_crew_bunk_flight_crew%;
+export %number_of_crew_bunks_CC% = leg.%nr_crew_bunk_cabin_crew%;
+
+/***************************************************************
+ * Section 5: Crew notifications
+ **************************************************************/
+%next_flight_start% =
+  first(leg(trip), leg.%start_UTC%) where (leg.%end_UTC% > fundamental.%now%);
+
+/* Variable for preloading some large tables into rave. */
+/* [acosta:08/029@15:13] Removed flight_leg_pax */
+redefine %preload_rave% = 
+  concat(accumulators.%preload_abstime_accumulator_table%, " ", 
+         accumulators.%preload_int_accumulator_table%, " ", 
+         accumulators.%preload_reltime_accumulator_table%, " ",
+     compdays.%preload_account_entry_table%, " ",
+     compdays.%preload_account_entry_change_table%, " ",
+	 compdays.%preload_account_entry_transaction_table%, " ",
+	 compdays.%preload_account_entry_check_table%, " ",
+	 compdays.%preload_account_entry_search_table%);
+
+/***************************************************************
+ * Section 6: Menu States
+ **************************************************************/
+
+%roster_any_marked_locked% =
+  any(leg(roster), marked and (preassigned_activity or environment_activity));
+
+/***************************************************************
+ * Section 7: Briefing variables
+ **************************************************************/
+
+export %duty_briefing_leg% =
+  first(leg(duty), leg_identifier)
+  where(leg.%has_check_in%);
+
+export %duty_debriefing_leg% =
+  last(leg(duty), leg_identifier)
+  where(leg.%has_check_out%);
+
+export %duty_checkin_activity% =
+  first(leg(duty), leg.%flight_name%)
+  where(leg.%has_check_in%);
+
+export %duty_checkout_activity% =
+  last(leg(duty), leg.%flight_name%)
+  where(leg.%has_check_out%);
+  
+  
+/*Cancelation candidate*/
+
+export %is_cancelation_flight_now%(String ap, Abstime starttime, Bool use_time) = 
+  any(leg(roster), %is_cancelation_flight%(ap))
+  from (first where(leg.%start_utc% > starttime))
+  while (leg.%start_utc% < %cancelation_flight_end%(starttime, use_time));
+  
+%cancelation_flight_end%(Abstime startime, Bool use_time) = 
+  if use_time then startime + 1:00 else startime + 24:00;
+  
+%is_cancelation_flight%(String ap) = 
+  (leg.%start_station% = ap) and studio_kpi.%leg_is_cancelation_candidate%;
+  
+%sort_cancelation_flight_select%(String ap, Abstime starttime, Bool use_time) = 
+  first(leg(roster), leg.%start_UTC%)
+  where(leg.%start_UTC% > starttime and 
+        leg.%start_UTC% < %cancelation_flight_end%(starttime, use_time) and 
+        %is_cancelation_flight%(ap));
+
+/* End of file */

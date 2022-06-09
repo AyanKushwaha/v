@@ -1,0 +1,690 @@
+/*  -*- crc -*- */
+/*
+ *  
+ *
+
+Typesafe evaluation of keywords using RAVE
+Used in various reports.
+
+Author: Niklas Johansson
+Created: Jan 2008
+
+*/
+
+root module crg_cmp_report
+
+import levels;
+import fundamental;
+import carmen_manpower_reports;
+import carmen_manpower_sk_mappings;
+import carmen_manpower_crew_need;
+import crg_date;
+import leg;
+import iterators;
+
+/*parameters*/
+%print_db_date%(Abstime Date) = format_time(Date, "%Y%02m%02d");
+%start_date% = parameter 01Jan2004;
+%end_date% = parameter 01Jan2005;
+%timetable_start_date% = parameter 01Jun2004;
+%calculation_start_date% = parameter 01Sep2004;
+
+/*
+%trip_start_day% = round_down(%niklas_start%, 24:00);
+
+%trip_end_day% = round_up(%niklas_end%, 24:00);
+
+export %trip_days% = 
+  %no_days%(%trip_start_day%, %trip_end_day%);
+ */
+export %no_days%(abstime start_date, abstime end_date) =
+  (end_date - start_date) / 24:00;
+/*
+%niklas_start% = parameter 19May2008;
+%niklas_end% = parameter 26May2008;
+*/
+
+%imp_id_param% = parameter "1";
+/**/
+export %pairing_group_pairing%(String crew_category) =
+  concat(crew_category, homebase, %ac_type_from_pairings%);
+
+export %pairing_group_time_table%(String crew_category, string aBase) =
+  concat(crew_category, aBase, %ac_type_from_timetable%);
+
+export %pairing_group_fleet_plan%(String crew_category, String ac_type, string aBase) =
+  concat(crew_category, aBase, ac_type);
+
+table CMP_period_for_date(abstime a_date) =
+  a_date -> string %period_type_for_date%;
+external carmen_manpower_sk_mappings.%CMP_period_types_table%;
+  (PeriodStart,PeriodEnd)  -> PeriodType;
+  - -> void_string;
+end
+
+table export_bcq(String crew_category, String ac_type, string aBase) =
+  ac_type, crew_category, aBase -> Bool %bcq_to_export%;
+external carmen_manpower_sk_mappings.%export_bcq_table%;
+  ACType,
+  Category,
+  "HomeBase" ->
+  ExportBCQ;
+  -, -, - -> void_bool;
+end
+
+
+/* Mappings */
+%leg_ac_family% = carmen_manpower_sk_mappings.%leg_ac_family%;
+%leg_block_time% = carmen_manpower_sk_mappings.%leg_block_time%;
+
+
+
+table CMP_period_types(int aRowNumber) =
+  aRowNumber -> abstime %period_start_for_row%, abstime %period_end_for_row%, string %period_type_for_row%;
+external carmen_manpower_sk_mappings.%CMP_period_types_table%;
+  row_number -> PeriodStart, PeriodEnd, PeriodType;
+  - -> void_abstime, void_abstime, void_string;
+end
+
+table productivity_for_acqual_on_date(Abstime aDate, String category, String ac_type) =
+  ac_type, category, aDate -> reltime %productivity_for_acqual_group_on_date%, 
+			      reltime %productivity_for_acqual_group_on_date_mon%,
+			      reltime %productivity_for_acqual_group_on_date_tue%,
+			      reltime %productivity_for_acqual_group_on_date_wed%, 
+			      reltime %productivity_for_acqual_group_on_date_thu%, 
+			      reltime %productivity_for_acqual_group_on_date_fri%, 
+			      reltime %productivity_for_acqual_group_on_date_sat%, 
+			      reltime %productivity_for_acqual_group_on_date_sun%;
+external carmen_manpower_sk_mappings.%ac_type_prod_table%;
+  ACType, Category, (PeriodStart, PeriodEnd) -> Productivity, 
+						ProductivityMon,
+						ProductivityTue,
+						ProductivityWed,
+						ProductivityThu,
+						ProductivityFri,
+						ProductivitySat,
+						ProductivitySun;
+  -,-,- ->  void_reltime, void_reltime, void_reltime, void_reltime, 
+	    void_reltime, void_reltime, void_reltime, void_reltime;
+end
+
+table no_air_crafts_on_date(Abstime aDate, String ac_type) =
+  ac_type, aDate ->  
+            reltime %productivity_mon%,
+			      reltime %productivity_tue%,
+			      reltime %productivity_wed%, 
+			      reltime %productivity_thu%, 
+			      reltime %productivity_fri%, 
+			      reltime %productivity_sat%, 
+			      reltime %productivity_sun%,
+            int %no_air_crafts_on_date%;
+external carmen_manpower_sk_mappings.%ac_needs_table%;
+  ACType, (PeriodStart, PeriodEnd) -> 
+  					ProductivityMon,
+						ProductivityTue,
+						ProductivityWed,
+						ProductivityThu,
+						ProductivityFri,
+						ProductivitySat,
+						ProductivitySun, 
+            NoAirCrafts;
+  -,- ->  void_reltime, void_reltime, void_reltime, void_reltime, 
+	    void_reltime, void_reltime, void_reltime, void_int;
+end
+
+export %productivity_for_air_craft_on_date%(Abstime aDate, String ac_type) =
+  if crg_date.%print_weekday%(aDate)      = "Mon" then %productivity_mon%(aDate, ac_type)
+  else if crg_date.%print_weekday%(aDate) = "Tue" then %productivity_tue%(aDate, ac_type)
+  else if crg_date.%print_weekday%(aDate) = "Wed" then %productivity_wed%(aDate, ac_type)
+  else if crg_date.%print_weekday%(aDate) = "Thu" then %productivity_thu%(aDate, ac_type)
+  else if crg_date.%print_weekday%(aDate) = "Fri" then %productivity_fri%(aDate, ac_type)
+  else if crg_date.%print_weekday%(aDate) = "Sat" then %productivity_sat%(aDate, ac_type)
+  else %productivity_sun%(aDate, ac_type);
+
+table period_type_for_date(Abstime aDate) =
+  aDate -> string %period_type_on_date%;
+external carmen_manpower_sk_mappings.%export_period_types_table%;
+  (PeriodStart, PeriodEnd) -> PeriodName;
+  - -> "Default";
+end
+
+%no_crew_for_air_craft_on_date%(Abstime aDate, String category, String ac_type) = 
+	%no_crew_for_air_craft_for_period_type_new%(%period_type_on_date%(aDate),  category, ac_type);
+
+table productivity_for_ac_type_on_date(string period_type, string category, String ac_type) =
+  ac_type, category, period_type -> int %no_crew_for_air_craft_for_period_type_new%;
+external carmen_manpower_sk_mappings.%ac_crew_needs_table%;
+  ACType, Category, PeriodType -> NoCrew;
+  -,-,- -> void_int;
+end
+
+table trip_acquals_group_for_acqualgroup(string ac_qual_group) =
+  ac_qual_group -> string %ac_family1_for%, string %ac_family2_for%, string %ac_family3_for%;
+external carmen_manpower_sk_mappings.%ac_qual_group_table%;
+  ACQualGroup -> ACQual1, ACQual2, ACQual3;
+  - -> void_string, void_string, void_string;
+end
+
+%export_data_for_fleet_plan%(String category, String ac_type, String base) =
+  default((length(%ac_family1_for%(ac_type)) > 0) and (length(%ac_family2_for%(ac_type)) = 0), False);
+
+table trip_acqual_group_for_acquals =
+  %trip_ac_family1%, %trip_ac_family2%, %trip_ac_family3% -> 
+    string %_trip_acqual_group_for_acquals%;
+external carmen_manpower_sk_mappings.%ac_qual_group_table%;
+  ACQual1, ACQual2, ACQual3 -> ACQualGroup;
+  -,-,- -> void_string;
+end
+table ac_base_distribution(Abstime aDate, string category, string ac_type, string aBase) =
+  ac_type, category, aBase, aDate -> 
+    int %ac_base_distribution%;
+external carmen_manpower_sk_mappings.%ac_base_distribution_table%;
+  ACType, Category, "HomeBase", (PeriodStart, PeriodEnd) -> PercentageOfProd;
+  -,-,-,- -> void_int;
+end
+
+%trip_acqual_group_for_acquals% =
+  default(%_trip_acqual_group_for_acquals%,%trip_ac_family1%);
+
+%flight_leg_to_consider_for_ac_family% =
+  not deadhead and carmen_manpower_sk_mappings.%leg_is_flight_duty%;
+
+%trip_ac_family1% =
+  min(leg(trip), %leg_ac_family%)
+  where (%flight_leg_to_consider_for_ac_family%);
+
+%trip_ac_family2% =
+  default(  min(leg(trip),%leg_ac_family%)
+            where (%leg_ac_family% <> %trip_ac_family1% and 
+                   %flight_leg_to_consider_for_ac_family%)
+          , "");
+
+%trip_ac_family3% =
+  default(  min(leg(trip),%leg_ac_family%)
+            where (%leg_ac_family% <> %trip_ac_family1% and
+                   %leg_ac_family% <> %trip_ac_family2% and 
+                   %flight_leg_to_consider_for_ac_family%)
+          , "");
+
+iterator homebase_acqual_group_trip_set =
+  partition(trip) by(homebase,%trip_acqual_group_for_acquals%);
+end
+
+iterator acqual_group_trip_set =
+  partition(trip) by(%trip_acqual_group_for_acquals%);
+end
+
+iterator ac_type_leg_set =
+  partition(leg) by(carmen_manpower_crew_need.%leg_ac_type_to_report%);
+end
+
+iterator start_date_leg_set =
+  partition(leg) by(carmen_manpower_crew_need.%leg_start_date%, %ac_type_from_timetable%);
+end
+
+export %leg_in_period%(abstime start_date, abstime end_date) =
+  carmen_manpower_crew_need.%leg_start_date% >= start_date and 
+  carmen_manpower_crew_need.%leg_start_date% <= end_date and
+  %ac_type_from_timetable% in aircraft_types_to_export;
+
+export %trip_to_export% = 
+  homebase in bases_to_export and
+  %trip_acqual_group_for_acquals% in aircraft_types_to_export;
+
+%min_leg_start_date% =
+  min(start_date_leg_set, carmen_manpower_crew_need.%leg_start_date%);
+
+%max_leg_start_date% =
+  max(start_date_leg_set, carmen_manpower_crew_need.%leg_start_date%);
+
+%export_base_acqual% =
+  default(homebase in bases_to_export and
+  %trip_acqual_group_for_acquals% in aircraft_types_to_export, false);
+
+%export_acqual% =
+  default(%trip_acqual_group_for_acquals% in aircraft_types_to_export, false);
+/*Pairing calculations*/
+
+%productivity_on_date_from_pairings%(Abstime aDate, string category) =
+  let mandays_on_date = %mandays_on_date_from_pairings%(aDate, category);
+  if mandays_on_date = 0 then
+    0:00
+  else
+    %blocktime_on_date_from_pairings%(aDate, category) /
+    mandays_on_date;
+
+%mandays_on_date_from_pairings%(Abstime aDate, string category) =
+  (if %is_fc_category%(category) then
+    sum(trip_set,%fc_trip%) where 
+      (carmen_manpower_reports.%cmp_production_on_date%(aDate))
+  else if %is_fp_category%(category) then 
+    sum(trip_set,%fp_trip%) where 
+      (carmen_manpower_reports.%cmp_production_on_date%(aDate))
+  else if %is_fr_category%(category) then 
+    sum(trip_set,%fr_trip%) where 
+      (carmen_manpower_reports.%cmp_production_on_date%(aDate))
+  else if %is_as_category%(category) then 
+    sum(trip_set,%as_trip%)  where 
+      (carmen_manpower_reports.%cmp_production_on_date%(aDate))
+  else if %is_ap_category%(category) then 
+    sum(trip_set,%ap_trip%) where 
+      (carmen_manpower_reports.%cmp_production_on_date%(aDate))
+  else if %is_ah_category%(category) then 
+    sum(trip_set,%ah_trip%) where 
+      (carmen_manpower_reports.%cmp_production_on_date%(aDate))
+  else
+    0);
+/* +
+  %standby_days_on_date_from_pairings%(aDate, category);*/
+
+%_standby_days_on_date_from_pairings%(Abstime aDate, string category) =
+  if %is_fc_category%(category) then
+    sum(trip_set,%fc_trip%) where 
+      (carmen_manpower_reports.%cmp_standby_on_date%(aDate))
+  else if %is_fp_category%(category) then 
+    sum(trip_set,%fp_trip%) where 
+      (carmen_manpower_reports.%cmp_standby_on_date%(aDate))
+  else if %is_fr_category%(category) then 
+    sum(trip_set,%fr_trip%) where 
+      (carmen_manpower_reports.%cmp_standby_on_date%(aDate))
+  else if %is_as_category%(category) then 
+    sum(trip_set,%as_trip%) where 
+      (carmen_manpower_reports.%cmp_standby_on_date%(aDate))
+  else if %is_ap_category%(category) then 
+    sum(trip_set,%ap_trip%) where 
+      (carmen_manpower_reports.%cmp_standby_on_date%(aDate))
+  else if %is_ah_category%(category) then 
+    sum(trip_set,%ah_trip%) where 
+      (carmen_manpower_reports.%cmp_standby_on_date%(aDate))
+  else
+    0;
+
+%_standby_days_on_date_from_implicit_pairings%(Abstime aDate, string category) =
+  if %is_fc_category%(category) then
+    0
+  else if %is_fp_category%(category) then 
+    0
+  else if %is_fr_category%(category) then 
+    0
+  else if %is_as_category%(category) then 
+    count(trip_set) where 
+      (carmen_manpower_reports.%cmp_ch_implicit_standby_on_date%(aDate))
+  else if %is_ap_category%(category) then 
+    count(trip_set) where 
+      (carmen_manpower_reports.%cmp_pu_implicit_standby_on_date%(aDate))
+  else if %is_ah_category%(category) then 
+    count(trip_set) where 
+      (carmen_manpower_reports.%cmp_fa_implicit_standby_on_date%(aDate))
+  else
+    0;
+
+%use_implicit_standby_pairings% = parameter false;
+
+%standby_days_on_date_from_pairings%(Abstime aDate, string category) =
+  if %use_implicit_standby_pairings% then
+    %_standby_days_on_date_from_implicit_pairings%(aDate, category)
+  else
+    %_standby_days_on_date_from_pairings%(aDate, category);
+  
+
+%trip_is_6_days_on_date_from_pairings%(Abstime aDate, string category) =
+  if %is_fc_category%(category) then
+    sum(trip_set,%fc_trip%) where 
+      (carmen_manpower_reports.%trip_starts_on_date%(aDate) and 
+	carmen_manpower_reports.%is_longer_than_6_day_trip%)
+  else if %is_fp_category%(category) then 
+    sum(trip_set,%fp_trip%) where 
+      (carmen_manpower_reports.%trip_starts_on_date%(aDate) and 
+	carmen_manpower_reports.%is_longer_than_6_day_trip%)
+  else if %is_fr_category%(category) then 
+    sum(trip_set,%fr_trip%) where 
+      (carmen_manpower_reports.%trip_starts_on_date%(aDate) and 
+	carmen_manpower_reports.%is_longer_than_6_day_trip%)
+  else if %is_as_category%(category) then 
+    sum(trip_set,%as_trip%) where 
+      (carmen_manpower_reports.%trip_starts_on_date%(aDate) and 
+	carmen_manpower_reports.%is_longer_than_6_day_trip%)
+  else if %is_ap_category%(category) then 
+    sum(trip_set,%ap_trip%) where 
+      (carmen_manpower_reports.%trip_starts_on_date%(aDate) and 
+	carmen_manpower_reports.%is_longer_than_6_day_trip%)
+  else if %is_ah_category%(category) then 
+    sum(trip_set,%ah_trip%) where 
+      (carmen_manpower_reports.%trip_starts_on_date%(aDate) and 
+	carmen_manpower_reports.%is_longer_than_6_day_trip%)
+  else
+    0;
+
+%trip_has_12_hour_duty_on_date_from_pairings%(Abstime aDate, string category) =
+  if %is_fc_category%(category) then
+    sum(trip_set,%fc_trip%) where 
+      (carmen_manpower_reports.%trip_starts_on_date%(aDate) and 
+	carmen_manpower_reports.%is_max_12_hour_duty_trip%)
+  else if %is_fp_category%(category) then 
+    sum(trip_set,%fp_trip%) where 
+      (carmen_manpower_reports.%trip_starts_on_date%(aDate) and 
+	carmen_manpower_reports.%is_max_12_hour_duty_trip%)
+  else if %is_fr_category%(category) then 
+    sum(trip_set,%fr_trip%) where 
+      (carmen_manpower_reports.%trip_starts_on_date%(aDate) and 
+	carmen_manpower_reports.%is_max_12_hour_duty_trip%)
+  else if %is_as_category%(category) then 
+    sum(trip_set,%as_trip%) where 
+      (carmen_manpower_reports.%trip_starts_on_date%(aDate) and  
+	carmen_manpower_reports.%is_max_12_hour_duty_trip%)
+  else if %is_ap_category%(category) then 
+    sum(trip_set,%ap_trip%) where 
+      (carmen_manpower_reports.%trip_starts_on_date%(aDate) and  
+	carmen_manpower_reports.%is_max_12_hour_duty_trip%)
+  else if %is_ah_category%(category) then 
+    sum(trip_set,%ah_trip%) where 
+      (carmen_manpower_reports.%trip_starts_on_date%(aDate) and  
+	carmen_manpower_reports.%is_max_12_hour_duty_trip%)
+  else
+    0;
+ 
+%blocktime_on_date_from_pairings%(Abstime aDate, string category) =
+  if %is_fc_category%(category) then
+    sum(trip_set, carmen_manpower_reports.%cmp_pairing_block_time_on_date%(aDate) * %fc_trip%)
+  else if %is_fp_category%(category) then 
+    sum(trip_set, carmen_manpower_reports.%cmp_pairing_block_time_on_date%(aDate) * %fp_trip%)
+  else if %is_fr_category%(category) then 
+    sum(trip_set, carmen_manpower_reports.%cmp_pairing_block_time_on_date%(aDate) * %fr_trip%)
+  else if %is_as_category%(category) then 
+    sum(trip_set, carmen_manpower_reports.%cmp_pairing_block_time_on_date%(aDate) * %as_trip%)
+  else if %is_ap_category%(category) then 
+    sum(trip_set, carmen_manpower_reports.%cmp_pairing_block_time_on_date%(aDate) * %ap_trip%)
+  else if %is_ah_category%(category) then 
+    sum(trip_set, carmen_manpower_reports.%cmp_pairing_block_time_on_date%(aDate) * %ah_trip%)
+  else
+    0:00;
+
+
+%longhaul_trip_starts_on_date_from_pairings%(Abstime aDate, string category) =
+  if %is_fc_category%(category) then
+    sum(trip_set,%fc_trip%) where 
+    (carmen_manpower_reports.%cmp_longhaul_pairing_start_on_date%(aDate))
+  else if %is_fp_category%(category) then 
+    sum(trip_set,%fp_trip%) where 
+      (carmen_manpower_reports.%cmp_longhaul_pairing_start_on_date%(aDate))
+  else if %is_fr_category%(category) then 
+    sum(trip_set,%fr_trip%) where 
+      (carmen_manpower_reports.%cmp_longhaul_pairing_start_on_date%(aDate))
+  else if %is_as_category%(category) then 
+    sum(trip_set,%as_trip%) where 
+      (carmen_manpower_reports.%cmp_longhaul_pairing_start_on_date%(aDate))
+  else if %is_ap_category%(category) then 
+    sum(trip_set,%ap_trip%) where 
+      (carmen_manpower_reports.%cmp_longhaul_pairing_start_on_date%(aDate))
+  else if %is_ah_category%(category) then 
+    sum(trip_set,%ah_trip%) where 
+      (carmen_manpower_reports.%cmp_longhaul_pairing_start_on_date%(aDate))
+  else
+    0;
+
+%layover_trip_starts_on_date_from_pairings%(Abstime aDate, string category) =
+  if %is_fc_category%(category) then
+    sum(trip_set,%fc_trip%) where 
+      (carmen_manpower_reports.%cmp_layover_pairing_start_on_date%(aDate))
+  else if %is_fp_category%(category) then 
+    sum(trip_set,%fp_trip%) where 
+      (carmen_manpower_reports.%cmp_layover_pairing_start_on_date%(aDate))
+  else if %is_fr_category%(category) then 
+    sum(trip_set,%fr_trip%) where 
+      (carmen_manpower_reports.%cmp_layover_pairing_start_on_date%(aDate))
+  else if %is_as_category%(category) then 
+    sum(trip_set,%as_trip%) where 
+      (carmen_manpower_reports.%cmp_layover_pairing_start_on_date%(aDate))
+  else if %is_ap_category%(category) then 
+    sum(trip_set,%ap_trip%) where 
+      (carmen_manpower_reports.%cmp_layover_pairing_start_on_date%(aDate))
+  else if %is_ah_category%(category) then 
+    sum(trip_set,%ah_trip%) where 
+      (carmen_manpower_reports.%cmp_layover_pairing_start_on_date%(aDate))
+  else
+    0;
+
+/*Timetable calculations*/
+
+%productivity_on_date_from_timetable_day%(Abstime aDate, String category, String ac_type) =
+  let day_in_week = (aDate - round_down_week(aDate)) / 24:00 + 1;
+  if day_in_week = 1 then
+    %productivity_for_acqual_group_on_date_mon%(aDate, category, ac_type)
+  else if day_in_week = 2 then
+    %productivity_for_acqual_group_on_date_tue%(aDate, category, ac_type)
+  else if day_in_week = 3 then
+    %productivity_for_acqual_group_on_date_wed%(aDate, category, ac_type)
+  else if day_in_week = 4 then
+    %productivity_for_acqual_group_on_date_thu%(aDate, category, ac_type)
+  else if day_in_week = 5 then
+    %productivity_for_acqual_group_on_date_fri%(aDate, category, ac_type)
+  else if day_in_week = 6 then
+    %productivity_for_acqual_group_on_date_sat%(aDate, category, ac_type)
+  else if day_in_week = 7 then
+    %productivity_for_acqual_group_on_date_sun%(aDate, category, ac_type)
+  else
+    void_reltime;
+
+
+%productivity_on_date_from_timetable%(Abstime aDate, String category, String ac_type) =
+  default(default(%productivity_on_date_from_timetable_day%(aDate, category, ac_type), 
+    %productivity_for_acqual_group_on_date%(aDate, category, ac_type) + 9999:00), -99:00);
+
+%productivity_from_timetable_leg_set_func%(String category) =
+  let ac_type = %ac_type_from_timetable%,
+      aDate = carmen_manpower_crew_need.%leg_start_date%;
+  default(default(%productivity_on_date_from_timetable_day%(aDate, category, ac_type), 
+    %productivity_for_acqual_group_on_date%(aDate, category, ac_type) + 9999:00), -99:00);
+
+%mandays_on_date_from_timetable%(Abstime aDate, String category, String ac_type, string aBase) =
+  let productivity_on_date = %productivity_on_date_from_timetable%(aDate, category, ac_type);
+  if productivity_on_date = 0:00 then
+    0
+  else
+    (%blocktime_on_date_from_timetable%(aDate, category, ac_type, aBase) + productivity_on_date - 0:01) / 
+    productivity_on_date;
+
+%mandays_from_timetable_leg_set_func%(String category, string aBase) =
+  let productivity_on_date = %productivity_from_timetable_leg_set_func%(category);
+  if productivity_on_date <= 0:00 then
+    0
+  else
+    (%blocktime_from_timetable_leg_set_func%(category, aBase) + productivity_on_date - 0:01) / 
+    productivity_on_date;
+
+%blocktime_on_date_from_timetable%(Abstime aDate, String category, String ac_type, string aBase) =
+  sum(leg_set, %leg_block_time% * carmen_manpower_crew_need.%leg_crew_complement_for%(category, aBase)) where (carmen_manpower_crew_need.%leg_start_date% = aDate);
+
+%blocktime_from_timetable_leg_set_func%(String category, string aBase) =
+  sum(leg_set, %leg_block_time% * carmen_manpower_crew_need.%leg_crew_complement_for%(category, aBase));
+
+/*Fleet plan calculations*/
+
+%productivity_on_date_from_calculation_day%(Abstime aDate, String category, String ac_type) =
+  %productivity_on_date_from_timetable_day%(aDate, category, ac_type);
+
+%productivity_on_date_from_calculation%(Abstime aDate, String category, String ac_type) =
+  default(default(%productivity_on_date_from_calculation_day%(aDate, category, ac_type),
+  %productivity_for_acqual_group_on_date%(aDate, category, ac_type)+ 8888:00), -99:00);
+
+%mandays_on_date_from_calculation%(Abstime aDate, String category, String ac_type, string aBase) =
+  let productivity_on_date = %productivity_on_date_from_calculation%(aDate, category, ac_type);
+  if productivity_on_date <= 0:00 then
+    0
+  else
+    ((%blocktime_on_date_from_calculation%(aDate, category, ac_type, aBase) + productivity_on_date - 0:01) / 
+    productivity_on_date);
+
+%blocktime_on_date_from_calculation%(Abstime aDate, String category, String ac_type, string aBase) =
+  if ac_type = "A320" then
+    %_blocktime_on_date_from_calculation%(aDate, category, "319", aBase) +
+    %_blocktime_on_date_from_calculation%(aDate, category, "320", aBase) +
+    %_blocktime_on_date_from_calculation%(aDate, category, "321", aBase)
+  else
+    %_blocktime_on_date_from_calculation%(aDate, category, ac_type, aBase);
+
+export %longhaul_trip_starts_on_date_from_calculation% = 0;
+export %layover_trip_starts_on_date_from_calculation% = 0;
+%_blocktime_on_date_from_calculation%(Abstime aDate, String category, String ac_type, string aBase) =
+  default((%no_air_crafts_on_date%(aDate, ac_type) *
+  %productivity_for_air_craft_on_date%(aDate, ac_type) * 
+  %no_crew_for_air_craft_on_date%(aDate, category, ac_type) *
+  %ac_base_distribution%(aDate, category, ac_type, aBase)) / 10000, 0:00);
+
+
+
+%productivity_on_date%(Abstime aDate, String ac_type, String category) =
+  let source_on_date = %source_on_date%(aDate);
+  if source_on_date = "PRNGS" then
+    %productivity_on_date_from_pairings%(aDate, category)
+  else if source_on_date = "TMTBL" then
+    %productivity_on_date_from_timetable%(aDate, category, ac_type)
+  else
+    %productivity_on_date_from_calculation%(aDate, category, ac_type);
+
+%source_on_date%(Abstime aDate) =
+  if aDate < %timetable_start_date% then
+    "PRNGS"
+  else if aDate < %calculation_start_date% then
+    "TMTBL"
+  else
+    "CLCTD";
+
+
+
+%days_in_period% =
+	(%end_date% - %start_date%) / 24:00 + 1;
+
+/*Pairing calculations*/
+
+%base_from_pairings% =
+  homebase;
+
+%ac_type_from_pairings% =
+  %trip_acqual_group_for_acquals%;
+
+%longhaul_trip_starts_on_date_from_timetable_leg_set%(string category, string aBase) =
+    default(sum(leg_set, carmen_manpower_crew_need.%leg_crew_complement_for%(category, aBase)) where 
+    (carmen_manpower_sk_mappings.%leg_is_tdf% and 
+      carmen_manpower_sk_mappings.%leg_start_airport% = aBase),0);
+
+
+%longhaul_trip_starts_on_date_from_timetable%(Abstime aDate, string category, string aBase) =
+    sum(leg_set, carmen_manpower_crew_need.%leg_crew_complement_for%(category, aBase)) where 
+    (carmen_manpower_sk_mappings.%leg_is_tdf% and 
+      carmen_manpower_sk_mappings.%leg_start_airport% = "HEL" and 
+      carmen_manpower_crew_need.%leg_start_date% = aDate);
+
+
+
+
+%layover_trip_starts_from_timetable_leg_set% = 0;
+
+%trip_has_12_hour_duty_on_day_ix_from_timetable_leg_set_date%(string category, string aBase) = 
+  let aDate = carmen_manpower_crew_need.%leg_start_date%;
+  default(sum(leg_set, carmen_manpower_crew_need.%leg_crew_complement_for%(category, aBase)) where 
+    ( carmen_manpower_reports.%is_max_12_hour_duty_trip% and
+      carmen_manpower_sk_mappings.%leg_start_airport% = aBase and
+      carmen_manpower_crew_need.%leg_start_date% = aDate),0);
+
+
+%blocktime_from_timetable_only_leg_set_func%(string category, string aBase) =
+  sum(leg_set,%blocktime_from_timetable_leg_set_func%(category, aBase));
+
+
+
+%productivity_from_timetable_only_leg_set_func%(string category) =
+  %productivity_from_timetable_leg_set_func%(category);
+
+
+%mandays_from_timetable_only_leg_set_func%(string category, string aBase) =
+  %mandays_from_timetable_leg_set_func%(category, aBase);
+
+
+
+%ac_type_from_timetable% =
+  carmen_manpower_crew_need.%leg_ac_type_to_report%;
+
+
+%ac_type_from_timetable_view% =
+  carmen_manpower_crew_need.%leg_ac_type_to_report%;
+
+
+/*This section should be customized for every customer possibly moved to customization section*/
+%fc_trip% =
+  carmen_manpower_reports.%trip_assigned_crew_position_1%;
+
+%is_fc_category%(string category) =
+  category = "FC";
+
+%fp_trip% =
+  carmen_manpower_reports.%trip_assigned_crew_position_2%;
+
+%is_fp_category%(string category) =
+  category = "FP";
+
+%fr_trip% =
+  carmen_manpower_reports.%trip_assigned_crew_position_3%;
+
+%is_fr_category%(string category) =
+  category = "FR";
+
+%as_trip% =
+  carmen_manpower_reports.%trip_assigned_crew_position_6%;
+
+%is_as_category%(string category) =
+  category = "AS";
+
+%ap_trip% =
+  carmen_manpower_reports.%trip_assigned_crew_position_5%;
+
+%is_ap_category%(string category) =
+  category = "AP";
+
+%ah_trip% =
+  carmen_manpower_reports.%trip_assigned_crew_position_7%;
+
+%is_ah_category%(string category) =
+  category = "AH";
+
+set maternity_leave_codes =
+  parameter "AL", "HV", "IL", "VL"
+  remark "Maternity leave codes:";
+
+set illness_leave_codes =
+  parameter "SA", "SD"
+  remark "Illness leave codes:";
+
+set unpaid_leave_codes =
+  parameter "VU", "VV", "OV"
+  remark "Unpaid leave codes:";
+
+set part_time_leave_codes =
+  parameter "VJ"
+  remark "Part time codes:";
+
+export set aircraft_types_to_export = parameter
+  "B737", "MD80", "A320", "A330", "A340", "3280", "8090", "CRJ"
+	remark "AC combinations to export";
+
+export set categories_to_export = parameter
+ "FC", "FP", "FR", "AS", "AP", "AH"
+  remark "cmp categories to export";
+
+export set bases_to_export = parameter
+  "STO", "CPH", "OSL", "ARN"
+  remark "cmp bases to export";
+
+group cmp = categories_to_export,
+	    aircraft_types_to_export,
+	    bases_to_export,
+	    carmen_manpower_sk_mappings.%ac_crew_comp_table_name%,
+	    carmen_manpower_sk_mappings.%CMP_period_types_table_name%,
+	    carmen_manpower_sk_mappings.%ac_type_prod_table_name%,
+	    carmen_manpower_sk_mappings.%ac_needs_table_name%,
+	    carmen_manpower_sk_mappings.%ac_crew_needs_table_name%,
+	    carmen_manpower_sk_mappings.%ac_base_distribution_table_name%,
+	    carmen_manpower_sk_mappings.%ac_qual_group_table_name%,
+	    carmen_manpower_sk_mappings.%export_bcq_table_name%,
+	    carmen_manpower_sk_mappings.%export_period_types_table_name%,
+	    carmen_manpower_reports.%_trip_end_time_when_still_possible_to_use_last_day%;

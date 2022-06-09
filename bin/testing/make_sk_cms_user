@@ -1,0 +1,566 @@
+#!/bin/sh
+#
+# Checks out a specific tag of the sk_cms user and prepares it for test
+# Author: Rickard Petzäll, Henrik Algestam (with lots of goodies stolen from Per Grönberg)
+
+usage_text() {
+    echo "Usage: `basename $0` [options...] <tag>|<branch>|default"
+    echo "       `basename $0` -l"
+    echo "   Commands are:"
+    echo "      (a valid tag)"
+    echo "         Check out a CARMUSR from the specified tag (use -l to list tags)"
+    echo "      (a valid branch)"
+    echo "         Check out a CARMUSR from the specified branch (use -b to list branches)"
+    echo "      default"
+    echo "         Check out the main trunk of the default branch"
+    echo "      -l"
+    echo "         List available tags"
+    echo "      -b"
+    echo "         List available branches"
+    echo "      -x"
+    echo "         Create the symlinks in the current directory, using the"
+    echo "         current directory as CARMUSR. Use with -f to replace previous"
+    echo "         symlinks"
+    echo "   Options include:"
+    echo "      -d Mercurial url"
+    echo "         Use a differenct Mercurial url"
+    echo "      -T path_to_tracking_carmsys"
+    echo "         Specify CARMSYS directory for Tracking"
+    echo "      -R path_to_planning_carmsys"
+    echo "         Specify CARMSYS directory for Planning"
+    echo "      -M path_to_planning_carmsys"
+    echo "         Specify CARMSYS directory for Manpower"
+    echo "      -I path_to_interbids_carmsys"
+    echo "         Specify CARMSYS directory for Interbids"
+    echo "      -n"
+    echo "         DO NOT compile rulesets"
+    echo "      -k"
+    echo "         DO NOT check out a new sandbox if there is an old one"
+    echo "      -r"
+    echo "         DO NOT set database plan"
+    echo "      -s <plan>"
+    echo "         Set <plan> as database plan to use. Default plan if"
+    echo "         not set is: ${DB_PLAN}"
+    echo "      -B <portbase>"
+    echo "         Set <portbase> as port base"
+    echo "      -S <servername>"
+    echo "         Set <servername> as cct, dig and historic server"
+    echo "      -f"
+    echo "         Replace symbolic links"
+    echo "      -c Clean existing sandbox"
+    echo "      -p <path>"
+    echo "         Use <path> as target path. Default path if not set is"
+    echo "         ${HOME}/tests/<tag>/sk_cms_user"
+    echo "      -L <logfile>"
+    echo "         Use <logfile> as name for the test log. Default path if not"
+    echo "         not set is $_SMOKETESTLOG"
+    echo "      -t"
+    echo "         Run all automatic tests"
+    echo "      -U"
+    echo "         Same as -k, but does a 'hg pull -u' if it exists"
+    echo "      -X option"
+    echo "         Send option to Rave compiler (only one option at a time)"
+    exit 1
+}
+
+# This variable is used when determining if current CARMUSR is CMS1 or CMS2
+# Set this to a file that only exists in CMS1.
+CMS1_FILE="data/doc/release_documentation"
+CMS_VERSION="1"
+
+unset CARMUSR
+unset CARMSYS
+unset CARMSYS_CCT
+unset CARMSYS_CAS
+unset CARMSYS_CMP
+unset CARMSYS_BID
+MODULE=sk_cms_user.hg
+MAIN_HG_REPOSITORY_URL=
+MAIN_HG_REPOSITROY_PATH=
+MAIN_HG_SERVER_HOST=
+DB_PLAN=sk_cms_development
+PORT_BASE=
+DESMOND_SERVER=
+_NOCHECKOUT=
+_NOCOMPILE=
+_NODBSETUP=
+_RUN_TESTS=
+_REPLACE_SYMLINKS=
+_MODULE_OVERRIDE=$MODULE
+_SANDBOX_OVERRIDE=
+_CMD=
+_COMPILER_OPTIONS=
+_SMOKETESTLOG=smoketest_`date +%Y%m%d_%H%M`.txt
+_CLEANSANDBOX=
+_SITE_FILE="etc/site_Carmen.xml"
+_BUILDENV="bin/buildenv.sh"
+
+if [ -z $SANDBOX_DIR ]; then
+    SANDBOX_DIR=$HOME/work/tests
+fi
+
+while getopts cntxfbkUlrd:p:T:R:M:I:X:s:B:S:L: option; do
+    case "$option" in
+        X) _COMPILER_OPTIONS="$_COMPILER_OPTIONS $OPTARG" ;;
+        d) MAIN_HG_REPOSITORY_URL=$OPTARG ;;
+        l) _CMD="list" ;;
+        b) _CMD="listb" ;;
+        x) _CMD="symlink" ;;
+        f) _REPLACE_SYMLINKS="1" ;;
+        T) CARMSYS_CCT=$OPTARG ;;
+        R) CARMSYS_CAS=$OPTARG ;;
+        M) CARMSYS_CMP=$OPTARG ;;
+        I) CARMSYS_BID=$OPTARG ;;
+        k) _NOCHECKOUT="1" ;;
+        U) _NOCHECKOUT="2" ;;
+        n) _NOCOMPILE="1" ;;
+        r) _NODBSETUP="1" ;;
+        s) DB_PLAN=$OPTARG ;;
+        B) PORT_BASE=$OPTARG ;;
+        S) DESMOND_SERVER=$OPTARG ;;
+        p) _SANDBOX_OVERRIDE=$OPTARG ;;
+        t) _RUN_TESTS="1" ;;
+        L) _SMOKETESTLOG=$OPTARG ;;
+        c) _CLEANSANDBOX="1" ;;
+        *) usage_text ;;
+    esac
+done
+
+shift `expr $OPTIND - 1`
+
+HG_TAG=$1
+
+MAIN_HG_SERVER_HOST="sashg"
+MAIN_HG_REPOSITORY_PATH="/mercurial/sk_cms_user.hg"
+
+# If no Mercurial repository was specified, try to guess the correct root
+if [ -z $MAIN_HG_REPOSITORY_URL ]; then
+    MAIN_HG_REPOSITORY_URL="ssh://$MAIN_HG_SERVER_HOST/$MAIN_HG_REPOSITORY_PATH"
+fi
+
+echo "Mercurial repository url is: $MAIN_HG_REPOSITORY_URL"
+
+###########################################
+# Component functions
+###########################################
+
+# Determines CMS version
+# Checks if the file $CMS1_FILE exists and if so it is assumed that the CMS
+# version is CMS1. Oterwise CMS2 version is assumed.
+function determine_cms_version() {
+    if [ -f $CMS1_FILE ]; then
+        CMS_VERSION="1"
+        _BUILDENV="etc/buildenv.sh"
+    else
+        CMS_VERSION="2"
+        _BUILDENV="bin/buildenv.sh"
+    fi
+
+    echo "Current CARMUSR is CMS$CMS_VERSION"
+}
+
+# Creates symbolic links
+# Assumes current dir is the CARMUSR to work with
+# If $_REPLACE_SYMLINKS is set, deletes old symlinks
+# before starting
+# Requires bin/buildenv.sh (or etc/buildenv.sh in CMS1)
+# to specify the CARMSYS to use.
+function create_symbolic_links() {
+
+    determine_cms_version
+   
+   if [ ! -d crc -o ! -f etc/config.xml ]; then
+        echo "##########################################"
+        echo "# The directory $PWD"
+        echo "# does not look like a SK CMS user."
+        echo "##########################################"
+        exit 1
+   fi
+   if [ ! -f $_BUILDENV ]; then
+        echo "##########################################"
+        echo "# The directory $PWD"
+        echo "# is a SK user but misses $_BUILDENV"
+        echo "# Ensure the specified tag has such a script"
+        echo "##########################################"
+        exit 1
+   fi
+   . $_BUILDENV
+   
+   if [ -z $BUILD_CARMSYS_CCT -o -z $BUILD_CARMSYS_CAS -o -z $BUILD_CARMSYS_CMP -o -z $BUILD_CARMSYS_BID]; then
+        echo "##########################################"
+        echo "# $_BUILDENV failed to set up CARMSYS"
+        echo "##########################################"
+        exit 1
+   fi
+
+   if [ "x${CARMSYS_CCT}" != "x" ] ; then
+       BUILD_CARMSYS_CCT=$CARMSYS_CCT
+   fi
+
+   if [ "x${CARMSYS_CAS}" != "x" ] ; then
+       BUILD_CARMSYS_CAS=$CARMSYS_CAS
+   fi
+
+   if [ "x${CARMSYS_CMP}" != "x" ] ; then
+       BUILD_CARMSYS_CMP=$CARMSYS_CMP
+   fi
+   
+   if [ "x${CARMSYS_BID}" != "x" ] ; then
+       BUILD_CARMSYS_BID=$CARMSYS_BID
+   fi
+   
+   
+   if [ "x${_REPLACE_SYMLINKS}" != "x" ]; then
+       rm -f current_carmsys_cct 2>/dev/null
+       rm -f current_carmsys_cas 2>/dev/null
+       rm -f current_carmsys_cmp 2>/dev/null
+       rm -f current_carmsys_bid 2>/dev/null
+       rm -f current_carmsys_int 2>/dev/null
+       rm -f current_carmtmp_cct 2>/dev/null
+       rm -f current_carmtmp_cas 2>/dev/null
+       rm -f current_carmtmp_cmp 2>/dev/null
+       rm -f current_carmtmp_int 2>/dev/null
+       rm -f current_carmtmp 2>/dev/null
+       rm -f current_carmdata 2>/dev/null
+   fi
+   if [ -e current_carmsys_cct -o -e current_carmsys_cas -o -e current_carmsys_cmp -o -e current_carmsys_int -o -e current_carmsys_bid]; then
+        echo "##########################################"
+        echo "# CARMSYS directories already exist"
+        echo "# in $PWD"
+        echo "##########################################"
+        exit 1
+   fi
+   if [ -e current_carmtmp -o -e current_carmtmp_cct -o -e current_carmtmp_cas -o -e current_carmtmp_cmp -o -e current_carmtmp_int ]; then
+        echo "##########################################"
+        echo "# CARMTMP directories already exist"
+        echo "# in $PWD"
+        echo "##########################################"
+        exit 1
+   fi
+   if [ -e current_carmdata ]; then
+        echo "##########################################"
+        echo "# CARMDATA directories already exist"
+        echo "# in $PWD"
+        echo "##########################################"
+        exit 1
+   fi
+   mkdir -p ../tmp_cct/logfiles 2>/dev/null
+   mkdir -p ../tmp_cas/logfiles 2>/dev/null
+   mkdir -p ../tmp_cmp/logfiles 2>/dev/null
+   
+   ln -s $BUILD_CARMSYS_CCT current_carmsys_cct
+   ln -s $BUILD_CARMSYS_CAS current_carmsys_cas
+   ln -s $BUILD_CARMSYS_CMP current_carmsys_cmp
+   ln -s $BUILD_CARMSYS_BID current_carmsys_bid
+   ln -s ../tmp_cct current_carmtmp
+   ln -s ../tmp_cct current_carmtmp_cct
+   ln -s ../tmp_cas current_carmtmp_cas
+   ln -s ../tmp_cmp current_carmtmp_cmp
+   ln -s /carm/proj/skcms/carmdata current_carmdata
+   
+   echo "CARMSYS configuration:"
+   echo "current_carmsys_cct -> `readlink -f current_carmsys_cct`"
+   echo "current_carmsys_cas -> `readlink -f current_carmsys_cas`"
+   echo "current_carmsys_cmp -> `readlink -f current_carmsys_cmp`"
+   echo "current_carmsys_bid -> `readlink -f current_carmsys_bid`"
+   
+
+   if [ -d bin/testing ]; then
+       chmod 755 bin/testing/*
+   fi
+
+   # Checking that current user has an entry in the users_Carmen.xml configuration file
+   if [[ `grep -i $USER etc/users_Carmen.xml` = "" ]]; then
+       echo "Warning: User $USER does not have an entry in the etc/users_Carmen.xml file"
+       if [ "x$CMS_VERSION" == "x1" ]; then
+           echo "Adding $USER to etc/users_Carmen.xml"
+           sed -i 's/<\/users>/  <user name="'$USER'" fullname="John Doe">\n      <role>Administrator<\/role>\n  <\/user>\n<\/users>/' etc/users_Carmen.xml
+       fi
+   fi
+}
+
+function get_sandbox() {
+    if [ "x${_SANDBOX_OVERRIDE}" != "x" ]; then
+        echo "Checking out to ${_SANDBOX_OVERRIDE}"
+        if [ -a "$_SANDBOX_OVERRIDE/.hg" -a "x${_NOCHECKOUT}" == "x" ]; then
+            echo "##########################################"
+            echo "# Target path ${_SANDBOX_OVERRIDE}"
+            echo "# already exists"
+            echo "##########################################"
+            exit 1
+        fi
+        SANDBOX=$_SANDBOX_OVERRIDE
+        
+        if [ -f $_SANDBOX_OVERRIDE ]; then
+            echo "##########################################"
+            echo "# Sandbox dir $_SANDBOX_OVERRIDE is a file"
+            echo "# Please move it out of the way, or set"
+            echo "# a different -p path."
+            echo "##########################################"
+            exit 1
+        fi
+        if [ ! -d $_SANDBOX_OVERRIDE ]; then
+            _NOCHECKOUT=
+        fi
+        mkdir -p $SANDBOX
+    else
+        if [ -f $SANDBOX_DIR ]; then
+            echo "##########################################"
+            echo "# Sandbox dir $SANDBOX_DIR is a file"
+            echo "# Please move it out of the way, or set"
+            echo "# the SANDBOX_DIR variable to something"
+            echo "# else."
+            echo "##########################################"
+            exit 1
+        fi
+        if [ ! -d $SANDBOX_DIR ]; then
+             mkdir -p $SANDBOX_DIR
+        fi
+        SANDBOX=${SANDBOX_DIR}/${HG_TAG}
+        
+        if [ "x${_NOCHECKOUT}" != "x" -a -d $SANDBOX ]; then
+            _REPLACE_SYMLINKS="1"
+        else
+            _NOCHECKOUT=
+            _i=0
+            while [ -d $SANDBOX ]; do
+                _i=`expr $_i + 1`
+	        SANDBOX=${SANDBOX_DIR}/${HG_TAG}_${_i}
+            done
+            mkdir $SANDBOX
+        fi
+    fi
+}
+
+# Clones and updates a new SK user. If $_NOCHECKOUT is set,
+# does not check out, but instead verifies that the sandbox
+# is indeed the specified tag.
+# Input: $MAIN_HG_REPOSITORY_URL and $HG_TAG
+# Assumes current directory is the sandbox directory
+function clone_and_update() {
+    if [ ! -z ${_NOCHECKOUT} ]; then
+
+        CURRENT_BRANCH="`hg -R $_MODULE_OVERRIDE/ branch 2>/dev/null`"
+        CURRENT_TAG="`hg -R $_MODULE_OVERRIDE/ id -t 2>/dev/null`"
+
+        if [ $HG_TAG == "default" ]; then
+	    if [ "xdefault" != "x$CURRENT_BRANCH" ]; then
+		echo "##########################################"
+		echo "# Sandbox $SANDBOX is not the"
+		echo "# default branch."
+		echo "##########################################"
+		exit 1
+	    fi
+        else
+	    if [ "x$HG_TAG" != "x$CURRENT_BRANCH" -a "x$HG_TAG" != "x$CURRENT_TAG" ]; then
+		echo "##########################################"
+		echo "# Sandbox $SANDBOX module $_MODULE_OVERRIDE does not"
+		echo "# contain the tag $HG_TAG."
+		echo "##########################################"
+		exit 1
+	    fi
+	fi
+        if [ "x${_NOCHECKOUT}" == "x2" ]; then
+            echo "Updating existing source"
+            OPWD=$PWD
+
+            if [ -d $SANDBOX_DIR/$_MODULE_OVERRIDE ]; then
+                cd $SANDBOX/$_MODULE_OVERRIDE
+            else
+                if [ -d $_MODULE_OVERRIDE ]; then
+                    cd $_MODULE_OVERRIDE
+                fi
+            fi
+
+	    if [ -f $_SITE_FILE ]; then
+	        rm -f $_SITE_FILE
+            fi
+            hg pull -u
+            cd $OPWD
+        else
+            echo "Skipping check-out step and using existing source"
+        fi
+    else
+        echo "Cloning repository: $MAIN_HG_REPOSITORY_URL"
+        hg clone -U $MAIN_HG_REPOSITORY_URL
+
+        OPWD=$PWD
+        cd $_MODULE_OVERRIDE
+
+        echo "Updating repository"
+        if [ "x$HG_TAG" == "xdefault" ]; then
+            hg update
+
+        else
+            hg update -C $HG_TAG
+        fi
+        cd $OPWD
+    fi
+}
+
+function compile_rulesets() {
+    if [ -z ${_NOCOMPILE} ]; then
+        if [ ! -f bin/admin/compileRulesets.sh ]; then
+            echo "##########################################"
+            echo "# Sandbox $SANDBOX does not"
+            echo "# contain the tag $HG_TAG."
+            echo "##########################################"
+            exit 1
+	fi
+	if ! bin/admin/compileRulesets.sh $_COMPILER_OPTIONS -e all ; then
+            echo "##########################################"
+            echo "# Failed to compile rulesets"
+            echo "##########################################"
+            exit 1
+        fi
+    else
+	echo "Skipping compilation of rulesets"
+    fi
+}
+
+function configure_database() {
+    if [ -z ${_NODBSETUP} ]; then
+        echo "Setting up database plan to use (${DB_PLAN})"
+        if [ -f $_SITE_FILE ]; then
+            #setting username to $DB_PLAN
+            bin/xmledit.py -p site/db -s user $DB_PLAN $_SITE_FILE || exit 1
+            #setting password to $DB_PLAN
+            bin/xmledit.py -p site/db -s passwd $DB_PLAN $_SITE_FILE || exit 1
+        else
+            echo "CMS2: Skipping setup of database plan"
+        fi
+    else
+        echo "Not configuring database plan"
+    fi
+}
+
+function configure_portbase() {
+    if [ ! "x$PORT_BASE" == "x" ]; then
+        echo "Setting up port base (${PORT_BASE})"
+        if [ -f $_SITE_FILE ]; then
+            #setting portbase to $PORT_BASE
+            bin/xmledit.py -p site/desmond -s portbase $PORT_BASE $_SITE_FILE || exit 1
+        else
+            echo "CMS2: Skipping setup of port base"
+        fi
+        
+    else
+        echo "Not configuring port base setting"
+    fi
+}
+
+function configure_desmond_servers() {
+    if [ ! "x$DESMOND_SERVER" == "x" ]; then
+        if [ $DESMOND_SERVER == $HOST ]; then
+            echo "Warning: Desmond server is the same as the current host!"
+        fi
+        echo "Setting up Desmond server (${DESMOND_SERVER})"
+        if [ -f $_SITE_FILE ]; then
+            #setting server to $DESMOND_SERVER
+            bin/xmledit.py -p site/desmond/host -s cct $DESMOND_SERVER $_SITE_FILE || exit 1
+            bin/xmledit.py -p site/desmond/host -s dig $DESMOND_SERVER $_SITE_FILE || exit 1
+            bin/xmledit.py -p site/desmond/host -s dig_slave $DESMOND_SERVER $_SITE_FILE || exit 1
+            bin/xmledit.py -p site/desmond/host -s historic $DESMOND_SERVER $_SITE_FILE || exit 1
+            bin/xmledit.py -p site/desmond/host -s historic_slave $DESMOND_SERVER $_SITE_FILE || exit 1
+        else
+            echo "CMS2: Skipping desmond"
+        fi
+    else
+        echo "Not configuring Desmond servers"
+    fi
+}
+
+function run_tests() {
+    if [ -d bin/testing ]; then
+        chmod 755 bin/testing/*
+    fi
+    if [ ! -z $_RUN_TESTS ]; then
+        if [ ! -f bin/testing/cms_unittest_all.sh ]; then
+            echo "##########################################"
+            echo "# Missing Per's test scripts"
+            echo "##########################################"
+            exit 1
+	fi
+	bin/testing/cms_unittest_all.sh | tee "$_SMOKETESTLOG"
+    else
+	echo "Not running any tests"
+    fi
+}
+
+function clean_sandbox() {
+    #removing dirs known to exist
+    rm -rf sk_cms_user.hg tmp_cas tmp_cct tmp_cmp
+    #renaming dirs that could not be removed
+    DATE=`date +%Y%m%d`
+    mv sk_cms_user sk_cms_user.$DATE 2>/dev/null
+    mv tmp_cas tmp_cas.$DATE 2>/dev/null
+    mv tmp_cct tmp_cct.$DATE 2>/dev/null
+    mv tmp_cmp tmp_cmp.$DATE 2>/dev/null
+}
+
+###########################################
+# Work begins here
+###########################################
+
+if [ ! -z ${_CMD} ]; then
+    function list_tags() {
+       ssh $MAIN_HG_SERVER_HOST hg -R $MAIN_HG_REPOSITORY_PATH tags | tac
+    }
+    function list_branches() {
+       ssh $MAIN_HG_SERVER_HOST hg -R $MAIN_HG_REPOSITORY_PATH branches | tac
+    }
+    case "$_CMD" in
+        list) list_tags ;;
+        listb) list_branches ;;
+        symlink) create_symbolic_links ;;
+        *) usage_text ;;
+    esac
+    exit 0
+fi
+
+if [ -z $HG_TAG ]; then
+    usage_text
+fi
+
+get_sandbox
+
+cd $SANDBOX
+
+if [ ! -z $_CLEANSANDBOX ]; then
+    echo "Cleaning sandbox in directory $SANDBOX"
+    clean_sandbox
+    exit 0
+fi
+
+
+echo "--------------------------"
+echo "Will now clone:"
+echo "   $MAIN_HG_REPOSITORY_URL"
+echo "   Tag: $HG_TAG"
+echo "into the directory:"
+echo "   $SANDBOX"
+echo "--------------------------"
+
+clone_and_update
+
+cd $_MODULE_OVERRIDE
+
+determine_cms_version
+
+create_symbolic_links
+
+compile_rulesets
+
+configure_database
+
+configure_portbase
+
+configure_desmond_servers
+
+run_tests
+
+echo "--------------------------"
+echo "DONE!"
+echo "--------------------------"
+
+exit 0

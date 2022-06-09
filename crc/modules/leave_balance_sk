@@ -1,0 +1,281 @@
+module leave_balance_sk inherits leave_balance
+
+import leave_params;
+import leave_entitlement;
+import leave_reduction;
+import leave_functions;
+
+/**
+ * %balance_accumulator_next_transaction_day_and_types%
+ * From date, the next transaction types are returned on the form
+ * <txns date="20090101">
+ *   <txn>
+ *     <type="entitlement_va"/>
+ *     <type="va_reduction_transaction"/>
+ *   </txn>
+ * </txns>
+ * 
+ * Each transation type is than asked for in 
+ * %balance_accumulator%
+ * At date, the leave balances are according to the input parameters.
+ * Return the next transaction of correct type, with date and leave balance changes,
+ * according to the format 
+ *
+ *   <txns date="20090101">
+ *     <txn>
+ *       <entry account="VA_ENTITLEMENT" days="4200" source="" comment="Entitlement VA"/>
+ *       <entry account="VA_ENTITLEMENT" days="-1000" source="" comment="LOA reduction to VA1"/>
+ *       <entry account="VA1_ENTITLEMENT" days="1000" source="" comment="LOA reduction"/>
+ *     </txn>
+ *   </txns>
+ * 
+ **/
+
+
+/* Balance accumulators, defines the accounts and order of the accounts*/
+redefine export %accumulators% =
+  concat( leave_params.%va_entitlement_account%," ",
+	  leave_params.%va_buffer_account%, " ",
+	  leave_params.%va_account%," ",
+	  leave_params.%f7_entitlement_account%," ",
+	  leave_params.%f7_buffer_account%," ",
+	  leave_params.%f7_account%," ",
+	  leave_params.%va1_entitlement_account%," ",
+	  leave_params.%va1_buffer_account%," ",
+	  leave_params.%va1_account%," ",
+	  leave_params.%saved_va_1%," ",
+	  leave_params.%saved_va_2%," ",
+	  leave_params.%saved_va_3%," ",
+	  leave_params.%saved_va_4%," ",
+	  leave_params.%saved_va_5%, " ",
+      leave_params.%f3_entitlement_account%, " ",
+      leave_params.%f3_buffer_account%, " ",
+      leave_params.%f3_account%, " ",
+      leave_params.%f3S_entitlement_account%, " ",
+      leave_params.%f3S_buffer_account%, " ",
+      leave_params.%f3S_account%, " ",
+      leave_params.%f37_entitlement_account%, " ",
+      leave_params.%f37_buffer_account%, " ",
+      leave_params.%f37_account%);
+
+/* Returns the next transactions, date and types on format above */
+redefine export %accumulator_next_transaction_info%(abstime date)=
+  /*First, we are only interested in the dates, to get what transactions we want
+   * The date defaults to 99999999 to indicate that there is no transaction. */
+
+  let /* Transactions from activities on the roster */
+      roster_transaction    = default(%roster_transaction%(date), "99999999"),
+      roster_date	    = %date%(roster_transaction),
+      /* Transaction from bought VA day, should be treated as ordinary VA */
+      bought_transaction_va_date = default(%next_bought_transaction_date%(leave_params.%va_account%, date),31Dec2036),
+      bought_transaction_va = default(leave_entitlement.%format_date%(bought_transaction_va_date),"99999999"),
+      /* Transaction from bought F7 day, should be treated as ordinary F7 */
+      bought_transaction_f7_date = default(%next_bought_transaction_date%(leave_params.%f7_account%, date),31Dec2036),
+      bought_transaction_f7 = default(leave_entitlement.%format_date%(bought_transaction_f7_date),"99999999"),
+
+      /* Entitlement of VA days, also transaction from entitlement accoutn to VA account */
+      date_va_entitlement   = default(leave_entitlement.%format_date%(leave_entitlement.%next_entitlement_transaction_date%(
+							  leave_params.%va_account%, date)),"99999999"), 
+      /* Entitlement of VA1 days. Doesn't happen ordinarily, it's on same date as VA transactions*/
+      date_va1_entitlement  = default(default(leave_entitlement.%format_date%(leave_entitlement.%next_entitlement_transaction_date%(
+									  leave_params.%va1_account%, date)), 
+					     leave_entitlement.%format_date%(leave_entitlement.%next_entitlement_transaction_date%(leave_params.%va_account%, date))),
+				     "99999999"),
+      /* Entitlement of F7 days, also transaction from buffer to F7 account */
+      date_f7_entitlement   = default(leave_entitlement.%format_date%(leave_entitlement.%next_entitlement_transaction_date%(
+							  leave_params.%f7_account%, date)),"99999999"), 
+      /*Reduction of VA days to VA1 because of LOA days */
+      date_va_reduction        = default(leave_entitlement.%format_date%(leave_reduction.%next_reduction_transaction_date%(
+											leave_params.%va_account%,date)),
+					 "99999999"),
+      /* Reduction of F7 days because of LOA. Not to VA1. */
+      date_f7_reduction        = default(leave_entitlement.%format_date%(leave_reduction.%next_reduction_transaction_date%(
+							  leave_params.%f7_account%,date)),
+					  "99999999"),
+      /* Transacations because of saved VA days */
+      saved_va_date	    = default(leave_entitlement.%format_date%(leave_entitlement.%next_transaction_date%(
+							  leave_params.%va_account%, date)),"99999999"),
+
+      /* Entitlement of F3 days, also transaction from buffer to F3 account */
+      date_f3_entitlement = default(leave_entitlement.%format_date%(
+                                        leave_entitlement.%next_entitlement_transaction_date%(
+                                            leave_params.%f3_account%,
+                                            date)),
+                                    "99999999"), 
+      /* Reduction of F3 days because of LOA. */
+      date_f3_reduction   = default(leave_entitlement.%format_date%(
+                                        leave_reduction.%next_reduction_transaction_date%(
+							                leave_params.%f3_account%,
+                                            date)),
+                                    "99999999"),
+      /* Entitlement of F3S days, also transaction from buffer to F3S account */
+      date_f3S_entitlement = default(leave_entitlement.%format_date%(
+                                        leave_entitlement.%next_entitlement_transaction_date%(
+                                            leave_params.%f3S_account%,
+                                            date)),
+                                    "99999999"), 
+      /* Reduction of F3S days because of LOA. */
+      date_f3S_reduction   = default(leave_entitlement.%format_date%(
+                                        leave_reduction.%next_reduction_transaction_date%(
+							                leave_params.%f3S_account%,
+                                            date)),
+                                    "99999999"),
+      /* Entitlement of F37 days, also transaction from buffer to F37 account */
+      date_f37_entitlement = default(leave_entitlement.%format_date%(
+                                        leave_entitlement.%next_entitlement_transaction_date%(
+                                            leave_params.%f37_account%,
+                                            date)),
+                                    "99999999"), 
+      /* Reduction of F37 days because of LOA. */
+      date_f37_reduction   = default(leave_entitlement.%format_date%(
+                                        leave_reduction.%next_reduction_transaction_date%(
+							                leave_params.%f37_account%,
+                                            date)),
+                                    "99999999"),
+
+      /* Transaction date, that is date of transafer from ENTITLEMENT to BUFFER account */
+      next_transaction_date = default(leave_entitlement.%format_date%(leave_entitlement.%next_transaction_date%(leave_params.%va_account%, date)),"99999999"),
+
+      /* The date we want is the one that comes first..*/
+      nextDate = nmin(date_va_entitlement, 
+		      date_va1_entitlement, 
+		      date_f7_entitlement, 
+		      date_va_reduction,
+		      date_f7_reduction, 
+		      roster_date, 
+		      saved_va_date,
+		      bought_transaction_va,
+		      bought_transaction_f7,
+              date_f3_entitlement,
+              date_f3S_entitlement,
+              date_f37_entitlement,
+              date_f3_reduction,
+              date_f3S_reduction,
+              date_f37_reduction);
+
+    /* Concat the string of transaction types*/
+    concat("<txns date=\"", nextDate, "\"> <txn> ",
+        if nextDate = roster_date            then "<type=\"roster_transaction\"/> " else "", 
+        if nextDate = saved_va_date          then "<type=\"saved_va_transaction\"/> " else "",
+        if nextDate = bought_transaction_va  then "<type=\"bought_transaction_va\"/> " else "",
+        if nextDate = bought_transaction_f7  then "<type=\"bought_transaction_f7\"/> " else "",
+        if nextDate = date_va_entitlement    then "<type=\"entitlement_va\"/> " else "",
+        if nextDate = next_transaction_date  then "<type=\"va1_reduction_transaction\"/> " else "",
+        if nextDate = date_va1_entitlement   then "<type=\"entitlement_va1\"/> " else "",
+        if nextDate = date_f7_entitlement    then "<type=\"entitlement_f7\"/> " else "",
+        if nextDate = date_va_reduction      then "<type=\"va_reduction_transaction\"/> " else "",
+        if nextDate = date_f7_reduction      then "<type=\"f7_reduction_transaction\"/> " else "",
+        if nextDate = date_f3_entitlement    then "<type=\"entitlement_f3\"/> " else "",
+        if nextDate = date_f3_reduction      then "<type=\"f3_reduction_transaction\"/> " else "",
+        if nextDate = date_f3S_entitlement   then "<type=\"entitlement_f3S\"/> " else "",
+        if nextDate = date_f3S_reduction     then "<type=\"f3S_reduction_transaction\"/> " else "",
+        if nextDate = date_f37_entitlement   then "<type=\"entitlement_f37\"/> " else "",
+        if nextDate = date_f37_reduction     then "<type=\"f37_reduction_transaction\"/> " else "",
+        "</txn> </txns>");
+
+/* Eg:      <entry account="VA" days="-700" source="" comment="VA on Roster" si="-100"/> or
+            <entry account="VAD" days="-200" source="" comment="VAD on Roster" si="-200"/> or
+            for short vacations si equals rate in account_entry table, days is still the true number of days
+ */
+
+export %accumulator_next_transaction_info_no_entitlement%(abstime date)=
+  /* Same as %accumulator_next_transaction_info% but without entitlement transactions. */
+  let /* Transactions from activities on the roster */
+      roster_transaction    = default(%roster_transaction%(date), "99999999"),
+      roster_date	    = %date%(roster_transaction),
+      /* Transaction from bought VA day, should be treated as ordinary VA */
+      bought_transaction_va_date = default(%next_bought_transaction_date%(leave_params.%va_account%, date),31Dec2036),
+      bought_transaction_va = default(leave_entitlement.%format_date%(bought_transaction_va_date),"99999999"),
+      /* Transaction from bought F7 day, should be treated as ordinary F7 */
+      bought_transaction_f7_date = default(%next_bought_transaction_date%(leave_params.%f7_account%, date),31Dec2036),
+      bought_transaction_f7 = default(leave_entitlement.%format_date%(bought_transaction_f7_date),"99999999"),
+
+      /* Transaction date, that is date of transafer from ENTITLEMENT to BUFFER account */
+      next_transaction_date = default(leave_entitlement.%format_date%(leave_entitlement.%next_transaction_date%(leave_params.%va_account%, date)),"99999999"),
+
+      /* The date we want is the one that comes first..*/
+      nextDate = nmin(roster_date,
+		      bought_transaction_va,
+		      bought_transaction_f7,
+              next_transaction_date);
+
+    /* Concat the string of transaction types*/
+    concat("<txns date=\"", nextDate, "\"> <txn> ",
+        if nextDate = roster_date           then "<type=\"roster_transaction\"/> " else "",
+        if nextDate = bought_transaction_va then "<type=\"bought_transaction_va\"/> " else "",
+        if nextDate = bought_transaction_f7 then "<type=\"bought_transaction_f7\"/> " else "",
+        if nextDate = next_transaction_date then "<type=\"va1_reduction_transaction\"/> " else "",
+        "</txn> </txns>");
+
+/*redefine %activity_str% =
+  concat(leave_entitlement.%format_date%(%leg_start%),
+         leave_entitlement.%transaction_string_rate%(leave_params.%account%, 
+		  %days_times_rate%(leave_functions.%leave_balance_length%, leave_params.%rate%), concat(activity_subtype, " on Roster"),-leave_params.%rate%));*/
+redefine %activity_str% =
+  concat(leave_entitlement.%format_date%(%leg_start%),
+         leave_entitlement.%transaction_string_rate%(leave_params.%account%, 
+		  -100*leave_functions.%leave_balance_length%, concat(activity_subtype, " on Roster"),-leave_params.%rate%));
+
+export %roster_transaction%(abstime date) =
+  default(min(tentative_roster,
+	      first(leg(chain), %activity_str%) 
+	           where (%leg_start%>=date 
+			  and
+			  kwdmap.%activity_maintype%="A" 
+			  and
+			  not void(leave_params.%consider_roster_account%)
+			 )
+	      ),
+	  leave_entitlement.%no_contribution%);
+
+
+redefine export %consider_balance_roster_sources% = "VA on Roster, F7 on Roster, VA1 on Roster, VAD on Roster, VAH on Roster, VA1D on Roster, VA1H on Roster, F3 on Roster, F3S on Roster, F37 on Roster";
+redefine export %balance_roster_source%(string account) = concat(account, " on Roster");
+  
+/********************
+ * Bought vacation days
+ ********************/
+
+/* Eg:      <entry account="VA" days="-100" source="" comment="Bought Days"/>
+ */
+
+%next_bought_transaction_date%(string actcode, abstime date) =
+    min(times(100), 
+      %_bought_transactiondate_from_table%(actcode, date, times_index(0))
+    );
+
+
+
+
+table leave_bought_day_table(string actcode, abstime date, int match) =
+  %crew_id%, date, actcode, match -> abstime %_bought_transactiondate_from_table%;
+  external "bought_days";
+  crew,	  <= start_time, day_type, match_number  -> start_time;
+  -,	  -,	    -,	      -		    -> void(abstime);
+end 
+
+
+
+/********************
+ * Roster assignments
+ ********************/
+
+/* (amount*100/167) is used to get amount 300 from 500.*/
+%days_divided_by_rate%(int amount, int rate) =
+  if rate = -166 then
+    (amount*100/167)-1
+  else
+    -100*amount/rate;
+
+%days_with_rate%(int amount, string vacId) = 
+  %days_times_rate%(amount, leave_params.%vac_code_to_rate%(vacId)) / 100;
+
+/* Calculation to get amount 500 from 300.*/
+%days_times_rate%(int amount, int rate) = 
+  if abs(rate) = 166 then
+    -amount*rate-200
+  else
+    -amount*rate;
+
+/* Eg:      <entry account="VA" days="-700" source="" comment="VA on Roster" si="-100"/>
+            si equals rate in account_entry table*/

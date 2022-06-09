@@ -1,0 +1,99 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *
+ *
+ * Sections:
+ *
+ *
+ * Created by:
+ *   Mikael Jensen, 27-Jun-2017
+ *
+ * Major changes:
+ *
+ */
+
+module rules_training_cct_fc inherits rules_training_cct
+
+import leg;
+import pp;
+import system_db_parameters;
+import training;
+import crew;
+import model_crew;
+import fundamental;
+import levels;
+import rule_exceptions;
+
+/*
+** Rule: Extra check for web training.
+**
+** Description:
+**  If PC in pp or prev pp then the rule check
+**  for web training in the month with PC or
+**  in the two months before.
+**
+** Agreement:
+**
+** JIRA:
+**   SKCMS-1503
+**
+*/
+
+export rule trng_web_training_needed =
+  valid %valid_trng_web_training_needed%
+  and %validity_trng_web_training_needed%
+  and rule_exceptions.%rule_on%(%start_date_wt_needed_warning%);
+
+  %has_wt_in_window%;
+
+  startdate  = %start_date_wt_needed_warning%;
+  failobject = %failobject_wt_needed_warning%;
+  failtext %web_training_failtext%;
+  remark "Missing web training. Needs WT(XX)",
+  planner "Extra check regarding WT(XX). Checks that crew has performed a WT(XX) "
+  "within the 3 month interval of the PC";
+end
+
+%validity_trng_web_training_needed% =
+   if %has_agmt_group_ski_fd_at_PC_date%
+   then system_db_parameters.%web_training_pc_LH_17_valid%(%pp_start%)
+   else system_db_parameters.%web_training_pc_SH_17_valid%(%pp_start%);
+
+%has_agmt_group_ski_fd_at_PC_date% =
+  crew.%has_agmt_group_ski_fd_at_date%(%pc_opc_not_Z_latest_date_in_pp_or_prev_pp%);
+
+%valid_trng_web_training_needed% =
+ (%has_pc_opc_not_Z_in_pp% and %has_valid_act_next_pp%) or
+ (%has_pc_opc_not_Z_in_prev_pp% and %has_valid_act_in_pp%);
+
+%has_valid_act_next_pp% =
+   any(leg(roster), (leg.%start_utc% > %pp_end% and %valid_for_web_training_warning%));
+
+%has_valid_act_in_pp% =
+   any(leg(roster), (leg.%start_utc% >= %pp_start% and leg.%start_utc% <= %pp_end% and %valid_for_web_training_warning%));
+
+%start_date_wt_needed_warning% = %next_pp_first_valid_leg_start%;
+
+%failobject_wt_needed_warning% =
+  first(leg(roster),leg.%failobject_departure%) where (%valid_for_web_training_warning%  and leg.%start_utc% >= %wt_window_end%);
+
+%web_training_failtext% = concat("Missing web training. Needs ","WT(xx).");
+%pc_opc_not_Z_latest_date_in_pp_or_prev_pp% = training.%PC_or_OPC_not_Z_last_performed%(%prev_pp_start%, %pp_end%);
+
+%prev_pp_start% = round_down_month(%prev_pp_end%);
+%prev_pp_end% = %pp_start%-0:01;
+%has_pc_opc_not_Z_in_pp% = default(%pc_opc_not_Z_latest_date_in_pp_or_prev_pp% >= %pp_start% and %pc_opc_not_Z_latest_date_in_pp_or_prev_pp% <= %pp_end%, False);
+%has_pc_opc_not_Z_in_prev_pp% = default(%pc_opc_not_Z_latest_date_in_pp_or_prev_pp% >= %prev_pp_start% and %pc_opc_not_Z_latest_date_in_pp_or_prev_pp% <= %prev_pp_end%, False);
+%wt_window_start% = add_months(%wt_window_end%, -3);
+%wt_window_end% =round_up_month(%pc_opc_not_Z_latest_date_in_pp_or_prev_pp%);
+/* CORONA SKCMS-2461: Remove %wt_completed_in_extended_window% below after delayed PC activities are completed. */
+%has_wt_in_window% = not void(training.%wt_last_performed_any%(%wt_window_start%, %wt_window_end%)) or training.%wt_completed_in_extended_window%;
+%next_pp_first_valid_leg_start% = first(leg(roster), leg.%start_utc%) where (%valid_for_web_training_warning% and leg.%start_utc% > %wt_window_end%);
+
+%valid_for_web_training_warning% = leg.%is_active_flight% or leg.%is_standby% or leg.%is_blank_day%;
+
+/* end of file */
+

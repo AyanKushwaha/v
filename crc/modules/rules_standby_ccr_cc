@@ -1,0 +1,1208 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains standby rules used for cabin crew in Carmen Crew Rostering
+ *
+ * Sections:
+ *   Standby rules
+ *
+ * Created by:
+ *   Henrik Mouritsen, 24-Sep-2006
+ *
+ * Major changes:
+ *
+ */
+
+module rules_standby_ccr_cc inherits rules_standby_ccr
+import levels;
+import roster;
+import crew;
+import wop;
+import trip;
+import duty;
+import leg;
+import recency;
+import rules_qual_ccr;
+import accumulators;
+import standby;
+import crew_pos;
+import training;
+import parameters;
+import system_db_parameters;
+
+
+/****************************************************************
+ * Section 1: Standby rules
+ ***************************************************************/
+
+/*
+** Standby in general is assumed to consist of trips created in the pairing phase.
+** On top of this strostandby consisting of single days (fill up style) standby days are
+** given. This can result in a single wop with layoyut R - empty day - R R R
+** thus the neccesity for trip levels rules in some cases.
+**
+** The terminology standby block does in this context means a number of standby activites
+** present in the roster as/on consecutive days. 
+**
+*/
+
+/** Rule: 
+**    Do not mix standby duty with other duty between freedays.
+**
+** Description:
+**    Check that standby duty is not mixed with other duty
+**    between freedays. 
+**
+** Agreement:
+**    Functional rule
+**
+**    4ExNG - no longer applies
+*/
+
+rule stb_standby_mixed_with_other_duty_CC_ALL =
+  valid roster.%check_rules% and
+        not crew.%k4exng_cc_sp5_1_valid%(wop.%start_day%) and
+        wop.%in_pp% and
+        /* not wop.%has_scattered_standby% and */
+        not (crew.%is_skj% or crew.%is_skk%) and
+        wop.%has_standby% and 
+        any(trip(wop), trip.%is_standby% and
+                       not (trip.%is_scattered_standby_at_home% or
+                            (trip.%is_scattered_standby% and
+                             crew.%is_SKS%))) and
+        rule_exceptions.%rule_on%(wop.%start_UTC%);
+
+  %wop_is_ok_standby_mix%;
+
+  startdate = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext "Standby mixed with other duty between freedays.";
+  remark "SBY: Standby mixed with other duty between freedays",
+  planner "The rule checks that standby duty is not mixed with"
+	  " other duty between freedays.";
+end
+
+%wop_is_ok_standby_mix% = 
+  all(trip(wop), trip.%is_standby% or trip.%is_off_duty_cmp%);
+
+/*
+** Rule: 
+**    Standby must cover all days between freedays for
+**    fixed group cabin crew
+**
+** Description:
+**    Check that standby covers all days between freedays
+**    fixed group cabin crew.
+**    It is assumed that multiple standbys divided by
+**    single empty days are never present inside wops. 
+**
+** Agreement:
+**    Functional rule
+**
+**    4ExNG - no longer applicable
+*/
+
+/* 
+**  Standby rules are present here to prevent illegal subchain,
+**  when combining 2 and 3 day standby blocks.
+*/
+
+rule stb_standby_btw_freedays_CC_ALL =
+  valid roster.%check_rules% and
+        not crew.%k4exng_cc_sp5_1_valid%(wop.%start_day%) and
+        wop.%in_pp% and
+        wop.%has_standby% and
+        crew.%in_fixed_group_wop_start% and
+        %wop_has_standby_not_scattered% and
+        not crew.%is_leased_wop_start% and
+        rule_exceptions.%rule_on%(wop.%start_UTC%);
+	
+  wop.%days% = %days_btw_freedays%;
+
+  startdate = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  failtext "Standby must cover all days between freedays.";
+  remark "(CCR) SBY: Standby must cover all days between freedays.",
+  planner "The rule checks standby assigned for fixed group crew"
+	  " covers all days between freedays.";
+end
+
+export %days_btw_freedays% =
+  default((next(wop(roster), wop.%start_day%) - 
+           prev(wop(roster), wop.%end_day% + 24:00))/24:00, 999);
+  
+%wop_has_standby_not_scattered% =
+  any(trip(wop), trip.%is_standby% and
+                 not trip.%is_scattered_standby_at_home%);
+  
+/*
+** Rule:
+**    Max standby days in calendar year
+**
+** Description:
+**    Maximum number of standby days per cabin crew in one calendar year.
+**
+** Agreement:
+**  4ExNG
+**  Cimber is excluded SKCMS-596
+**
+*/
+rule stb_max_standby_days_in_calendar_year_ALL =
+  valid roster.%check_rules% and
+        crew.%k4exng_cc_sp5_1_valid%(wop.%start_day%) and
+        wop.%in_pp% and
+        (wop.%is_last_standby_in_month% or
+        wop.%is_last_standby_line_in_month%)
+        and not crew.%has_agmt_group_qa_at_date%(fundamental.%pp_start%);
+
+  %standby_days_in_calendar_year% <= %standby_days_per_year_limit% + 
+				     rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+  startdate  = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(int val, int limit) = 
+    concat("SBY: ", %int2str%(val), 
+           " SBY days in calendar year. Only ", %int2str%(limit),
+           " allowed.");
+  remark "SBY: Max standby days in calendar year exceeded",
+  planner "Check that number of standby days in a calendar year is less than 35 (SKN CC 45).",
+          "Reduced proportionally for vacation, illness etc";
+end
+
+%standby_days_per_year_limit% =
+  if system_db_parameters.%part_time_crew_grtr_80_jan2019%(wop.%start_UTC%) and
+     (crew.%has_agmt_group_nkf_cc% or crew.%has_agmt_group_snk_cc%) and
+     (crew.%part_time_factor_at_date%(round_down_year(wop.%start_UTC%)) <= 80) then
+     35
+  else if (crew.%has_agmt_group_nkf_cc% or crew.%has_agmt_group_snk_cc%) then
+     45
+  else
+     35;
+
+/* Standby days in calendar year
+** 4ExNG
+** Note: Number of standby-line days are reduced by a factor 1.6
+** That means if crew only had standby line days the maximum number
+** is 1.6*35 = 56 instead og 35
+** per year */
+%standby_days_in_calendar_year% =  
+  let calendar_year_start = round_down_year(wop.%start_hb%),
+      p_end = round_up_year(wop.%start_hb%);
+      
+  if leg.%end_utc% = standby.%last_standby_in_wop_date% then
+    accumulators.%standby_days_in_period%(calendar_year_start, p_end) 
+    + %adjusted_standby_lines_rounded_up%(calendar_year_start, p_end)
+  else
+    0;
+
+/* 
+** Adjusting number of standby lines by dividing by 1.6 and rounding up to nearest integer
+**/
+%adjusted_standby_lines_rounded_up%(abstime p_start, abstime p_end) =  
+  if(fundamental.%cabin_crew%) then
+    (100*accumulators.%standby_line_days_in_period%(p_start, p_end) + 159)/160
+  else
+    0;
+
+/*
+** Rule: 
+**    Maximum one airport standby in standby block
+**
+** Description:
+**    Check that there is maximum one airport standby in a standby block. 
+**    An airport standby is considered a single activity of type airport standby.
+**    The rule is only valid for danish shorthaul cabin crew.
+**
+** Agreement:
+**    CAU K04 B2 F1.3
+**
+**    4ExNG - no longer applies
+*/
+rule stb_max_airport_standby_in_standby_block_CC_SKD =
+  valid roster.%check_rules% and
+        not crew.%k4exng_cc_sp5_1_valid%(wop.%start_day%) and
+        wop.%in_pp_extended% and
+        crew.%is_SKD% and 
+	crew.%is_short_haul_wop_start% and
+        wop.%has_airport_standby%;
+
+	%airport_standby_in_wop% <= %max_airport_standby_in_standby_wop% + 
+				    rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+
+  startdate = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(int val, int limit) = 
+    concat("SBY: ", %int2str%(val), 
+           " airport SBY in SBY block. Only ", %int2str%(limit),
+           " allowed.");
+  remark "(CCR) SBY: Maximum number of airport standbys in standby block",
+  planner "The rule checks that the maximum number of airport standby in"
+	        " a standby block doesnt exceed 1.";
+end
+
+%airport_standby_in_wop% = count(duty(wop)) where (duty.%is_standby_at_airport%);
+
+%max_airport_standby_in_standby_wop% = 1;
+
+/*
+** Rule: 
+**    Crew must have at least 3 months of experience before performing standby.
+**
+** Description:
+**    Crew must have at least 3 months of experience before performing standby.
+**    The rule is only valid for danish shorthaul cabin crew.
+**
+** Agreement:
+**    CAU K04 B2 F1.7
+*/
+rule stb_min_3_months_sh_experience_before_standby_CC_SKD =
+  valid roster.%check_rules% and
+        crew.%is_SKD% and 
+        wop.%in_pp_extended% and
+        wop.%has_standby% and
+	rule_exceptions.%rule_on%(wop.%start_UTC%);
+
+  %crew_legal_experience_for_standby_short_haul%;
+
+  startdate = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext  
+    concat("SBY: Minimum 3 months experience before SBY,"  
+           "  next valid SBY date is:  ", format_time(%first_valid_sh_standby_date%, "%02d%ub%Y"));
+  remark "(CCR) SBY: Crew must have at least 3 months of experience before standby.",
+  planner "The rule checks that has 3 months of experience before performing standby.";
+end
+
+/*
+** NEW NEW is valid from date of second familiarization flight
+** which is the demand of this rule
+** Other training rules will prevent standby before secon
+** familiarization flight.
+*/
+%crew_legal_experience_for_standby_short_haul% =
+  not crew.%has_restr_subtype_in_ival%("NEW", "NEW", add_months(standby.%first_standby_in_wop_date%, -3), 
+                                       standby.%first_standby_in_wop_date%);
+
+/*
+%first_standby_in_wop_date% = 
+  default(first(duty(wop),duty.%start_UTC%) where(duty.%is_standby%), wop.%start_UTC%); 
+*/
+
+%first_valid_sh_standby_date% =
+  add_months(crew.%restriction_subtype_enddate%("NEW", "NEW", standby.%first_standby_in_wop_date%), 3);
+
+/*
+** Rule: 
+**    No standby allowed immediately after vacation or leave of absence
+**    exceeding 7 days 
+**
+** Description:
+**    Check that vaction and leave of absence of at least 7 days duration is
+**    not immediately (following day) followed by standby.
+**    The rule is only valid for danish cabin crew.
+**
+** Agreement:
+**    CAU K04 B2 F1.1.9
+**    CAU K04 B2 F2.1.10
+*/
+rule stb_no_standby_after_vacation_CC_SKD = 
+  valid roster.%check_rules% and
+        crew.%is_SKD% and
+        wop.%in_pp_extended% and
+        first(trip(wop), trip.%is_standby%) and
+        prev(wop(chain), %wop_is_short_loa_or_va%) and
+        rule_exceptions.%rule_on%(wop.%start_UTC%);
+   
+   not %standby_after_vacation%;
+   
+   startdate = wop.%start_UTC%;
+  failobject = first(duty(wop), duty.%failobject_start%);
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext "SBY: No SBY immediately after vacation or leave."; 
+  remark "SBY: No standby after vacation or leave of absence",
+  planner "The rule checks that there is no standby on the day following vacation or",
+          " leave of absence of at least 7 days duration.";
+end
+
+%standby_after_vacation% = wop.%consecutive_wops_bw%;
+
+%wop_is_short_loa_or_va% = 
+  (wop.%is_loa%  or wop.%is_vacation%) and
+  wop.%days% >= %minimum_length_for_short_absence_period%;
+
+%minimum_length_for_short_absence_period% = 7;
+
+/*
+** Rule:
+**    Max standby lines in calendar year
+**
+** Description:
+**    Maximum number of standby lines per longhaul cabin crew in one calendar year.
+**    Added SKD long haul with limit 20 days according to change request PS07.
+**
+** Agreement:
+**    CAU K04 B2 F2.1.1
+**    NKF B6
+**    SCCA E 2.2
+**
+*/
+
+rule stb_max_standby_lines_in_calendar_year_CC_ALL =
+  valid roster.%check_rules% and
+        wop.%in_pp% and
+        crew.%is_long_haul_wop_start% and
+        wop.%is_last_standby_line_in_month%;
+
+  %standby_lines_in_calendar_year% <= %max_standby_lines_in_calendar_year% + 
+				      rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+  startdate  = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(int val, int limit) = 
+    concat("SBY: ", %int2str%(val), 
+           " SBY lines in calendar year. Only ", %int2str%(limit),
+           " allowed.");
+  remark "SBY: Maximum standby lines in calendar year",
+  planner "Check that number of standby lines in a calendar year is less than 3 (SKD).";
+end
+
+%max_standby_lines_in_calendar_year% = 
+  if    system_db_parameters.%part_time_crew_less_75_jan2019%(wop.%start_UTC%) and
+        crew.%has_agmt_group_skd_cc% and
+        crew.%part_time_factor% < 75 then
+    1
+  else 
+    2; 
+    
+%max_sby_lines_in_cal_year_SKS_p% = 
+  parameter 4
+  remark "Maximum number of standby lines for CC SKS";
+
+%standby_lines_in_calendar_year% =  
+  let calendar_year_start = round_down_year(wop.%start_day%),
+      p_start = round_down_year(%pp_start%),
+      p_end = round_up(wop.%end_hb%, 24:00) + 0:01;
+  accumulators.%standby_lines_in_period%(nmax(calendar_year_start,p_start), p_end);
+
+/*
+** Rule: 
+**    Minimum days between standby.
+**    Minimum days between standby lines.
+**
+** Description:
+**    Check the minimum days between standby.
+**    Assumption is that a standby block/line is inside wop range.
+**    Check the minimum days between standby lines.
+**    The standby line rule is valid for danish and norwegian longhaul cabin crew.
+**
+** Agreement:
+**    Functional rule - doesn't apply for SKJ/SKK
+*/
+rule stb_min_days_btw_standby_CC_ALL =
+  valid roster.%check_rules% and
+        wop.%for_publish_in_pp% and
+        wop.%has_standby% and
+        not (crew.%is_skj% or crew.%is_skk%) and
+        not wop.%has_scattered_standby% and
+        not wop.%has_single_day_standby%;
+
+	%standby_days_prev% >= (if wop.%is_standby_line% then
+                                %min_days_btw_standby_lines%
+                            else if (crew.%part_time_factor% >= 50 and crew.%part_time_factor% <= 70) then
+                                %min_days_btw_standby_blocks_parttime_50_to_70%
+                            else if (crew.%part_time_factor% > 70 and crew.%part_time_factor% <= 100) then
+                                %min_days_btw_standby_blocks_parttime_70_to_100%
+                            else if (crew.%part_time_factor% >= 0 and crew.%part_time_factor% < 50) then
+                                %min_days_btw_standby_blocks_parttime_0_to_50%
+                            else 0) -
+                            rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+
+  startdate = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(int val, int limit) = 
+    concat("SBY: ", %int2str%(val),
+           " days between standby ",
+           %standby_type_text%, 
+           %int2str%(limit),
+           " required.");
+  remark "SBY: Min days between standby blocks/lines",
+  planner "The rule checks that the days between standby blocks/lines"
+	  " fulfills the minimum requirement.";
+end
+
+%standby_type_text% = 
+  if wop.%is_standby_line% then
+    "line, " 
+  else
+    "block, ";
+
+%standby_days_prev% =
+  (round_down(standby.%first_standby_in_wop_date%,24:00) - round_up(%prev_standby_block_line_date%, 24:00)) / 24:00;
+
+%prev_standby_block_line_date% =
+  if wop.%has_standby_line% then
+    default(accumulators.%prev_standby_line_date%(wop.%start_UTC% - 0:01), 01jan1986) 
+  else
+    default(accumulators.%prev_short_standby_block_date%(wop.%start_UTC% - 0:01), 01jan1986); 
+
+%min_days_btw_standby_blocks_parttime_0_to_50% =
+  parameter 42
+  remark "(CCR) Min days between standby block for 0-<50% part-time crew";
+
+%min_days_btw_standby_blocks_parttime_50_to_70% =
+  parameter 42
+  remark "(CCR) Min days between standby block for 50-70% part-time crew";
+
+%min_days_btw_standby_blocks_parttime_70_to_100% =
+  parameter 20
+  remark "(CCR) Min days between standby block for >70-100% part-time crew";
+
+/* 
+** Rule:
+**  Min 30 days between standby line and standby block 
+**
+** Description:
+**  Check that at least 30 days has passed since 
+**  the previous SBL (if SB block) or vice-versa
+*/
+rule stb_min_days_btw_sbl_and_sb_block_CC =
+  valid roster.%check_rules% and
+        (crew.%is_skd% or crew.%is_sks% or crew.%is_skn%) and 
+        not (crew.%is_skj% or crew.%is_skk%) and
+        crew.%is_long_haul_wop_start% and
+        (wop.%is_standby_line% or
+         wop.%has_short_standby_block%) and
+        wop.%for_publish_in_pp% and
+        rule_exceptions.%rule_on%(wop.%start_utc%);
+       
+  %days_since_last_sbl_or_sbb% >= %min_days_btw_sbl_and_sbb%;
+  startdate = wop.%start_utc%;
+  failobject = wop.%failobject_start%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext "Soft: Min days between SBL-SBB";
+  remark "Soft: Min days between SB-Line-SB-Block",
+  planner "The rule checks that at least 30 days "
+           " have passed since the previous SBL/SBB";
+end
+
+%min_days_btw_sbl_and_sbb% =
+  parameter 30
+  remark "(CCR) Min days between standby line and standby block";
+  
+%days_since_last_sbl_or_sbb% =
+  if wop.%is_standby_line% then
+    (wop.%start_hb% -
+     station_localtime(fundamental.%base2station%(crew.%base_at_date%(wop.%start_hb%)),
+       default(accumulators.%prev_short_standby_block_date%(wop.%start_UTC% - 
+                                                            0:01), 01jan1986))) /
+    24:00
+  else
+    (wop.%start_hb% -
+     station_localtime(fundamental.%base2station%(crew.%base_at_date%(wop.%start_hb%)),
+       default(accumulators.%prev_standby_line_date%(wop.%start_UTC% - 
+                                                     0:01), 01jan1986))) /
+    24:00;
+    
+/*
+** Rule: 
+**    No illegal standby for cabin crew
+**
+** Description:
+**    Check that no short standby is assigned to longhaul
+**    cabin crew.
+**    For danish and swedish longhaul cabin crew short standby in 
+**    this context is considered non scattered, non standby lines standby. 
+**    For norwegian longhaul cabin crew short standby in 
+**    this context is considered non standby lines standby. 
+**    Check that no long standby is assigned to shorthaul
+**    cabin crew. Standbvy considered as long standby in this context is
+**    standby lines.
+**
+** Agreement:
+**    Functional rule
+*/
+rule stb_illegal_standby_CC_ALL =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        trip.%is_standby% and
+	rule_exceptions.%rule_on%(trip.%start_UTC%);
+	
+  %trip_is_legal_standby%;
+
+  startdate = trip.%start_UTC%;
+  failobject = trip.%failobject_start%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext %illegal_standby_failtext%;
+  remark "SBY: Illegal standby for crew",
+  planner "The rule checks that no illegal standby is assigned"
+	  " to cabin crew.";
+end
+
+%trip_is_legal_standby% =
+  if crew.%is_long_haul_trip_start% and
+     not (crew.%is_skj% or crew.%is_skK%) then
+    trip.%is_standby_line% or
+    trip.%is_standby_long_haul% or
+    crew.%is_skd% or
+    (crew.%is_SKS% and trip.%is_scattered_standby%) or
+    (crew.%is_SKN% and parameters.%k11_skn_cc_sp10_9_valid%(wop.%start_day%) and
+     (trip.%is_scattered_standby% or
+      trip.%is_airport_standby%))
+  else /* shorthaul crew + SKJ/SKK */
+    not (trip.%is_standby_line% or trip.%is_standby_long_haul%);
+
+%illegal_standby_failtext% =
+  if crew.%is_long_haul_pp_start% then
+    "Illegal shorthaul standby for longhaul crew."
+  else 
+    "Illegal longhaul standby for shorthaul crew.";
+
+/*
+** Rule: 
+**    No single empty day between sby trips
+**
+** Description:
+**    Wop definition allows wops consisting of standby
+**    trips divides by single empty days.  
+**    This rule prevents this from happening and is mainly 
+**    biased towards optimization phase.
+**
+** Agreement:
+**    Functional rule
+*/
+rule stb_no_single_empty_standby_ALL =
+  valid roster.%check_rules% and
+        trip.%end_hb% + 24:00 > %pp_start% and
+        trip.%start_hb% < %pp_end% and
+        %trip_non_scattered_standby% and
+        %next_trip_non_scattered_standby% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+	
+  %no_single_empty_day_btw_standby%;
+
+  startdate = trip.%start_UTC%;
+  failobject = trip.%failobject_start%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext "No single empty day between standby trips.";
+  remark "(CCR) SBY: No single empty day between standby.",
+  planner "The rule prevents single empty days between standby trips.";
+end
+
+%trip_non_scattered_standby% =
+  trip.%is_standby% and
+  not trip.%is_scattered_standby_at_home%;
+
+%next_trip_non_scattered_standby% =
+  default(next(trip(roster), %trip_non_scattered_standby%), false);
+
+%no_single_empty_day_btw_standby% =
+  trip.%days_btw_trips_fwd% <> 1;
+
+/*
+** Rule: 
+**    No standby for crew that has not fulfilled recency requirements.
+**
+** Description:
+**    Check that no standby is given for crew that has not fulfilled
+**    recency requirements for any qualification.
+**
+** Agreement:
+**    Functional rule
+*/
+
+/* 
+rule stb_no_standby_for_recency_CC_ALL =
+  valid roster.%check_rules% and
+        wop.%in_pp% and
+        trip.%is_standby% and
+	rule_exceptions.%rule_on%(trip.%start_UTC%);
+
+  not recency.%absent_from_flight_duty%;
+
+  startdate  = trip.%start_UTC%;
+  failobject = trip.%failobject_start%;
+  failtext %recency_failtext_standby%;
+  remark "(CCR) SBY: Crew must be recent for standby duty",
+  planner "The rule checks that standby is not given to crew that hasnt fulfilled ",
+          " recency requirements.";
+end
+
+%recency_failtext_standby% =
+  concat("SBY: No aircraft ",
+         format_int(recency.%days_since_last_flown%, "has been flown in %i day"),
+         %plural%(recency.%days_since_last_flown%), ", ",
+         format_int(recency.%max_days%, "max is %i days"));
+
+/*
+** Rule:
+**    Max standby blocks in quarter
+**
+** Description:
+**    Maximum number of standby blocks per crew in one quarter
+**    A standby block in this context is considered a working period (WOP)
+**    of 3 days with only standby-block (not scattered or lines).
+**    The rule is valid for norwegian cabin crew only.
+**
+** Agreement:
+**    NKF/BSK K06 6.2
+**
+**    4ExNG - no longer applies
+*/
+
+rule sby_max_standby_blocks_in_quarter_CC_SKN_SKL =
+  valid roster.%check_rules% and
+        not crew.%k4exng_cc_sp5_1_valid%(trip.%start_day%) and
+        crew.%is_SKN% and
+        trip.%in_pp_extended% and
+        trip.%is_last_standby_in_month%;
+
+  %standby_blocks_in_quarter% <= %max_standby_blocks_in_quarter% + 
+				 rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+
+  startdate = trip.%start_UTC%;
+  failobject = trip.%failobject_start%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(int val, int limit) = 
+    concat("SBY: ", %int2str%(val), 
+           " SBY blocks in quarter. Only ", %int2str%(limit),
+           " allowed.");
+  remark "(CCR) SBY: Maximum standby blocks in quarter",
+  planner "Check that number of standby blocks in quarter does not exceed maximum.";
+end
+
+%max_standby_blocks_in_quarter% = 
+  parameter 2 
+  remark "(CCR) SKN: Maximum standby blocks in quarter";
+
+%standby_blocks_in_quarter% =  
+  accumulators.%standby_3day_blocks_in_period%(%quarter_start%, round_up_month(trip.%start_hb%));
+
+%quarter_start% = 
+  add_months(%pp_start%, - fundamental.%month_in_quarter%(format_time(trip.%start_hb%,"%m"))); 
+
+/*
+** Rule: 
+**    Minimum days between standby and long LOA period.
+**
+** Description:
+**    Check the minimum days requirement between standby and last
+**    date of restriction LOAIL is fulfilled. 
+**
+** Agreement:
+**    Functional rule
+*/
+rule stb_min_days_btw_standby_LOAIL_CC_ALL =
+  valid roster.%check_rules% and
+        wop.%in_pp_extended% and
+        (wop.%has_standby% or wop.%is_standby_line%) and
+        not wop.%has_scattered_standby% and
+        rule_exceptions.%rule_on%(wop.%start_UTC%);
+	
+        not %has_had_LOAIL_restriction_recently%;
+
+  startdate  = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext
+    concat("SBY: ", %int2str%(%min_days_btw_standby_LOAIL_p%),
+           " days between standby and LOAIL required. ");
+  remark "SBY: Min days between standby blocks and LOAIL",
+  planner "The rule checks that the minimum days requirement between standby blocks and a"
+	  " LOAIL period is fulfilled.";
+end
+
+export %has_had_LOAIL_restriction_recently% =
+  crew.%has_restr_subtype_in_ival%("MEDICAL", "LOAIL", wop.%start_UTC% - (%min_days_btw_standby_LOAIL_p% * 24:00), wop.%start_UTC%);
+  
+%min_days_btw_standby_LOAIL_p% = 
+  parameter 90
+  remark "(CCR): Minimum days between restriction LOAIL and standby.";
+
+/*
+** Rule: 
+**    No standby line starting in same month as previous calendar year
+**
+** Description:
+**    Check if crewmember has a standby line in month X last year.
+**    If so, do not assign a standby line this year.
+**    The rule is only valid for CC SKD. 
+**
+** Agreement:
+**    Functional rule (change request PS07)
+**
+**    4ExNG - no longer applies
+*/
+
+rule stb_no_standby_line_same_month_cons_years_CC_SKD =
+  valid roster.%check_rules% and
+        not crew.%k4exng_cc_sp5_1_valid%(wop.%start_utc%) and
+        crew.%is_skd% and
+        wop.%in_pp% and
+        wop.%is_last_standby_line_in_month%;
+
+  %standby_lines_same_month_last_year% <= 0 + rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+
+  startdate  = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext concat("(CCR) SBY: Crew had a standby line same month last calendar year ",%same_month_last_year%);
+  remark "SBY: No standby lines same month in two consecutive years",
+  planner ".";
+end
+
+%same_month_last_year% = format_time(%month_start_last_year%,"(%b %Y).");
+
+%month_start_last_year% = add_months(wop.%start_month_start%,-12);
+%month_end_last_year% = round_up_month(%month_start_last_year%+0:01);
+
+%standby_lines_same_month_last_year% = 
+  accumulators.%standby_lines_in_period%(%month_start_last_year%,%month_end_last_year%);
+  
+/*
+** Rule: 
+**    Minimum 7 calendar weeks between airport standby.
+**
+** Description:
+**    Check that there is minimum 7 calendar weeks between airport standby. 
+**    An airport standby is considered a single activity of type airport standby.
+**    The rule is only valid for danish shorthaul cabin crew.
+**
+** Agreement:
+**    CAU K04 B2 F1.3
+**
+**    4ExNG - no longer applies
+*/
+rule stb_min_calendar_weeks_between_airport_standby_CC_SKD =
+  valid roster.%check_rules% and
+        not crew.%k4exng_cc_sp5_1_valid%(wop.%start_utc%) and
+        crew.%is_SKD% and 
+        wop.%in_pp_extended% and
+        crew.%is_short_haul_wop_start% and
+        wop.%has_airport_standby% and
+        not crew.%is_leased_wop_start%;
+	
+	%first_airport_standby_in_wop_date% >= %valid_airport_standby_date% - 
+					       rule_exceptions.%overshoot_rel%(wop.%start_UTC%);
+
+  startdate = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(Abstime val, Abstime limit) = 
+    concat("SBY: Min 7 calendar weeks between airport SBY,"  
+           "  next valid airport SBY date is:  ", format_time(limit,"%02d%ub%Y"));
+  remark "SBY: Min 7 calendar weeks between airport standby",
+  planner "The rule checks that the minimum number of calendar weeks between"
+	        " airport standby is 7.";
+end
+
+%first_airport_standby_in_wop_date% = 
+  default(first(duty(wop),duty.%end_UTC%)
+          where(duty.%is_standby_at_airport%), wop.%start_UTC%); 
+
+%valid_airport_standby_date% = 
+  add_weeks(accumulators.%prev_airport_standby_date%(wop.%start_UTC% - 0:01), 7);
+  
+/*
+** Rule: 
+**    No standby for crew after change to new qualification.
+**
+** Description:
+**    Check that no standby is given for crew in period after change 
+**    to new aircraft qualication.
+**    The period is defined from the last work shop (course activity) until
+**    all required NEW flights have been performed.
+**
+** Agreement:
+**    Functional rule
+*/
+
+rule sby_no_standby_for_new_qualification_CC_ALL =
+  valid roster.%check_rules% and
+        wop.%in_pp_extended% and
+        wop.%has_standby% and
+        %crew_has_had_course_recently% and
+        not crew.%is_leased_wop_start% and
+        not void(%sby_first_non_scattered_standby%) and
+        rule_exceptions.%rule_on%(wop.%start_UTC%);
+  %sby_required_training_type% <> "NEW";
+  startdate  = %sby_first_non_scattered_standby%;
+  failobject = %sby_no_standby_for_new_qualification_CC_ALL_failobject%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext "No SBY for crew after change to new aircraft qualification. ";
+  remark "SBY: No standby for crew after change to new aircraft qualification",
+  planner "The rule checks that no standby is given to crew after initial or",
+          "change to new aircraft qualification";
+end
+
+%crew_has_had_course_recently% =
+  training.%last_perf_day_for_workshop%("", wop.%start_hb%) > add_months(%pp_start%,-6);
+
+%sby_first_non_scattered_standby% = 
+  first(duty(wop), duty.%start_UTC%) 
+    where(duty.%is_standby% and not duty.%is_scattered_standby_at_home% and
+          duty.%in_pp_extended%);
+
+%sby_required_training_type% = 
+  first(duty(wop),first(leg(duty),training.%required_type_on_leg%)) 
+    where(duty.%is_standby% and not duty.%is_scattered_standby_at_home% and
+          duty.%in_pp_extended%);
+
+%sby_no_standby_for_new_qualification_CC_ALL_failobject% = 
+  default(first(duty(wop), duty.%failobject_start%) 
+            where(duty.%is_standby% and
+                  not duty.%is_scattered_standby_at_home% and
+                  duty.%in_pp_extended%), 
+          wop.%failobject_start%);
+
+%standby_legal_for_crew_after_qual_change% =
+  not crew.%has_restr_new%(standby.%first_standby_in_wop_date% - 14 * 24:00) and
+  not crew.%has_qual_restr_new_actype_any_qual%(standby.%first_standby_in_wop_date%);
+
+/*
+** Rule: 
+**    No longhaul standby for crew that has changed from rank AH to AS
+**    within 3 months after change unless 3 longhaul flights have
+**    been completed.
+**
+** Description:
+**    Check that no longhaul standby is given for crew that has changed 
+**    from rank AH to AS within a period after change unless a number of
+**    longhaul flights have been completed.
+**    It is assumed that crew only changes rank at most once within the
+**    period chosen.
+**
+** Agreement:
+**    Functional rule
+**
+** Known Issues:
+**   The rule does not use accumulator so it is possible that we miss
+**   1 trip. This will only mean that in some few cases, the rule will
+**   be over-restrictive.
+*/
+
+rule sby_no_standby_for_AH_AS_change_CC_ALL =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        trip.%is_standby_line% and
+        crew.%rank_at_date%(trip.%start_UTC%) = "AS" and
+        crew.%rank_at_date%(%check_AH_AS_break_date%) = "AH" and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+
+  %AS_crew_experienced_for_longhaul_standby%;
+
+  startdate  = trip.%start_UTC%;
+  failobject = trip.%failobject_start%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext "AS crew must be experienced for longhaul standby duty: ";
+  remark "SBY: AS crew must be experienced for longhaul standby duty",
+  planner "The rule checks that longhaul standby is given to crew ranked AS",
+          "only if crew has 3 at least 3 previous longhaul flights as AS,",
+          "or has been AS for at least 3 months";
+end
+
+%AS_crew_experienced_for_longhaul_standby% =
+  %num_of_longhaul_flights_since_rank_change% >= %nr_lh_flight_qualifying_for_AS_standby_p%;
+
+%check_AH_AS_break_date% =
+  trip.%start_UTC% - %days_since_change_from_AH_to_AS_p% * 24:00;
+
+%num_of_longhaul_flights_since_rank_change% = 
+  let current_standby_date = trip.%start_UTC%,
+      check_period_start = %check_AH_AS_break_date%;
+
+  count(trip(roster)) 
+  where (trip.%is_long_haul% and
+         trip.%start_UTC% >= check_period_start and
+         any(leg(trip), crew_pos.%assigned_function% = "AS") and
+         trip.%start_UTC% < current_standby_date);
+
+%days_since_change_from_AH_to_AS_p% =
+  parameter 40
+  remark "(CCR) Minimum days since change from AH to AS for LH SBY ";
+
+%nr_lh_flight_qualifying_for_AS_standby_p% =
+  parameter 3
+  remark "(CCR) Minimum LH flights to qualify for standby since change from AH to AS.";
+  
+
+/*
+** Rule:
+**    Max scattered standby days in calendar year
+**
+** Description:
+**    Maximum number of scattered standby days per shorthaul cabin crew in one calendar year.
+**    The rule is valid for all shorthaul cabin crew and swedish longhaul
+**    and norwegian cabin crew.
+**
+** Agreement:
+**    SCCA K04 B2 E.1.2 , B2 E2.1
+**    NKF B6 
+**    CAU B2 F 2.1.1
+**    NKF K11 6.2
+**
+**    4ExNG - no longer applies
+*/
+rule stb_max_scattered_standby_days_in_calendar_year_CC_ALL =
+  valid roster.%check_rules% and
+        not crew.%k4exng_cc_sp5_1_valid%(wop.%start_day%) and
+        wop.%in_pp% and
+        (wop.%has_scattered_standby% or
+         (crew.%is_SKS% and
+          any(trip(wop),trip.%is_scattered_standby%))) and
+        (crew.%is_short_haul_wop_start% or
+         ((crew.%is_sks% or crew.%is_skd% or crew.%is_skn%) and crew.%is_long_haul_wop_start%)) and
+        (wop.%is_last_scattered_standby_in_month% or
+         (wop.%is_last_scattered_standby_in_month_sks% and 
+          crew.%is_SKS%)) and
+        not crew.%is_leased_wop_start%; 
+
+  %scattered_standby_days_in_calendar_year% <= %max_scattered_standby_days_in_calendar_year% + 
+					       rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+  startdate = wop.%start_UTC%;
+  failobject = first(duty(wop), duty.%failobject_start%);
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(int val, int limit) = 
+    concat("SBY: ", %int2str%(val), 
+           " scattered SBY days in calendar year. Only ", %int2str%(limit),
+           " allowed.");
+  remark "SBY: Max scattered standby days in calendar year",
+  planner "Check that number of scattered standby days in a calendar year is less than 15 (SKS) (SKN).",
+          "Reduction active for SKS SH part-time.";
+end
+
+/*
+** SCCA crew does NOT reduce their demand proportionally
+** according to parttime factor but rather utilizes
+** a fixed reduction for any shorthaul parttime crew
+** CAU and NKF however explicitly states that proportional reduction 
+** is demanded. 
+*/
+%max_scattered_standby_days_in_calendar_year% =
+
+  if crew.%is_SKS% or 
+     (crew.%is_skd% and crew.%is_long_haul_wop_start%) then
+    %scattered_standby_days_per_year_region%
+  else
+    (if crew.%part_time_change_in_month% then
+       crew.%avg_pt_factor_times_days_in_month%
+     else
+       wop.%month_days% * crew.%part_time_factor_month_start%)
+     * %scattered_standby_days_per_year_region% / (wop.%month_days% * 100);
+
+table scattered_standby_limit =
+  crew.%is_long_haul_wop_start%,
+  crew.%region%,
+  crew.%part_time_factor_month_start% <> 100 -> 
+    %scattered_standby_days_per_year_region%;
+  true,  "SKD", -     -> 5;
+  false, "SKD", -     -> 5;
+  -,     "SKN", -     -> 20;
+  true,  "SKS", -     -> 5;
+  false, "SKS", true  -> 13;
+  false, "SKS", false -> 15;
+
+  -, -, - -> 0;
+end
+
+%scattered_standby_days_in_calendar_year% =  
+  let calendar_year_start = round_down_year(wop.%end_hb%),
+      p_end = round_up(wop.%end_hb%, 24:00) + 0:01;
+  accumulators.%scattered_standby_days_in_period%(calendar_year_start, p_end);
+
+/*
+** Rule: 
+**    Maximum number of isolated standby days per calendar month
+**
+** Description:
+**    The rule checks that the maximum number of isolated standby days
+**    is not exceeded. Isolated standby day are standby days contained
+**    in blocks of max 2 consecutive standby days.
+**    The rule is only valid for norwegian cabin crew.
+**    
+** Agreement:
+**    NKF/BSK K06 6.2
+**
+**    4ExNG - no longer applies
+*/
+
+rule stb_max_isolated_standby_days_calendar_month_CC_SKN_SKL =
+  valid roster.%check_rules% and
+        not crew.%k4exng_cc_sp5_1_valid%(trip.%start_day%) and
+        trip.%in_pp% and
+        crew.%is_SKN% and
+        trip.%is_last_isolated_standby_in_month% and
+        not crew.%is_leased_trip_start%;
+
+  %isolated_standby_days_in_calendar_month% <= 
+	%max_isolated_standby_days_in_calendar_month% + 
+	rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+
+  startdate  = trip.%start_UTC%;
+  failobject = trip.%failobject_start%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(int val, int limit) = 
+    concat("SBY: ", %int2str%(val), 
+           " isolated SBY days in calendar month. Only ", %int2str%(limit),
+           " allowed.");
+  remark "(CCR) SBY: Max isolated standby days in calendar month exceeded.",
+  planner "Check that number of standby days in a calendar month is less than 2 (SKN).";
+end
+
+%isolated_standby_days_in_calendar_month% =
+  roster.%isolated_standby_days_in_period%(trip.%start_month_start%,
+                                           trip.%start_month_end%); 
+
+%max_isolated_standby_days_in_calendar_month% = 
+  2;
+
+/*
+** Rule: 
+**    Maximum number of standby days per calendar month
+**
+** Description:
+**    The rule checks that the maximum number of standby days
+**    is not exceeded. 
+**    The rule is only valid for norwegian cabin crew.
+**    
+** Agreement:
+**    NKF K11 6.2
+**
+**    4ExNG - no longer applies
+*/
+
+rule stb_max_standby_days_calendar_month_cc_skn =
+  valid roster.%check_rules% and
+        not crew.%k4exng_cc_sp5_1_valid%(wop.%start_day%) and
+        wop.%in_pp% and
+        crew.%is_skn% and
+        not crew.%is_long_haul_wop_start% and
+        parameters.%k11_skn_cc_sp10_9_valid%(wop.%start_day%) and
+        wop.%is_last_standby_in_month% and
+        not crew.%is_leased_wop_start%;
+
+  %standby_days_in_calendar_month% <= 
+	%max_standby_days_in_calendar_month_skn% + 
+	rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+
+  startdate  = wop.%start_UTC%;
+  failobject = first(duty(wop), duty.%failobject_start%);
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(int val, int limit) = 
+    concat("SBY: ", %int2str%(val), 
+           " SBY days in calendar month. Only ", %int2str%(limit),
+           " allowed.");
+  remark "(CCR) SBY: Max standby days in calendar month exceeded.",
+  planner "Check that number of standby days in a calendar month is less than 8 (SKN).";
+end
+
+/* Standby days in calendar month
+** For SKN K11, standby_line days must always be included.
+*/
+%standby_days_in_calendar_month% =  
+  let p_start = round_down_month(wop.%start_hb%),
+      p_end = round_up(wop.%end_hb%, 24:00) + 0:01;
+      
+  roster.%standby_days_in_period%(p_start, p_end)
+  + roster.%standby_lines_days_in_period%(p_start, p_end);
+
+%max_standby_days_in_calendar_month_skn% = 
+  8;
+
+/*
+** Rule: 
+**    Maximum number of airport standby days per calendar month
+**
+** Description:
+**    The rule checks that the maximum number of standby days
+**    is not exceeded. 
+**    The rule is only valid for norwegian cabin crew
+**    
+** Agreement:
+**    NKF K11 6.2 
+**
+**    4ExNG - no longer applies
+*/
+
+rule stb_max_airport_standby_days_calendar_month_cc_skn =
+  valid roster.%check_rules% and
+        not crew.%k4exng_cc_sp5_1_valid%(wop.%start_day%) and
+        wop.%in_pp% and
+        crew.%is_skn% and
+        parameters.%k11_skn_cc_sp10_9_valid%(wop.%start_day%) and
+        wop.%is_last_standby_in_month% and
+        not crew.%is_leased_wop_start%;
+
+  %airport_standby_days_in_calendar_month% <= 
+	%max_airport_standby_days_in_calendar_month% + 
+	rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+
+  startdate  = wop.%start_UTC%;
+  failobject = first(duty(wop), duty.%failobject_start%);
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(int val, int limit) = 
+    concat("SBY: ", %int2str%(val), 
+           " airport SBY (A) days in calendar month. Only ", %int2str%(limit),
+           " allowed.");
+  remark "(CCR) SBY: Max airport standby days in calendar month exceeded.",
+  planner "Check that number of airport standby days in a calendar month is less than 2 (SKN).";
+end
+
+/* Airport standby days in calendar month
+*/
+%airport_standby_days_in_calendar_month% =  
+  let p_start = round_down_month(wop.%start_hb%),
+      p_end = round_up(wop.%end_hb%, 24:00) + 0:01;
+      
+  roster.%airport_standby_days_in_period%(p_start, p_end);
+
+%max_airport_standby_days_in_calendar_month% = 
+  2;
+
+/*
+** Rule:
+**    Max scattered standby days in calendar year
+**
+** Description:
+**    Maximum number of scattered standby days per shorthaul cabin crew in one calendar month.
+**    The rule is valid for all SKN cabin crew.
+**
+** Agreement:
+**    NKF K11 6.2
+**
+**    4ExNG - no longer applies
+*/
+rule stb_max_scattered_standby_days_in_calendar_month_skn =
+  valid roster.%check_rules% and
+        not crew.%k4exng_cc_sp5_1_valid%(wop.%start_day%) and
+        wop.%in_pp% and
+        wop.%is_last_standby_in_month% and
+        wop.%has_scattered_standby% and
+        parameters.%k11_skn_cc_sp10_9_valid%(wop.%start_day%) and
+        not crew.%is_leased_wop_start%;
+
+  %scattered_standby_days_in_calendar_month% <= 4 + 
+					       rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+  startdate = wop.%start_UTC%;
+  failobject = first(duty(wop), duty.%failobject_start%);
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(int val, int limit) = 
+    concat("SBY: ", %int2str%(val), 
+           " scattered SBY days in calendar month. Only ", %int2str%(limit),
+           " allowed.");
+  remark "SBY: Max scattered standby days in calendar month",
+  planner "Check that number of scattered standby days in a calendar year is less than 2 (SKN).";
+end
+
+%scattered_standby_days_in_calendar_month% =  
+  let p_start = round_down_month(wop.%start_hb%),
+      p_end = round_up(wop.%end_hb%, 24:00) + 0:01;
+  roster.%scattered_standby_days_in_period%(p_start, p_end);
+
+/* end of file */

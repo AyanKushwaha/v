@@ -1,0 +1,441 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   This module contains the connection times between different activities and
+ *   definitions and connection between coterminals.
+ *
+ * Created by:
+ *   Henrik Albertson, 19-Dec-2005
+ *
+ * Major changes:
+ *
+ */
+
+root module connection
+import fundamental;
+import keywords;
+import levels;
+import trip;
+import leg;
+import crew_pos;
+import base_break;
+
+%coterminals_table% = %etab_path%(%coterminals_table_p%);
+%coterminals_table_p% =
+  parameter "coterminals"
+  remark "ETAB: Table with coterminals and connection times";
+
+/* Checks if the connecting airports are different and thus might be a valid 
+   coterminal pair. */
+%possible_coterminals% = 
+  default(leg.%end_station% <> next(leg(chain), leg.%start_station%), false);
+  
+/* Check both the arrival and departure airport */
+export %is_btw_coterminals% =
+  if %possible_coterminals% then 
+    (%_coterminals%(leg.%end_station%, next(leg(chain),leg.%start_station%)) <> "Not Coterminals") or
+    (%_coterminals%(next(leg(chain),leg.%start_station%),leg.%end_station%) <> "Not Coterminals")
+  else
+    false;
+
+/* Check both the arrival and departure airport */
+export %min_time_when_coterminals% = 
+  %_min_time_when_coterminals%;
+
+%_min_time_when_coterminals% =
+  default(%_min_cnx_coterminals%(leg.%end_station%, next(leg(duty),leg.%start_station%)),
+          default(%_min_cnx_coterminals%(next(leg(duty),leg.%start_station%), leg.%end_station%),
+                  99:00));
+
+table min_cnx_coterminals(String a1, String a2) =
+  a1, a2 ->
+    String %_coterminals%,
+    Reltime %_min_cnx_coterminals%;
+  external %coterminals_table%;
+  Airport1, Airport2 ->
+    Airport1, MinCnx;
+  -, - -> "Not Coterminals", void_reltime;
+end
+
+/*
+** Pairing / Rostering independant main rank
+*/
+%maincat_connection% =
+  if %flight_crew% then
+    "F"
+  else
+    "C";
+
+export %connection_time% =
+  leg.%connection_time%;
+
+/*
+**  Prio 1: Get min connection passive to active using the station
+*/
+
+table min_cnx_lookup_passive_station_1 =
+  leg.%end_station%,
+  leg.%is_deadhead%,
+  leg.%area%,
+  next(leg(duty), leg.%area%),
+  leg.%start_UTC% ->
+    export Reltime %_min_time_passive_station_1_fc%,
+    export Reltime %_min_time_passive_station_1_cc%,
+    export Reltime %_min_time_passive_station_1_cc_ap%;
+  external %min_cnx_passive_table%;
+  place, ispass, arrtype, deptype, (validfrom, validto) -> 
+    cnxfc, cnxcc, cnxap;
+  -, -, -, -, - ->
+    %_min_time_passive_station_2_fc%,
+    %_min_time_passive_station_2_cc%,
+    %_min_time_passive_station_2_cc_ap%;
+end
+
+table min_cnx_lookup_passive_station_2 =
+  leg.%end_station%,
+  leg.%is_deadhead%,
+  leg.%area%,
+  next(leg(duty), leg.%area%),
+  leg.%start_UTC% ->
+    export Reltime %_min_time_passive_station_2_fc%,
+    export Reltime %_min_time_passive_station_2_cc%,
+    export Reltime %_min_time_passive_station_2_cc_ap%;
+  external %min_cnx_passive_table%;
+  place, ispass, arrtype, deptype, (validfrom, validto) -> 
+    cnxfc, cnxcc, cnxap;
+  -, -, -, -, - ->
+    %_min_time_passive_area_1_fc%,
+    %_min_time_passive_area_1_cc%,
+    %_min_time_passive_area_1_cc%;
+end
+
+/*
+**  Prio 2: Get min connection passive to active using the area
+*/
+
+table min_cnx_lookup_passive_area_1 =
+  %arrival_area%,
+  leg.%is_deadhead%, 
+  leg.%area%,
+  next(leg(duty), leg.%area%),
+  leg.%start_UTC% ->
+    export Reltime %_min_time_passive_area_1_fc%,
+    export Reltime %_min_time_passive_area_1_cc%,
+    export Reltime %_min_time_passive_area_1_cc_ap%;
+  external %min_cnx_passive_table%;
+  place, ispass, arrtype, deptype, (validfrom, validto) -> 
+    cnxfc, cnxcc, cnxap;
+  -, -, -, -, - -> 
+    %_min_time_passive_area_2_fc%,
+    %_min_time_passive_area_2_cc%,
+    %_min_time_passive_area_2_cc_ap%;
+    
+end
+
+table min_cnx_lookup_passive_area_2 =
+  %arrival_area%,
+  leg.%is_deadhead%,
+  leg.%area%,
+  next(leg(duty), leg.%area%),
+  leg.%start_UTC% ->
+    export Reltime %_min_time_passive_area_2_fc%,
+    export Reltime %_min_time_passive_area_2_cc%,
+    export Reltime %_min_time_passive_area_2_cc_ap%;
+  external %min_cnx_passive_table%;
+  place, ispass, arrtype, deptype, (validfrom, validto) -> 
+    cnxfc, cnxcc, cnxap;
+  -, -, -, -, - -> 99:00, 99:00, 99:00;
+end
+
+%min_cnx_passive_table% = %etab_path%(%min_cnx_passive_table_p%);
+%min_cnx_passive_table_p% =
+  parameter "minimum_connect_pass"
+  remark "ETAB: Table with minimum connection times for passive to active duty";
+
+export %is_trusted_same_ac% =
+  /* Returns true if connection does not involve a a/c change and the station 
+   * is trusted.
+   */
+  (not default(keywords.%aircraft_change%,true)) and default(%_trusted_station%, false);
+
+/* 
+** Will return true if connection check is needed, e.g. if
+**   ac-change 
+**   not trusted station
+**   FC connection SH from deadhead to active leg
+**   current leg is the last in a sequence of legs that must be followed by
+**   a debriefing, e.g. LC/ILC
+*/
+export %normal_connection% =
+  (leg.%end_station% = next(leg(trip),leg.%start_station%) or
+   connection.%is_btw_coterminals%) and
+  (not leg.%is_last_in_duty% and next(leg(duty), not leg.%is_standby%) and
+   (leg.%is_ac_change% or not %_trusted_station% or
+    (%flight_crew% and
+     leg.%is_deadhead% and leg.%is_short_haul% and
+     next(leg(duty), not leg.%is_deadhead% and leg.%is_short_haul%)) or
+    leg.%check_out_training_exception% > 0:00));
+
+/*
+** True if next leg departs from same station or coterminal 
+** or trip is broken by duty break
+*/
+export %is_plausible% =
+  default(leg.%end_station% = next(leg(chain),leg.%start_station%),
+          true) or
+  %is_btw_coterminals% or
+  (is_last(leg(trip)) and
+   (base_break.%duty_break_ends_trip% or
+    next(duty(chain),base_break.%duty_break_starts_trip%))) or
+  base_break.%leg_break_continues_trip% or
+  %starting_or_ending_stationing_at_another_base%;
+
+/*
+** Minimum required connection time between the current and the following leg in
+** a duty.
+**
+** If the current leg is the last in a sequence of legs that must be followed by
+** a debriefing, then the debriefing time must be added to the normal minimum
+** connection time. This debriefing time was first defined to be added to the
+** normal check-out, hence its name is leg.%check_out_training_exception%
+*/
+
+export %min_time_connection% =
+  /* Active lh to passive or vice versa */
+  let lh_to_passive = (leg.%is_long_haul% and next(leg(duty), leg.%is_deadhead%)) or
+                      (leg.%is_deadhead% and next(leg(duty), leg.%is_long_haul%));
+         
+  (if not leg.%is_charter% and next(leg(duty), leg.%is_charter%) and
+          leg.%is_skd% then
+     1:00
+   else if leg.%is_skn% and 
+      next(leg(duty), leg.%flight_carrier% = "TX") then
+     0:30
+   else if %cabin_crew% then
+     if lh_to_passive  and crew_pos.%assigned_function% = "AP" then
+       %_min_time_passive_station_1_cc_ap%
+     else if lh_to_passive then
+       %_min_time_passive_station_1_cc%
+     else 
+       %_min_time_CC%
+   else
+     if lh_to_passive then
+       %_min_time_passive_station_1_fc%
+     else if leg.%is_deadhead% and next(leg(duty),leg.%is_short_haul%) then
+       0:50
+     else 
+       %_min_time_FC%) + leg.%check_out_training_exception%;
+
+       /* For critical connection in teaming the minimum connection time can only depend
+   on the connection itself (not the full chain), therefore another version of
+   employer code is used. This version does not work for DH or ground tasks,
+   but critical connections isn't used for these anyway so that is ok.
+*/
+export %leg_scoped_min_time_connection%  =
+/* Active lh to passive or vice versa */
+let lh_to_passive = (leg.%is_long_haul% and next(leg(duty), leg.%is_deadhead%)) or
+                    (leg.%is_deadhead% and next(leg(duty), leg.%is_long_haul%));
+
+(if not leg.%is_charter% and next(leg(duty), leg.%is_charter%) and
+        leg.%is_skd% then
+   1:00
+ else if leg.%is_skn% and
+    next(leg(duty), leg.%flight_carrier% = "TX") then
+   0:30
+ else if %cabin_crew% then
+   if lh_to_passive  and crew_pos.%assigned_function% = "AP" then
+     %_min_time_passive_station_1_cc_ap%
+   else if lh_to_passive then
+     %_min_time_passive_station_1_cc%
+   else
+     %_leg_scoped_min_time_CC%
+ else
+   if lh_to_passive then
+     %_min_time_passive_station_1_fc%
+   else if leg.%is_deadhead% and next(leg(duty),leg.%is_short_haul%) then
+     0:50
+   else
+     %_leg_scoped_min_time_FC%) + leg.%check_out_training_exception%;
+
+table min_cnx_lookup_station =
+  trip.%trip_ac_employer_code%,
+  leg.%end_station%,
+  leg.%is_long_haul%,
+  leg.%area_schengen%,
+  next(leg(duty), leg.%area_schengen%),
+  leg.%start_UTC% ->
+    export Reltime %_min_time_FC%,
+    export Reltime %_min_time_CC%,
+    export Bool %_trusted_station%;
+  external %min_cnx_table%;
+  ac_employer, place, islonghaul, arrtype, deptype, (validfrom, validto) ->
+    cnxfc, cnxcc, trusted;
+  -, -, -, -, -, - ->
+    %_min_time_FC_area%, %_min_time_CC_area%,
+    %_trusted_area%;
+end
+%connection_employer% = if leg.%employer% = "SK"
+                           then "SKI"
+                        else leg.%employer%;
+
+table leg_scoped_min_cnx_lookup_station =
+  %connection_employer%,
+  leg.%end_station%,
+  leg.%is_long_haul%,
+  leg.%area_schengen%,
+  next(leg(duty), leg.%area_schengen%),
+  leg.%start_UTC% ->
+    export Reltime %_leg_scoped_min_time_FC%,
+    export Reltime %_leg_scoped_min_time_CC%;
+  external %min_cnx_table%;
+  ac_employer, place, islonghaul, arrtype, deptype, (validfrom, validto) ->
+    cnxfc, cnxcc;
+  -, -, -, -, -, - ->
+    1:00, 1:00;
+end
+
+export %connection_before_charter% =
+    not leg.%is_charter% and
+    default(next(leg(duty), leg.%is_charter%), False);
+
+export %connection_before_charter_from_homebase% =
+    not leg.%is_charter% and
+    default(next(leg(duty), leg.%is_charter% and 
+                 leg.%departs_from_homebase%), False);
+  
+/*
+**  Area prioritized connection
+*/
+
+table min_cnx_lookup_arrival_area =
+  trip.%trip_ac_employer_code%,
+  %arrival_area%,
+  leg.%is_long_haul%,
+  leg.%area_schengen%,
+  next(leg(duty), leg.%area_schengen%),
+  leg.%start_UTC% ->
+    export Reltime %_min_time_FC_area%,
+    export Reltime %_min_time_CC_area%,
+    export Bool %_trusted_area%;
+  external %min_cnx_table%;
+  ac_employer, place, islonghaul, arrtype, deptype, (validfrom, validto) ->
+    cnxfc, cnxcc, trusted;
+  -, -, -, -, -, - ->
+  99:00, 99:00, True;
+end
+
+%arrival_area% =
+  if leg.%arrival_is_interscand% or
+     leg.%end_station% = "HEL" then
+    "SCAN"
+  else if leg.%arrival_is_european% or
+          not leg.%is_long_haul% then
+    "EURO"
+  else
+    "INTC";
+
+export %min_cnx_table% = %etab_path%(%min_cnx_table_p%);
+%min_cnx_table_p% =
+  parameter "minimum_connect"
+  remark "ETAB: Table with minimum connection times";
+
+/* 
+ * Special exceptions user controllable - redefined in rostering
+ */
+%cnx_type% =
+  if %PassToAct% then
+    "PassToAct" 
+/*  else if %ActToPass% then
+    "ActToPass" */
+  else if %DebBefSchool% then  
+    "DebBefSchool" 
+  else if %SKDToCharterCC% then
+    "SKDToCharterCC" 
+  else if %SKNToTX% then
+    "SKNToTX" 
+  else if %OrdinaryFC% then
+    "OrdinaryFC"	                /* ordinary connection check SH LH FC */
+  else if %OrdinarySHCC% then
+    "OrdinarySHCC"	                /* ordinary connection check SH CC */
+  else if %OrdinaryAPLHCC% then
+    "OrdinaryAPLHCC"	                /* ordinary connection check AP LH CC */
+  else if %OrdinaryAHASLHCC% then
+    "OrdinaryAHASLHCC"	                /* ordinary connection check AH/AS LH CC */
+  else
+    "*";		/* fall through */
+
+%PassToAct% =
+  leg.%is_deadhead% and 
+  (%flight_crew% or leg.%is_long_haul%) and
+  default(next(leg(duty),leg.%is_on_duty%), false);
+
+%ActToPass% =
+  leg.%is_flight_duty% and 
+  default(next(leg(duty),leg.%is_deadhead%), false);
+
+/*
+**  Debriefing before School Flight - FC only
+*/
+%DebBefSchool% =
+  %flight_crew% and
+  leg.%is_simulator_briefing_debriefing% and
+  default(next(leg(duty),leg.%is_school_flight%), false);
+
+/*
+** Special case CPH to charter - CC relevant Only
+*/
+%SKDToCharterCC% =
+  %cabin_crew% and
+  leg.%region% = "SKD" and
+  not leg.%is_charter% and 
+  default(next(leg(duty), leg.%is_charter%), false);
+
+/*
+** Special case for Norwegian crew between TRF and OSL
+** FC and CC relevant 
+*/
+%SKNToTX% =
+  leg.%region% = "SKN" and
+  default(next(leg(duty), leg.%flight_carrier% = "TX"), false);
+
+%is_lh% =
+  leg.%region% = "SKI";
+  
+/*
+** ordinary connection check SH LH FC 
+*/
+%OrdinaryFC% =
+  %flight_crew% and
+  %normal_connection%;
+  
+/*
+** ordinary connection check SH CC 
+*/
+%OrdinarySHCC% =
+  %cabin_crew% and
+  not %is_lh% and
+  %normal_connection%;
+
+/*
+** ordinary connection check AP position LH CC 
+*/
+%OrdinaryAPLHCC% =
+  %cabin_crew% and
+  %is_lh% and
+  crew_pos.%assigned_function% = "AP" and
+  %normal_connection%;
+
+/*
+** ordinary connection check AH/AS position LH CC 
+*/
+%OrdinaryAHASLHCC% =
+  %cabin_crew% and
+  %is_lh% and
+  not (crew_pos.%assigned_function% = "AP") and
+  %normal_connection%;
+
+/* Redefined for CCR */
+export %starting_or_ending_stationing_at_another_base% = false;
+
+
+/* end of file */

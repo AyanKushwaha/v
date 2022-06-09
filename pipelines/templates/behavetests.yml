@@ -1,0 +1,86 @@
+parameters:
+- name: buildId
+  type: string 
+  default: ''
+
+jobs:
+
+- job: SetupCARMTMP
+  pool:
+    name: CMS Agent
+  workspace:
+    clean: all
+  steps:
+  - checkout: none
+  - bash: |
+        mkdir -m 775 -p /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_${{ parameters.buildId }}/logfiles
+        mkdir -m 775 -p /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_${{ parameters.buildId }}/logfiles/DIG
+        mkdir -m 775 -p /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_${{ parameters.buildId }}/logfiles/sge
+        mkdir -m 775 -p /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_${{ parameters.buildId }}/logfiles/tmp
+        mkdir -m 775 -p /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_${{ parameters.buildId }}/carmtmp_behave
+        mkdir -m 775 -p /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_${{ parameters.buildId }}/run
+        mkdir -m 775 -p /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_${{ parameters.buildId }}/ftp
+        mkdir -m 775 -p /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_${{ parameters.buildId }}/ftp/imported
+        ln -nfs /opt/Carmen/CARMTMP/ftp/in /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_${{ parameters.buildId }}/ftp/in
+        ln -nfs /opt/Carmen/CARMTMP/ftp/out /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_${{ parameters.buildId }}/ftp/out
+    failOnStderr: true
+    displayName: 'Create new CARMTMP directories for Tracking CARMUSR'
+
+- job: BehaveTests
+  displayName: 'Execute all behave tests for Tracking CARMUSR'
+  timeoutInMinutes: 500
+  dependsOn: SetupCARMTMP
+  condition: succeeded()
+  pool:
+    name: CMS Agent
+    demands:
+    - uge_host
+       
+  steps:
+    - checkout: self
+      fetchDepth: 1
+
+    - task: Bash@3
+      inputs:
+        filePath: 'makelinks.sh'
+        failOnStderr: true
+        noProfile: false
+        noRc: false
+        arguments: '-m ${{ parameters.buildId }}'
+      displayName: 'Create symlinks for CARMSYS, CARMDATA and CARMTMP'
+
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: 'rm -rf carmtmp_behave/*'
+        noProfile: false
+        noRc: false
+      displayName: 'Cleanup carmtmp_behave directory'
+
+    - task: Bash@3
+      inputs:
+        filePath: 'bin/test_behave.sh'
+        arguments: '-cn'
+        noProfile: false
+        noRc: false
+      displayName: 'Compile all behave features'
+
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: 'source /opt/Carmen/uge-8.6.15/sasdev/common/settings.sh;
+                 bin/test_behave.sh -u 10 -v --junit;
+                 wait'
+        noProfile: false
+        noRc: false
+      displayName: 'Run all behave features for ${{ parameters.buildId }}'
+    
+    - task: PublishTestResults@2
+      inputs:
+        testResultsFormat: 'JUnit' # Options: JUnit, NUnit, VSTest, xUnit, cTest
+        testResultsFiles: '**/TESTS-*.xml' 
+        searchFolder: '$(System.DefaultWorkingDirectory)/carmtmp_behave' # Optional
+
+    - bash: |
+        rm -rf /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/*
+      displayName: 'Clean up CARMTMP directories'

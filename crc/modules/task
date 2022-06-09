@@ -1,0 +1,670 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   Code for reading task (activity tables)
+ *
+ * Sections:
+ *   1. Activity data
+ *   2. Activity group data
+ *   3. Activity set data
+ *   4. Office day handling
+ *
+ * Created by:
+ *   Extracted from the Carmen Standard User, 07-Dec-2005
+ *
+ * Major changes:
+ *   February 2007: Adapted to new UDM activity data model
+ *
+ */
+
+root module task
+
+import crew_contract;
+import fundamental;
+import keywords;
+import system_db_parameters;
+import parameters;
+import base_utils;
+
+/****************************************************************
+ * Section 1: Activity data
+ ***************************************************************/
+
+export %code% =
+  if keywords.%ground_transport% then
+    /* A 'ground_transport' is also 'flight_duty', so we evaluate this first. */ 
+    keywords.%flight_carrier%
+  else if keywords.%flight_duty% then
+    "FLT"
+  else if keywords.%ground_duty% then 
+     /* Please note that ground_duty_code_suffix is currently
+      * supported only in file plans.
+      * In db plans, ground_duty_code contains "F7S" from start. */
+     if keywords.%ground_duty_code% = "F7" and keywords.%ground_duty_code_suffix% = "S"
+     then "F7S"
+     else %ground_duty_code%
+  else 
+     keywords.%off_duty_code%;     
+     
+%ground_duty_code% =
+    let 
+        gdc = keywords.%ground_duty_code%;
+    if parameters.%override_ground_duty_code% and gdc = "RT" then
+        "R"
+    else
+        gdc;
+
+%report_back_attribute% = "R";
+  
+export %report_back_code% =
+  let rb_code = concat(%code%, %report_back_attribute%),
+      rb_group = %group%(rb_code);
+  if rb_group = %group_code%
+  then rb_code
+  else void_string;
+  
+export %report_back_base_code% =
+  let base = substr(%code%, 1, length(%code%) - 1),
+      attr = substr(%code%, length(%code%), 1);
+  if attr = %report_back_attribute% and %group%(base) = %group_code%
+  then base
+  else void_string;
+  
+/* Lookup in the period table to see if there are any valid data there.
+   If so use those, if not use the normal table */
+export %description% =
+  %description_by_code%(%code%);
+/* To be used when task code is dynamically recalculated */
+export %description_by_code%(String code) =
+  default(%desc_in_period%(code), %desc%(code));
+export %description_by_code_w_ofdx%(String code, Abstime d) =
+  let id = default(%ofdx_id%(code), 0);
+  if id>0 then %ofdx_desc%(id, d)
+  else %description_by_code%(code);
+
+/*
+** Activity attributes on group level. The attributes are overridden for
+** some individual activity codes and areas. This is currently handled
+** hard coded here. Maybe it should be handled in activity_set_period or
+** similar, now there is a possibility of confusion because some logic
+** is in the etables and some is in rave
+*/
+export %color%(String activity) = 
+  %group_color_in_period%(%group%(activity));
+export %is_on_duty%(String activity) = 
+  %group_onduty_in_period%(%group%(activity));
+
+set off_activity_groups = "VAC","LOA","ILL","F4XNG","CMP";
+    
+/* Day off  defined by belonging to the OFF activity_category */
+export %is_day_off%(String activity) = 
+  activity = "F14" or
+  %group%(activity) in off_activity_groups;
+  
+export %has_no_duty_time_contribution%(String activity) = 
+  %group_nodutylimit_in_period%(%group%(activity));
+
+export %is_freeday%(String activity) =
+  /* Exceptions: */
+  /*if activity = "F31" and %cabin_crew% then
+    true*/
+  if activity = "LA21" and %cabin_crew% then
+    false
+  else if activity = "IL8" then
+    true
+  else if activity = "F0" then
+    true
+  else if %handle_as_freeday_not_vacation%(activity) then
+    true
+  /* Normal case */
+  else
+    %group_valid_freeday_in_period%(%group%(activity));
+
+%f7_activity% = "F7";
+
+set f7_is_freeday_agmts = "SKIN_FD_AG", "SKID_FD_AG", "SKD_FD_AG";
+
+%handle_as_freeday_not_vacation%(String activity) =
+  if activity = %f7_activity% then
+    if crew_contract.%agreement_group_at_date%(%pp_start%) in f7_is_freeday_agmts then
+      true
+    else
+      false
+  else
+    false;
+
+export %is_pt_freeday%(String activity) = 
+  /* Exceptions: */
+  if activity = "LA21" and %cabin_crew% then
+    false
+  else if activity = "IL8" then
+    true
+  /* Normal case */
+  else
+    %group_valid_pt_freeday_in_period%(%group%(activity));
+
+export %is_group_valid_freeday%(String activity) =
+  %group_valid_freeday_in_period%(%group%(activity));
+
+export %is_group_valid_pt_freeday%(String activity) = 
+  %group_valid_pt_freeday_in_period%(%group%(activity));
+
+export %is_super_freeday%(String activity) =
+  activity = "FS";
+
+export %is_single_super_freeday%(String activity) =
+  activity = "FS1";
+
+/* free_weekend with FW activity code is special bidding activity for weekend free */
+export %is_free_weekend_FW%(String activity) =
+  activity = "FW";
+
+export %is_allowed_on_free_weekend%(String activity) = 
+  /* Exceptions: */
+  if activity = "SI1" or activity = "TH1" or activity = "RI1" then
+    true
+  /* Reverse exceptions: */
+  else if activity = "F3S" then
+    false
+  /* Normal case */
+  else
+    %group_allowed_on_free_weekend_in_period%(%group%(activity));
+    
+/* Activities that are considered rest, dayoff column used for this information */
+export %is_rest%(String grp) = 
+  %group_dayoff_in_period%(grp); 
+export %is_vacation%(String activity) = 
+  %group%(activity) = "VAC";
+export %is_standby%(String activity) = 
+  %category%(%group%(activity)) = "SBY";
+export %is_standby_at_airport%(String activity) = 
+  %group%(activity) = "SBA";
+/* Will give standby blocks, scattered standby and standby lines */
+export %is_standby_at_home%(String activity) = 
+  %group%(activity) = "SBH" or
+  %is_standby_line%(activity);
+export %is_standby_at_hotel%(String activity) = 
+  %group%(activity) = "SBO";
+export %is_scattered_standby%(String activity) = 
+  %is_standby%(activity) and locate("S", activity) > 0;
+export %is_standby_line%(String activity) = 
+  %group%(activity) = "SBL";
+export %is_standby_long_haul%(String activity) =
+  %group%(activity) = "SBH" and locate ("AL", activity) > 0;
+export %pm_activity_code%(Bool as_mentor) =
+  if as_mentor then
+    "PMM"
+  else
+    "PM";
+export %is_pm_student%(String activity) =
+  activity = %pm_activity_code%(false);
+export %is_pm_mentor%(String activity) =
+  activity = %pm_activity_code%(true);
+export %is_waiting%(String activity) =
+  %group%(activity) = "WAITING";
+  
+set training_set = "EDU","REC","SIM";  
+export %is_training%(String activity) = 
+  %category%(%group%(activity)) in training_set;
+
+export %is_fdp_training%(String activity) =
+  %is_training%(activity) and not %is_course%(activity);
+
+export %is_safety_training%(String activity) =
+  (substr(activity, 1, 1) = "N");
+  
+set simulator_set = "SIM","OPC","PC","AST","ASF","FFS";
+export %is_simulator%(String activity) = 
+  %group%(activity) in simulator_set;
+  
+export %is_simulator_briefing_debriefing%(String activity) = 
+  %group%(activity) = "SIB";
+  
+export %is_course%(String activity) = 
+  %group%(activity) = "COD";
+  
+set training_bl =
+  parameter "BL5", "BL8", "BL20"
+  remark "BL codes used for training";
+  
+export %is_blank_day%(String activity) = 
+  %group%(activity) = "BL";
+
+export %is_blank_day_4exng%(String activity) =
+  activity = "BL" or activity = "BL7";
+
+export %is_blank_day_BL%(String activity) =
+  activity = "BL";
+  
+export %is_training_blank_day%(String activity) =
+  %is_blank_day%(activity) and activity in training_bl;
+  
+export %is_meeting%(String activity) = 
+  %group%(activity) = "MET";
+  
+export %is_compensation_day%(String activity) = 
+  %group%(activity) = "CMP";
+
+export %is_ground_duty%(String activity) = 
+  %group%(activity) = "GND";
+  
+export %is_special_ground_duty%(String activity) = 
+  %group%(activity) = "SGD";
+  
+export %is_ground_transport%(String activity) = 
+  %group%(activity) = "GT";
+  
+export %is_illness%(String activity) =
+  %group%(activity) = "ILL";
+
+set fs_friends = "F", "F14","FS";
+
+export %is_fs_friends%(String activity) =
+	activity in fs_friends;
+ 
+export %is_fs_disallow%(String activity) =
+          activity = "F14" or
+  %group%(activity) in off_activity_groups;
+
+set on_freeday_illness_codes = "IL4", "IL4R";
+
+export %is_freeday_illness%(String activity) =
+  activity in on_freeday_illness_codes;
+
+set on_duty_illness_codes = "IL", "ILR", "IL7", "IL7R";
+
+export %is_longterm_illness%(String activity) =
+  activity in longterm_illness_codes;
+  
+set longterm_illness_codes = "IL12";
+
+export %is_loa_la12%(String activity) =
+  activity in loa_codes;
+
+set loa_codes ="LA12";
+
+export %is_on_duty_illness%(String activity) =
+  activity in on_duty_illness_codes;
+  
+set illness_during_duty_codes = "IL7", "IL7R";
+export %is_illness_during_duty%(String activity) =
+  activity in illness_during_duty_codes;
+  
+set child_illness_codes = "LA91", "LA91R", "LA92", "LA92R";
+export %is_child_illness%(String activity) =
+  activity in child_illness_codes;
+  
+set child_illness_entire_day = "LA91", "LA91R";
+export %is_child_illness_entire_day%(String activity) =
+  activity in child_illness_entire_day;
+
+set child_illness_during_duty_codes = "LA92", "LA92R";
+export %is_child_illness_during_duty%(String activity) =
+  activity in child_illness_during_duty_codes;
+
+set unfit_for_flight_codes = "UF", "UF1", "UF2", "UFO", "UFH", "UFP", "UFE";
+export %is_unfit_for_flight%(String activity) =
+  activity in unfit_for_flight_codes;
+
+/* intended to encompass all UF ("UF*") */
+export %is_unfit_for_flight_star%(String activity) =
+  substr(activity, 1, 2) = "UF";
+
+export %is_loa%(String activity) = 
+  (activity = "LA21" and %cabin_crew%) or %group%(activity) = "LOA";
+  
+export %is_partial_loa%(String activity) =
+  %group%(activity) = "PFR";
+  
+export %is_ppf%(String activity) = 
+  %group%(activity) = "PPF";
+  
+export %is_office_duty%(String activity) = 
+  %group%(activity) = "OFD";
+  
+export %is_passive_transfer%(String activity) = 
+  %group%(activity) = "PAT";
+  
+export %is_ground_activity%(String activity) = 
+  %category%(%group%(activity)) = "GRA";
+
+export %freedays_disqual_activities% = "VAC ILL LOA SGD";
+
+export %fs_disqual_activities% = "VAC ILL LOA SGD F0 F3";
+
+export %fte_disqual_activities% = "ILL LOA SGD";
+
+export %is_fte_disqual% (String activity) =
+  if(locate(%group%(activity), %fte_disqual_activities%) > 0)
+    or activity = "FN" then
+    true
+  else
+    false;
+
+export %is_freedays_disqual%(String activity) =
+  if(locate(%group%(activity), %freedays_disqual_activities%) > 0) then
+    if %handle_as_freeday_not_vacation%(activity) then
+      false
+    else
+      true
+  else
+    false;
+
+
+/* Returns true i acitvity code is a LA(x) code, (or "L" as a special case). */
+/* Jira SASCMS-6547 */
+export %is_LAx%(String activity) =
+  locate("LA", activity, 1) > 0 or activity = "L";
+
+export set summer_vacation_codes =
+    "VA", "VAC", "VA1", "F7";
+
+export set fs_valid_vacation_codes =
+    "VA", "VA1", "F7";
+
+export set summer_vacation_parttime_codes =
+    "IL8", "LA21", "LA35", "LA37", "LA39", "LA53", "LA55", "LA8", "LA84", "LA5", "LA56", "LA58", "LA59", "LA85", "LA22", "LA12", "LA45";
+
+export set rotationsferie_codes_partly =
+    "VA", "VA1", "F7", "IL8";
+
+export %is_rotationsferie%(String activity)
+   = substr(activity, 1, 2) = "LA" or activity in rotationsferie_codes_partly;
+
+
+/* Recurrent training activities */
+export %is_recurrent%(String activity) = 
+  %is_opc%(activity) or
+  %is_pc%(activity) or
+  %is_ast%(activity) or
+  %is_asf%(activity) or
+  %is_pgt%(activity) or
+  %is_crm%(activity) or
+  %is_rec%(activity) or
+  %is_crmc%(activity);
+
+export %is_opc%(String activity) = %group%(activity) = "OPC";
+export %is_pc%(String activity)  = %group%(activity) = "PC";
+export %is_ast%(String activity) = %group%(activity) = "AST";
+export %is_asf%(String activity) = %group%(activity) = "ASF";
+export %is_ffs%(String activity) = %group%(activity) = "FFS";
+export %is_pgt%(String activity) = %group%(activity) = "PGT";
+export %is_emg_pgt%(String activity) = %group%(activity) = "EMG-PGT";
+export %is_crm%(String activity) = %group%(activity) = "CRM";
+export %is_rec%(String activity) = %group%(activity) = "REC";
+export %is_fmst%(String activity) = activity = "FMST";
+export %is_lrsb%(String activity) = activity = "LRSB";
+export %is_crmc%(String activity) = %group%(activity) = "CRMC";
+
+/* A lot of activities are defined as REC, but the yearly recurrent for cabin
+   is a special case called N1, N2, N3, N5, N9 or NP*, NS*, NW* */
+set dynamic_rec_codes = "N1", "N2", "N3", "N5", "N9";
+set full_rec_codes = "NP", "NS", "NW";
+export %is_cc_rec_web%(String activity) =
+  activity in dynamic_rec_codes or
+  substr(activity, 1,2) in full_rec_codes;
+
+set rec_instr_codes = "OL1", "OL2", "OL3";
+export %is_cc_rec_instr%(String activity) =
+  activity in rec_instr_codes;
+
+export %is_ol123%(String activity) =
+  substr(activity,1,3) in rec_instr_codes;
+
+set cc_instr_codes_ntc17 =
+   parameter "OLC", "OLN", "OLQ", "OLS", "OLI", "OLR", "OLE", "OLT", "OLP", "OLA", "OLW", "OLO"
+   remark "Training Codes: CC Instructor (NCT17).";
+
+export %is_cc_inst_activity_ntc17%(String activity) =
+  substr(activity,1,3) in cc_instr_codes_ntc17;
+
+set fd_instr_codes_ntc17 =
+   parameter "OXC", "OXL", "OXB", "OXS", "OXO", "OXI", "OXT", "OXE", "OXJ", "OXD", "OXP", "OXR"
+   remark "Training Codes: FD Instructor (NCT17).";
+
+export %is_fd_inst_activity_ntc17%(String activity) =
+  substr(activity,1,3) in fd_instr_codes_ntc17;
+
+set ol456_task_codes = "OL4", "OL5", "OL6";
+export %is_ol456%(String activity) = 
+  activity in ol456_task_codes;
+
+set rec_instr_olcrm_codes = "OLCRM4", "OLCRM5", "OLCRM6";
+export %is_fc_rec_instr%(String activity) =
+  activity in rec_instr_olcrm_codes;
+export %is_olcrm456%(String activity) =
+  substr(activity,1,6) in rec_instr_olcrm_codes;
+
+export %duty_time%(String activity) = 0:00;
+
+export %block_time%(String activity) = 0:00;
+
+export %activity_set_table% = %etab_path%(%activity_set_table_p%);
+%activity_set_table_p% = 
+  parameter "activity_set"
+  remark "ETAB: Activity set";
+  
+%activity_set_period_table% = %etab_path%(%activity_set_period_table_p%);
+%activity_set_period_table_p% =
+  parameter "activity_set_period"
+  remark "ETAB: Activity set period";
+  
+table activity_set_table(String activity) = 
+  activity -> String %group_by_activity%, String %desc%, String %_recurrent_typ_by_activity%;
+  external %activity_set_table%;
+  "id" -> "grp", "si", "recurrent_typ";
+  -    -> "", void_string, ""; 
+end
+
+table activity_set_grp_by_type(String typ) =
+  typ -> String %_recurrent_group_by_type%;
+  external %activity_set_table%;
+  "recurrent_typ" -> "grp";
+  -    ->  void_string;
+end
+
+
+/* Should probably do a lookup on validity period as well? */
+table activity_set_period_table(String activity) = 
+  activity -> String %desc_in_period%;
+  external %activity_set_period_table%;
+  "id" -> "si";
+  -    -> void_string; 
+end         
+
+
+table activity_set_period_at_date_table(String activity, Abstime start_hb) = 
+  activity, start_hb -> Abstime %_activity_valid_at_date%;
+  external %activity_set_period_table%;
+  "id", ("validfrom","validto"( -> "validfrom";
+  -   , - -> void_abstime; 
+end         
+
+export %activity_valid_at_date%(String activity, Abstime start_hb)=
+  if void(%_activity_valid_at_date%(activity,start_hb)) then
+    false
+  else
+    true;
+
+
+%recurrent_typ_by_activity%(String activity) =
+  %_recurrent_typ_by_activity%(activity);
+
+/* typical group=CRM, typ=OCCRM, activity=OCCRM4 */
+export %recurrent_group_by_type%(String typ) = 
+  default(%_recurrent_group_by_type%(typ),typ);
+
+/* Note: adding (or removing) items to this list will require
+
+   1. Change ofdx_count
+   2. Add item to the table
+
+   Crew Properties report and Menu Filter functions are dynamic and will pick up changes from below.
+*/
+
+export %ofdx_count% = 33;
+
+table ofc_day_tbl(Int ofdx_id) =
+  ofdx_id -> export String %ofdx_code%;
+  1      -> "OA92";
+  2      -> "OK30";
+  3      -> "OK31";
+  4      -> "OK32";
+  5      -> "OK33";
+  6      -> "TW10";
+  7      -> "TW11";
+  8      -> "TW12";
+  9      -> "TW13";
+  10     -> "TW14";
+  11     -> "TW15";
+  12     -> "TW16";
+  13     -> "TW17";
+  14     -> "TW18";
+  15     -> "TW19";
+  16     -> "TW20";
+  17     -> "TW21";
+  18     -> "TW22";
+  19     -> "TW23";
+  20     -> "TW24";
+  21     -> "TW25";
+  22     -> "TW26";
+  23     -> "TW27";
+  24     -> "TW28";
+  25     -> "TW29";
+  26     -> "TW30";
+  27     -> "WBTR";
+  28     -> "PD1";
+  29     -> "PD2";
+  30     -> "PD3";
+  31     -> "PD4";
+  32     -> "PD5";
+  33     -> "TW99";
+  -      -> void_string;
+end
+
+/****************************************************************
+ * Section 1: Activity group data
+ ***************************************************************/
+
+export %category_code% = %category%(%group_code%);
+export %group_code% = %group%(%code%); 
+export %group_code_description% = %group_description%(%group_code%); 
+
+/* If the activity is in the activity_set table this will be void */
+export %group%(String activity) = 
+  default(if activity = "FLT" then
+            "FLT"
+          else
+            %group_by_activity%(activity),
+          "");
+    
+/* Lookup in the period table to see if there are any valid data there.
+   If so use those, if not use the normal table */
+export %group_description%(String grp) = 
+  default(%group_desc_in_period%(grp), %group_desc%(grp));
+  
+%activity_group_table% = %etab_path%(%activity_group_table_p%);
+%activity_group_table_p% = 
+  parameter "activity_group"
+  remark "ETAB: Activity group";
+
+%activity_group_period_table% = %etab_path%(%activity_group_period_table_p%);
+%activity_group_period_table_p% = 
+  parameter "activity_group_period"
+  remark "ETAB: Activity group period";
+  
+table activity_group_table(String grp) = 
+  grp -> String %category_by_group%, String %group_desc%; 
+  external %activity_group_table%;
+  "id" -> "cat", "si";
+  -    -> "", void_string;
+end
+
+/* Should probably do a lookup on validity period as well? */
+table activity_group_period_table(String grp) = 
+  grp -> String %group_desc_in_period%,
+         Reltime %group_fct_in_period%,
+         Int %group_sct_in_period%,
+         Reltime %group_fbt_in_period%,
+         Int %group_sbt_in_period%,
+         Reltime %group_fdt_in_period%,
+         Int %group_sdt_in_period%,
+         Bool %group_onduty_in_period%,
+         Bool %group_npp_in_period%, 
+         Bool %group_dayoff_in_period%, 
+         Int %group_color_in_period%,
+         Bool %group_nodutylimit_in_period%,
+         Bool %group_valid_freeday_in_period%,
+         Bool %group_valid_pt_freeday_in_period%,
+         Bool %group_allowed_on_free_weekend_in_period%;
+  external %activity_group_period_table%;
+  "id" -> "si", "fct", "sct", "fbt", "sbt", "fdt", "sdt", 
+          "onduty", "npp", "dayoff", "color", "nodutylimitations",
+          "validfreeday", "validptfreeday", "freeweekend";
+   - -> "Undefined Group Period", 0:00, 0, 0:00, 0, 0:00, 0, 
+        false, false, false, -1, true, false, false, false;
+end
+
+
+/****************************************************************
+ * Section 1: Activity category data
+ ***************************************************************/
+ 
+export %category%(string grp) =
+  if grp = "FLT" then
+    "FLT"
+  else
+    %category_by_group%(grp);
+  
+%activity_category_table% = %etab_path%(%activity_category_table_p%);
+%activity_category_table_p% = 
+  parameter "activity_category"
+  remark "ETAB: Activity category";
+  
+table activity_category_table(String category) = 
+  category -> export String %category_description%;
+  external %activity_category_table%;
+  "id" -> "si";
+  -    -> void_string;
+end
+
+
+/****************************************************************
+ * Section 4: Handling of office day actitivites
+ ***************************************************************/
+
+export %ofdx_desc%(Int ofdx_id, Abstime d) =
+  system_db_parameters.%ofdx_name%(%ofdx_code%(ofdx_id), d);
+
+export %ofdx_long_desc%(Int ofdx_id, Abstime d) =
+  concat(%ofdx_code%(ofdx_id),": ", %ofdx_desc%(ofdx_id, d));
+
+export %ofdx_period_start%(Int ofdx_id, Abstime d) =
+  system_db_parameters.%ofdx_period_start%(%ofdx_code%(ofdx_id), d);
+
+export %ofdx_period_end%(Int ofdx_id, Abstime d) =
+  system_db_parameters.%ofdx_period_end%(%ofdx_code%(ofdx_id), d);
+
+export %ofdx_attend_goal%(Int ofdx_id, Abstime d) =
+  system_db_parameters.%ofdx_attend_goal%(%ofdx_code%(ofdx_id), d);
+
+export %ofdx_attend_limit%(Int ofdx_id, Abstime d) =
+  system_db_parameters.%ofdx_attend_limit%(%ofdx_code%(ofdx_id), d);
+
+export %ofdx_agmt_group%(Int ofdx_id, Abstime d) = 
+  system_db_parameters.%ofdx_agmt_group%(%ofdx_code%(ofdx_id), d);
+
+export %ofdx_qualification%(Int ofdx_id, Abstime d) = 
+  system_db_parameters.%ofdx_qualification%(%ofdx_code%(ofdx_id), d);
+
+export %ofdx_valid%(Int ofdx_id, Abstime d) =
+  default( d>= %ofdx_period_start%(ofdx_id,d) and d<%ofdx_period_end%(ofdx_id, d), False);
+
+export %ofdx_id%(String activity_code) =
+  max(times(%ofdx_count%), %times_index_0%)
+  where (%ofdx_code%(%times_index_0%) = activity_code);
+
+
+/* end of file */

@@ -1,0 +1,81 @@
+/*  -*- crc -*- */
+/*
+** This is a module handling fdp - flight duty period, as defined for oma.
+** In some sense it looks like duty module, but is a "virtual" level handling situations where the fdp time should start count
+** before / after the duty starts IRL, and it also handles "split duties". A split duty is one fdp that consists of two duties with a shorter
+** break between; the break allows for a longer fdp in total than normal
+*/
+
+root module fdp
+
+import base_utils;
+import fundamental;
+import duty;
+import levels;
+import oma16_defs;
+import leg;
+import duty_period;
+
+export %start_utc% = duty_period.%start_utc%;
+
+export %end_utc% =
+  if duty_period.%is_last_duty_in_duty_period%
+  then if duty.%has_active_flight%
+       then duty.%last_active_block_on%
+  		 else prev(duty(chain), if duty.%has_active_flight% then duty.%last_active_block_on% else void_abstime)
+  else if next(duty(chain), duty.%has_active_flight%)
+       then next(duty(chain), duty.%last_active_block_on%)
+       else duty.%last_active_block_on%;
+
+export %start_acclim% = %start_utc% + duty_period.%acclim_tz_corrector%;
+export %end_acclim% = %end_utc% + duty_period.%acclim_tz_corrector%;
+
+export %duty_cfd_abs%(String attr) =
+  if not duty_period.%is_first_duty_in_duty_period%
+  then  prev(duty(chain), duty.%duty_cfd_abs%(attr))
+  else duty.%duty_cfd_abs%(attr);
+
+export %duty_cfd_rel%(String attr) =
+  if not duty_period.%is_first_duty_in_duty_period%
+  then  prev(duty(chain), duty.%duty_cfd_rel%(attr))
+  else duty.%duty_cfd_rel%(attr);
+
+export %scheduled_time_in_interval% (Abstime start_utc, Abstime end_utc) =
+   overlap(prev(duty(wop),%start_scheduled_utc%), prev(duty(wop),%end_scheduled_utc%), start_utc, end_utc);
+
+export %start_scheduled_utc% =
+  if duty_period.%is_first_duty_in_duty_period%
+  then duty.%start_scheduled_utc%
+  else prev(duty(chain), duty.%start_scheduled_utc%);
+
+export %end_scheduled_utc% =
+  if not duty_period.%is_last_duty_in_duty_period%
+  then next(duty(chain), duty.%last_active_scheduled_block_on%)
+  else duty.%last_active_scheduled_block_on%;
+
+export %start_scheduled_acclim% = %start_scheduled_utc% + duty_period.%acclim_tz_corrector%;
+
+export %end_scheduled_acclim% = %end_scheduled_utc% + duty_period.%acclim_tz_corrector%;
+
+
+export %num_sectors% =
+  if not duty_period.%is_last_duty_in_duty_period%
+  then duty.%num_active_legs% + next(duty(chain), duty.%num_active_legs%)
+  else if not duty_period.%is_first_duty_in_duty_period%
+       then duty.%num_active_legs% + prev(duty(chain), duty.%num_active_legs%)
+       else duty.%num_active_legs%;
+
+export %time% =
+  %end_utc% - %start_utc%;
+
+export %time_in_interval%(Abstime start_utc, Abstime end_utc) =
+  overlap(%start_utc%, %end_utc%, start_utc, end_utc);
+
+export %scheduled_time% =
+  %end_scheduled_utc% - %start_scheduled_utc%;
+
+export %is_last_leg_in_fdp% = leg.%end_utc% = %end_utc%;
+
+
+/* end of file */
+

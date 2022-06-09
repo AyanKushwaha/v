@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- Channel to handle data pushes from CMS to CrewInfoServer. -->
+<process name="crewinfoserver"
+         dbConn="profile:live"
+         dbSchema="%(db/dave/live/schema)"
+         inOrder="False"
+         maxMessagesInChannel="20"
+         threadPoolSize="14"
+         messageAgeWarning="20m"
+         messageAgeError="30m"
+         continueOnMessageError="True">
+    <start_cmd>%(programs/dig/start_cmd)</start_cmd>
+
+    <reader class="carmensystems.dig.scheduler.job.JobReader"
+            onlyLatest="False"
+            readInterval="5"/>
+               
+    <messagehandlers>
+        <messagehandler class="carmensystems.dig.scheduler.reports.ReportTranslator"/>
+
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportHandler"
+                        defaultServer="rs_publish"
+                        rs_publish="%(API/getServiceUrl/portal_publish_CIS)"
+                        contentIsReports="False"/>
+
+        <messagehandler class="carmensystems.dig.messagehandlers.dave.DaveWriter"
+                        cacheSize="0"
+                        ignoreOutOfOrder="True"
+                        ageTimeout="-1"
+                        idleTimeout="-1"
+                        raiseRetryErrors="False"/>
+
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+
+        <messagehandler class="dig.filehandlers.ReportRecorder"
+            log_file_prefix="crewinfoserver_out_"
+            log_directory="/var/carmtmp/logfiles/DIG"/>
+
+        <messagehandler class="dig.xhandlers.AddressInjector"
+            default_dests="mqdest"
+            mqdest_protocol="mq"
+            mqdest_mq_manager="%(dig_settings/mq/manager)"
+            mqdest_mq_queue="CMS.TO.SEIP.CREWDATA%(dig_settings/mq/out_qsuffix_v2)"/>
+        <!-- Message printer for debugging outgoing messages -->
+        <!--<messagehandler
+            class="dig.messagehandlerdebugger.MessagePrinter"
+            name="debug_destinations"/>-->
+
+        <!-- TransportDispactcher for MQ -->
+        <messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher"
+            mq_host="%(dig_settings/mq/server)"
+            mq_port="%(dig_settings/mq/port)"
+            mq_channel="%(dig_settings/mq/channel)"
+            mq_altUser="%(dig_settings/mq/altuser)"/>
+        <!-- TransportDispatcher for HTTP/JSON (not used)
+        <messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher"
+            file_mkdirs="True"
+            file_tempdir="%(dig_settings/paths/crewinfoserver_temp)"
+            file_basedir="%(dig_settings/paths/crewinfoserver_temp)"/>-->
+
+    </messagehandlers>
+
+    <notifiers>
+        <notifier category="message"
+            class="carmensystems.dig.notifiers.file.FileNotifier"
+            formatterClass="dig.notifiers.SKLogFormatter"
+            filename="/var/carmtmp/logfiles/DIG/errmsg/crewinfoserver.msg" />
+        <notifier category="performance"
+            class="carmensystems.dig.notifiers.file.FileNotifier"
+            formatterClass="dig.notifiers.PerformanceFormatter"
+            filename="/var/carmtmp/logfiles/DIG/performance/crewinfoserver.log" />
+        <notifier category="fatal"
+            class="carmensystems.dig.notifiers.mail.MailNotifier"
+            host="%(dig_settings/mail/host)"
+            port="%(dig_settings/mail/port)"
+            sender="%(dig_settings/mail/from)"
+            recipients="%(dig_settings/mail/to)"
+            subject="DIG channel 'crewinfoserver' fatal error" />
+    </notifiers>
+
+</process>
+
+

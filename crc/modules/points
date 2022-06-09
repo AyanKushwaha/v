@@ -1,0 +1,1531 @@
+/* -*- crc -*-
+ *
+ *
+ * Purpose:
+ *   Definition of basic common point definitions.
+ *
+ * Created by:
+ *   Henrik Mouritsen Initial, 15-Dec-2005
+ *
+ * Agreement:
+ *   Operations Manual - A OMA chapter 7. 15-Dec-2005
+ *
+ * Description:
+ *   Calculation of points although common to a certain point, differ btw 
+ *   the 90 points rule and the 7x24 hours rule.
+ *
+ *   The 90 points rule states a maximum of 90 points in a socalled flight
+ *   duty period. (OMA 7.1.1.2). A flight duty period is considered the
+ *   period btw two rest periods, in this context a pointswise rest period, 
+ *   which is defined as a rest period between 8.00 - 15:00 hours depending 
+ *   on east west duty.  Rest is considered the period btw transports.
+ *   Thus the 90 points rule definition of rest differs a bit from the duty
+ *   level definition code in such a way that a points flight duty period can
+ *   contain several duty level duties. 
+ *   The 90 points rule only calculates points uptil last active block on in
+ *   the flight duty period, and also calculates training and simulator points
+ *   in a different way than the 7x24 hours calculations.   
+ *
+ *   The 7x24 hours calculation are straightforward 7x24 hours sliding rules,
+ *   differing from the 90 points rule mainly on calculation of training and
+ *   simulator points as well as that activities at the tail or head of 
+ *   the 7x24 range can potentially be cutoff thus contributing only partly
+ *   in the points calculation.
+ *   
+ *   Passive points btw duties are assumed non existing since duty level 
+ *   definition differs on 8 hours and passive duty above 4 hours calculates
+ *   to 0 points. This is because we assume that the stop btw 2 duties 
+ *   subtracted by local transport will
+ *   always exceed 4 hours.  
+ * 
+ * Major changes:
+ *
+ */
+
+/*
+**	Outstanding stuff
+**
+**              Synchronize with tracking
+**                 points calculation rapport vars  
+**                 HL info code - hotel at home base
+**			
+**		Performance optimization 
+**	           higher caching levels  
+**
+**              consider moving landing points to leg level 
+**
+**		Specific comments inside code - search,fix and destroy
+**
+**		F7S or BL
+*/
+
+root module points
+import fundamental;
+import levels;
+import duty;
+import trip;
+import leg;
+import task;
+import hotel;
+import crew_pos;
+
+/*
+**  Basic definitions
+*/
+
+/* max points limits */
+export %max_points_in_duty_SKN% = 6750;
+export %max_points_in_fdp% = 90;
+export %max_points_in_7x24_hrs% = 270;
+export %cct_max_points_in_fdp% = 108;
+export %max_points_in_fdp_passive% = 108;
+export %max_points_in_fdp_passive_simulator% = 116;
+
+/* Point time variables */
+export %day_time_start% = 6:00; 
+export %day_time_end% = 22:00; 
+%day_time_duration% = %day_time_end% - %day_time_start%;
+%night_time_duration% = 24:00 - %day_time_duration%;
+
+/* points calculation styles - readability purpose */
+export %points_style_90% = true;
+export %points_style_7x24% = false;
+
+/* Point calculations need special definitions of leg and duty start and end */
+/*
+** A home/hotel standby is converted into passive duty beggining from the start of
+** the standby leg itself if theres is more than 4 hours btw callout and duty start
+** In this case a fixed 1:00 local transport is assumed. (OMA 7.1.1.6)
+**
+** home hotel standby leg - standby points are calculated from check_in
+**
+** Ordinary passive duty - acces to rest in bed btw legs 
+** passive points are calculated btw transports so subtract local transport 
+**
+*/
+%points_leg_start%(Bool points_style) = 
+  if task.%code% = "KD" then
+    round_down(leg.%end_UTC%, 24:00) + 09:00 - first(leg(duty), leg.%homebase_tz_corrector%) 
+  else if leg.%is_first_in_duty% then
+    duty.%start_utc%
+  else if prev(leg(duty), %home_hotel_standby_leg%) then			
+    /* leg is preceeded by passive with standby as source -
+       include standard local transfer in leg */
+    if (prev(leg(duty), %home_hotel_standby_considered_passive%)) then
+      leg.%ci_start_utc% - %standby_standard_local_transport_time%
+    else	
+      leg.%ci_start_utc%
+  /* this means passive duty between legs*/ 
+  else if %leg_preceeded_by_passive_duty% then
+    leg.%ci_start_utc% - %leg_points_local_transport_before%
+  else
+    prev(leg(duty), %points_leg_end%(points_style));
+
+/*
+** home hotel standby - calculate standby points until standard local transport next leg 	
+**
+** leg followed by passive duty - passive points are calculated btw transports 
+*/
+%points_leg_end%(Bool points_style) = 
+  let fdp_points_block_on_end_fdp = %fdp_points_block_on_end_fdp%;
+  if task.%code% = "KD" then
+    round_down(leg.%end_UTC%, 24:00) + 16:00 - first(leg(duty), leg.%homebase_tz_corrector%) 
+  else if %home_hotel_standby_leg% then
+    %home_hotel_standby_leg_end% 
+  else if %leg_followed_by_passive_duty% then
+    leg.%co_end_utc% + %leg_points_local_transport_after%
+  else if leg.%is_last_in_duty% and (points_style = %points_style_7x24% or
+         default(next(leg(chain), leg.%start_utc% < fdp_points_block_on_end_fdp), false)) then
+    leg.%co_end_utc%
+  else
+    leg.%end_utc%;
+
+/* 7x24 backward rule - start of range can be in the middle of passive duty period */
+%points_passive_leg_start%(Bool points_style) = 
+  if %leg_preceeded_by_passive_duty% then 
+    default(prev(leg(duty), %points_leg_end%(points_style)), %points_leg_start%(points_style))
+  else
+    %points_leg_start%(points_style);
+
+/* Point calculations need special definitions of duty (level duty) start and end */
+export %points_duty_start% = 
+  if duty.%F7S_or_BL% then
+    round_down(duty.%end_UTC%, 24:00) + 08:00 - first(leg(duty), leg.%homebase_tz_corrector%) 
+  else
+    duty.%start_utc%;
+
+export %points_fdp_duty_start% =
+  /* Minimum rest before this duty fulfilled */
+  if default(prev(duty(chain), %points_minimum_rest_after_fulfilled%)
+             where(not duty.%has_no_duty_time_contribution%), true) then
+    duty.%start_utc%
+  else
+    prev(duty(chain), duty.%start_utc%) 
+    where(default(prev(duty(chain), %points_minimum_rest_after_fulfilled%)
+                  where(not duty.%has_no_duty_time_contribution%), true));
+      
+export %points_duty_end% = 
+  if duty.%F7S_or_BL% then
+    round_down(duty.%end_UTC%, 24:00) + 16:00 - first(leg(duty), leg.%homebase_tz_corrector%)
+  else
+    duty.%end_utc%; 
+
+/* Local transport */ 
+export %points_duty_transport_start% =
+  %points_duty_start% - first(leg(duty), %leg_points_local_transport_before%);
+%points_duty_transport_end% =
+   %points_duty_end% + last(leg(duty), %leg_points_local_transport_after%);
+
+/*
+** Points definition of local transport is
+** 1 special transport 		        - table'ized special transportation
+** 2 airport/prefered hotel 		- table'ized standard hotel transport
+** 3 default transport      		- always 1:00 - note this is were
+**                                        points transport differ 
+**
+** home or hotel standby callout  	- use fixed transport in standby 
+**                                        calcs elsewhere
+*/
+
+%leg_points_local_transport_time% = 
+  default(
+    if %home_hotel_standby_leg% then
+      0:00
+    else if not is_first(leg(trip)) and
+            prev(leg(trip), %leg_followed_by_rest_at_hotel%) then
+      prev(leg(trip), hotel.%leg_transport_time_apt_to_hotel%)
+    else
+      %points_default_local_transport_time%,
+  %points_default_local_transport_time%);
+
+export %leg_points_local_transport_time_before% = 
+  %leg_points_local_transport_time%;
+
+export %leg_points_local_transport_time_after% = 
+  default(
+    if %home_hotel_standby_leg% then
+      0:00
+    else if %leg_followed_by_rest_at_hotel% then
+      hotel.%leg_transport_time_apt_to_hotel%
+    else
+      %points_default_local_transport_time%,
+  %points_default_local_transport_time%);
+
+%leg_points_local_transport_before% = 
+  default(hotel.%slt_before_leg%, %leg_points_local_transport_time_before%);
+
+%leg_points_local_transport_after% = 
+  default(hotel.%slt_after_leg%, %leg_points_local_transport_time_after%);
+  
+/*
+**  points minimum rest after duty
+**  For east west flight duty periods exceeding 4:30 without 
+**  preceeding 3 nights special rest special rest demands apply
+**  Agreement: OMA 7.1.1.6 East/west item 3
+*/
+export %east_west_normal_rest_limit% = 4:30;
+%passive_duty_points_limit% = 4:00;
+%points_minimum_rest% = 8:00;
+%points_east_west_maximum_rest% = 15:00;
+
+export %points_rest_after% = 
+  default(next(duty(chain),%points_duty_transport_start%) 
+	  where (duty.%is_on_duty% and 
+                 not duty.%has_no_duty_time_contribution%) -
+  %points_duty_transport_end%, %points_minimum_rest_after%);
+
+/* Points minimum rest after duty */
+export %points_minimum_rest_after% = 
+  nmin(%points_east_west_maximum_rest%,
+       %points_minimum_rest% +
+       (if default(next(duty(chain), %east_west% and
+				     duty.%time% > %east_west_normal_rest_limit% and
+				     not %three_night_zone_active%),  true) then
+          %points_east_west_minimum_rest_add_on% 
+	else
+	  0:00));
+/*
+**  Duty marks beginning or end of a 
+**  points flight duty period
+*/
+export %points_minimum_rest_after_fulfilled% = 
+  default(%points_rest_after% >= %points_minimum_rest_after%, true);
+  
+export %points_minimum_rest_before_fulfilled% = 
+  default(prev(duty(chain), %points_minimum_rest_after_fulfilled%)
+	  where (duty.%is_on_duty%), true);
+
+/* Point weights */
+export %day_points_per_hour% = 600;
+export %night_points_per_hour% = 800;
+%rest_points_per_hour% = 400;
+%passive_points_per_hour% = 300;
+%training_simulator_points_per_hour% = 1400;
+%landing_points_per_landing% = 500;
+%ordinary_standby_points_per_hour% = 300;
+
+/* Standby points variables - OMA 7.1.1.6 item 3 */
+%points_free_standby_when_preceeded_by_minimum_rest% = 4:00;
+/*
+** The transfer time for (home/hotel) standby on callout is fixed 
+** in a points context
+** OMA 7.16 Item Transfer
+*/
+%standby_standard_local_transport_time% = 1:00;
+%points_default_local_transport_time% = 1:00;
+%previous_night_end_utc% = 
+  round_down(leg.%start_UTC%, 24:00) + %duty_day_time_start%;
+%next_night_start_utc% = round_down(leg.%start_UTC%, 24:00) + %duty_day_time_end%;
+%next_night_end_utc% = %next_night_start_utc% + %night_time_duration%;
+
+/*
+**  Time conversion routines
+*/
+
+/*
+**  Conversion from localtime to UTC 
+*/
+%utc_correct_reltime%(Reltime atime, Reltime tz) =
+  let corrected_time = atime - tz;
+
+  if corrected_time > 24:00 then
+    corrected_time - 24:00
+  else if corrected_time < 0:00 then
+    corrected_time + 24:00
+  else
+    corrected_time;
+
+/*
+** UTC time corrected for points relevant timezone 
+** Returns current day/night time limits as UTC time
+*/
+export %duty_day_time_start% = 
+  let start = %points_duty_start%;
+
+  if %three_night_zone_active% then 
+    %utc_correct_reltime%(%day_time_start%, 
+                          last(duty(trip),first(leg(duty),leg.%localtime_tz_corrector%))	
+                          where (%east_west% and %three_nights_in_time_zone% and %points_duty_start% <= start))
+  else
+    %utc_correct_reltime%(%day_time_start%, 
+                          first(leg(trip), leg.%homebase_tz_corrector%));
+
+export %duty_day_time_end% = 
+  let start = %points_duty_start%;
+
+  if %three_night_zone_active% then 
+    %utc_correct_reltime%(%day_time_end%, 
+                          last(duty(trip),first(leg(duty),leg.%localtime_tz_corrector%))
+                          where (%east_west% and %three_nights_in_time_zone% and %points_duty_start% <= start))
+  else
+    %utc_correct_reltime%(%day_time_end%, 
+                          first(leg(trip), leg.%homebase_tz_corrector%));
+
+/*
+** Modularized base module variables
+**
+** Variables redefined in submodules to express different
+** functionality btw CC/FC and Pairing/Rostering
+*/
+
+/* Rest on board points - reducing points when rest on board */
+export %rest_on_board_reduction_points_leg_full% = 0;
+
+/* Rest on board points - reducing points when rest on board */
+%rest_on_board_reduction_points_leg%(Abstime start, Abstime stop, Bool points_style) = 0;
+
+/* Training points common for Pairing Rostering */
+/* 90 points rule */
+%training_points_leg%(Abstime start, Abstime stop, Bool points_style) = 0; 
+/* 270 points rule */
+export %training_points_leg_full%(Bool points_style) = 0; 
+
+/* Simulator points common for Pairing Rostering */
+/* 90 points rule */
+%simulator_points_leg%(Abstime start, Abstime stop, Bool points_style) = 0;
+export %simulator_points_leg_full%(Bool points_style) = 0;
+
+/* Landing points variables */
+%landing_points_duty% = 0;
+%landings% = 0;  
+%initial_free_landings% = 0;
+%landing_points_leg% =
+  if crew_pos.%relief_pilot% 
+    then 0 
+  else %landing_points_per_landing% * 
+      nmin(1, nmax(0, %leg_nr% - %initial_free_landings%)); 
+  
+%leg_nr% =  
+  sum(leg(duty), 1)
+  from (current) backwards
+  while (leg.%is_active_flight%);
+
+/*
+** East West  
+** Agreement: OMA 7.1.1.6 East/west
+*/
+
+/*
+** east/west more than 4 timezones without 3 night rest demands extra preceeding rest
+** Agreement: OMA 7.1.1.6 East/west  Item 3 
+*/
+%points_east_west_minimum_rest_add_on% = 
+  abs(default(next(duty(chain), duty.%start_time_zone%),duty.%start_time_zone%) - duty.%start_time_zone%); 
+
+/*
+** A longhaul east/west sling exceeds 4 time zones or
+** 3 nights in timezone more than 4 hours from last "active time zone"
+** Trip is assumed to start in scandinavia which is why we dont need to check first duty
+** Agreement: OMA 7.1.1.6
+*/
+
+%east_west% = 
+  not is_first(duty(trip)) and
+  abs(duty.%start_time_zone% - trip.%start_time_zone%) > 4:00 or
+  abs(duty.%start_time_zone% - 
+      default(prev(duty(trip), duty.%start_time_zone%)
+	      where(%three_nights_in_time_zone% and
+		    abs(duty.%start_time_zone% - trip.%start_time_zone%) > 4:00), duty.%start_time_zone%)) > 4:00;
+
+/* 
+**  A longhaul east west sling covers 4 zones. Crew slipping for 3 nights in timezone 
+**  demand points calculated against this timezone
+*/
+
+%three_nights_in_time_zone% = 
+  let start = duty.%start_lt%,
+      tz = duty.%start_time_zone%;
+
+  sum(duty(trip), %local_night_rest_before_duty%)
+      where(duty.%start_lt% <= start)
+      backwards
+      while (duty.%start_time_zone% = tz and
+	     %local_night_rest_before_duty% >= %night_time_duration%)
+  >= 3 * %night_time_duration%;
+
+/*
+** Local night rest hours before duty 
+*/
+
+%local_night_rest_before_duty% =
+
+  if not is_first(duty(trip)) then
+    scale_time(
+      prev(duty(trip), 
+      duty.%end_lt% +
+      (if duty.%end_lt% > (round_down(duty.%end_lt%, 24:00) + %day_time_end%) and
+	  duty.%end_lt% < (round_down(duty.%end_lt%, 24:00) + %day_time_end% + %night_time_duration%) then
+	 %night_time_duration%
+       else
+	 0:00)),
+      duty.%start_lt% - 
+      (if duty.%start_lt% > (round_down(duty.%start_lt%, 24:00) + %day_time_end%) and 
+	 duty.%start_lt% < (round_down(duty.%start_lt%, 24:00) + %day_time_end% + %night_time_duration%) then
+	 %night_time_duration%
+       else
+	 0:00),
+    0,
+    %day_time_end%,
+    %day_time_start%, 
+    1) 
+  else 0:00;
+
+/*
+**  This means were in an east/west timezone differing from last localtime based point calculations
+*/
+
+export %three_night_zone_active% = 
+
+  let start = %points_duty_start%;
+	
+  default(any(duty(trip), %east_west% and %three_nights_in_time_zone%) 
+	  where (%points_duty_start% <= start), false);  
+
+/*
+**  time zone corrected points. 
+**  east/west duty without 3 nights local rest gives day points per hour for the first 4 duty hours
+**  Agreement:
+**    OM-A 7.1.6 east/west section 2
+*/
+
+%time_zone_correction% =
+  let start = duty.%start_UTC%;
+
+  %east_west% and
+  not any(duty(trip),%three_nights_in_time_zone%) 
+        where (duty.%start_UTC% <= start);
+
+%time_zone_corrected_points%(Abstime start, Abstime stop) = 
+  let day_time_start = duty.%start_UTC% - round_down(duty.%start_UTC%,24:00),
+      day_time_end = day_time_start + 4:00;
+
+  scale_time(start, stop, %night_points_per_hour%,
+	           day_time_start, day_time_end, %day_points_per_hour%) / 1:00;
+
+/*
+**  Points calculated against ordinary 6/8 points algorithm
+**  Agreement: OMA 7.1.1.6 Flight duty periods
+*/
+
+%ordinary_points%(Abstime start, Abstime stop) =
+
+  scale_time(start, stop, %day_points_per_hour%,
+	     %duty_day_time_end%, %duty_day_time_start%, %night_points_per_hour%) / 1:00;
+
+/*
+** Duty level - 90 points rule - stop always on duty block on
+*/
+/*
+** Traverse duties inside period.
+** Duty is either inside period range or partially in period
+*/
+export %duty_points_in_period%(Abstime start, Abstime stop, Bool points_style, Bool landings) =
+
+  /* only count landing points in 90 points style calculations */ 
+  (if landings then
+     %landing_points_duty% 
+   else 0) +
+
+  /* duty completely inside range */
+  (if %points_duty_start% >= start and %points_duty_end% <= stop 
+    then if points_style = %points_style_90%
+          then %duty_points_full_duty_90_style%  
+         else %duty_points_full_duty_7x24_style%  
+         
+   /* duty partially in range or cutoff at block_on  */
+   else if %points_duty_end% >= start and %points_duty_start% < stop
+    then sum(leg(duty),%leg_points_partial%(start, stop, points_style))
+   else 0);
+
+/*%leg_points_in_period%(Abstime start, Abstime stop, Bool points_style) = 
+  (if points_style = %points_style_90% then
+     %landing_points_leg% 
+   else 0) +
+  
+  (if %points_leg_start%(points_style) >= start and %points_leg_end%(points_style) < stop then
+     if points_style = %points_style_90% then
+       sum(leg(chain),%leg_points_full%(true))
+     else
+       sum(leg(chain),%leg_points_full%(false))
+       
+   else if %points_leg_start%(points_style) >= start and %points_leg_start%(points_style) < stop then 
+     sum(leg(chain),%leg_points_partial%(start, stop, points_style))
+   else 0);*/
+
+/* caching variables */
+%duty_points_full_duty_90_style% = 
+  sum(leg(duty),%leg_points_full%(true));
+
+%duty_points_full_duty_7x24_style% = 
+  sum(leg(duty),%leg_points_full%(false));
+
+/*
+** Leg level variables
+*/
+/**************************************************************************************
+**
+** Variables for full leg points calculations
+**
+**************************************************************************************/
+
+/*
+** Points for full leg. 
+** This is the calculated points of 
+** a leg considered completely inside the relevant range
+** and thus contributing 100% in the points calculation% 
+*/
+
+export %leg_points_full%(Bool points_style) =
+  %active_flight_points_leg_full%(points_style) -
+  %rest_on_board_reduction_points_leg_full% +	
+  %standby_points_leg_full%(points_style) +
+  %ground_duty_points_leg_full%(points_style) +
+  %passive_points_leg_full%(points_style) +
+  %training_points_leg_full%(points_style) +
+  %simulator_points_leg_full%(points_style);
+
+export %active_flight_points_leg_full%(Bool points_style) =
+  let stop = %points_leg_end%(points_style);
+  
+    %active_flight_points_leg%(%points_leg_start%(points_style), stop, points_style);
+
+export %standby_points_leg_full%(Bool points_style) =
+  %standby_points_leg%(%points_leg_start%(points_style), %points_leg_end%(points_style), points_style);
+
+export %ground_duty_points_leg_full%(Bool points_style) = 
+  %ground_duty_points_leg%(%points_leg_start%(points_style), %points_leg_end%(points_style), points_style);
+
+/*
+**  Passive points between legs inside duty.
+**  Ground duty with rest facilities counts as passive duty 
+**  Agreement: OMA 7.1.1.5 Passive Duty
+*/
+
+export %passive_points_leg_full%(Bool points_style) = 
+
+  if %leg_preceeded_by_passive_duty% and
+    %passive_rest_duration_full%(points_style) <= %passive_duty_points_limit% then 
+    %passive_points%(%passive_rest_duration_full%(points_style))
+  else
+    0;
+/*
+** Crew has access to rest.
+** Period must be less than 4 hours to provide points.
+** OM-A 7.1.6
+** 
+** A general definition of passive duty according to existing
+** rules (time off rules) is that there must be at least 5 hours btw
+** block-on block-off btw legs. Thus if the distance is less you cannot qualify for
+** passive duty. Except off course if a panic hotel situation occurs.
+** 
+** In case of passive duty, passive duty points are only given when:
+**  time duration btw local transports (duration of passive duty) where crew has access to rest
+**  is less than 4 hours - local transport however is always calculated in case
+**  of passive duty - no matter the duration length
+**
+**  This can happen either as a short stop on non homebase or 
+**  on homebase when a 'panic' situation has occured 
+**
+**  standby callout where time btw callout and duty is less
+**  than 4 hours - in this case the standby duty itself is converted
+**  into passive duty, thus leading to passive duty periods exceeding 4 hours 
+*/
+export %leg_preceeded_by_passive_duty% =
+
+  /* never passive duty before fdp */
+  not (leg.%is_first_in_duty% and
+       %points_minimum_rest_before_fulfilled%) and
+
+  not is_first(leg(chain)) and
+
+  /* passive duty demands at least 5:00 btw block on block off */
+  (leg.%is_first_in_duty% or
+   prev(leg(chain),
+       /* a stop between legs of passive points relevant duration */
+       %leg_followed_by_rest_at_hotel% or
+
+       /* home hotel standby considered passive */
+       (%home_hotel_standby_leg% and %home_hotel_standby_considered_passive%)));
+
+%passive_points%(Reltime duration) =
+  duration * %passive_points_per_hour% / 1:00; 
+
+/* Full passive rest between legs inside duty */
+
+%passive_rest_duration%(Abstime start, Abstime stop, Bool points_style) = 
+  nmin(%points_leg_start%(points_style), stop) - 
+  nmax(default(prev(leg(duty), %points_leg_end%(points_style)), 
+               %points_leg_start%(points_style)),
+       start);
+
+%passive_rest_duration_full%(Bool points_style) = 
+  /* time btw local transports for HB HL  */
+  %points_leg_start%(points_style) - default(prev(leg(chain), %points_leg_end%(points_style)), %points_leg_start%(points_style));
+  
+/**************************************************************************************
+**
+** Variables for partial leg points calculations - including block-on
+**
+**************************************************************************************/
+
+%leg_points_partial%(Abstime start, Abstime stop, Bool points_style) = 
+
+  if %points_passive_leg_start%(points_style) > stop or %points_leg_end%(points_style) < start then 
+    0
+  else if %points_passive_leg_start%(points_style) >= start and %points_leg_end%(points_style) <= stop then
+    %leg_points_full%(points_style)
+  else
+    %active_flight_points_leg%(start, stop, points_style) -
+    %rest_on_board_reduction_points_leg%(start, stop, points_style) +
+    %standby_points_leg%(start, stop, points_style) +
+    %ground_duty_points_leg%(start, stop, points_style) +
+    %passive_points_leg%(start, stop, points_style) +
+    %training_points_leg%(start, stop, points_style) +		/* 14 points  */
+    %simulator_points_leg%(start, stop, points_style);		/* 14 points  */
+
+/* partial passiv */
+%passive_points_leg%(Abstime start, Abstime stop, Bool points_style) = 
+
+  /* passive points before leg */
+  (if %points_leg_start%(points_style) > start and 
+      %leg_preceeded_by_passive_duty% and 
+      %passive_rest_duration%(start, stop, points_style) <= %passive_duty_points_limit% then  
+    %passive_points%(%passive_rest_duration%(start, stop, points_style))
+   else
+    0);
+
+/**************************************************************************************
+**
+** Variables for general leg points calculations - including block-on
+**
+**************************************************************************************/
+/*
+** Active flight points on a single leg
+** Covers all scenarios:
+**	full leg		
+**	leg until block on
+**	partial leg
+*/
+%active_flight_points_leg%(Abstime start, Abstime stop, bool points_style) =
+    %active_flight_points_period%(nmax(%points_leg_start%(points_style),start), nmin(%points_leg_end%(points_style), stop));
+
+%active_flight_points_period%(Abstime start, Abstime stop) =
+
+   if not (leg.%is_flight_duty% or leg.%is_ground_transport%) or
+      leg.%is_school_flight% 
+    then 0
+   else if %time_zone_correction% 
+    then
+     %time_zone_corrected_points%(start, stop) 
+   else 
+     %ordinary_points%(start, stop);
+
+/*
+** Points for standby duty
+** Agreement: OMA 7.1.1.6 Standby duty
+**
+** If standby is performed at an airport (ie. no bed rest)
+** points are calculated according to ordinary 6/8 points rules.
+** (OMA 7.1.1.6.2)
+*/
+
+%standby_points_leg%(Abstime start, Abstime stop, Bool points_style) =
+  %home_hotel_standby_points%(nmax(%points_leg_start%(points_style),start), nmin(%points_leg_end%(points_style),stop)) +
+  %airport_standby_points%(nmax(%points_leg_start%(points_style),start), nmin(%points_leg_end%(points_style), stop)); 
+
+/*
+** Ground duty calculated after ordinary 6/8 points
+** If ground_duty in future differs standby and simulator
+** logic can be optimized 
+*/
+
+%ground_duty_points_leg%(Abstime start, Abstime stop, Bool points_style) = 
+  if not (leg.%is_flight_duty% or leg.%is_ground_transport%) and
+     not leg.%is_simulator% and
+     leg.%is_on_duty% and /* If onduty but not sim nor flight -> ground task */
+     not (task.%group%(task.%code%) in group_no_ground_duty_points) and
+     not (task.%code% in code_no_ground_duty_points) then
+    %ordinary_points%(nmax(%points_leg_start%(points_style),start), nmin(%points_leg_end%(points_style),stop))  
+  else
+    0;
+
+set group_no_ground_duty_points = 
+  parameter "BL","SBA","SIM","SBH","SBO","SBL","SGD","CMP"
+  remark "Activity groups not contributing to points";
+
+set code_no_ground_duty_points = 
+  parameter "BF","ID","ID1","MT2","MT6","MT8", "MT12", "MT18"
+  remark "Activity Codes not contributing to points";
+
+/*  
+** unrested points from previous points flight duty period 
+** not incl. unrested points from previous previous flight duty period
+*/
+export %prev_unrested_points% =
+  /* Unrested points should be calculated using points to c/o - rest points */
+  default(prev(duty(chain), %unrested_points_after%(points.%points_style_7x24%, true))
+	  where (%points_minimum_rest_after_fulfilled% and
+		 duty.%is_on_duty%), 0);
+
+/*
+** points rest reduction between flight duty periods 
+*/
+export %rest_reducing_points% = 
+  %ordinary_points%(%points_duty_transport_end%, %rest_stop%);
+
+%rest_stop% = 
+  default(next(duty(chain), %points_duty_transport_start%)
+	  where (duty.%is_on_duty% and 
+                 not duty.%has_no_duty_time_contribution%), %points_duty_transport_end% + 100:00);
+
+/*
+** Were on a non active leg - and wish to make sure its the last leg in duty 
+** since it may be inside a duty
+*/
+%no_active_flights_after_this_flight% =
+  let stop = duty.%end_hb%;
+  if leg.%is_active_flight% then
+    false
+  else
+    not any(leg(duty), leg.%is_active_flight%) 
+    from (current) forwards
+    while (leg.%start_hb% < stop);
+
+/* redefined in tracking */
+%standby_callout% = false; 
+%standby_callout_time% = void_abstime; 
+
+/*
+** Do we have a full nights rest period
+** in the range of a standby callout and the start of
+** local transport before the duty
+*/
+
+%full_night_rest_btw_callout_and_duty% =
+let end_sby = first(leg(duty), leg.%end_utc%) 
+              where (leg.%is_standby%),
+    start_flt_leg = first(leg(duty), leg.%ci_start_uptodate_utc% - 
+                                     %standby_standard_local_transport_time%) 
+                    where ((leg.%is_flight_duty% or leg.%is_ground_transport%)
+                           and leg.%start_utc% > end_sby);
+
+    scale_time(end_sby, start_flt_leg, 0, 
+	             %duty_day_time_end%, %duty_day_time_start%, 1)
+    > %night_time_duration%;
+
+/*
+** If time between stby callout and local transport on following duty 
+** contains full night rest or passive duty no points are given 
+**
+** standby callout followed by full nights rest until local transfer start 
+** standby duty considered rest 
+** naturally rest calculates to 0 points 
+**
+** standby callout followed by > 4 hours until local transfer start  
+** standby duty considered passive duty 
+** passive duty exceeding 4 hours calculates to 0 points so in this
+** case the standby duty calculates to 0 points
+**
+** Agreement: OMA 7.1.1.6 item 6
+*/
+
+
+/* standby callout followed by full night rest - duty considered rest */
+/* standby callout followed by at least 4 hours rest - duty considered passive */
+/* standby callout followed by duty, min of 4 hours and leg time should be added */
+/* standby not called within 22:00 - 6:00 => 0p for this period*/
+%tst%  =  %day_time_start% + (24:00 - %day_time_end%);
+%home_hotel_standby_points%(Abstime start, Abstime stop) =
+let night_start = %utc_correct_reltime%(%day_time_end%, leg.%localtime_tz_corrector%),
+    night_end = %utc_correct_reltime%(%day_time_start%, leg.%localtime_tz_corrector%),
+    night_length = night_end + (24:00 - night_start);
+    
+  if not %home_hotel_standby_leg% or 
+     (%standby_callout% and %home_hotel_standby_considered_rest%) 
+   then 0	
+  else if %points_minimum_rest_before_fulfilled%
+    then if scale_time(start,stop,0,night_start,night_end,1) = night_length
+          then nmax(0:00,stop - night_length - start) * %ordinary_standby_points_per_hour% / 1:00
+         else nmax(0:00,stop - nmin(leg.%time%, 4:00) - start) * %ordinary_standby_points_per_hour% / 1:00
+  else (stop - start) * %ordinary_standby_points_per_hour% / 1:00;
+
+%home_hotel_standby_considered_rest% =
+  /* standby callout followed by full night rest - duty considered rest */
+  %points_minimum_rest_after_fulfilled% and
+  %full_night_rest_btw_callout_and_duty%;
+
+%home_hotel_standby_considered_passive% =
+  /* 
+  ** standby callout followed by at least 4 hours rest - leg considered passive duty 
+  ** In this special case we utilize a standby specific transport time OMA 7.1.1.5 Standby item 5*/
+  not leg.%is_last_in_duty% and 
+  (next(leg(duty), leg.%ci_start_uptodate_utc% - %standby_standard_local_transport_time%) -
+   leg.%co_end_utc% + %leg_points_local_transport_after%) > %passive_duty_points_limit%;
+
+/*  OMA 7.1.1.6 item 6 */
+%standby_callout_during_night_duty% =
+  %standby_callout% and
+  %standby_includes_night_rest% and
+  leg.%end_UTC% < %previous_night_end_utc% or
+  leg.%end_UTC% >= %next_night_start_utc% and
+  leg.%end_UTC% < %next_night_end_utc%;
+
+/*  OMA 7.1.1.6 item 4 */
+%standby_includes_night_rest% = 
+  scale_time(leg.%start_UTC%, leg.%end_UTC%, 0, %duty_day_time_end%, %duty_day_time_start%, 1) > 0:00;
+
+/*
+** start/end of home/hotel standby leg in points calculation
+**
+** If the leg is preceeded by minimum rest, the first 4 hours of standby
+** should calculate to 0 points so we just change the start of the leg 
+** accordingly
+** Minimum rest is the points flight duty period definition of
+** minimum rest.
+**
+** If standby includes nightduty and no call-out is activated
+** during nighttime the night points calculates to 0.
+**
+** If time between callout and local transport before duty exceeds 4 hours
+** the standby duty period is considered passive duty 
+**
+** If time between callout and local transport before duty contains
+** a full night the standby duty is considered rest
+**
+** This means that if the time between callout and local transport is below 
+** 4 hours it is considers standby duty and will be charged pointswise as such,
+** excluding the local transport period.
+**
+** SBK aoc: Everything described above concerning, rest, passive and night is the same.
+**          It differs from SAS aoc in that points are charged from the actual moment of
+**          callout, not 4 hours inside standby duty
+*/
+
+%home_hotel_standby_leg_start% = 
+
+  nmax(
+  if %points_minimum_rest_before_fulfilled% then
+      nmin(%standby_points_calc_start%, %home_hotel_standby_leg_end%)
+  else 
+    leg.%start_UTC%,
+  if not %standby_callout_during_night_duty% then
+    if leg.%start_UTC% < %previous_night_end_utc% then 
+      %previous_night_end_utc%
+    else if leg.%start_UTC% >= %next_night_start_utc% then
+      %next_night_end_utc%
+    else
+      leg.%start_UTC%
+  else
+    leg.%start_UTC%);
+
+/*
+** Please not that callout times are potentially entered manually.
+** This can lead to callout times thta actually preceedes leg start
+** which again can lead to excessive points accumulation. (BU style only)
+**
+** For this reason the earliest callout time accepted in a points
+** calculation context is leg start.
+**
+** Note: evaluate below with critical eyes when changing callout mechanism
+**
+** The definition of event standby callout (standby_cct) states that if a sby
+** leg is followed by prod leg in the same duty we have a callout. This basically
+** means 8 hours between the two. Assuming this is correct, (i still feel a bit
+** sceptical) it is fair to utilize aoc from the following leg in duty to signal
+** correct points calculation. 
+** Also for receiving the actual callout_time the beginning of the stby leg
+** is given as argument, and it must be present in schedule to trigger points
+** calculation.
+** For BU we never start points sby calculations earlier than
+** sby leg start. 
+** Mads - 20070809
+**
+** Note: evaluate above with critical eyes when changing callout mechanism
+*/
+%standby_points_calc_start% =
+  if %standby_callout% and 
+    %standby_callout_is_BU_aoc% then
+    nmax(default(%standby_callout_time%, %default_standby_points_calc_start%), leg.%start_UTC%)
+  else
+    %default_standby_points_calc_start%;
+
+%default_standby_points_calc_start% =
+  leg.%start_UTC% + %points_free_standby_when_preceeded_by_minimum_rest%;
+
+%standby_callout_is_BU_aoc% =
+  default(next(leg(duty), leg.%is_on_duty% and leg.%aoc% = "BU"), false);
+
+/* 
+** end of standby leg in points calculation
+** see comments from %home_hotel_standby_leg_start% 
+*/
+
+%home_hotel_standby_leg_end% =
+
+  if %standby_callout% then
+    /*leg.%end_UTC%*/
+   /* in this passive case the leg points are accounted for in passive points calculation * */
+   if %home_hotel_standby_considered_passive% then    
+     /* to ensure correct calculation of passive rest duration */
+     leg.%end_UTC%	 
+   else      
+     next(leg(chain), leg.%ci_start_uptodate_utc% - %standby_standard_local_transport_time%)
+  else if not %standby_callout_during_night_duty% then
+    if leg.%end_UTC% > %next_night_end_utc% then
+      leg.%end_UTC%
+    else if leg.%end_UTC% > %next_night_start_utc% then
+      %next_night_start_utc% 
+    else if leg.%end_UTC% < %previous_night_end_utc% then
+      leg.%start_UTC%
+    else
+      leg.%end_UTC%
+  else leg.%end_UTC%;
+
+%home_hotel_standby_leg% = leg.%is_standby_with_rest%;
+
+/*
+** Airport standby calculated after ordinary 6/8 points
+*/
+
+%airport_standby_points%(Abstime start, Abstime stop) = 
+  if leg.%is_standby_at_airport% then
+    %ordinary_points%(start, stop) 
+  else
+    0;
+
+%passive_points_at_tail%(Abstime start, Abstime stop, Bool points_style) = 
+  if default(%any_passive_points_at_tail%(start, stop, points_style), false) then
+    first(duty(chain), %passive_points_result%(start, stop, points_style))
+    from (current) 
+    where(last(leg(duty), %points_leg_start%(points_style)) > stop)
+  else
+    0;
+    
+%any_passive_points_at_tail%(Abstime start, Abstime stop, Bool points_style) = 
+  first(duty(chain), 
+	last(leg(duty), %leg_followed_by_passive_duty%)
+	where(%points_leg_end%(points_style) > start and %points_leg_end%(points_style) < stop))
+  from (current) where(%points_duty_end% > stop);
+
+%passive_points_result%(Abstime start, Abstime stop, Bool points_style) =
+  first(leg(duty), %passive_points%(%passive_rest_duration%(start, stop, points_style)))
+  where(%points_leg_start%(points_style) > stop and 
+	%leg_followed_by_passive_duty%);
+
+%leg_followed_by_passive_duty% =
+  not leg.%is_last_in_duty% and
+  next(leg(duty), %leg_preceeded_by_passive_duty%);
+
+/*
+**  Hotel presence 
+**
+**  We can always assume hotel presence at the end of a duty pass. 
+*/
+
+%leg_followed_by_rest_at_hotel% = 
+
+  /* always assume hotel at end of dutypass */
+  (leg.%is_last_in_duty% and 
+   not leg.%arrives_at_homebase%) or
+
+   %crew_at_hotel_hb_hl%;
+
+/*
+**  Note: To be synced with tracking
+**        This variable is supposed to cover potential hotel rest inside a duty !
+**        It is normally triggered by the socalled HB = hotel at home base ! or HL infocode
+**        in the tracking phase (hotel code HB and HL) to cover unforeseen situations.  
+**        Since we dont know if this is to be covered for now its just falsed.
+*/
+%crew_at_hotel_hb_hl% = false;
+
+/*
+**  Passive duty below 4 hours is point giving
+**  Agreement:
+**    OMA 7.1.1.6 Passive duty
+*/
+
+%duty_ending_with_standby% = last(leg(duty), %home_hotel_standby_leg%);
+
+/*
+** This could be changed to trip level for caching purposes - MADS 
+*/
+
+export %fdp_points_7x24hrs_fwd% = 
+  let start = %points_duty_start%,
+      limit_7x24hrs_fwd = start + 168:00;
+      
+  (%points_7x24hrs_fwd%(start, limit_7x24hrs_fwd) + 99) / 100; 
+  
+/* This is used to calculate points for a single trip in the TripInfo report. */
+export %trip_points_7x24hrs_fwd% = 
+  first(duty(trip), (%points_7x24hrs_fwd%(trip.%start_utc%, trip.%end_utc%) + 99) / 100); 
+
+export %trip_points_7x24hrs_fwd_incl_landings% = 
+  first(duty(trip), (%points_7x24hrs_fwd%(trip.%start_utc%, trip.%end_utc%) + 99) / 100) 
+  + %trip_landing_points%; 
+
+%trip_landing_points% =
+  first(duty(trip), %trip_landing_points_fwd%);
+
+%trip_landing_points_fwd% =
+  sum(duty(trip), %initial_free_landing_points%)
+  from (current) forwards while (%points_duty_start% <= trip.%end_utc%);
+
+export %points_7x24hrs_fwd%(Abstime start, Abstime stop) = 
+  sum(duty(chain), %duty_points_in_period%(start, stop, %points_style_7x24%, false))
+  from (current) forwards while (%points_duty_start% <= stop) +
+  /* if period cutoffs btw legs in passive duty period calculate passive points at tail */
+  %passive_points_at_tail%(start, stop, %points_style_7x24%) +
+  %skn_illness_points_in_period%(start, stop);
+
+/* Redefined in points_ccr_cc */    
+%skn_illness_points_in_period%(Abstime start, Abstime stop) = 0;
+
+
+export %points_7x24hrs_no_current%(Abstime start, Abstime stop) = 
+  sum(duty(chain), %duty_points_in_period%(start, stop, %points_style_7x24%, false))
+  where(%points_duty_start% >= start) forwards while (%points_duty_start% <= stop) +
+  /* if period cutoffs btw legs in passive duty period calculate passive points at tail */
+  %passive_points_at_tail%(start, stop, %points_style_7x24%);
+
+/*
+** This could be changed to trip level for caching purposes - MADS 
+*/
+export %fdp_points_7x24hrs_bwd% = 
+  let stop = %points_duty_end%,
+      limit_7x24hrs_bwd = stop - 168:00;
+  (%points_7x24hrs_bwd%(limit_7x24hrs_bwd, stop) + 99) / 100; 
+
+export %points_7x24hrs_bwd%(Abstime start, Abstime stop) = 
+  sum(duty(chain), %duty_points_in_period%(start, stop, %points_style_7x24%, false))
+  from (current) backwards while (%points_duty_end% >= start) +
+  %skn_illness_points_in_period%(start, stop);
+
+/*
+** Hours in flight duty period surrounded by points minimum rest
+** Includes local transfer before duty.
+*/
+export %fdp_duty_hours% = 
+  let start = %points_duty_transport_start%,
+      stop = default(first(duty(chain), %points_duty_end%) from (current) 
+                     where (%points_duty_start% >= start and 
+                            %points_minimum_rest_after_fulfilled%), %points_duty_end%);
+  stop - start;
+
+export %active_duty_within_7x24_bwd% =
+  let p_start = %period_start_7x24_bwd%;
+  any(duty(chain),duty.%is_active_flight% and
+                   not duty.%is_standby%)
+  from (current) backwards
+  while (duty.%start_lt% > p_start);
+
+export %period_start_7x24_bwd% = 
+  duty.%start_lt% - 168:00;
+
+export %active_flight_btw_off_duties% = 
+  let stop = %points_duty_end%,
+      start = %prev_points_off_duty_period_end%;
+  %active_flight_in_period%(start, stop);
+
+%active_flight_in_period%(Abstime start, Abstime stop) = 
+  any(duty(chain), duty.%is_active_flight% and
+                   not duty.%is_standby%)
+  where (%points_duty_start% >= start and %points_duty_end% < stop);
+
+export %fdp_points_btw_off_duties% = 
+  let stop = %points_duty_end%,
+      start = %prev_points_off_duty_period_end%;
+
+  (%points_7x24hrs_bwd%(start, stop) + 99) / 100; 
+
+/*
+** Have to traverse at chain level since special
+** cases (FX) can locate 2 consecutive trips
+** containing prod 
+*/
+export %next_points_off_duty_period_start% =
+  let start = %points_duty_start%;
+  first(duty(chain),%points_rested_to_zero_abstime%)
+  where (%points_duty_start% >= start and
+         %points_off_duty_period_after%);
+
+/* The previous off duty period ends at the start of the 
+ * current trip if the points are rested to zero. */
+export %prev_points_off_duty_period_end% =
+  default(%_prev_points_off_duty_period_end%, trip.%start_lt%);
+
+%_prev_points_off_duty_period_end% =
+  let stop = %points_duty_end%;
+  
+  last(duty(chain), %points_duty_transport_start%) 
+  where (%points_duty_end% <= stop and
+         duty.%is_on_duty% and
+         %points_off_duty_period_before%);
+
+export %points_off_duty_period_before% = 
+  default(prev(duty(chain), %points_off_duty_period_after%)
+          where (duty.%is_on_duty% and
+                 not duty.%has_no_duty_time_contribution%), true);
+
+/*
+** Check if points are rested to zero according to points off duty definition.
+** This initial check avoid using the exact abstime og zero rest for performance reasons
+** The actual time of rest to zero is only needed when the rule is activated
+*/
+export %points_off_duty_period_after% = 
+  %points_minimum_rest_after_fulfilled% and
+  %rest_points_off_duty_period% > %required_rest_points_off_duty_period%;
+
+export %remaining_points_off_duty_period% = 
+  nmax(0, %required_rest_points_off_duty_period% - 
+          %rest_points_off_duty_period%) / 100;
+
+/* Rest points between duty end and a off-duty period that is required before 
+the rest stop.*/
+%rest_points_off_duty_period% = 
+  %ordinary_points%(%points_duty_transport_end%, %rest_stop% - 26:00);
+
+/* required off duty period for fulfillment of rest to zero */
+%required_rest_points_off_duty_period% = 
+  nmax(%outstanding_unrested_points%, 
+       %ordinary_points%(%points_duty_transport_end%, 
+                         %points_duty_transport_end% + %points_minimum_rest%));
+
+%outstanding_unrested_points% = 
+  (if %points_return_from_east_west% then 
+     %fdp_points_east_west% 
+   else %fdp_points%) + 99;
+
+%outstanding_unrested_points_as_reltime% =
+  /* OMA 7.1.1.6 East west item 4 */
+  (%outstanding_unrested_points%) / 100 * 1:00;
+
+export %points_return_from_east_west% =
+  let start = %points_duty_start%;
+
+  /* OMA 7.1.1.6 East west item 4 */
+  duty.%arrives_at_homebase% and
+  any(duty(trip), %east_west%)
+  where (%points_duty_start% <= start);
+
+%fdp_points_east_west% =
+  abs(trip.%max_time_zone_diff%) * 3000 / 1:00;
+
+/*
+** Absolute time of points of points rested to zero  
+** minimum 8 hours - OMA 7.1.1.6 Rest periods item 1
+*/
+
+export %points_rested_to_zero_abstime% =
+  nmax(%points_duty_transport_end% + %points_minimum_rest%, %points_rested_to_zero%);
+
+/*
+** This variable calculates abstime from rest start until
+** points rested to zero
+*/
+%points_rested_to_zero% =
+  /* rest starts in day time */
+  if %rest_start_in_day_time% then
+
+    /* first interval - day */
+    if %remaining_points_after_day_1_as_reltime% <= 0:00 then
+      %points_duty_transport_end% + %outstanding_unrested_points_as_reltime% / 6
+
+    /* second interval - night */
+    else if %remaining_points_after_night_1_as_reltime% <= 0:00 then
+      %rest_day_time_end_utc% + %remaining_points_after_day_1_as_reltime% / 8
+
+    /* third interval - day */
+    else if %remaining_points_after_day_2_as_reltime% <= 0:00 then
+      %rest_day_time_start_UTC% + 24:00 + %remaining_points_after_night_1_as_reltime% / 6
+
+    /* fourth interval - night */
+    else if %remaining_points_after_night_2_as_reltime% <= 0:00 then
+      %rest_day_time_end_utc% + 24:00 + %remaining_points_after_day_2_as_reltime% / 8
+
+    /* fifth interval - day */
+    else %rest_day_time_start_utc% + 48:00 + %remaining_points_after_night_2_as_reltime% / 6
+
+  else /* rest starts in night time */
+
+    if %remaining_points_after_night_1_as_reltime% <= 0:00 then
+      %points_duty_transport_end% + %outstanding_unrested_points_as_reltime% / 8
+
+    else if %remaining_points_after_day_2_as_reltime% <= 0:00 then
+      %rest_day_time_start_UTC% + 24:00 + %remaining_points_after_night_1_as_reltime% / 6
+
+    else if %remaining_points_after_night_2_as_reltime% <= 0:00 then
+      %rest_day_time_end_UTC% + 24:00 + %remaining_points_after_day_2_as_reltime% / 8
+
+    else if %remaining_points_after_day_3_as_reltime% <= 0:00 then
+      %rest_day_time_start_UTC% + 48:00 + %remaining_points_after_night_2_as_reltime% / 6
+
+    else %rest_day_time_end_UTC% + 48:00 + %remaining_points_after_day_3_as_reltime% / 8;
+
+/*
+** Remaining points to rested to zero after first day interval
+*/
+
+/*
+** This is the first interval from rest end to next day/night limit
+*/
+%remaining_points_after_day_1_as_reltime% =
+  %outstanding_unrested_points_as_reltime% - (%rest_day_time_end_utc% - %points_duty_transport_end%) * 6;
+
+%remaining_points_after_night_1_as_reltime% =
+  %remaining_points_after_day_1_as_reltime% - %night_time_duration% * 8;
+
+%remaining_points_after_day_2_as_reltime% =
+  %remaining_points_after_night_1_as_reltime% - %day_time_duration% * 6;
+
+%remaining_points_after_night_2_as_reltime% =
+  %remaining_points_after_day_2_as_reltime% - %night_time_duration% * 8;
+
+%remaining_points_after_day_3_as_reltime% =
+  %remaining_points_after_night_2_as_reltime% - %day_time_duration% * 6; 
+
+/*
+** Does rest start in daytime (local)
+** Measure day night periods towards localtime
+*/
+
+/*
+** Start of daytime on same day as rest start
+** expressed as UTC time to compare against %points_duty_transport_end% which utilizes UTC
+** day_start is calculated as the day_start preceeding beginning of rest and
+** is calculated like this to ease calculation of points intervals
+*/
+%rest_day_time_start_utc% =
+  let hb_tz_corr = first(leg(duty), leg.%homebase_tz_corrector%), 
+      day_start = round_down(%points_duty_transport_end% + hb_tz_corr, 24:00) + %duty_day_time_start% - hb_tz_corr;
+      if %points_duty_transport_end% < day_start then
+        day_start - 24:00 
+      else
+        day_start;
+/*
+** End of daytime on same day as rest start
+** expressed as UTC time to compare against %points_duty_transport_end% which utilizes UTC
+*/
+%rest_day_time_end_utc% =
+      %rest_day_time_start_utc% + %day_time_duration%;
+
+/*
+** Rest period starts in a points day time interval
+*/
+%rest_start_in_day_time% = 
+  %points_duty_transport_end% >= %rest_day_time_start_utc% and
+  %points_duty_transport_end% <= %rest_day_time_end_utc%;
+
+export %fdp_ends_with_deadhead% = duty.%ends_with_deadhead%;
+
+export %fdp_includes_simulator% =
+  let duty_start = %points_duty_start%, 
+      start = default(last(duty(trip),%points_duty_start%)
+                      where (%points_minimum_rest_before_fulfilled% and
+                             %points_duty_start% <= duty_start), %points_duty_start%);
+
+  any(duty(trip), duty.%is_simulator%)
+  where (%points_duty_start% >= start);
+
+export %next_duty_inside_period% =
+  default(next(duty(chain), duty.%start_lt% > %pp_start%), true);
+
+/* Added by Peter J at 2/8 -06 to check the time between two off duty periods.
+   This is not working for all cases due to the special treatment of BL days.
+   Note: Should count correct even with BL days. */
+export %hours_btw_points_off_duties% =
+  points.%points_rested_to_zero_abstime% - points.%prev_points_off_duty_period_end%;
+
+/*
+**  Points for full duty.
+**  Training and simulator counts as 14 points / hour. 
+**  Supports 116 points rule.
+**  The calculation includes checkout.
+*/
+export %fdp_points_full% = 
+  (%_duty_points_acc%(%points_style_90%, true) +
+  %check_out_points% + 99) / 100;
+
+%check_out_points% =
+  %ordinary_points%(last(leg(duty), leg.%end_utc%), %points_duty_end%);
+
+export %fdp_points% = 
+	%_duty_points%(%points_style_90%,true);
+  
+%_fdp_points_end_fdp% =
+  let p_start = %points_duty_start%;
+
+  default(first(duty(chain), duty.%end_actual_block_UTC%)
+          where (%points_duty_start% >= p_start and
+                 %points_minimum_rest_after_fulfilled% and
+                 (not duty.%has_no_duty_time_contribution%)),
+          duty.%end_UTC%);
+
+%last_passive_block_on_in_fdp% =
+  let block_on = %fdp_points_block_on_end_fdp%;
+  default(last(leg(duty),leg.%end_utc%)
+          where (leg.%is_deadhead% and 
+                 leg.%end_utc% <= block_on), %points_duty_start%);
+
+%fdp_points_block_on_end_fdp% = %_fdp_points_end_fdp%;
+
+/*
+**  Points util and including last active block on.
+**  Supports 90 points rule, which only relates to
+**  active flight duty.  The calculation does not include last checkout.
+*/
+export %at_active_block_on% = %duty_points_acc%(%points_style_90%);
+export %fdp_points_active_block_on% =  %at_active_block_on%; /*used in python scripts*/
+
+export %fdp_points_active_block_on_incl_landings% = 
+	%duty_points_acc%(%points_style_90%) +
+  %initial_free_landings% * %landing_points_per_landing% / 100;
+
+export %initial_free_landing_points% = 0;
+
+%last_active_block_on_in_fdp% = 
+  let block_on = %fdp_points_block_on_end_fdp%;
+  /* Duty is not last in fdp */
+  if block_on > duty.%block_on% then
+    default(
+    next(duty(chain) where(duty.%block_on% <= block_on), 
+         default(last(leg(duty),leg.%end_UTC%)
+                 where (leg.%is_active_flight% and 
+                 leg.%end_UTC% <= block_on), %points_duty_start%)),
+            %points_duty_start%)
+  else
+    default(last(leg(duty),leg.%end_UTC%) 
+            where (leg.%is_active_flight% and 
+                   leg.%end_UTC% <= block_on), %points_duty_start%);
+
+export %fdp_points_in_period%(Abstime start, Abstime stop, Bool points_style, Bool landings) =
+
+  sum(duty(chain), 
+      %duty_points_in_period%(start, stop, points_style, landings))
+  from (first where(%points_duty_start% = start))
+  while (%points_duty_start% < stop);
+
+/*
+** Normally the first two landings are 'points free' for CC.
+** in the 90 points OMA rule.
+*/
+%leg_landing_points%(Bool initial_landings) = 
+  if %leg_seq_no% > %initial_free_landings% or
+     (initial_landings and
+      %leg_seq_no% > 0) then 
+    %landing_points_per_landing%
+  else
+    0;
+
+/*
+** Info window has possibility to display all landings
+*/
+%initial_landing_points% = 
+  if %leg_seq_no% > 0 and 
+     %leg_seq_no% <= %initial_free_landings% then
+    %landing_points_per_landing%
+  else
+    0;
+
+%leg_seq_no% =
+  let first_start = %points_duty_start%;
+  default(count(leg(chain)) 
+          from (current) backwards
+	  while (leg.%start_lt% >= first_start and
+                 leg.%is_active_flight%),0);
+
+/* 
+** unrested points from previous duty added with
+** points in current duty subtracted by
+** rest following current duty
+*/
+
+/* Accumulated points leg-by-leg. Used in reports and for
+ * defining the correct failobject. Also used in rudob.
+*/
+export %leg_points_block_on_acc%(Bool points_style) =
+  default((%_leg_points_block_on_acc%(false, points_style) + 99) / 100, 0);
+
+%_leg_points_block_on_acc%(Bool landings, Bool points_style) = 
+  let first_start = %points_duty_start%,
+      start = default(last(duty(chain), %points_duty_start%)
+              where (%points_duty_start% <= first_start and
+                     %points_minimum_rest_before_fulfilled%), first_start),
+      stop = %last_active_block_on_in_fdp%;
+
+  %unrested_points_acc%(points_style, landings) + 
+  sum(leg(chain), %active_flight_points_leg%(%points_leg_start%(points_style), 
+                                             nmin(stop, %points_leg_end%(points_style)), 
+                                             points_style) + 
+                  %rest_on_board_reduction_points_leg_full% +
+                  (if leg.%is_active_flight% then
+                    %leg_landing_points%(landings)
+                   else
+                    0))
+  from (current) backwards
+  while (leg.%start_utc% >= start)
+  where (leg.%end_utc% <= stop);
+
+export %duty_time%(Bool points_style) = 
+  let start = %points_duty_start%,
+      stop = if %points_style_90% and duty.%has_active_flight% 
+              then %last_active_block_on_in_fdp% 
+             else %points_duty_end%;
+           
+   stop - start;
+
+export %duty_points_no_landing%(Bool points_style) =
+	default( (%_duty_points%(points_style, false) + 99) / 100, 0);
+
+%_duty_points%(Bool points_style, Bool landings) =
+  let start = %points_duty_start%,
+      stop = if %points_style_90% = points_style and duty.%has_active_flight% 
+              then %last_active_block_on_in_fdp% 
+             else %points_duty_end%;
+  /* We must move forward to the last duty in the FDP before we
+  ** start to travers backwards */
+  default(next(duty(chain) where (duty.%start_utc% > stop), prev(duty(chain),             
+          sum(duty(chain), %duty_points_in_period%(start,
+                           stop, 
+                           points_style,
+                           landings))
+  from (current) backwards while (%points_duty_end% > start))),
+  /* Previous void, then we must go to the last duty in chain and count
+  ** backwards */
+  last(duty(chain),
+       sum(duty(chain), %duty_points_in_period%(start,
+                           stop, 
+                           points_style,
+                           landings))
+       from (current) backwards while (%points_duty_end% > start)));
+  
+export %duty_points_acc%(Bool points_style) =
+default( (%_duty_points_acc%(points_style, true) + 99) / 100, 0);
+
+export %remaining_points_after_rest% =
+  nmax(%_duty_points_acc%(points.%points_style_7x24%,true) - 
+       %rest_reducing_points%, 0);
+
+export %unrested_points_after%(Bool points_style, Bool landings) = 
+  nmax(%_duty_points%(points_style, landings) - %rest_reducing_points%,0);
+
+export %unrested_points_acc%(Bool points_style, Bool landings) = 
+  sum(duty(chain), %unrested_points_after%(points_style, landings))
+    from (prev) backwards while (%unrested_points_after%(points_style, landings) > 0);
+ 
+export %_duty_points_acc%(Bool points_style, Bool landings) =
+    /* Unrested points should be calculated using points to c/o - rest points */
+    %unrested_points_acc%(points.%points_style_7x24%, landings) + 
+    %_duty_points%(points_style,landings);
+     
+export %leg_points_acc% =
+default( (%_leg_points_acc% + 99) / 100, 0);
+
+export %_leg_points_acc_check_out% =
+  let start = %points_duty_start%;
+  
+  %unrested_points_acc%(%points_style_7x24%, false) +
+  sum(leg(chain), %leg_points_full%(%points_style_7x24%))
+  from (current) backwards
+  while (leg.%start_utc% >= start);
+
+export %_leg_points_acc% =
+  let start = %points_fdp_duty_start%;
+  /* Unrested points should be calculated using points to c/o - rest points */
+  %unrested_points_acc%(%points_style_7x24%, true) + 
+  sum(leg(chain), %leg_points_full%(%points_style_90%) +
+                  %landing_points_leg%)
+  from (current) backwards
+  while (leg.%start_utc% >= start);
+
+export %_leg_points_acc_no_landing% =
+  let start = %points_duty_start%;
+  /* Unrested points should be calculated using points to c/o - rest points */
+  %unrested_points_acc%(%points_style_7x24%, true) + 
+  sum(leg(chain), %leg_points_full%(%points_style_90%))
+  from (current) backwards
+  while (leg.%start_utc% >= start);
+  
+export %_leg_time_points% =
+  let start = %points_duty_start%;
+  
+  sum(leg(chain),%active_flight_points_leg_full%(%points_style_90%) +
+  		 %standby_points_leg_full%(%points_style_90%) +
+  		 %ground_duty_points_leg_full%(%points_style_90%) +
+  		 %training_points_leg_full%(%points_style_90%) +
+  		 %simulator_points_leg_full%(%points_style_90%))
+  from (current) backwards
+  while (leg.%start_utc% >= start);
+
+export %max_points_simulator_in_period%(Abstime start, Abstime stop) =
+  count(duty(chain)) where 
+    (duty.%is_on_duty% and
+     duty.%start_UTC% >= start and
+     duty.%start_UTC% < stop and
+     points.%fdp_ends_with_deadhead% and
+     points.%fdp_includes_simulator% and
+     points.%fdp_points_full% > 
+       points.%max_points_in_fdp_passive%);
+    
+/* end of file */

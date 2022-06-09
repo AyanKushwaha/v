@@ -1,0 +1,136 @@
+module leave_basic
+
+/* Imports */
+import basic;
+import levels;
+import kwdmap;
+import rule_exceptions;
+
+
+/* ----------------------------------------------------------- */
+/* this flag is True when the leave auto assigner runs. */
+%run_from_leave_auto_assigner% = parameter False;
+
+export %va_trip_start_day% = round_down(%va_trip_start%, 24:00);
+export %va_trip_end_day% = round_up(%va_trip_end%, 24:00);
+
+export %va_trip_days% =
+  %no_days%(%va_trip_start_day%, %va_trip_end_day%);
+
+export %no_days%(abstime start_date, abstime end_date) =
+  (end_date - start_date) / 24:00;
+
+global export %va_trip_start% =
+  default(
+    if %prev_trip_connected_with_bought_days% then
+      prev(extended_trip(chain), %_va_trip_start%) where (%trip_is_vacation% and %trip_connected_with_bought_days% and not %prev_trip_connected_with_bought_days%)
+    else
+      %_va_trip_start%,
+    %trip_start%);
+
+export %_va_trip_start% =
+  default(
+    if (%_bought_transaction_start_type%(%trip_start%) in levels.vacation_code)then
+      %_bought_transaction_start_date_from_table%(%trip_start%)
+    else
+      %trip_start%,
+    %trip_start%);
+
+
+global export %va_trip_end% =
+  default(
+    if %trip_connected_with_bought_days% then
+      next(extended_trip(chain), %_va_trip_end%) where (%trip_is_vacation% and %prev_trip_connected_with_bought_days% and not %trip_connected_with_bought_days%)
+    else
+      %_va_trip_end%,
+    %trip_end%);
+
+export %_va_trip_end% =
+  default(
+    if (%_bought_transaction_end_type%(%trip_end%) in levels.vacation_code) then
+      %_bought_transaction_end_date_from_table%(%trip_end%)
+    else
+      %trip_end%,
+    %trip_end%);
+
+
+export %general_crew_type% = "ALL";
+
+export %year%(abstime date) =
+  (round_down_year(date) - 01jan1986 00:00)/8760:00 + 1986;
+
+export %trip_connected_with_bought_days% =
+  default(
+    (%_bought_transaction_end_date_from_table%(%trip_end%) = %next_vacation_trip_start_time%) and
+      %_bought_transaction_end_type%(%trip_end%) in levels.vacation_code,
+    false);
+
+export %prev_trip_connected_with_bought_days% =
+  default(prev(extended_trip(chain), %trip_connected_with_bought_days%) where (%trip_is_vacation%), false);
+
+export %trip_is_vacation_or_auto_assign% =
+  %run_from_leave_auto_assigner%
+  OR %trip_is_vacation%;
+
+export %trip_is_vacation% =
+  first(leg(extended_trip),activity_subtype in levels.vacation_code);
+
+export %next_vacation_trip_start_time% =
+  next(extended_trip(chain), %trip_start%) where (%trip_is_vacation%);
+
+export %length_balance% =
+  (%leg_end% - %leg_start%)/24:00;
+
+export %trip_va_length_balance% =
+  sum(leg(extended_trip),%length_balance%)where(activity_subtype in levels.vacation_code);
+  
+export %trip_days% = 
+  %no_days%(%trip_start_day%, %trip_end_day%);
+  
+export %trip_start_day% = round_down(%trip_start%, 24:00);
+
+export %trip_end_day% = round_up(%trip_end%, 24:00);
+
+export %time_of_year%(abstime date) =
+  let yearlength = round_up_year(date)-round_down_year(date),
+      cand = (date - round_down_year(date));
+  if yearlength = 366*24:00 and cand > 59*24:00 then
+      cand-24:00
+  else
+      cand;
+      
+export %abs_to_int%(abstime date) = 
+  (date-01jan1986 00:00)/00:01;
+export %int_to_abs%(int date) =
+  (date*00:01)+01jan1986 00:00;
+    
+/* ----------------------------------------------------------- */
+
+
+
+/* Table Definitions */
+table leave_bought_end_date_table(abstime endDate1) =
+  %crew_id%, endDate1 ->
+    export abstime %_bought_transaction_end_date_from_table%,
+    export string %_bought_transaction_end_type%;
+  external "bought_days";
+  crew, start_time -> end_time, day_type;
+  -, - -> void(abstime), void(string);
+end
+
+
+table leave_bought_start_date_table(abstime startDate1) =
+  %crew_id%, startDate1-24:00, startDate1+24:00 ->
+    abstime %_bought_transaction_start_date_from_table%,
+    export string %_bought_transaction_start_type%;
+  external "bought_days";
+  crew, <end_time, >end_time -> start_time, day_type;
+  -, -, - -> void(abstime), void(string);
+end
+
+table leave_vacation_status_table(abstime s_date) =
+  %crew_id%, s_date, "EXTRAVAC" ->
+    export bool %is_extra_vacation%;
+  external "vacation_status";
+  crew, st, status -> any(row_number);
+end

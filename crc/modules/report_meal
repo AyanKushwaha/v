@@ -1,0 +1,954 @@
+/* -*- crc -*-
+ *
+ * 
+ *
+ * Purpose:
+ *   This file containes meal variables needed for reports.
+ *   Note: in the past it contained lot's of business logic, and quite a lot of it remains. The purpose
+ *   of this module should be presention, and "meal" theme module should do the decisions instead. /LW
+ *
+ * Sections:
+ *  1:     Meal consumption section.
+ *  1.1:     Meal consumption variables.
+ *  1.2:     Meal code variables.
+ *  1.2.1:     Supplemetary Meals
+ *  1.2.2:     Best Meal Break.
+ *  2:     Meal load variables
+ *  2.1:     Meal load corrections
+ *  2.2:     Meal load udor
+ *  2.3:     Meal load flight nr
+ *  2.4:     Meal load station
+ *  2.5:     Meal update time
+ *  2.6:     Meal update station
+ *  2.7:     Meal update supplier
+ *  2.8:     Meal update load flight number
+ *  2.9:     Meal update load flight udor
+  *  3:     Python report support
+ *  3.1 :    Iterators
+ *  4:     Table lookups
+ *
+ * Created by:
+ *   Leo Wentzel; 22-Aug-2006
+ *
+ * Major changes:
+ * Date   Name             Comment
+ * 080701 Hasse Eliasson   Industrialized code + Restructure.
+ * 081118 Hasse Eliasson   Best meal break total rewrite.
+ */
+
+root module report_meal
+
+import base_utils;
+import fundamental;
+import levels;
+import iterators;
+import leg;
+import duty;
+import trip;
+import meal;
+import system_db_parameters;
+import parameters;
+
+/****************************************************************
+ * Section 1: Meal consumption section.
+ *            This section calculates on which legs meals are
+ *            needed (consumed).
+ ***************************************************************/
+/****************************************************************
+ * Section 1.1: Meal consumption variables.
+ *              This is the actual data that meal orders use.
+ *              They describe the meal and consumtion flights.
+ *
+ * Note: consumption_code is derrived from meal_code, which has
+ *       all business rules for consumption.
+ ***************************************************************/
+export %consumption_flight_nr% = leg.%flight_descriptor%;
+export %consumption_stn% = leg.%start_station%;
+export %consumption_date% = leg.%start_hb%;
+export %consumption_udor% = leg.%udor%;
+%consumption_udor_str% = format_time(%consumption_udor%, "%02d%b%Y");
+export %consumption_code% =
+  if (not leg.%is_deadhead% or service_type = "P" or service_type = "A") then
+	  if default(%consumption_corr_exist%,false) then
+	    %_consumption_code_table%
+	  else
+	    %consumption_code_normal%
+  else
+       "";
+
+/* Correction valid this weekday 
+ *    0 used as wildcard for flight_nr  */
+%consumption_corr_exist% =
+  %cons_corr_valid%(leg.%flight_nr%) or
+  %cons_corr_valid%(0);
+
+/* Types:
+ *   A - Add meal to leg
+ *   N - No meal for scheduled crew meal
+ *   O - Override only if scheduled crew meal
+ *   S - Supplement only on leg without scheduled meal */
+table consumption_corr_types =
+  %consumption_corr_type%, %consumption_code_normal_exist% ->
+    %_consumption_code_table%, %consumption_corr_is_effective%;
+  "A", true  -> concat(%consumption_code_normal%, ",", %consumption_corr_code%), true;
+  "A", false -> %consumption_corr_code%, true;
+  "N", true  -> "", true;
+  "O", true  -> %consumption_corr_code%, true;
+  "S", false -> %consumption_corr_code%, true;
+  -  , -     -> %consumption_code_normal%, false;
+end
+
+%consumption_code_normal_exist% = 
+  default(%consumption_code_normal% <> "", false);
+
+/* Prio: Flight nr, Route */
+%consumption_corr_type% = meal.%consumption_corr_type%;
+
+/* Prio: Flight nr, Route */
+%consumption_corr_code% = meal.%consumption_corr_code%;
+
+/*Definition of meal consumption code and it's components
+  Note that it's just a translation of meal code.*/
+export %consumption_code_normal% =
+  %strip_leading_comma%(concat(%_cons_breakfast%, %_cons_mealbox%,
+    %_cons_bringown%, %_cons_meal_ground_ac%, %_cons_meal_flight%));
+
+/* The translation is based on departure for all meals except ground meal that
+ * is based on arrival. The idea is to use the time when the meal is actually 
+ * consumed.
+ */
+%_default_flight_meal_consumption% = ",H";
+%_cons_breakfast% = %_meal_to_consumption_codes%(%_mc_breakfast%, leg.%start_od_lt%, leg.%activity_scheduled_start_time_lt%);
+%_cons_mealbox% = %_meal_to_consumption_codes%(%_mc_mealbox%, leg.%start_od_lt%, leg.%activity_scheduled_start_time_lt%);
+%_cons_bringown% = %_meal_to_consumption_codes%(%_mc_bringown%, leg.%start_od_lt%, leg.%activity_scheduled_start_time_lt%);
+%_cons_meal_ground_ac% = %_meal_to_consumption_codes%(%_mc_meal_ground_ac%, leg.%start_od_lt%, leg.%activity_scheduled_start_time_lt%);
+%_cons_meal_flight% = 
+  if %_has_double_breakfast% then
+    %_default_flight_meal_consumption% 
+  else
+    %_meal_to_consumption_codes%(%_mc_meal_flight%, leg.%start_od_lt%, leg.%activity_scheduled_start_time_lt%);
+
+
+/*meal consumption help functions */
+%_meal_to_consumption_codes%(String in_meal_code, RelTime tod_lookup, AbsTime day_lookup) = 
+  let cons_codes = %_get_cons_codes%(%strip_leading_comma%(in_meal_code), tod_lookup, day_lookup);
+  if cons_codes = "" then ""
+  else concat(",", cons_codes);
+%_get_cons_codes%(String in_meal_code, RelTime tod_lookup, AbsTime day_lookup) =
+  cat(times(10) while (default(%_cons_code%(in_meal_code, tod_lookup, day_lookup, %times_index_0%),"")<>""),
+                  %_cons_code%(in_meal_code, tod_lookup, day_lookup, %times_index_0%), ",");
+export %strip_leading_comma%(string instr) =
+  if locate(",",instr) = 1 then
+    substr(instr, 2, length(instr))
+  else
+    instr;
+
+/* DEBUG */
+%is_multi_meal_code%= locate(",", %meal_code%) > 0;
+%debug_meal_code% = cat(leg(duty), %meal_code%, ", ") where(%meal_code% <> "");
+/* ----- */
+
+/****************************************************************
+ * Section 1.2: Meal code variables.
+ *              These codes are set for each consumption flight, 
+ *              according to SAS rules
+ *
+ * Note: consumption_code is translated from meal_code through a
+ *       table lookup. The consumtion code handling is still to be rewritten and put into meal module.
+ ***************************************************************/
+
+/* comma separated string of meal codes, like "GO,VO" */
+export %meal_code% =
+  meal.%meal_code%;
+
+/* Check if any meal code is assigned */
+export %has_meal_code% = meal.%has_meal%;
+
+/* comma separated string of warm meal codes assigned(X, V, VO) */
+%meal_break_code% =
+  meal.%meal_code_break%;
+
+/* comma separated string of assigned meal code in flight (VO, GF, GO, SF) */
+export %meal_code_excl_meal_on_ground% =
+  meal.%meal_code_on_leg%;
+
+/* comma separated string of assigned meal codes on ground (X, V) */
+export %meal_on_ground_code% =
+  meal.%meal_code_after_leg%;
+
+export %opted_in_crew% = true;
+/*
+** Following function serve consumtion code evaluation and can be removed when rewritten
+** The meal during flight (VO) may also be a breakfast.
+ */
+%_has_double_breakfast% =
+   default(system_db_parameters.%agreement_valid%(%_skip_double_breakfast_agreement%, leg.%activity_scheduled_start_time_lt%), False) and
+   %_mc_breakfast% <> "" and %_mc_meal_flight% <> "" and
+    %_meal_to_consumption_codes%(%_mc_breakfast%, leg.%start_od_lt%, leg.%activity_scheduled_start_time_lt%) = 
+    %_meal_to_consumption_codes%(%_mc_meal_flight%, leg.%start_od_lt%, leg.%activity_scheduled_start_time_lt%); 
+        
+%_skip_double_breakfast_agreement% =
+  if meal.%meal_region% = "SKN" then
+    "meal_skip_double_breakfast_skn"
+  else if meal.%meal_region% = "SKD" then
+    "meal_skip_double_breakfast_skd"
+  else if meal.%meal_region% = "SKS" then
+    "meal_skip_double_breakfast_sks"
+  else
+    void_string;
+ 
+%_mc_breakfast% =
+  meal.%_mc_code_has%(meal.%mc_id_breakfast%);
+
+%_mc_mealbox% =
+  meal.%_mc_code_has%(meal.%mc_id_mealbox%);
+
+%_mc_bringown% =
+  meal.%_mc_code_has%(meal.%mc_id_bringown%);
+
+%_mc_meal_stop% =
+  meal.%_mc_code_has%(meal.%mc_id_stop%);
+
+%_mc_meal_ground_ac% =
+  meal.%_mc_code_has%(meal.%mc_id_at_ramp%);
+
+%_mc_meal_flight% =
+  meal.%_mc_code_has%(meal.%mc_id_in_flight%);
+
+/****************************************************************
+ * Section 2: Meal load variables
+ ***************************************************************/
+export %load_date% =
+  if %correction_flt_and_stn_prev_in_rotation% then
+    %_correction_flt_departure_lt%
+  else
+    leg.%start_lt%;
+
+/* Udor might be other day than load date.
+   That is why we need to calculate it.
+   Udor is not included in correction table. */
+export %load_udor% =
+  if %correction_flt_and_stn_prev_in_rotation% then
+    %_correction_flt_udor%
+  else
+    %_load_udor%;
+%load_udor_str% = format_time(%load_udor%, "%02d%b%Y");
+
+export %load_flight_nr% =
+  if %correction_flt_and_stn_prev_in_rotation% then
+    %load_flight_nr_corr%
+  else
+    %_load_flight_nr%;
+
+
+export %load_service_type% = meal.%service_type%;
+
+export %load_stn% =
+  if %correction_flt_and_stn_prev_in_rotation% then
+    %load_stn_corr%
+  else
+    %_load_stn%;
+
+export %load_supplier_id% =
+  /* First look for preferred supplier */
+  default(%supplier_id_pref%(%meal_region%, %load_stn%, %load_date%, service_type),
+    /* Look for not preferred supplier */
+      default(%valid_supplier_id%(%meal_region%, %load_stn%, %load_date%),
+        /* Just try to get DEFAULT supplier */
+        default(%supplier_id_default%(%load_date%),
+          /* Return dummy id when missing default entry*/
+          "missingDEFAULT")));
+
+
+/* Update meal variables */
+export %update_load_time% = 
+  if %update_load_flight_nr% <> %load_flight_nr% then
+    01Jan1986 0:00
+  else if %correction_flt_and_stn_prev_in_rotation% then
+    if %station_has_update_support%(%load_stn_corr%, %meal_region%, service_type, %_correction_flt_time%) then 
+      %_correction_flt_time%
+    else
+      01Jan1986 0:00
+  else
+    default(%_update_load_time%, 01Jan1986 0:00);
+
+
+export %update_load_stn% =
+  if %update_load_flight_nr% <> %load_flight_nr% then
+    "missingStation"
+  else    
+    %load_stn%;
+    
+export %update_load_supplier_id% =
+  if %update_load_flight_nr% <> %load_flight_nr% then
+    "missingSupplier"
+  else
+    default(%_update_load_supplier_id%, "missingSupplier");
+
+
+export %update_load_flight_nr% = 
+  if %correction_flt_and_stn_prev_in_rotation% then
+    if %station_has_update_support%(%load_stn_corr%, %meal_region%, service_type, %_correction_flt_time%) then 
+      %load_flight_nr_corr%
+    else
+      "missingFlight"
+  else
+    default(%_update_load_flight_nr%, "missingFlight");
+
+
+export %update_load_udor_str% = format_time(%update_load_udor%, "%02d%b%Y");
+%update_load_udor% = 
+  if %update_load_flight_nr% <> %load_flight_nr% then
+    01Jan1986 0:00
+  else if %correction_flt_and_stn_prev_in_rotation% then
+    if %station_has_update_support%(%load_stn_corr%, %meal_region%, service_type, %_correction_flt_time%) then 
+      %_correction_flt_udor%
+    else
+      01Jan1986 0:00
+  else
+    default(%_update_load_udor%, 01Jan1986 0:00);
+
+  
+/****************************************************************
+ * Section 2.1: Meal load corrections
+ ***************************************************************/
+%correction_flt_and_stn_prev_in_rotation% =
+  /* Correction flt and stn valid this weekday */
+  %load_corr_valid_today% and
+  /* Supplier exist at station */
+  not void(%valid_supplier_id%(%meal_region%, %load_stn_corr%, leg.%start_date%)) and
+  /* Flt and stn exist earlier in rotation */
+  default(%_correction_flt_and_stn_prev_in_rotation%, false);
+
+%_correction_flt_and_stn_prev_in_rotation% =
+  let corr_flt = %load_flight_nr_corr%,
+      corr_stn = %load_stn_corr%,
+      this_day = leg.%start_date%,
+      this_legnr  = %leg_nr_in_ac_rotation%;
+  transform(ac_rotations_ref,
+    any(leg(chain), leg.%flight_descriptor% = corr_flt and
+                    leg.%start_station% = corr_stn)
+    from (current) backwards
+    while (leg.%start_date% = this_day or
+           /*Stop traversing when no longer valid values*/
+           not void(%valid_corr_date%(leg.%udor%, this_day, this_legnr))));
+
+%_correction_flt_udor% =
+  let corr_flt = %load_flight_nr_corr%,
+      corr_stn = %load_stn_corr%,
+      this_day = leg.%start_date%,
+      this_legnr  = %leg_nr_in_ac_rotation%;
+  transform(ac_rotations_ref,
+            if (leg.%flight_descriptor% = corr_flt 
+                and leg.%start_station% = corr_stn) then
+                %valid_corr_date%(leg.%udor%, this_day, this_legnr)
+            else
+            prev(leg(chain), %valid_corr_date%(leg.%udor%, this_day, this_legnr))
+                where (leg.%flight_descriptor% = corr_flt and
+                       leg.%start_station% = corr_stn or
+           /*Stop traversing when no longer valid values*/
+           void(%valid_corr_date%(leg.%udor%, this_day, this_legnr))));
+
+%_correction_flt_time% =
+  let corr_flt = %load_flight_nr_corr%,
+      corr_stn = %load_stn_corr%,
+      this_day = leg.%start_date%,
+      this_legnr  = %leg_nr_in_ac_rotation%;
+  transform(ac_rotations_ref,
+    if (leg.%flight_descriptor% = corr_flt 
+                and leg.%start_station% = corr_stn) then
+                %valid_corr_date%(leg.%start_UTC%, this_day, this_legnr)
+    else
+    prev(leg(chain), %valid_corr_date%(leg.%start_UTC%, this_day, this_legnr))
+    where (leg.%flight_descriptor% = corr_flt and
+           leg.%start_station% = corr_stn or
+           /*Stop traversing when no longer valid values*/
+           void(%valid_corr_date%(leg.%udor%, this_day, this_legnr))));
+
+%_correction_flt_departure_lt% =
+  let corr_flt = %load_flight_nr_corr%,
+      corr_stn = %load_stn_corr%,
+      this_day = leg.%start_date%,
+      this_legnr  = %leg_nr_in_ac_rotation%;
+  transform(ac_rotations_ref,
+    if (leg.%flight_descriptor% = corr_flt 
+                and leg.%start_station% = corr_stn) then
+                %valid_corr_date%(leg.%start_lt%, this_day, this_legnr)
+    else
+    prev(leg(chain), %valid_corr_date%(leg.%start_lt%, this_day, this_legnr))
+    where (leg.%flight_descriptor% = corr_flt and
+           leg.%start_station% = corr_stn or
+           /*Stop traversing when no longer valid values*/
+           void(%valid_corr_date%(leg.%udor%, this_day, this_legnr))));
+
+%leg_nr_in_ac_rotation% = transform(ac_rotations_ref, %leg_nr_in_chain%);
+
+%valid_corr_date%(AbsTime answer, AbsTime date, Int referencelegnr) =
+  if leg.%start_date% = date then answer
+    else %valid_load_date%(answer, referencelegnr);
+  
+/****************************************************************
+ * Section 2.2: Meal load udor
+ ***************************************************************/
+
+/* Find the best flt udor (Prio: 1. preferred, 2. supplier) */
+%_load_udor% =
+  default(%best_preferred_load_udor%,
+    default(%best_load_udor%,
+      leg.%udor%));
+
+%best_preferred_load_udor% =
+  if %has_pref_supplier%(%meal_region%, service_type) then
+    leg.%udor%
+   else if %meal_region_is_same_in_rotation% then
+    transform(ac_rotations_ref, %prev_best_preferred_load_udor%)
+  else
+    void_abstime;
+    
+
+/* 
+ * The lookup is terminated if no preferred supplier is found within max legs
+ * backward. The return value from %valid_load% will then be void. This is
+ * to simulate a while statement, which is not allowed for this traverser.
+ */
+%prev_best_preferred_load_udor% =
+  let this_legnr  = %leg_nr_in_chain%,
+      this_day    = leg.%start_date_lt%,
+      this_stc    = service_type,
+      this_region = %meal_region%;
+  prev(leg(chain), %valid_load_date%(leg.%udor%, this_legnr))
+  where ((%has_pref_supplier%(this_region, this_stc) and leg.%start_date_lt% = this_day) or
+         not %valid_legnr%(this_legnr));
+
+%best_load_udor% =
+  if %has_supplier%(%meal_region%) then
+    leg.%udor%
+  else if %meal_region_is_same_in_rotation% then
+    transform(ac_rotations_ref, %prev_best_load_udor%)
+  else
+    void_abstime;
+    
+
+/* 
+ * The lookup is terminated if no supplier is found within max legs
+ * backward. The return value from %valid_load% will then be void. This is
+ * to simulate a while statement, which is not allowed for this traverser.
+ */
+%prev_best_load_udor% =
+  let this_legnr = %leg_nr_in_chain%,
+      this_day   = leg.%start_date_lt% ,
+      this_region = %meal_region%;
+  prev(leg(chain), %valid_load_date%(leg.%udor%, this_legnr))
+  where ((%has_supplier%(this_region) and leg.%start_date_lt% = this_day) or
+         not %valid_legnr%(this_legnr));
+
+/****************************************************************
+ * Section 2.3: Meal load flight nr.
+ ***************************************************************/
+/* Find the best flt nr (Prio: 1. preferred, 2. supplier) */
+%_load_flight_nr% =
+  default(%best_preferred_load_flight_nr%,
+    default(%best_load_flight_nr%,
+      leg.%flight_descriptor%));
+
+%best_preferred_load_flight_nr% =
+  if %has_pref_supplier%(%meal_region%, service_type) then
+    leg.%flight_descriptor%
+  else if %meal_region_is_same_in_rotation% then
+    transform(ac_rotations_ref, %prev_best_preferred_load_flight_nr%)
+  else
+    void_string;
+  
+
+/* 
+ * The lookup is terminated if no preferred supplier is found within max legs
+ * backward. The return value from %valid_load% will then be void. This is
+ * to simulate a while statement, which is not allowed for this traverser.
+ */
+%prev_best_preferred_load_flight_nr% =
+  let this_legnr  = %leg_nr_in_chain%,
+      this_day    = leg.%start_date_lt%,
+      this_stc    = service_type,
+      this_region = %meal_region%;
+  prev(leg(chain), %valid_load%(leg.%flight_descriptor%, this_legnr))
+  where ((%has_pref_supplier%(this_region, this_stc) and leg.%start_date_lt% = this_day) or
+         not %valid_legnr%(this_legnr));
+
+%best_load_flight_nr% =
+  if %has_supplier%(%meal_region%) then
+    leg.%flight_descriptor%
+  else if %meal_region_is_same_in_rotation% then
+    transform(ac_rotations_ref, %prev_best_load_flight_nr%)
+  else 
+    void_string;
+  
+/* 
+ * The lookup is terminated if no supplier is found within max legs
+ * backward. The return value from %valid_load% will then be void. This is
+ * to simulate a while statement, which is not allowed for this traverser.
+ */
+%prev_best_load_flight_nr% =
+  let this_legnr = %leg_nr_in_chain%,
+      this_day   = leg.%start_date_lt%,
+      this_region = %meal_region%;
+  prev(leg(chain), %valid_load%(leg.%flight_descriptor%, this_legnr))
+  where ((%has_supplier%(this_region) and leg.%start_date_lt% = this_day) or
+         not %valid_legnr%(this_legnr));
+
+/****************************************************************
+ * Section 2.4: Meal load station
+ ***************************************************************/
+/* Find the best load stn (Prio: 1. preferred, 2. supplier) */
+%_load_stn% =
+  default(%best_preferred_load_stn%,
+    default(%best_load_stn%,
+      leg.%start_station%));
+
+%best_preferred_load_stn% =
+  if %has_pref_supplier%(%meal_region%, service_type) then
+    leg.%start_station%
+  else if %meal_region_is_same_in_rotation% then
+    transform(ac_rotations_ref, %prev_best_preferred_load_stn%)
+  else
+    void_string;
+
+    
+/* 
+ * The lookup is terminated if no preferred supplier is found within max legs
+ * backward. The return value from %valid_load% will then be void. This is
+ * to simulate a while statement, which is not allowed for this traverser.
+ */
+%prev_best_preferred_load_stn% =
+  let this_legnr = %leg_nr_in_chain%,
+      this_day   = leg.%start_date_lt%,
+      this_stc    = service_type,
+      this_region = %meal_region%;
+  prev(leg(chain), %valid_load%(leg.%start_station%, this_legnr))
+  where ((%has_pref_supplier%(this_region, this_stc) and leg.%start_date_lt% = this_day) or
+         not %valid_legnr%(this_legnr));
+
+%best_load_stn% =
+  if %has_supplier%(%meal_region%) then
+    leg.%start_station%
+  else if %meal_region_is_same_in_rotation% then
+    transform(ac_rotations_ref, %prev_best_load_stn%)
+  else
+    void_string;
+      
+/* 
+ * The lookup is terminated if no supplier is found within max legs
+ * backward. The return value from %valid_load% will then be void. This is
+ * to simulate a while statement, which is not allowed for this traverser.
+ */
+%prev_best_load_stn% =
+  let this_legnr = %leg_nr_in_chain%,
+      this_day   = leg.%start_date_lt%,
+      this_region = %meal_region%;
+  prev(leg(chain), %valid_load%(leg.%start_station%, this_legnr))
+  where ((%has_supplier%(this_region) and leg.%start_date_lt% = this_day) or
+         not %valid_legnr%(this_legnr));
+
+
+/****************************************************************
+ * Section 2.5: Meal update time
+ ***************************************************************/
+
+/* The meal region may change when going from the roster view to the 
+ * rotation when the flight isn't found the the meal_flight_table.
+ * When missing, the region is determined by the hombase of the crew 
+ * in the roster view and the hombase of the plane in the rotation view.
+ * When this happens, it is not ok to search for load legs in the rotation
+ * view.   
+ */
+%meal_region_is_same_in_rotation% = 
+  if %meal_region% = transform(ac_rotations_ref, %meal_region%) then
+    True
+  else
+    False;
+
+
+%_update_load_time% =
+  if %has_update_supplier%(%meal_region%, service_type) then
+    leg.%start_UTC%
+  else if %meal_region_is_same_in_rotation% then
+    transform(ac_rotations_ref, %valid_update_load_time%)
+  else
+    void_abstime;
+
+/* 
+ * The lookup is terminated if no preferred supplier is found within max legs
+ * backward. The return value from %valid_load% will then be void. This is
+ * to simulate a while statement, which is not allowed for this traverser.
+ */
+%valid_update_load_time% =
+  let this_legnr  = %leg_nr_in_chain%,
+      this_stc    = service_type,
+      this_day    = leg.%start_date_lt%,
+      this_region = %meal_region%;
+  prev(leg(chain), %valid_load_date%(leg.%start_UTC%, this_legnr))
+  where (((%has_update_supplier%(this_region, this_stc)) and leg.%start_date_lt% = this_day) or
+         not %valid_legnr%(this_legnr));
+
+
+/****************************************************************
+ * Section 2.6: Meal update station
+ ***************************************************************/
+
+%_update_load_stn% =
+  if %has_update_supplier%(%meal_region%, service_type) then
+    leg.%start_station%
+  else if %meal_region_is_same_in_rotation% then
+    transform(ac_rotations_ref, %valid_update_load_stn%)
+  else
+    void_string;
+/* 
+ * The lookup is terminated if no preferred supplier is found within max legs
+ * backward. The return value from %valid_load% will then be void. This is
+ * to simulate a while statement, which is not allowed for this traverser.
+ */
+%valid_update_load_stn% =
+  let this_legnr = %leg_nr_in_chain%,
+      this_day    = leg.%start_date_lt%,
+      this_stc    = service_type,
+      this_region = %meal_region%;
+  prev(leg(chain), %valid_load%(leg.%start_station%, this_legnr))
+  where ((%has_update_supplier%(this_region, this_stc) and leg.%start_date_lt% = this_day) or
+         not %valid_legnr%(this_legnr));
+
+
+/****************************************************************
+ * Section 2.7: Meal update supplier
+ ***************************************************************/
+
+%_update_load_supplier_id% =
+  %supplier_id_update%(%meal_region%, %update_load_stn%, %update_load_time%, service_type);
+
+/****************************************************************
+ * Section 2.8: Meal update load flight number
+ ***************************************************************/
+%_update_load_flight_nr% =   
+  if %has_update_supplier%(%meal_region%, service_type) then
+    leg.%flight_descriptor%
+  else if %meal_region_is_same_in_rotation% then
+    transform(ac_rotations_ref, %prev_valid_update_load_flight_nr%)
+  else
+    void_string;
+
+/* 
+ * The lookup is terminated if no preferred supplier is found within max legs
+ * backward. The return value from %valid_load% will then be void. This is
+ * to simulate a while statement, which is not allowed for this traverser.
+ */
+%prev_valid_update_load_flight_nr% =
+  let this_legnr  = %leg_nr_in_chain%,
+      this_day    = leg.%start_date_lt%,
+      this_stc    = service_type,
+      this_region = %meal_region%;
+  prev(leg(chain), %valid_load%(leg.%flight_descriptor%, this_legnr))
+  where ((%has_update_supplier%(this_region, this_stc) and leg.%start_date_lt% = this_day) or not %valid_legnr%(this_legnr));
+
+
+/****************************************************************
+ * Section 2.9: Meal update load flight udor
+ ***************************************************************/
+
+%_update_load_udor% =
+  if %has_update_supplier%(%meal_region%, service_type) then
+    leg.%udor%
+  else if %meal_region_is_same_in_rotation% then
+    transform(ac_rotations_ref, %prev_valid_update_load_udor%)
+  else
+    void_abstime;
+
+/* 
+ * The lookup is terminated if no preferred supplier is found within max legs
+ * backward. The return value from %valid_load% will then be void. This is
+ * to simulate a while statement, which is not allowed for this traverser.
+ */
+%prev_valid_update_load_udor% =
+  let this_legnr  = %leg_nr_in_chain%,
+      this_day    = leg.%start_date_lt%,
+      this_stc    = service_type,
+      this_region = %meal_region%;
+  prev(leg(chain), %valid_load_date%(leg.%udor%, this_legnr))
+  where ((%has_update_supplier%(this_region, this_stc) and leg.%start_date_lt% = this_day) or not %valid_legnr%(this_legnr));
+
+
+/****************************************************************
+ * Helper functions for meal load calculations
+/***************************************************************/
+%max_legs_bwd% = parameter 2
+  remark "Meal: Number of legs, to look backwards in Ac-Rotation, for supplier lookup";
+%valid_legnr%(Int referencelegnr) = %leg_nr_in_chain% >= referencelegnr - %max_legs_bwd%;
+%leg_nr_in_chain% = leg.%no_in_chain%;
+
+/* If the current legnr is less than actual legnr minus max legs bwd,
+ * a void_string will be returned, otherwise type (flight_nr or stn). */
+%valid_load%(String answer, Int referencelegnr) =
+  if %valid_legnr%(referencelegnr) then answer else void_string;
+/* If the current legnr is less than actual legnr minus max legs bwd,
+ * a void_abstime will be returned, otherwise udor. */
+%valid_load_date%(Abstime date, Int legnr) =
+  if %valid_legnr%(legnr) then date else void_abstime;
+
+
+%has_update_supplier%(String region, String stc) =
+  not void(%supplier_id_update%(region, leg.%start_station%, leg.%start_date%, stc)) and
+  %has_pref_supplier%(region, stc);
+
+%station_has_update_support%(String station, String region, String stc, AbsTime date) =
+  not void(%supplier_id_update%(region, station, date, stc)) and
+  not void(%supplier_id_pref%(region, station, date, stc)); 
+ 
+ 
+%has_pref_supplier%(String region, String stc) = 
+  not void(%supplier_id_pref%(region, leg.%start_station%, leg.%start_date%, stc));
+%has_supplier%(String region) =
+  not void(%valid_supplier_id%(region, leg.%start_station%, leg.%start_date%));
+
+/*debug start*/
+%is_loaded_in_advance% = %consumption_code% <> "" and %load_stn% <> leg.%start_station%;
+/*debug end*/
+
+/****************************************************************
+ * Section 3: Python report support
+              Contains what's needed for the python reports like:
+              iterators, variables, parameters,
+ ***************************************************************/
+/* Indicates if there is a meal code or not */
+export %has_consumption_code% = default(%consumption_code%, "") <> "";
+
+/* Used by batch to determine on wich day to run */
+export %order_horizon% = parameter 1
+  remark "Meal: Number of days, after today, to run Meal Order for";
+export %meal_rundate% = fundamental.%now% + (%order_horizon% * 24:00);
+
+/* Counting nr of meals of each type using the legs paritioned by the 
+ * iterator meal_set */
+export %meals% = count(iterators.leg_set);
+
+%meal_region% = meal.%meal_region%;
+
+/****************************************************************
+ * Section 3.1 : Iterators
+ ***************************************************************/
+/* Meal set iterator */
+export iterator meal_set =
+  partition(leg)
+  by(%consumption_code%, fundamental.%main_cat%);
+end
+
+/* Meal break set iterator */
+export iterator meal_code_set =
+  partition(leg)
+  by(%meal_code%);
+end
+
+/* Meal region iterator */
+export iterator meal_region_set =
+  partition(leg)
+  by(%meal_region%);
+end
+
+/* Load day */
+export %load_day% = round_down(%load_date%, 24:00);
+
+/* Load day iterator */
+export iterator load_day_set =
+  partition(leg)
+  by(%load_day%);
+end
+
+/* Load date iterator */
+export iterator load_date_set =
+  partition(leg)
+  by(%load_date%);
+end
+
+/* Has meal consumption code iterator */ 
+export iterator has_meal_set =
+  partition(leg)
+  by(%has_consumption_code%);
+end
+
+/* Load station iterator */
+export iterator load_stn_set =
+  partition(leg)
+  by(%load_stn%);
+end
+
+/* Load supplier iterator */
+export iterator load_supplier_set =
+  partition(leg)
+  by(%load_supplier_id%);
+end
+
+/* Update load time iterator */
+export iterator update_load_time_set =
+  partition(leg)
+  by(%update_load_time%);
+end
+
+/* Update load time iterator */
+export iterator update_load_stn_set =
+  partition(leg)
+  by(%update_load_stn%);
+end
+
+/* Load supplier iterator */
+export iterator update_load_supplier_set =
+  partition(leg)
+  by(%update_load_supplier_id%);
+end
+
+/* Service type iterator */
+export iterator load_service_type_set =
+  partition(leg)
+  by(%load_service_type%);
+end
+
+
+/****************************************************************
+ * Section 4: Table lookups
+ ***************************************************************/
+%consumption_code_table% = %etab_path%(%consumption_code_table_p%);
+%consumption_code_table_p% =
+  parameter "meal_consumption_code"
+  remark "Meal: Table with meal consumption codes and validity";
+table consumption_code(String in_meal_code, RelTime tod_lookup, AbsTime day_lookup, Int match) =
+  %meal_region%, fundamental.%main_cat%, service_type, in_meal_code,
+  tod_lookup, day_lookup, match ->
+    String %__cons_code%;
+  external %consumption_code_table%;
+  region, maincat, stc, "meal_code", 
+  (start_time, end_time), (validfrom, validto), match_number ->
+    cons_code;
+  -, -, -, -, -, -, - -> "";
+end
+/* If consumption code missing in meal_code table -> empty string*/
+%_cons_code%(String in_meal_code, RelTime tod_lookup, AbsTime day_lookup, Int match)=
+  let conscode = %__cons_code%(in_meal_code, tod_lookup, day_lookup, match);
+  if void(%meal_description%(conscode)) then ""
+  else conscode;
+
+%meal_code_table% = %etab_path%(%meal_code_table_p%);
+%meal_code_table_p% =
+  parameter "meal_code"
+  remark "Meal: Meal code table";
+
+table meal_type_data(string mealcode) =
+  mealcode -> export string %meal_description%;
+  external %meal_code_table%;
+  code -> description;
+  - -> void_string;
+end
+
+%meal_supplier_table% = %etab_path%(%meal_supplier_table_p%);
+%meal_supplier_table_p% =
+  parameter "meal_supplier"
+  remark "Meal: Meal supplier table";
+
+table valid_meal_supplier(String region, String station, Abstime date) =
+  region, station, date, leg.%start_od% ->
+    String %valid_supplier_id%;
+  external %meal_supplier_table%;
+  region, station, (validfrom, validto(, (opening_time, closing_time)
+                -> supplier_id;
+  -, -, -, -    -> void_string;
+end
+
+table preferred_meal_supplier(String region, String station, Abstime date, String stc) =
+  region, station, date, leg.%start_od%, stc ->
+    String %supplier_id_pref%;
+  external %meal_supplier_table%;
+  region, station, (validfrom, validto(, (opening_time, closing_time),
+  pref_stc        ->  supplier_id;
+  -, -, -, -, -   ->  void_string;
+end
+
+
+table update_meal_supplier(String region, String station, Abstime date, String stc) =
+  region, station, date, leg.%start_od%, true, stc ->
+    String %supplier_id_update%;
+  external %meal_supplier_table%;
+  region, station, (validfrom, validto(, (opening_time, closing_time),
+  update_support, pref_stc        ->  supplier_id;
+  -, -, -, -, -, -   ->  void_string;
+end
+
+
+table supplier_id_default(Abstime date) =
+  "DEFAULT", %meal_region%, date ->
+    String %supplier_id_default%;
+  external %meal_supplier_table%;
+  supplier_id, region, (validfrom, validto( -> supplier_id;
+  -          , -     , -                    -> void_string;
+end
+
+%meal_customer_table% = %etab_path%(%meal_customer_table_p%);
+%meal_customer_table_p% =
+  parameter "meal_customer"
+  remark "Meal: Meal customer table";
+
+table meal_customer_data(string company, string region) =
+  company, region ->
+    export string %customer_department%,
+    export string %customer_phone1%,
+    export string %customer_phone2%,
+    export string %customer_fax%,
+    export string %customer_email%,
+    export string %invoice_companyname%,
+    export string %invoice_controlstaff%,
+    export string %invoice_addrname%,
+    export string %invoice_addrline1%,
+    export string %invoice_addrline2%,
+    export string %invoice_addrline3%;
+  external %meal_customer_table%;
+  company, region -> department, phone1, phone2, fax, email,
+                     invoicecompanyname, invoicecontrolstaff, invoiceaddrname,
+                     invoiceaddrline1, invoiceaddrline2, invoiceaddrline3;
+end
+
+%meal_region_table% = %etab_path%(%meal_region_table_p%);
+%meal_region_table_p% =
+  parameter "crew_region_set"
+  remark "Meal: Region table";
+
+table meal_region(string region) =
+  region -> export string %region_name%;
+  external %meal_region_table%;
+  id -> name;
+  - -> region;
+end
+
+%load_correction_table% = %etab_path%(%load_correction_table_p%);
+%load_correction_table_p% =
+  parameter "meal_load_correction"
+  remark "Meal: Load correction table";
+
+/* [acosta:07/073@16:17] Hack, so that user doesn't have to enter carrier
+* (and suffix).  Use of leg.%flight_descriptor% would be more appropriate,
+* but is more difficult to enter.*/
+%load_flight_nr_corr% =
+  concat("SK ", format_int(%_load_flight_nr_corr%, "%06d"), " ");
+
+table load_correction =
+  leg.%flight_nr%, %consumption_stn%, leg.%start_hb% ->
+    Int %_load_flight_nr_corr%,
+    String %load_stn_corr%,
+    String %load_weekdays%;
+external %load_correction_table%;
+  cons_flt, cons_stn, (validfrom, validto( ->
+        load_flt, load_stn, weekdays;
+  -, -, - ->
+    void_int, void_string,"_______";
+end
+
+export %cons_corr_valid%(Int flt_nr) =
+ locate(%int2str%(leg.%start_weekday%), meal.%cons_weekdays%(flt_nr)) > 0;
+ 
+export %load_corr_valid_today% =
+ locate(%int2str%(leg.%start_weekday%), %load_weekdays%) > 0;
+
+/* end of file */
+

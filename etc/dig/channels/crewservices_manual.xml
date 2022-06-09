@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- This is manual channel for crewservices that is used for testing
+     the MQ channel messages are created from a file where each line
+     is a message e.g:
+     
+     CrewList,SK 0875,20120201,N,Y,CPH,BKK,00:00,,Y,Y,Y,N,Y,N,N,N,,
+     CrewBasic,29982,20110301,Y,Y
+     CrewRoster,37954,Y,Y,N,Y,N,20120308,20120405
+     GetReport,DUTYCALC,3,24080,20120304,20120309
+     GetReport,DUTYOVERTIME,3,28332,MAR,2012
+     GetReportList,27268
+     FutureActivities,24835,20120301
+     CheckInOut,33616
+
+     The real MQ messages are recorded to a file in PROD and PROD_TEST and 
+     may be found at /var/carmtmp/logfiles/DIG/CQFREQ_LIVE
+
+ -->
+<process name="crewservices_manual"
+    dbConn="profile:live"
+    dbSchema="%(db/dave/live/schema)"
+    inOrder="True"
+    maxMessagesInChannel="20"
+    threadPoolSize="14"
+    messageAgeWarning="10s"
+    messageAgeError="90s"
+    continueOnMessageError="True">
+    <start_cmd>%(programs/dig/start_cmd)</start_cmd>
+
+    <reader class="carmensystems.dig.readers.file.FileLineReader"
+        filename="/var/carmtmp/logfiles/DIG/crewservices_manual_test.in"/>
+    <messagehandlers>
+        <messagehandler class="dig.xhandlers.ReportRequestBuilder"
+            delta="False"
+            overrideServerArgs="True"
+            serviceLookupClass="dig.xhandlers.RSLookup"
+            configFile="$(CARMUSR)/data/config/dig/queries/reports.services"
+            paramSeparator=","/>
+        <messagehandler class="dig.dispatchers.ReportCacheDispatcher"
+            cachingRequests="CrewBasic,CheckInOut,CrewRoster"
+            timeout="40"
+            archive_dir="%(services_archiver/archive_dir)"
+            defaultServer="rs_publish"
+            contentIsReports="False"
+            rs_publish="%(API/getServiceUrl/portal_publish)"
+            rs_scheduled="%(API/getServiceUrl/portal_scheduled)"
+            rs_latest="%(API/getServiceUrl/portal_latest)"/>
+        <messagehandler class="dig.xhandlers.CustomDaveWriter"
+            relaxTables="crew_notification,ci_frozen"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        <messagehandler class="dig.filehandlers.MessageRecorder"
+            log_file_prefix="crewservices_manual_test_out"
+            log_directory="/var/carmtmp/logfiles/DIG"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="performance"
+            class="carmensystems.dig.notifiers.file.FileNotifier"
+            formatterClass="dig.notifiers.PerformanceFormatter"
+            filename="/var/carmtmp/logfiles/DIG/performance/crewservices.log" />
+        <notifier category="fatal"
+            class="carmensystems.dig.notifiers.mail.MailNotifier"
+            host="%(dig_settings/mail/host)"
+            port="%(dig_settings/mail/port)"
+            sender="%(dig_settings/mail/from)"
+            recipients="%(dig_settings/mail/to)"
+            subject="DIG channel 'services' fatal error" />
+    </notifiers>
+</process>

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+    36.1    Long Term Flight Schedule
+    36.2.1  Short Term Flight Schedule changes
+    36.2.2  Ad Hoc flight Schedule changes
+
+    CR180: This channel now also handles message of following types:
+    37.1    Aircraft rotations, Initial Load
+    37.2    Flight Movements
+    37.3    Aircraft Rotation changes
+    37.4    Schooling and Training Flights
+ -->
+<process name="flt_planning"
+    dbConn="profile:live"
+    dbSchema="%(db/dave/live/schema)"
+    maxMessagesInChannel="40"
+    threadPoolSize="0"
+    continueOnMessageError="True"
+    messageAgeError="2m"
+    retry="True">
+    <start_cmd>%(programs/dig/start_cmd)</start_cmd>
+
+    <reader class="carmensystems.dig.readers.jmq.MQReader"
+        host="%(dig_settings/mq/server)"
+        port="%(dig_settings/mq/port)"
+        manager="%(dig_settings/mq/manager)"
+        channel="%(dig_settings/mq/channel)"
+        altUser="%(dig_settings/mq/altuser)"
+        queue="CQFTITA%(dig_settings/mq/sk_qsuffix)"
+        allowExpiry="True"
+        decode="False"
+        numToRead="-1"
+        enableMetaRequestMessage="False"/>
+    <!-- Temp config, to read from PROD queues on TEST system -->
+    <!--reader class="carmensystems.dig.readers.jmq.MQReader"
+        host="%(dig_settings/mq/server_prod)"
+        port="%(dig_settings/mq/port_prod)"
+        manager="%(dig_settings/mq/manager_prod)"
+        channel="%(dig_settings/mq/channel_prod)"
+        altUser="%(dig_settings/mq/altuser_prod)"
+        queue="CQFTITA%(dig_settings/mq/sk_qsuffix_prod)"
+        allowExpiry="True"
+        numToRead="-1"/-->
+    <messagehandlers>
+        <messagehandler class="dig.filehandlers.MessageRecorder"
+            log_file_prefix="CQFTITA_LIVE"
+            log_directory="/var/carmtmp/logfiles/DIG"/>
+        <messagehandler class="dig.messagesplitfilter.MessageSplitFilter"
+            linesize="200"/>
+        <messagehandler class="dig.dispatchers.OpusSsimDispatcher"
+            flightFilter="dig.xhandlers.isValidFlight"/>
+		<messagehandler class="carmensystems.dig.messagehandlers.aircrew.CrewAttacher"/>
+        <messagehandler class="dig.extendedsuffix.AttributeRemover"/>
+        <messagehandler class="dig.extpublishclient.PublicationHandler"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.dave.DaveWriter"
+            cacheSize="0"
+            ignoreOutOfOrder="True"
+            ageTimeout="-1"
+            idleTimeout="5"
+            raiseRetryErrors="True"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="message"
+            class="carmensystems.dig.notifiers.file.FileNotifier"
+            formatterClass="dig.notifiers.SKLogFormatter"
+            filename="/var/carmtmp/logfiles/DIG/errmsg/CQFTITA.msg" />
+        <notifier category="fatal"
+            class="carmensystems.dig.notifiers.mail.MailNotifier"
+            formatterClass="dig.notifiers.TracebackFormatter"
+            host="%(dig_settings/mail/host)"
+            port="%(dig_settings/mail/port)"
+            sender="%(dig_settings/mail/from)"
+            recipients="%(dig_settings/mail/to)"
+            subject="DIG channel 'flt_planning' fatal error" />
+    </notifiers>
+</process>

@@ -1,0 +1,200 @@
+/* -*- crc -*- */
+module crg_hotel
+
+import fundamental;
+import levels;
+import iterators;
+import leg;
+import duty;
+import crg_basic;
+import crg_date;
+import crg_crew_pos;
+import hotel;
+
+/* The Hotel report always uses Local Time. 
+   No other time mode makes sense */
+
+/* 
+** Interface to rules/cost modelling
+** -----------------------------------------------------------
+** By default bound to the standard concept hotel module
+*/
+
+%earliest_check_in% = hotel.%duty_check_in%;
+%latest_check_out% = hotel.%duty_check_out%;
+
+/* 
+ * Above variables should be getting data from a hotel etable
+ * with the correct values for each hotel. If this is data
+ * is not available, then use dummy values like these:
+
+%earliest_check_in% = parameter 10:00;
+%latest_check_out% = parameter 18:00;
+%transport_time% = parameter 1:00;
+
+*/
+
+%hotel_check_in_date% = hotel.%duty_rest_check_in_date%;
+%hotel_check_out_date% = hotel.%duty_rest_check_out_date%;
+
+/*
+ * Above two variables use the night stop calculation from the
+ * rules/cost modelling. Thus the number of nights will be
+ * exactly the same in the Hotel report as in the cost function.
+ *
+ * If you for some reason want the Hotel report to do its own
+ * calculation, then it should look like this:
+
+%hotel_check_in_date% =
+  round_down((duty.%end_lt% + %transport_time% - %earliest_check_in%), 24:00);
+%hotel_check_out_date% =
+  round_down((next(duty(trip), duty.%start_lt%) - %transport_time% + 
+              (24:00 - %latest_check_out%)), 24:00);
+*/
+
+/* ----------------------------------------------------------- */
+
+%days% = crg_basic.%report_pp_days% + crg_basic.%extra_days%;
+
+iterator layover_duty_set =
+  partition(duty)
+  by(%layover_arrival_flight%,%layover_departure_flight%,
+     %duty_arrival_time_lt%,%duty_departure_time_lt%);
+/* use proper flight identifiers + deadhead ! */
+end
+
+%flight_arrival_time_lt% = last(leg(duty), leg.%end_lt%);
+%duty_arrival_time_lt% =  duty.%end_lt%;
+%hotel_arrival_time_lt% =
+  %duty_arrival_time_lt% + hotel.%duty_transport_time_apt_to_hotel%;
+
+%flight_departure_time_lt% = 
+  next(duty(trip), first(leg(duty), leg.%start_lt%));
+%duty_departure_time_lt% = next(duty(trip),duty.%start_lt%);
+%hotel_departure_time_lt% =
+  %duty_departure_time_lt% -
+  next(duty(trip),hotel.%duty_transport_time_hotel_to_apt%);
+
+%hotel_arrival_date_lt% = 
+  round_down(%hotel_arrival_time_lt%, 24:00);
+%hotel_departure_date_lt% = 
+  round_down(%hotel_departure_time_lt%, 24:00);
+
+%layover_arrival_flight% = last(leg(duty), leg.%flight_nr%);
+%layover_departure_flight% = 
+  next(duty(trip), first(leg(duty), leg.%flight_nr%));
+
+%layover_arrival_dh_info% = 
+  last(leg(duty), crg_basic.%dh_mark%);
+%layover_departure_dh_info% = 
+  next(duty(trip), first(leg(duty), crg_basic.%dh_mark%));
+
+%need_room_in_period% =
+ any(duty_set,
+  not is_last(duty(trip)) and
+  (%hotel_check_out_date% > crg_basic.%report_pp_start% and
+   %hotel_check_in_date% <= crg_basic.%report_pp_end% + crg_basic.%extra_days%*24:00));
+
+%book_hotel_this_date_ix% =
+  crg_date.%ix% >= %hotel_check_in_date% and
+  crg_date.%ix% < %hotel_check_out_date%;
+
+%print_day_info_ix% =
+  crg_date.%ix% >= %hotel_check_in_date% and
+  crg_date.%ix% <= %hotel_check_out_date%;
+
+
+%airport_sum_ix% =
+  sum(duty_set, default(crg_crew_pos.%trip_assigned_sum%(crg_crew_pos.AllCat,
+                                                 crg_crew_pos.SingleTrip),
+                    /* Dummy expression to 'level cast' */
+                    duty.%days%-duty.%days%))
+  where(%need_room_in_period% and %book_hotel_this_date_ix%);
+
+%airport_sum_ix_pretty% =
+  if %airport_sum_ix% = 0 then " " else format_int(%airport_sum_ix%,"%d");
+
+
+%potential_room_reduction_ix_pretty% =
+  if %potential_room_reduction_ix% = 0 then " " 
+  else format_int(%potential_room_reduction_ix%,"%d");
+
+%potential_room_reduction_ix% =
+  default(
+     %airport_sum_ix% -
+     max(duty_set, %usage_at_arrival_ix%)
+     where(%need_room_in_period% and %book_hotel_this_date_ix%), 0);
+
+%usage_at_arrival_ix% =
+  let this_arr = nmax(crg_date.%ix% + %earliest_check_in%,
+                    %hotel_arrival_time_lt%);
+  sum(above(1), 
+    sum(duty_set, default(crg_crew_pos.%trip_assigned_sum%(crg_crew_pos.AllCat,
+                                                   crg_crew_pos.SingleTrip),
+                    /* Dummy expression to 'level cast' */
+                    duty.%days%-duty.%days%))
+    where (%hotel_arrival_time_lt% <= this_arr and
+           %hotel_departure_time_lt% > this_arr and
+           %hotel_departure_time_lt% > crg_date.%ix% + %latest_check_out%));
+
+
+%early_arrival% = 
+  time_of_day(%hotel_arrival_time_lt%) < %earliest_check_in%;
+%late_departure% = 
+  %latest_check_out% < time_of_day(%hotel_departure_time_lt%);
+
+%day_info_ix% =
+  if not %print_day_info_ix% then "   "
+  else if crg_date.%ix% = %hotel_arrival_date_lt%
+       and crg_date.%ix% = %hotel_departure_date_lt%
+    then %day_info_ad% 
+  else if crg_date.%ix% = %hotel_arrival_date_lt%
+    then %day_info_a% 
+  else if crg_date.%ix% = %hotel_departure_date_lt%
+    then %day_info_d% 
+  else if crg_date.%ix% < %hotel_arrival_date_lt% then " xx"
+  else if crg_date.%ix% > %hotel_departure_date_lt% then "xx "
+  else "---";
+
+%day_info_ad% =
+  if %early_arrival% and %late_departure% then "A-D" 
+  else if %late_departure% and not %early_arrival% then " AD"
+  else if %early_arrival% and not %late_departure% then "AD "
+  else "AD";
+
+%day_info_a% = 
+  if %early_arrival% then "A--"
+  else if time_of_day(%hotel_arrival_time_lt%) > %latest_check_out%
+    then " xA"
+  else " A-";
+
+%day_info_d% = 
+  if %earliest_check_in% > time_of_day(%hotel_departure_time_lt%)
+    then "Dx "
+  else if %late_departure%
+    then "--D"
+  else "-D ";
+
+/* Added functionality for hotel report By Niklas Johansson */
+
+/*%export_hotel_data% = parameter false remark "Export hotel data to csv format";*/
+enum report_source_enum = 
+  report_planned_db remark "DB_Planned";
+  report_planned remark "Planned";
+  report_performed remark "Performed";
+  report_forecast remark "Forecast";
+  remark "Report source";
+end
+
+%report_source% = parameter report_planned;
+
+%report_source_string% = 
+    if %report_source% = report_planned then
+        "Planned"
+    else if %report_source% = report_planned_db then
+        "DB_Planned"
+    else if %report_source% = report_performed then
+        "Performed"
+    else
+        "Forecast";
+

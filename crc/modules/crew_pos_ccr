@@ -1,0 +1,253 @@
+/* -*- crc -*-
+ *
+ *
+ *
+ * Purpose:
+ *   This module contains rostering additions to crew_pos.
+ *
+ * Created by:
+ *   Extracted from the Carmen Standard User, 07-Dec-2005
+ *
+ * Major changes:
+ *
+ */
+
+module crew_pos_ccr inherits crew_pos
+import crew;
+import trip;
+import training_matador;
+/*
+** Crew position
+*/
+
+/* The current functions holds information about rank from crew-data.
+   If trip is in open time, then current rank will be same as
+   first assigned */
+/* Currently title rank is used here, which means that matador assigns according
+   to title rank and lower/higher calculations are performed with respect to
+   title rank. Crew normally have the same title and operational rank but crew on
+   training might have a lower operational rank */
+export %current_function% = default(crew.%crewrank_at_date%(leg.%start_hb%),
+                                    %assigned_function%);
+export %current_pos% = %func2pos%(substr(%current_function%,1,2));
+/* Map variable in matador uses this variable to determine what position to assign
+   a trip to crew as. This variable is calculated by matador for all trip-crew
+   combinations. Matador starts counting at 0, as opposed to 1 in studio */
+/* Note: %trip_active_start_homebase% returns the start time of the first leg in the */
+/* kernel of the trip in order to correctly evaluate the crew fucntion. */
+
+export %trip_active_start_homebase% = first(leg(trip), leg.%start_hb%) where (not leg.%is_deadhead%);
+%matador_current_function% = default(model_crew.%crewrank_at_date_by_id%(crew.%id%, %trip_active_start_homebase%),
+                                    %assigned_function%);
+%matador_current_pos% = %func2pos%(substr(%matador_current_function%,1,2));
+
+export %matador_assign% =
+    default(training_matador.%training_pos% - 1, %_matador_assign%);
+
+%_matador_assign% =
+  if trip.%is_pgt% or trip.%is_crm% or trip.%is_crmc% or trip.%has_cc_rec% or trip.%is_ast% or trip.%is_asf% or (trip.%is_ofdx% and booked_crew_position_9 > 0) then
+    8 /*TL - Training limited */
+  else if (trip.%is_opc% or trip.%is_pc%) and %matador_current_function% = "FR" then
+    1 /* FR flies as FP on PC/OPC's */
+  else if %matador_current_function% = "AS" then
+    /* Long haul AS should be assigned in own position on REC and AL trips.
+    In all other cases they should be assigned in AH */
+    if crew.%is_long_haul_trip_start% and
+        (trip.%has_long_haul_aircraft% or trip.%is_standby_line% or trip.%is_standby_long_haul% or trip.%has_active_LH_with_NX_ac%) then
+        5
+    else
+        6
+  else
+    %matador_current_pos% - 1; /* normal position but with matador indexing */
+
+export %matador_assign_second% =
+  if crew.%is_sim_instr_trip_start% and trip.%is_simulator% then
+    9 /*TR, included in fly below rank-function to allow a crew to be considered as both student and instructor*/
+  else if %matador_current_function% = "FC" then
+    1 /*FP*/
+  else if %matador_current_function% = "FP" then
+    2 /*FR*/
+  else if %matador_current_function% = "AP" or %matador_current_function% = "AS" then
+    6 /*AH*/
+  else if %matador_current_function% = "AH" and %ah_considered_for_ap% then
+    4 /*AP, this is actually above rank but we use the optimizer below rank function*/
+  else
+    -1; /* Forbidden */
+export %matador_assign_third% =
+  if %matador_current_function% = "FC" then
+    2 /*FR*/
+  else
+    -1; /* Forbidden */
+
+export %matador_assign_second_scc% =
+  if %matador_current_function% = "AH" and %ah_considered_for_ap% then
+    4 /*AP, this is actually above rank but we use the optimizer below rank function*/
+  else
+    -1; /* Forbidden */
+
+export %matador_assign_second_sim_instr% =
+  if crew.%is_sim_instr_trip_start% and trip.%is_simulator% then
+    9 /*TR, included in fly below rank-function to allow a crew to be considered as both student and instructor*/
+  else
+    -1; /* Forbidden */
+
+export %matador_assign_third_scc% =
+    -1; /* Forbidden */
+
+%ah_considered_for_ap% =
+  (((locate("AHP", trip.%name%) > 0) and crew.%is_ahp_trip_start%) or
+  ((locate("SCC", trip.%name%) > 0) and crew.%is_scc_trip_start%)) and %trip_has_no_booked_au_position%;
+
+/* This is used to determine if the trip has training that requires a real AP assigned in the AP position */
+%trip_has_no_booked_au_position% =
+  all(leg(trip), booked_crew_position_8 = 0);
+
+/*
+** Lower rank
+*/
+export %lower_rank% =
+  /* Position 4 and 8 are supernumerary positions and shouldn't be lower.
+     Position 1 (FC) and 5 (AP) are the highest positions in each category
+     and are never lower (could happen for crew with rank ex FA otherwise)
+     Position 9 and 10 are extra training positions and shall also not be lower
+     Position 7 for AS is not lower on short haul */
+  %current_pos% > 0 and /* To not get fbr on data error (AA) */
+  %assigned_pos% < 8 and
+  %assigned_pos% <> 4 and
+  %assigned_pos% > 1 and
+  %assigned_pos% <> 5 and
+  %assigned_pos% > %current_pos% and
+  /* Lower for AS as AH on AL only */
+  not (%current_pos% = 6 and %assigned_pos% = 7 and leg.%qual% <> "AL") and
+  not leg.%has_training_code%;
+
+export %trip_lower_rank% =
+  any(leg(trip), %lower_rank%);
+export %higher_rank% = %assigned_pos% < %current_pos%;
+export %above_or_below% =
+  %lower_rank% or %higher_rank%;
+
+export %lower_lower_rank% =
+  %lower_rank% and
+  %assigned_pos% > %current_pos% + 1;
+
+export %code% = default(%_code%, "");
+
+table pos_code_table =
+  %current_pos%, %assigned_pos%
+      -> string %_code%;
+  7, 8 -> "U";  /* AH -> AU */
+  7, 7 -> "";   /* AH -> AH */
+  7, 6 -> "H";  /* AH -> AS */
+  7, 5 -> "H";  /* AH -> AP, special case */
+
+  6, 8 -> "U";  /* AS -> AU */
+  6, 7 -> %code_AS_AH%;  /* AS -> AH, should not be considered as lower rank when on short haul */
+  6, 6 -> "";   /* AS -> AS */
+  6, 5 -> "H";  /* AS -> AP */
+
+  5, 8 -> "U";  /* AP -> AU */
+  5, 7 -> "L";  /* AP -> AH, special case */
+  5, 6 -> "L";   /* AP -> AS */
+  5, 5 -> "";   /* AP -> AP */
+
+  3, 4 -> "U";  /* FR -> FU */
+  3, 3 -> "";   /* FR -> FR */
+  3, 2 -> "H";  /* FR -> FP */
+  3, 1 -> "HH"; /* FR -> FC */
+
+  2, 4 -> "U";  /* FP -> FU */
+  2, 3 -> "L";  /* FP -> FR */
+  2, 2 -> "";   /* FP -> FP */
+  2, 1 -> "H";  /* FP -> FC */
+
+  1, 4 -> "U";  /* FC -> FU */
+  1, 3 -> "LL"; /* FC -> FR */
+  1, 2 -> "L";  /* FC -> FP */
+  1, 1 -> "";   /* FC -> FC */
+
+  &
+
+  -, - -> "";
+end
+
+%code_AS_AH% =
+  if leg.%qual% = "AL" then
+    "L"
+  else
+    "";
+
+export %trip_is_supernum% = any(leg(trip), %is_supernum%);
+
+export %is_supernum% =
+  crew.%is_pilot% and %assigned_pos% = 4
+  or
+  crew.%is_cabin% and %assigned_pos% = 8;
+
+export %is_supernum_cabin% =
+  crew.%is_cabin% and %assigned_pos% = 8;
+
+export %is_supernum_cockpit% =
+  crew.%is_pilot% and %assigned_pos% = 4;
+
+table pos_code_table2 =
+  %current_pos%, %assigned_pos%
+      -> export bool %valid_pos%;
+  /* Crew are always allowed in supernum and in training positions */
+  <4, 4 -> True;
+  >4, 8 -> True;
+  -, >8 -> True;
+
+  /* AH are allowed in own position, and AP position if they have SCC qualification */
+  7, 7 -> True;
+  7, 5 -> %ah_considered_for_ap%;
+
+  /* AS are allowed in AS only on longhaul, always in AH */
+  6, 7 -> not leg.%is_standby_line%;
+  6, 6 -> leg.%is_standby_line% or leg.%is_standby_long_haul% or any(leg(trip), leg.%qual% = "AL" or (leg.%qual% = "A2" and leg.%is_LH_with_NX_ac%)) where (leg.%is_active_flight%);
+
+  /* AP are allowed in AP and AH, but not AS due to lacking specific AS training */
+  5, 7 -> not leg.%is_standby%;
+  5, 5 -> True;
+
+  /* FR are only allowed in FP in simulator */
+  3, 3 -> True;
+  3, 2 -> leg.%is_simulator%;
+
+  2, 3 -> not leg.%is_standby%;
+  2, 2 -> True;
+
+  1, 3 -> not leg.%is_standby%;
+  1, 2 -> not leg.%is_standby%;
+  1, 1 -> True;
+
+  -, - -> False;
+end
+
+
+/*
+** Points calculation
+*/
+
+export %acting_commander% =
+  %assigned_function% = "FC" and
+  not (leg.%is_deadhead% or
+       leg.%is_supernum%);
+
+export %acting_copilot% =
+  %assigned_function% = "FP" and
+  not (leg.%is_deadhead% or
+       leg.%is_supernum%);
+
+redefine export %relief_pilot% =
+  %assigned_function% = "FR" and
+  not (leg.%is_deadhead% or
+       leg.%is_supernum%);
+
+/* this is defined here to avoid compilation error, this variable
+is only used in tracking*/
+
+export %chief_of_cabin% = false;
+
+/* end of file */
+

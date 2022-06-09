@@ -1,0 +1,256 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains soft (quality) rules used in Carmen Crew Rostering
+ *   and as studio only in Carmen Crew Tracking.
+ *
+ * Sections:
+ *   1. Functional rules
+ *   2. Special schedule rules
+ *
+ * Created by:
+ *   Henrik Albertson, 17-Feb-2005
+ *
+ * Major changes:
+ *
+ */
+
+root module rules_soft_ccr
+import fundamental;
+import base_utils;
+import levels;
+import crew_pos;
+import leg;
+import duty;
+import trip;
+import wop;
+import roster;
+import crew;
+import rule_exceptions;
+import freedays;
+import base_product;
+import bought_days;
+import roster_cost;
+import rest;
+import rules;
+
+/****************************************************************
+ * Section 1: Functional rules
+ ***************************************************************/
+/*
+** Rule:
+**    Only trips from home station.
+**
+** Description:
+**    Functional rule for optimisation and manually assignments.
+*/
+rule sft_only_trips_from_homebase_ALL =
+  valid roster.%check_rules% and
+        trip.%is_complete% and
+        trip.%in_pp% and
+        trip.%is_on_duty% and 
+        not default(prev(trip(wop), last(leg(trip), leg.%arrival_airport_base%)) = trip.%start_base%,false) and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+  trip.%start_base% = trip.%crew_homestation%;
+  startdate = trip.%start_UTC%;
+  failtext %only_trips_from_homebase_failtext%;
+  remark "(CCR) Soft: Only trips from the right home station";
+end
+
+%only_trips_from_homebase_failtext% =
+  if trip.%has_only_flight_duty% then
+    "Soft: Only trips from the right home station."
+  else
+    concat("Soft: Only trips from the right base (", trip.%code%, ")");
+
+/*
+** Rule:
+**    max weeks between free weekends.
+**
+** Description:
+**
+*/
+
+rule (off) sft_max_weeks_btw_ree_we_SKS_CC =
+  valid crew.%is_sks% and %cabin_crew%;
+
+  roster_cost.%quality_free_weekends_separation_volume% <= roster_cost.%quality_big_separation_between_free_weekends_limit_p% +
+                                rule_exceptions.%overshoot_int%(%pp_start%);
+
+  startdate  = %pp_start%;
+  failtext(Int value, Int limit) =
+        concat("Soft: Weeks btw free weekends", format_int(value, " %d"), format_int(limit, "[%d]"));
+  remark "Soft: Max weeks btw free weekends";
+end
+
+/*
+** Min freedays after SBY-line
+**
+**
+*/
+rule sft_min_freedays_after_sby_line_SKI =
+  valid roster.%check_rules% and
+        freedays.%valid_freedays_after_duty% and
+        crew.%is_ski% and
+        duty.%is_standby_line% and
+        not crew.%is_leased_duty_start%;
+
+  freedays.%freedays_after_duty% >= freedays.%min_required_freedays_after_duty_total_soft% -
+                           rule_exceptions.%overshoot_int%(duty.%start_utc%);
+                           
+  startdate  = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %sft_min_freedays_after_duty_ski_failobject%;
+  failtext(Int value, Int limit) = concat("Soft: F-days after prod(duty)", format_int(value, "%d"), format_int(limit, "[%d]"));
+  remark "Soft: Min freedays after production",
+  planner "Check that the number of freedays after scheduled production is "
+          "at least the number required according to the number of production "
+          "days.";
+end
+
+%sft_min_freedays_after_duty_ski_failobject% =
+  default(if not duty.%consecutive_duties_fw% then
+            last(leg(duty), leg.%failobject_departure%)
+          else
+            next(duty(chain) 
+            where (not duty.%is_freeday% or not duty.%is_off_duty_cmp% or
+                   (duty.%is_bought% and bought_days.%duty_bought_type% <> "F") or
+                   not duty.%consecutive_duties_fw%), duty.%failobject_start%),
+          duty.%failobject_start%);
+
+
+/*
+** Rule:
+**    Only assign trips to correct position
+**
+** Description:
+**    Functional rule
+*/
+rule sft_correct_assigned_pos_ALL =
+  valid roster.%check_rules% and
+        leg.%is_on_duty% and
+        not leg.%is_pact% and
+            (leg.%is_active_flight% or leg.%is_standby%) and
+        leg.%starts_in_pp% and
+        rule_exceptions.%rule_on%(leg.%start_UTC%);
+  crew_pos.%valid_pos%;
+  startdate = leg.%start_UTC%;
+  failtext "Soft: Crew should be assigned in a valid position";
+  remark "(CCR) Soft: Only assignment in valid position";
+end
+
+/*
+** Rule:
+**    Incorrect planned duty, should start and end 23:00 utc not 00:00 
+**
+** Description:
+**
+**
+**
+** Agreement:
+**    ?????
+*/
+rule sft_correct_planned_activity_ALL =
+  valid base_product.%is_rostering% and 
+       roster.%check_rules% and
+        leg.%in_pp% and
+        leg.%is_rest%;
+  
+  leg.%correct_planed_activity%;
+ 
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = leg.%failobject_departure%;
+  failtext "Coll: Incorrect planned activity, full day should start and end at 00:00 HB time";
+  remark "(CCR) Coll: Incorrect planned activity",
+  planner "";
+end
+
+/*
+** Rule:
+**   Minimum buffered rest after trip
+*/
+
+rule min_buffered_rest_after_trip =
+    valid base_product.%is_rostering% and
+          roster.%check_rules% and
+          rest.%use_additional_rest% and
+          %trip_rest_end_in_pp_extended% and
+          trip.%is_on_duty% and
+          not is_last(trip(wop)) and
+          not trip.%is_rest% and
+          %min_buffered_rest_after_trip_required% > 0:00;
+
+    trip.%rest_time% >= %min_buffered_rest_after_trip_required%
+                        - rule_exceptions.%overshoot_rel%(trip.%end_UTC%);
+
+    startdate = trip.%end_UTC%;
+    failobject = next(trip(roster), trip.%failobject_start%);
+    failtext(reltime value, reltime limit) =
+        rules.%failtext_rel%("Soft: Minimum buffered rest after trip", value, limit);
+    remark "Soft: Minimum buffered rest after trip",
+    planner "This rule ensures that the required rest after a trip containing a flight number"
+            "defined in the table additional_rest is met.";
+end
+
+%trip_rest_end_in_pp_extended% =
+    default(overlap(trip.%start_hb%,trip.%rest_end%,%pp_start%,%pp_end_extended%) > 0:00, false);
+
+%min_buffered_rest_after_trip_required% =
+    nmax(rest.%additional_rest_for_flight_after%,
+         next(trip(wop), rest.%additional_rest_for_flight_before%));
+    
+/*
+**  Rule:
+**  Heavy destinations first in wop if planned as round trip
+*/
+
+rule (off) sft_first_in_wop_destinations =
+    valid base_product.%is_rostering% and
+          roster.%check_rules% and
+          trip.%has_flight_duty% and
+          trip.%in_pp_extended% and
+          not crew.%is_temporary% and
+          %trip_to_first_in_wop_destination% and
+          rule_exceptions.%rule_on%(trip.%start_hb%);
+          
+          %is_first_trip_in_wop_vg_fg%;
+          
+    startdate = trip.%start_hb%;
+    failobject = first(trip(wop), trip.%failobject_start%);
+    failtext concat("Soft: Round trip to ",%failtext_first_in_wop_destination%, " should be placed first in wop");
+    remark "Soft: Round trip should be placed first in wop";
+   
+end
+
+%is_first_trip_in_wop_vg_fg% =
+if crew.%in_fixed_group_wop_start% then
+    is_first(trip(wop)) and trip.%start_day% - 24:00 = prev(trip(roster),trip.%end_day%) where (trip.%is_rest%)
+else 
+    is_first(trip(wop));
+
+%failtext_first_in_wop_destination% =
+first(leg(trip), leg.%end_station%);
+
+%trip_to_first_in_wop_destination% = first(duty(trip), %duty_to_first_in_wop_destination%);
+%duty_to_first_in_wop_destination% = first(leg(duty), %leg_to_first_in_wop_destination%);          
+%leg_to_first_in_wop_destination% = leg.%end_station% in first_in_wop_destinations and 
+                                    %apply_on_round_trip_destination%
+                                    and first(leg(trip), leg.%start_station% in first_in_wop_homebase_for_trip);
+
+%apply_on_round_trip_destination% =
+if %apply_first_in_wop_only_on_round_trips_p% then
+        default(leg.%end_station% = next(leg(duty), leg.%start_station%), false) and
+        default(leg.%start_station% = next(leg(duty), leg.%end_station%), false)
+else true;
+set first_in_wop_homebase_for_trip = parameter "ARN"
+    remark "Soft: Homebase for trip where first in wop rule should apply:";
+
+set first_in_wop_destinations = parameter "LPA", "TFS"
+    remark "Soft: Destinations to place first in wop:";
+%apply_first_in_wop_only_on_round_trips_p% = parameter true
+    remark "Soft: Apply first in wop only on round trips to same base";
+    
+/* end of file */

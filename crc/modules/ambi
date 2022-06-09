@@ -1,0 +1,121 @@
+/* -*- crc -*- 
+ *
+ * Support module for 43.2 Ambi List integration.
+ *
+ * This report is run every month to produce some kind of duty time summary
+ * for Danish crew.
+ *
+ * The AMBI value is produced by adding three components:
+ *
+ * (1) Corrected block time on flights with registration number starting
+ *     with 'OY' (Registered in Denmark)
+ * (2) Standby on Danish ground.
+ * (3) Base activities in Denmark.
+ *
+ * [acosta:07/089@12:07] First version.
+ */
+
+module ambi
+
+import crew;
+import duty;
+import iterators;
+import leg;
+import levels;
+import task;
+import salary;
+
+
+/* Parameters ******************************************************** {{{1 */
+group ambi_group = %ambi_norm_p%;
+
+export %ambi_norm_p% = parameter 6:00
+  remark "AMBI: AMBI norm hours per day";
+
+
+/* exported variables ************************************************ {{{1 */
+export %ambi_time% =
+  sum(leg(chain), %leg_ambi_time%);
+
+
+/* ambi_time_interval ************************************************ {{{1 */
+export %ambi_time_interval%(abstime s, abstime e) =
+  sum(leg(chain) where (%leg_start% >= s and %leg_end% < e), %leg_ambi_time%);
+
+
+/* leg_ambi_time ***************************************************** {{{1 */
+export %leg_ambi_time% =
+  %leg_ambi_oy_time% + %leg_ambi_sby_time% + %leg_ambi_gd_time%;
+
+
+/* leg_ambi_oy_time ************************************************** {{{1 */
+
+/*
+ * Danish crew on aircraft registered in Denmark (OY) will get "duty time".
+ */
+export %leg_ambi_oy_time% =
+  if %crew_is_ambi% and leg.%is_flight_duty% and substr(leg.%ac_reg% , 1, 2) = "OY" then
+    %leg_corrected_duty_time% 
+  else
+    0:00;
+
+/*
+ * Add 90 minutes if crew is active, 60 minutes if crew is passive.
+ * If next leg starts within 90 or 60 minutes, take that value instead.
+ */
+%leg_corrected_duty_time% = %leg_end% - %leg_start% + %correction%;
+
+%correction% =
+  if is_last(leg(chain)) then
+    %correction_value%
+  else
+    nmin(%correction_value%, next(leg(chain), %leg_start%) - %leg_end%);
+
+%correction_value% =
+  if leg.%is_deadhead% then
+    1:00
+  else
+    1:30;
+
+
+/* leg_ambi_sby_time ************************************************* {{{1 */
+
+/* All standby in Denmark */
+export %leg_ambi_sby_time% =
+  if %is_standby% and %crew_is_ambi% and %activity_in_denmark% then
+    %leg_end% - %leg_start%
+  else
+    0:00;
+
+
+/* leg_ambi_gd_time *************************************************** {{{1 */
+
+/* All base activities performed in Denmark */
+export %leg_ambi_gd_time% =
+  if %is_ground_duty% and %crew_is_ambi% and %activity_in_denmark% then
+    %leg_end% - %leg_start%
+  else
+    0:00;
+
+
+/* private variables ************************************************** {{{1 */
+%leg_start% = leg.%start_UTC%;
+%leg_end% = leg.%end_UTC%;
+
+%crew_is_ambi% =
+  crew.%is_SKD% or (crew.%is_SKI% and salary.%is_SKD%);
+%activity_in_denmark% = leg.%start_country% = "DK";
+
+%is_ground_duty% =
+  not leg.%is_flight_duty% and
+  not leg.%is_ground_transport% and
+  not %is_standby% and
+  leg.%is_on_duty% and
+  not duty.%has_no_duty_time_contribution%;
+%is_standby% =
+  task.%is_standby%(leg.%code%);
+
+
+/* modeline ********************************************************** {{{1 */
+/* vim: set fdm=marker: fdl=1 */
+/* eof */

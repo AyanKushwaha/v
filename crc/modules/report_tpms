@@ -1,0 +1,323 @@
+/* crc modules*/ 
+root module report_tpms
+import attributes;
+import base_utils;
+import crew; 
+import crew_pos; 
+import fundamental;
+import iterators;
+import keywords;
+import leg; 
+import levels; 
+import task;  
+import training; 
+import training_log;
+
+/* Basic crew export */
+export %crew_sel% = crew.%is_pilot% or crew.%is_cabin%; /* maybe also filter out retired crew, incomplete crew... */
+export %crew_first_name% = default(crew.%firstname%,"Noname");
+export %crew_last_name% = default(crew.%surname%, "Noname");
+export %crew_street%(Abstime d) = default(crew.%street%(d),"");
+export %crew_postal_code%(Abstime d) = default(crew.%postal_code%(d),"");
+export %crew_city%(Abstime d) = default(crew.%city%(d),"");
+export %crew_country%(Abstime d) = default(crew.%country%(d),"");
+export %crew_email%(Abstime d) = default(crew.%gen_email_addr%(d), default(crew.%phone_no%("Email", "work"), "Unknown email address"));
+
+/* Roster export support */
+%todays_midnight% = round_down(%now%,24:00);
+%tpms_roster_period_start% = %todays_midnight% - 1*24:00;
+%tpms_roster_period_end% = %todays_midnight% + 6*24:00;
+%tpms_roster_period_end_list% = %todays_midnight% + 60*24:00; /* 2021-08-26 PY: Increased to 60 days */
+
+export %leg_selected% =
+   leg.%start_utc% >=%tpms_roster_period_start% and 
+   leg.%start_utc% <%tpms_roster_period_end_list% and
+   crew.%debug_selected% and 
+   (leg.%is_training% or training_log.%leg_is_valid%);
+
+export %leg_ac_family% = training.%leg_ac_family%;
+
+set TH_courses_set = "TH1", "TH2", "TH3", "TH4", "TH5", "TH6"; /* TH course days */
+
+export %leg_training_type% =
+   if leg.%is_flight_duty% then 
+      "FLT"
+   else if leg.%is_simulator% then 
+      "SIM"
+   else if training.%is_any_cbt_leg% then 
+     if %leg_code% in TH_courses_set then
+           "GRD"
+     else
+        "CBT"
+   else
+       /* PY 2021-08-26: Remove CBT due to WEB2 and WEB3. */
+       /*
+       if %leg_code%="WEB2" or %leg_code%="WEB3" then
+           "CBT"
+       else
+       */
+        "GRD";
+
+%_unknown_or_instr_code% =
+   if substr(%leg_code%,1,2) = "OL" or substr(%leg_code%,1,2) = "OX"  then
+      %leg_code%
+   else 
+      concat("Unknown code ",%leg_code%);
+
+table leg_type_not_valid_training_log =
+      %leg_code%-> String %_leg_type_not_valid_training_log%;
+      "B"        -> "COURSE TIME";
+      "OL4"      -> "CRM INSTRUCTOR";
+      "OL5"      -> "CRM INSTRUCTOR";
+      "OL6"      -> "CRM INSTRUCTOR";
+      "OLCRM4"   -> "CRM INSTRUCTOR";
+      "OLCRM5"   -> "CRM INSTRUCTOR";
+      "OLCRM6"   -> "CRM INSTRUCTOR";
+      "OXI"      -> "INSTR DUTY CLASSROOM";
+      "S1"       -> "-";
+      "S2"       -> "-";
+      "S3"       -> "-";
+      "S4"       -> "-";
+      "S5"       -> "-";
+      "S6"       -> "-";
+      "S7"       -> "-";
+      "S8"       -> "-";
+      "S9"       -> "-";
+      "Y1"       -> "-";
+      "Y2"       -> "-";
+      "Y3"       -> "-";
+      "Y4"       -> "-";
+      "Y5"       -> "-";
+      "Y6"       -> "-";
+      "Y7"       -> "-";
+      "Y8"       -> "-";
+      "Y9"       -> "-";
+      "AC1"      -> "AC DEMO";
+      "AC2"      -> "AC DEMO";
+      "AC3"      -> "AC DEMO";
+      "AC4"      -> "AC DEMO";
+      "AC5"      -> "AC DEMO";
+      "AC6"      -> "AC DEMO";
+      "AC7"      -> "AC DEMO";
+      "AC8"      -> "AC DEMO";
+      "AC9"      -> "AC DEMO";
+      "INT2"     -> "COURSE";
+      "SI"       -> "COURSE";
+      "TH2"      -> "COURSE";
+      -          -> %_unknown_or_instr_code%;
+end
+
+export %leg_code% = default(training.%leg_code_redefined%, leg.%code%);
+
+export %leg_type% =
+   let ret = if not void(training_log.%leg_type%) then
+                if %leg_training_type% = "CBT"  then
+                    "COURSE WEB"
+                else if training_log.%leg_type% = "ETOPS LIFUS/LC" then
+                 
+                     if first(leg(trip),leg.%start_utc% ) = leg.%start_utc% then
+                       "ETOPS LIFUS"
+                     else
+                       "ETOPS LC"
+                else
+                    training_log.%leg_type%
+             else if task.%is_ol123%(task.%code%) then
+                "INSTR CC CLASSROOM"
+             else
+               %_leg_type_not_valid_training_log%;
+   if substr(ret,1,15)="CONVERSION REFR" then  
+      concat("CONV REFR",substr(ret,16,length(ret)-15))  /* TPMS needs max 20 characters */
+   else 
+      ret;
+
+/* this function is needed for debugging only */ /*TODO Remove */
+/*export %is_instructor% =
+   leg.%start_hb% >= round_down_month(%pp_start%) and 
+   leg.%start_hb% < round_up_month(%pp_start%+0:01) and 
+   (leg.%is_training% or training_log.%leg_is_valid%) and  
+   (%leg_type% = "INSTR CC CLASSROOM" or %leg_type% = "INSTR DUTY CLASSROOM"); */
+/* */ 
+%_is_instructor% =         
+   crew_pos.%assigned_function% = "TR" or 
+   %leg_type% = "LIFUS INSTR" or 
+   %leg_type% = "INSTR CC CLASSROOM";
+
+%qual_to_update_a3a4a5% =
+   let doc_qual = crew.%expiry_doc_any_ac_qual%("REC", "LC", leg.%start_hb%);
+   if doc_qual = "" then
+      %leg_type%
+   else
+      default(concat(%leg_type%, "_", doc_qual), %leg_type%);
+
+set a3a4a5_set = "A3", "A4", "A5";
+
+/* Sets of instructor and trainee activity codes that are different than normal OL-/OX-training code standard: */
+set crm_cc_act_set = "CRMC", "OLCRMC", "OXCRMC"; /* CRM for CC */
+set crm_fd_act_set = "CRM", "OLCRM", "OXCRM"; /* CRM for FD */
+set occ_crm_act_set = "OCCRM", "OXOCRM"; /* OCC CRM FD */
+set occ_crm4_act_set = "OCCRM4", "OLCRM4"; /* OCC CRM STO */
+set occ_crm5_act_set = "OCCRM5", "OLCRM5"; /* OCC CRM CPH */
+set occ_crm6_act_set = "OCCRM6", "OLCRM6"; /* OCC CRM OSL */
+set ocrc_act_set = "OCRC", "OLOCRC", "OXOCRC"; /* CRM Refresher */
+
+set pgt_act_set = "E1", "E2", "E3", "OXR"; /* RGT */
+set pgt_act_set_srch = "EH", "EJ", "EK";
+set pgt_emg_act_set = "E20", "E30", "E40", "E50", "E60", "OLE2", "OLE3", "OLE4", "OLE5", "OLE6"; /* Emergency RGT */
+set pgt_newhire_act_set = "EN1", "EN2", "EN3", "EN7", "OLT2", "OLT3"; /* PGT Newhire */
+set pgt_refresher_act_set = "EX1", "EX2", "EX3", "EX12", "EX13", "EX14", "EX16", "EX22", "EX23", "EX24", "EX26", "EX32", "EX33", "EX34", "EX36", "OLEX"; /* PGT Refresher */
+
+set rec_CX7_act_set = "CX7", "OLR"; /* REC CX7 */
+set REC_REFRESHER_set = "NF38", "NF52", "NF56", "Q2R", "Q3R", "Q4R"; /* REC REFRESHER */
+set REC_CONV_set = "N22", "N24", "N38", "Q2I", "Q2OC", "Q2TS", "Q3I", "Q3OC", "Q3TS", "Q4I", "Q4OC", "Q4TS"; /* REC CONV */
+
+set lifusb_act_set = "LIFUSB", "OXLIFB"; /* LIFUS Briefing */
+set lifus4_act_set = "LIF4", "LIFUS4", "OXLIF4"; /* LIFUS A4 */
+set lifus5_act_set = "LIF5", "LIFUS5", "OXLIF5"; /* LIFUS A5 */
+set lifus6_act_set = "LIF6", "LIFUS6", "OXLIF6"; /* LIFUS A3 */
+
+set wet_drill_act_set = "WD1", "WD2", "WD3", "OLWD"; /* Wet drill */
+
+/* TPMS - Qualification to be updated */
+export %qual_to_update% = 
+   if not %_is_instructor% then
+      /*Only  a value for trainees*/           
+      if %leg_type% = "LC" and leg.%qual% in a3a4a5_set then 
+         %qual_to_update_a3a4a5%
+      else if %leg_code% in pgt_newhire_act_set then
+         "PGT NEWHIRE" /* PGT EN */
+      else if %leg_code% in pgt_refresher_act_set then
+         "PGT REFRESHER" /* PGT EX */
+      else if %leg_code% = "CX7" then
+         "REC CX7"
+      else if %leg_code% = "CX8" then
+         "REC CX8"
+      else if %leg_code% = "N1" or %leg_code% = "N2" or %leg_code% = "N3" then
+         "" /* N1, N2, N3 shall not affect REC */
+      else if %leg_code% in REC_REFRESHER_set then
+         "REC REFRESHER" /* REFRESHER CRB => REC REFRESHER to affect REC */
+      else if %leg_code% in REC_CONV_set then
+         "REC CONV" /* CONVERSION => REC CONV to affect REC */
+      else
+         %leg_type%         
+   else
+      "";
+
+%_event_str% =
+   if %leg_code%in crm_cc_act_set then 
+      "CRMCC"
+   else if %leg_code%in crm_fd_act_set then 
+      "CRMFD"
+   else if %leg_code% in pgt_emg_act_set then 
+      "EMG"
+   else if %leg_code%= "OLT2" then /* Instr N-hire RGT A2 */
+      "EN2"
+   else if %leg_code%= "OLT3" then /* Instr N-hire RGT 38 */
+      "EN3"
+   else if %leg_code%= "OXETOP" then /* ETOPS (Extended Ops Briefing) */
+      "ETOPS"
+   else if %leg_code% in lifusb_act_set then 
+      "LIFUSB"
+   else if %leg_code%in lifus4_act_set then 
+      "LIFUS4"
+   else if %leg_code% in lifus5_act_set then 
+      "LIFUS5"
+   else if %leg_code% in lifus6_act_set then 
+      "LIFUS6"
+   else if %leg_code%in occ_crm_act_set then 
+      "OCCRM"
+   else if %leg_code%in occ_crm4_act_set then 
+      "OCRM4"
+   else if %leg_code%in occ_crm5_act_set then 
+      "OCRM5"
+   else if %leg_code%in occ_crm6_act_set then 
+      "OCRM6"
+   else if %leg_code%in ocrc_act_set then 
+      "OCRC"
+   else if %leg_code%= "OXI" then /* Classroom */
+      "B"
+   else if %leg_code% in rec_CX7_act_set then /* Recurrent/Renewal REC CX7 */
+      "CX7"
+   else if %leg_code% in pgt_act_set or substr(%leg_code%, 1, 2) in pgt_act_set_srch then 
+      "PGT"
+   else if %leg_code% in pgt_newhire_act_set then /*PGT Newhire */
+      "PGT_NEWHIRE"
+   else if %leg_code% in pgt_refresher_act_set then /*PGT Refresher */
+      "PGT_REFRESHER"
+   else if %leg_code% in wet_drill_act_set then 
+      "WET"
+   else if training.%is_new_wt_code_leg% then
+      training.%wt_code_full%
+   else 
+      void_string;
+
+%_event_activity_id% =
+   let len = length(%leg_code%);
+   if not void(%_event_str%) then 
+      %_event_str%
+   else if leg.%is_cc_inst_activity_ntc17% then
+      substr(%leg_code%, 3, len)
+   else if leg.%is_fd_inst_activity_ntc17% then
+      if locate("PERF", %leg_code%) > 0 then /* PERF/PERF2/PERF3/PERF4/PERF6  */
+         concat("PERF", substr(%leg_code%,len,len)) 
+      else if locate("PER", %leg_code%) > 0 then /* OXPER2/OXPER3/OXPER4/OXPER6 */
+         concat("PERF", substr(%leg_code%,len,len)) 
+      else 
+         substr(%leg_code%, 3, len)
+   else 
+      %leg_code%;
+
+%_grd_leg_id% =
+   if %leg_training_type%="GRD" or %leg_training_type%="CBT" then
+      concat("TPMS", %_event_activity_id%, leg.%start_station%, substr(base_utils.%abstime2str%(leg.%start_utc%),1,9))
+   else
+      "";
+
+/* TPMS - Event ID */
+export %leg_id% =
+   if leg.%is_flight_duty% then
+      base_utils.%int2str%(keywords.%trip_id%)
+   else if %leg_training_type%="GRD" or %leg_training_type%="CBT" then
+      %_grd_leg_id%
+   else 
+      keywords.%ground_uuid%;
+
+/* TPMS: CIRO_EMP_NUMBER_FIRST */
+export %leg_crew_id% = crew.%id%;
+
+/* TPMS: CIRO_EVENT_RANK */
+export %leg_crew_rank% = crew.%rank%;
+export %leg_titlerank% = crew.%titlerank_at_date%(leg.%start_utc%);
+export %leg_assigned_rank% = crew_pos.%assigned_function%;
+
+%course_name% = default(training.%course_name%(leg.%start_utc%),"");
+
+/* TPMS - Event training code 2  */
+export %event_training_code% =
+   if (leg.%is_any_lifus% and %course_name% <> "")  then   
+      concat(%leg_crew_rank%, "_", %course_name%)
+   else 
+      %leg_crew_rank%;
+
+/* TPMS - Simulator name */
+export %leg_sim_name% = 
+    if training.%is_new_wt_code_leg% then
+      training.%wt_code_full%
+    else
+      %leg_code%;
+export %leg_flight_carrier% = leg.%flight_carrier%;
+export %leg_flight_no% =
+   if leg.%is_flight_duty% then
+      base_utils.%int2str%(leg.%flight_nr%) 
+   else 
+      "";
+export %leg_ac_reg% =
+   if leg.%is_flight_duty% then  
+      default(leg.%ac_reg%,"") 
+   else
+      "";
+
+
+
+export %leg_ac_owner% = leg.%aircraft_owner%;
+
+/* eof */

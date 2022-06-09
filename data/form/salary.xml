@@ -1,0 +1,285 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- $Header$ -->
+<!-- XAMJ definition for salary run & export -->
+<!-- [acosta:06/255@12:33] Added tabbed views -->
+<!-- [acosta:07/064@14:37] Changed runtype presentation -->
+<!-- [acosta:08/111@15:48] Changed layout, now also using Jython. -->
+
+<views>
+<head>
+
+<title>Salary</title>
+
+<alias id="job_parameter_alias" source="job_parameter"/> <!-- Non-visible table used for disabling Send emails.-->
+
+<on-loaded>
+    setEventEnabled(on-changed, false);
+    model("carmensystems.mirador.tablemanager.salary_initiate_tables");
+    model("carmensystems.mirador.tablemanager.toggleMailingMenuItem", "NULL");
+    refreshClient();
+</on-loaded>
+
+<on-opened>
+    setEventEnabled(on-changed, true);
+</on-opened>
+
+<script><![CDATA[
+def strip_rows(s):
+    return "\n".join([r.strip() for r in s.split("\n")])
+
+def confirm_dialog(context, title="Confirmation",
+        head="Are you sure?", msg="Press OK to confirm.",
+        buttonmode="NULL"):
+    context.action('openForm', 'confirm.xml', 'modal', 'title='+strip_rows(title),
+        'head='+strip_rows(head), 'msg='+strip_rows(msg),
+        'buttonmode='+strip_rows(buttonmode), 'okaction=NULL', 'cancelaction=NULL')
+    return confirmButtonPressed(context) == 'OK'
+]]></script>
+
+<timer delay="15000">
+    refreshModel();
+    refreshClient();
+</timer>
+
+<action name="do_confirm" args="head,msg,arg1,arg2,arg3"><![CDATA[
+if confirm_dialog(context, head=head, msg=msg):
+    context.action("do_command", arg1, arg2, arg3)
+]]></action>
+
+<action name="do_command" args="arg1,arg2,arg3"><![CDATA[
+context.action('progress', 'true')
+context.action('submitClient')
+context.action('model', 'doCommand', arg1, arg2, arg3)
+context.action('refreshClient')
+context.action('progress', 'false')
+]]></action>
+
+<action name="validate" args=""><![CDATA[
+import java.text
+sdf = java.text.SimpleDateFormat("ddMMMyyyy")
+def convdate(fld):
+    x = context.sm.resolve(fld)
+    if x == 'NULL':
+        return -1
+    return sdf.parse(x).getTime()
+context.action('removeMessage', context.sm.resolve("${id_end_of_period}"))
+if convdate("${id_start_of_period}") > convdate("${id_end_of_period}"):
+    context.action('setMessage', 'id_end_of_period', "End date must be larger than start date", 'error')
+]]></action>
+
+<action name="toggle_mailing_menu_item" args="runid"><![CDATA[
+context.action("carmensystems.mirador.tablemanager.toggleMailingMenuItem", runid)
+]]></action>
+
+</head>
+
+<menu-bar>
+    <menu label="_F_ile">
+        <menu-item label="_J_ob Status...">
+            <on-click>
+             progress(true);
+             openForm("job.xml", frame, new, "channel=salary_manual", "submitter=salary_manual_jobs");
+             progress(false);
+            </on-click>
+        </menu-item>
+        <separator/>
+        <menu-item ref="exit_button"/>
+    </menu>
+
+    <menu label="_R_eporting">
+        <menu-item ref="id_report_button"/>
+        <menu-item ref="id_balance_button"/>
+        <menu-item ref="id_validity_button"/>
+    </menu>
+
+    <menu label="A_c_tions">
+        <menu-item ref="id_retro_button"/>
+        <menu-item ref="id_cancel_button"/>
+        <menu-item ref="id_remove_button"/>
+        <separator/>
+        <menu-item id="id_release_button" label="Re_l_ease Run"
+                filter.enabled="(&amp;(!(${id_pick}=NULL))(NULL=${id_pick[releasedate]})(!(${id_pick[admcode]}=T)))">
+            <on-click>
+                do_confirm("Do you want to release run ${id_pick[runid]}?", 
+                    "A job will be created that will release the run with ID ${id_pick[runid]}.
+                    An export file will be created and moved to a release area.
+                    A balancing report will also be created and sent by email.
+                    The job will be marked as released.",
+                   "release_run", "${id_pick[runid]}", "");
+            </on-click>
+        </menu-item>
+        <menu-item id="id_email_button" label="Send e-mails"
+                filter.enabled="(&amp;(!(NULL=${id_pick[releasedate]}))(!(${id_pick}=NULL))(${id_toggle}=true)(|(${id_pick[admcode]}=N)(${id_pick[admcode]}=R))(${id_pick[runtype]}=PERDIEM))">
+            <on-click>
+                do_confirm("Do you want to send e-mails for run ${id_pick[runid]}?", 
+                    "A job will be created that will send e-mails for run with ID ${id_pick[runid]}.",
+                   "email_run", "${id_pick[runid]}", "");
+            </on-click>
+        </menu-item>
+    </menu>
+
+    <menu label="_A_dmin">
+        <menu-item label="Admin Codes">
+            <on-click>openForm("cmsadm_table.xml", frame, new, "tablesource=salary_admin_code", "title=Admin Codes")</on-click>
+        </menu-item>
+        <menu-item label="Article Codes">
+            <on-click>openForm("cmsadm_table.xml", frame, new, "tablesource=salary_article", "title=Article Codes", "allowedit=true")</on-click>
+        </menu-item>
+        <menu-item label="Salary Regions">
+            <on-click>openForm("cmsadm_table.xml", frame, new, "tablesource=salary_region", "title=Salary Regions")</on-click>
+        </menu-item>
+        <menu-item label="Crew Exceptions">
+            <on-click>openForm("salary_crew_exclusions.xml", frame, new, "title=Crew Exceptions", "allowedit=true")</on-click>
+        </menu-item>
+        <menu-item label="Convertible Crew">
+            <on-click>openForm("salary_convertible_crew.xml", frame, new, "title=Convertible Crew", "allowedit=true")</on-click>
+        </menu-item>
+    </menu>
+</menu-bar>
+
+<!-- This invisible component is a cell from a temporary table which is used to toggle a menu entry.-->
+<table-cell id="id_toggle" source="tmp_menu_toggle" row="0" column="enable" visible="false"/>
+
+<box style.orientation="border">
+    <box style.orientation="border" style.constraints="Center">
+        <box style.orientation="border" style.constraints="North" label="Submit Job">
+            <box style.constraints="West">
+                <table-cell id="id_run_time" source="tmp_salary_run_id" row="0" column="starttime" label="Run time" editable="true" style.maxRadioCount="1" />
+                <table-cell id="id_run_type_expl" ref="id_run_time" column="runtype_expl" label="Run type" />
+                <table-cell id="id_admin_code_expl" ref="id_run_time" column="admcode_expl" label="Admin code" />
+                <button id="id_start_button" label="Start R_u_n" tooltip="Submit job to be handled by report server" style.width="120">
+                    <on-click>
+                        do_command("start_run", "", "");
+                    </on-click>
+                </button>
+            </box>
+            <box style.constraints="East">
+                <table-cell id="id_salary_system" ref="id_run_time" column="extsys" label="Salary system" />
+                <table-cell id="id_start_of_period" ref="id_run_time" column="firstdate" label="Start of period" />
+                <table-cell id="id_end_of_period" ref="id_run_time" column="lastdate" label="End of period">
+                    <on-changed>
+                        validate();
+                    </on-changed>
+                </table-cell>
+                <table-cell id="id_note" ref="id_run_time" column="note" style.width="200" label="Comment" />
+            </box>
+        </box>
+
+        <box style.orientation="border" style.constraints="Center" label="Previous Runs">
+            <box style.constraints="Center">
+                <table id="id_pick"
+                        source="salary_run_id" 
+                        columns="runid,extsys,runtype,firstdate,lastdate,starttime,releasedate,admcode,note"
+                        editable="false"
+                        table.selectionmode="SINGLE"
+                        table.cellselection="false"
+                        sort.ascending="false"
+                        sort.column="runid"
+                        style.grid="true"
+                        style.height="410"
+                        style.scroll="true"
+                        style.width="900">
+                    <columninfo column="runid" label="Run" editable="false" />
+                    <columninfo column="extsys" label="System" editable="false" />
+                    <columninfo column="runtype" label="Type" editable="false" />
+                    <columninfo column="firstdate" label="From" width="90" editable="false" />
+                    <columninfo column="lastdate" label="To" width="90" editable="false" />
+                    <columninfo column="starttime" label="Started at" width="120" editable="false" />
+                    <columninfo column="releasedate" label="Released at" width="120" editable="false" />
+                    <columninfo column="admcode" label="Code" editable="false" />
+                    <columninfo column="note" label="Comment" editable="false" />
+                    <on-selection-changed>
+                        toggle_mailing_menu_item("${id_pick[runid]}");
+                        refreshClient();
+                    </on-selection-changed>
+                </table>
+            </box>
+            <box style.orientation="border" style.constraints="South">
+                <box style.orientation="border" style.constraints="West" style.border="none">
+                    <button id="refresh_button" label="_R_efresh List" style.constraints="North"
+                            tooltip="Refresh list of previous runs" style.width="120">
+                        <on-click>
+                            progress(true);
+                            refreshModel();
+                            refreshClient();
+                            progress(false);
+                        </on-click>
+                    </button>
+                </box>
+                <box style.orientation="border" style.constraints="East" style.border="none">
+                    <box style.orientation="vertical" style.constraints="West" label="Reporting">
+                        <button id="id_report_button" label="S_h_ow Report"
+                                tooltip="Only available for Overtime and Per Diem" style.width="120"
+                                filter.enabled="(${id_pick[runtype]}=[[PERDIEM|OVERTIME|TEMP_CREW]])">
+                            <on-click>
+                                do_command("get_report", "${id_pick[runid]}", "${connection.properties[modelserver.url, value]}");
+                            </on-click>
+                        </button>
+                        <button id="id_balance_button" label="Email _B_alancing"
+                                tooltip="Sends Balancing Report (Afstemningsunderlag) to current user" style.width="120"
+                                filter.enabled="(!(${id_pick}=NULL))">
+                            <on-click>
+                                do_command("send_balancing", "${id_pick[runid]}", "${connection.properties[modelserver.url, value]}");
+                            </on-click>
+                        </button>
+                        <button id="id_validity_button" label="_V_alidity Check"
+                                tooltip="Show Validity Check report for selected run" style.width="120"
+                                filter.enabled="(!(${id_pick}=NULL))">
+                            <on-click>
+                                do_command("validity_check", "${id_pick[runid]}", "${connection.properties[modelserver.url, value]}");
+                            </on-click>
+                        </button>
+                    </box>
+                    <box style.orientation="border" style.constraints="Center" label="Export to File">
+                        <table-cell id="id_pick_format" source="tmp_salary_pick_format" row="0" column="format" label="Format" />
+                        <button id="id_export_button" label="E_x_port Run to File" style.constraints="South" style.width="120"
+                                tooltip="Create export file"
+                                filter.enabled="(!(${id_pick}=NULL))">
+                            <on-click>
+                                do_command("start_export", "${id_pick[runid]}", "${id_pick_format}");
+                            </on-click>
+                        </button>
+                    </box>
+                    <box style.orientation="vertical" style.constraints="East" label="Actions">
+                        <!-- Don't allow RETRO if already cancelled or already retro and not Chinese or Japanese crew. -->
+                        <button id="id_retro_button" label="Retr_o_ Run" style.width="120"
+                                tooltip="Start new run with differences compared to selected run"
+                                filter.enabled="(!(|(${id_pick[admcode]}=[[NULL|C|R]])(${id_pick[extsys]}=[[JP|CN]])))">
+                            <on-click>
+                                do_command("start_retro", "${id_pick[runid]}", "");
+                            </on-click>
+                        </button>
+                        <button id="id_cancel_button" label="_C_ancel Run" style.width="120"
+                                tooltip="Cancel run by creating new run with all values negated"
+                                filter.enabled="(!(|(${id_pick[admcode]}=[[NULL|C]])(${id_pick[extsys]}=[[JP|CN]])))">
+                            <on-click>
+                                do_command("start_cancel", "${id_pick[runid]}", "");
+                            </on-click>
+                        </button>
+                        <button id="id_remove_button" label="Re_m_ove Run" style.width="120"
+                                tooltip="Remove run from all tables"
+                                filter.enabled="(&amp;(!(${id_pick}=NULL))(${id_pick[admcode]}=T))">
+                            <on-click>
+                                do_command("remove_run", "${id_pick[runid]}", "");
+                            </on-click>
+                        </button>
+                    </box>
+                </box>
+            </box>
+        </box>
+    </box>
+
+    <vbox style.constraints="South">
+        <button id="exit_button" label="_E_xit" style.width="75"
+                tooltip="Close the Salary form">
+            <on-click>closeForm()</on-click>
+        </button>
+        <box style.border="line" style.border.width="1" style.border.color="gray">
+            <table-cell source="tmp_salary_messages" row="0" column="message"
+                        id="id_messages" editable="false" style.left="0"/>
+        </box>
+    </vbox>
+</box>
+
+</views>
+

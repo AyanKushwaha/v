@@ -1,0 +1,393 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains studio used in Carmen Crew Pairing.
+ *
+ * Sections:
+ *   1. Crew need rules 
+ *   2. Base Variants
+ *   3. Area checks
+ *   4. Performance management
+ *
+ * Created by:
+ *   Henrik Albertson, 19-Dec-2005
+ *
+ * Major changes:
+ *
+ */
+
+root module rules_studio_ccp
+import fundamental;
+import leg;
+import task;
+import trip;
+import levels;
+import crew_pos;
+import rule_exceptions;
+import rules;
+import base_product;
+
+/****************************************************************
+ * Section 1: Crew need rules
+ ***************************************************************/
+/*
+** Rule:
+**    Crew need must not exceed max crew seats
+**
+** Description:
+**    Check that the total crew need does not exceed the number of
+**    crew seats. Basically, this is a rule that controls that the
+**    service need entered in table crew_need_service is valid.
+**
+** Agreement:
+**    Functional
+*/
+/* WP448, Zilla24518, reducing possibilities that base variants turn illegal */
+export rule sft_need_greater_than_max_crew_seats_ALL =
+  valid trip.%check_rules% 
+        and leg.%is_flight_duty%
+        and not leg.%is_deadhead%
+		and leg.%starts_in_pp%;
+  %crew_need% <= %crew_seats% + 
+		 rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%);
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%(concat(%main_cat%,
+                                " crew seats ",
+                                leg.%ac_type%),
+                         value,
+                         limit);
+  remark "(CCP) GUI: Crew need must not exceed available seats",
+  planner "The rule check that the total crew need does not exceed"
+          " the number of crew seats. Basically, this is a rule that"
+          " controls that the service need entered in table"
+          " crew_need_service is valid.";
+end
+
+%main_cat% = if %flight_crew% then "flight" else "cabin";
+
+%crew_need% =
+  if %flight_crew% then
+    crew_pos.%total_flight_crew_need%
+  else crew_pos.%total_cabin_crew_need%;
+
+%crew_seats% =
+  if %flight_crew% then
+    leg.%max_flight_crew_seats%
+  else leg.%max_cabin_crew_seats%;
+
+/*
+** Rule:
+**    Number of booked crew must not exceed max crew seats
+**
+** Description:
+**    In CCP we compare booked crew with available seats while in
+**    CCR/CCT compare assigned crew with available seats.
+**
+** Agreement:
+**    Functional
+*/
+/* WP448, Zilla24518, reducing possibilities that base variants turn illegal */
+
+
+export rule sft_booked_greater_than_max_crew_seats_ALL =
+  valid trip.%check_rules% and
+        (%product% = "CCP" or %product% = "CCR" or
+        %is_roster%) and
+        leg.%is_flight_duty% and
+        not leg.%is_deadhead% and
+        not leg.%is_school_flight% and
+		    leg.%starts_in_extended_pp%;
+  %crew_booked% <= %crew_seats% +
+		 rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%);
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%(concat(%main_cat%,
+                                " crew seats ",
+                                leg.%ac_type%),
+                         value,
+                         limit);
+  remark "Soft: Booked crew must not exceed available seats",
+  planner "The rule checks that the total number of "
+          "booked(CCP)/assigned(CCR/CCT) crew "
+	      "does not exceed the number of crew seats.";
+end
+	
+table booked_crew =
+  %product%, %flight_crew% -> %crew_booked%;
+  /* In CCP and CCR we care about booked value, i.e. warn when open and assigned
+     positions are too many */
+  "CCP", true   -> crew_pos.%total_flight_crew_booked%;
+  "CCP", false  -> crew_pos.%total_cabin_crew_booked%;
+  /* In CCR and CCT we allow supernum positions to reduce the total value */
+  "CCR", true   -> crew_pos.%total_flight_crew_booked%;
+  "CCR", false  -> crew_pos.%total_cabin_crew_booked% - %cj_supernum_reduction%;
+  /* CCT only cares about assigned positions */
+  "CCT", true   -> crew_pos.%total_leg_rostered_fc%;
+  "CCT", false  -> crew_pos.%total_leg_rostered_cc% - %cj_supernum_reduction%;
+  &
+      -, true   -> crew_pos.%total_flight_crew_booked%;
+      -, false  -> crew_pos.%total_cabin_crew_booked%;
+end
+
+/* In general we count all crew, but CRJ doesn't have any extra seats and will
+   be illegal for all crew if there is training in AU. In reality the CC crew on
+   training will take a passenger seat or the extra seat in FD. When this isn't 
+   possible it is handled by the tracker. /EKG 090305 */
+%cj_supernum_reduction% =
+    if leg.%qual% = "CJ" and crew_pos.%leg_rostered_pos%(8) > 0 then
+        1
+    else 
+        0;
+    
+/****************************************************************
+ * Section 2: Base Variants
+ ***************************************************************/
+  
+/*
+** Rule: 
+**    Base variants time limit
+** 
+** Description:
+** The rule checks that deadheads added to beginning and end of a trip to 
+** produce base variants starts within a certain time interval at the start 
+** and end of the trips.
+**
+** Agreement:
+**    Functional
+*/
+
+export rule (off) sft_base_variants_time_limit_ALL =
+  valid trip.%check_rules% and
+        /*trip.%in_pp_extended%  
+        Removed since base variants vill be made for all marked trips in window
+        regardless of pp. 
+        all(leg(trip),crr_has_base_variant) 
+        Removed since crr_has_base_variant will not be true for the
+        temporary objects rules are evaluated on when building base variants.
+        /annao 2008-10-10*/
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+        
+ (if first(leg(trip),leg.%is_deadhead%) then
+      first(leg(trip),leg.%start_UTC% <= 
+            next(leg(trip),leg.%start_UTC%) - %minimum_start_time_before%) and
+      first(leg(trip),leg.%start_UTC% >= 
+            next(leg(trip),leg.%start_UTC%) - %maximum_start_time_before%)
+   else true) and
+   (if last(leg(trip),leg.%is_deadhead%) then
+       last(leg(trip),leg.%start_UTC% >=  
+            prev(leg(trip),leg.%end_UTC%) + %minimum_start_time_after%) and
+       last(leg(trip),leg.%start_UTC% <=  
+            prev(leg(trip),leg.%end_UTC%) + %maximum_start_time_after%)
+  else true);
+   
+  startdate = trip.%start_UTC%;
+  failtext %sft_base_variants_time_limit_ALL_failtext%; 
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %sft_base_variants_time_limit_ALL_failobject%;    
+  remark "(CCP) GUI: Base variants time limit",
+  planner "The rule checks that base variant deadheads starts within an interval", 
+  "at start and end of original trip.";
+end
+ 
+%sft_base_variants_time_limit_ALL_failtext% =
+  rules.%failtext_rel%("Soft: Base variant dh dep",
+                       time_of_day(%base_variants_value%),
+                       time_of_day(%base_variants_limit%));
+
+%base_variants_value% = 
+  if %first_base_variant_minimum_break% or
+     %first_base_variant_maximum_break%
+  then first(leg(trip),leg.%start_UTC%)
+  else last(leg(trip),leg.%start_UTC%);
+
+%base_variants_limit% = 
+  if %first_base_variant_minimum_break% 
+     then first(leg(trip),next(leg(trip),leg.%start_UTC%)) 
+                - %minimum_start_time_before%
+  else if %first_base_variant_maximum_break%
+     then first(leg(trip),next(leg(trip),leg.%start_UTC%))
+                - %maximum_start_time_before%
+  else if %last_base_variant_minimum_break%
+     then last(leg(trip),prev(leg(trip),leg.%end_UTC%))
+               + %maximum_start_time_after%
+  else last(leg(trip),prev(leg(trip),leg.%end_UTC%))
+            + %minimum_start_time_after%;
+
+
+%sft_base_variants_time_limit_ALL_failobject% = 
+   if %first_base_variant_minimum_break% or
+      %first_base_variant_maximum_break% 
+   then first(leg(trip), leg.%failobject_departure%)
+   else last(leg(trip), leg.%failobject_departure%);
+
+%first_base_variant_minimum_break% = 
+ first(leg(trip),leg.%is_deadhead%) and
+ first(leg(trip),leg.%start_UTC% > 
+       next(leg(trip),leg.%start_UTC%) - %minimum_start_time_before%);
+	   
+%first_base_variant_maximum_break% = 
+ first(leg(trip),leg.%is_deadhead%) and
+ first(leg(trip),leg.%start_UTC% < 
+       next(leg(trip),leg.%start_UTC%) - %maximum_start_time_before%);
+
+%last_base_variant_minimum_break% =
+ last(leg(trip),leg.%is_deadhead%) and
+ last(leg(trip),leg.%start_UTC% <  
+      prev(leg(trip),leg.%end_UTC%) + %minimum_start_time_after%);
+
+%last_base_variant_maximum_break% = 
+ last(leg(trip),leg.%is_deadhead%) and
+ last(leg(trip),leg.%start_UTC% >  
+      prev(leg(trip),leg.%end_UTC%) + %maximum_start_time_after%);
+ 
+%test% = all(leg(trip),crr_has_base_variant);
+
+%maximum_start_time_before% =
+  parameter 05:00
+  remark "Max time between first dh start and trip start for base variants";
+    
+%minimum_start_time_before% =
+  parameter 2:00
+  remark "Min time between first dh start and trip start for base variants";
+    
+%minimum_start_time_after% =
+  parameter 2:00
+  remark "Min time between trip end and last dh start for base variants";
+  
+%maximum_start_time_after% =
+  parameter 05:00
+  remark "Max time between trip end and last dh start for base variants";
+  
+/****************************************************************
+ * Section 3: Area checks
+ ***************************************************************/
+/*
+** Rule:
+**    Check that the ac-qual of all legs in a trip matches 
+**    the ac-qual set in crr_area keyword. 
+**
+** NB: Rule should be turned OFF in tracking and is therefore 
+**     turned OFF in parameter files for both Alertgenerator and Studio
+*/
+
+export rule sft_check_leg_ac_qual_against_trip_area_FC =
+  valid trip.%check_rules% and
+        trip.%in_pp_extended% and
+        %trip_is_for_FC% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+  
+        %all_legs_in_trip_matches_ac_qual% ;
+    
+  startdate = trip.%start_UTC%;
+  failtext "Soft: All legs in FC trip must have same qualification";
+  severity =  first(leg(trip), %severity_filter_int%(leg.%start_utc%,%duty_lh_region%));
+  failobject = trip.%failobject_start%;
+  remark "(CCR) Soft: All legs in FC trip must have same qualification",
+  planner "The rule checks if the time table has changed and a flight has "
+	        "changed ac-type as a consequence.";
+end
+
+%all_legs_in_trip_matches_ac_qual% =
+    let first_active_qual = first(leg(trip), leg.%code_for_areaqual%)
+                            where (leg.%is_active_flight%);
+    all(leg(trip), leg.%code_for_areaqual% = first_active_qual) where (leg.%is_active_flight%);
+  
+%trip_is_for_FC% = any(leg(trip),crew_pos.%leg_assigned_fc% > 0);
+
+/****************************************************************
+ * Section 4: Performance managmement
+ ***************************************************************/
+/*
+** Rule:
+**    Check that the ac-qual of all legs in a trip matches
+**    the ac-qual set in crr_area keyword.
+**
+** NB: Rule should be turned OFF in tracking and is therefore
+**     turned OFF in parameter files for both Alertgenerator and Studio
+*/
+
+%check_cur_pm%(String activity, Abstime s, Abstime e) =
+  leg.%code% = activity and leg.%start_hb% = s and leg.%end_hb% = e;
+/* %check_trail_pm%(String activity, Abstime s, Abstime e) =
+  if fundamental.%is_roster% then
+    false
+  else
+    default(next(leg(duty),%check_cur_pm%(activity, s, e)),false);
+%count_trail_pm%(String activity, Abstime s, Abstime e) =
+  count(equal_legs)
+    where (%check_trail_pm%(activity,s,e));*/
+
+%count_trail_pm_crew%(String activity, Abstime s, Abstime e) =
+  if default(next(leg(duty),%check_cur_pm%(activity, s, e)),false) then
+    leg.%assigned_crew_amount%
+  else
+    0;
+
+%count_trail_pm%(String activity, Abstime s, Abstime e) =
+  sum(equal_legs,%count_trail_pm_crew%(activity,s,e));
+
+%pm_matching_count%(String activity, Abstime s, Abstime e) =
+  prev(leg(duty),%count_trail_pm%(activity,s,e));
+
+export %pm_mentor_matching_count% =
+  %pm_matching_count%(task.%pm_activity_code%(true),leg.%start_hb%,leg.%end_hb%);
+export %pm_student_matching_count% =
+  %pm_matching_count%(task.%pm_activity_code%(false),leg.%start_hb%,leg.%end_hb%);
+
+
+export rule pm_nbr_matching_pmm =
+  valid trip.%check_rules% 
+        and trip.%in_pp_extended% 
+	and leg.%is_pm_student%
+	and rule_exceptions.%rule_on%(leg.%start_hb%);
+  %pm_mentor_matching_count% = 1 ;
+
+  startdate = leg.%start_hb%;
+  failtext "PM: PM activities should have exactly one matching mentor (PMM) activity"; 
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = trip.%failobject_start%;
+  remark "PM: There is no mentor activity matching this PM meeting",
+  planner "PM: PM activities should have exactly one matching mentor (PMM) activity";
+end
+
+export rule pm_nbr_matching_pm =
+  valid trip.%check_rules%
+        and trip.%in_pp_extended%
+        and leg.%is_pm_mentor% 
+	and rule_exceptions.%rule_on%(leg.%start_hb%);
+  %pm_student_matching_count% >= 1 ;
+
+  startdate = leg.%start_hb%;
+  failtext "PM: PMM activity should have at least one matching student (PM) activity";
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = trip.%failobject_start%;
+  remark "PM: There is no student activity matching this PM meeting",
+  planner "PM: PMM activities should have at least one matching student (PM) activity";
+end
+
+export rule ast_allowed_time_of_day =
+  valid trip.%check_rules%
+        and trip.%in_pp_extended%
+    and rule_exceptions.%rule_on%(leg.%start_hb%)
+    and leg.%is_ast%
+    and not (leg.%has_qual%("A3") or leg.%has_qual%("A4") or leg.%has_qual%("A5"));
+
+  scale_time(leg.%start_hb%, leg.%end_hb%, 0, 3:00, 7:00, 1) = 0:00;
+
+  startdate = leg.%start_hb%;
+  failtext "AST training is not allowed during time period 0300 - 0700";
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = trip.%failobject_start%;
+  remark "AST training is not allowed during time period 0300 - 0700",
+  planner "AST training is not allowed during time period 0300 - 0700";
+end
+
+/* end of file */
+

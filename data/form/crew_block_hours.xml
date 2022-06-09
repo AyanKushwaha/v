@@ -1,0 +1,293 @@
+<!-- $Header$ -->
+
+<!-- 
+Crew Block Hours application
+
+Maintain Pilots' log books:
+* blkhours    - Block hours per A/C family
+* logblkhrs   - Loggable block hours (reduced)
+* simblkhrs   - Simulator block hours
+* landings    - Landings
+
+The administrator can correct the accumulated data by adding manual entries to
+crew_log_acc_mod using this GUI.
+
+See also: CrewBlockHours.py, crewlog.py
+-->
+
+<views>
+<head>
+
+<title>Crew Block Hours</title>
+
+<alias id="filtered_stat_table" source="tmp_cbh_stat" filter="(!(accvalue_i=0))"/>
+
+<on-loaded>
+  setEventEnabled(on-changed, false);
+  model("init_wave_client", "cbh_initiate_tables");
+</on-loaded>
+
+<on-opened>
+  setEventEnabled(on-changed, false);
+  setFontSize("status_bar", "11");
+  setEventEnabled(on-changed, true);
+  setProperty("status_bar", "style.backgroundColor", "${tmp_cbh_form_info[0, status_colour]}");
+  setValue("status_bar", "${tmp_cbh_form_info[0, status_message]}");
+</on-opened>
+
+
+<!-- Jython actions --> 
+
+<!-- Change accumulator type (blkhours, logblkhrs, ...) -->
+<action name="change_typ" args="new_type"><![CDATA[
+context.action('setEventEnabled', 'on-changed', 'false')
+context.action('model', 'submit_trans')
+context.action('model', 'cbh_change_type', new_type)
+context.action('update_status_bar')
+context.action('setEventEnabled', 'on-changed', 'true')
+]]></action>
+
+
+<!-- create a new row -->
+<action name="create_new_row" args="typ"><![CDATA[
+# Find unique keys in current rows.
+view = context.sm.getContext().getView('tmp_cbh_acc_table', context.comp)
+seqno_list = [row['seqno'] for row in view.getEntityIterator(0)]
+
+# Add a new row in model_source.
+context.action('model', 'submit_trans')
+context.action('model', 'cbh_create_new_row')
+
+if typ == 'landings':
+    table_id = 'block_hour_table_i'
+else:
+    table_id = 'block_hour_table_r'
+
+# Find the row# (row_ix) that was added (the one that doesn't exist 
+# in seqno).  Set focus on column 2 of that row.
+row_ix = 0
+for row in view.getEntityIterator(0):
+    if row['seqno'] not in seqno_list:
+        # row@row_ix is the one that was added.
+        context.action('setFocus', table_id, str(row_ix), '2')
+        break
+    row_ix += 1
+
+context.action('update_status_bar')
+]]></action>
+
+
+<!-- change accumulator type to display/manipulate. -->
+<action name="change_typ" args="new_type"><![CDATA[
+context.action('setEventEnabled', 'on-changed', 'false')
+context.action('model', 'submit_trans')
+context.action('model', 'cbh_change_type', new_type)
+context.action('update_status_bar')
+context.action('setEventEnabled', 'on-changed', 'true')
+]]></action>
+
+
+<!-- delete row from the table -->
+<action name="delete_row" args="typ"><![CDATA[
+if typ == 'landings':
+    seqno = '${block_hour_table_i[seqno]}'
+else:
+    seqno = '${block_hour_table_r[seqno]}'
+context.action('model', 'submit_trans')
+context.action('model', 'cbh_delete_row', seqno)
+context.action('update_status_bar')
+]]></action>
+
+
+<!-- fetch new crew -->
+<action name="get_new_crew" args="empno"><![CDATA[
+context.action('setEventEnabled', 'on-changed', 'false')
+context.action('model', 'submit_trans')
+context.action('model', 'cbh_get_new_crew', empno)
+context.action('update_status_bar')
+context.action('setEventEnabled', 'on-changed', 'true')
+]]></action>
+
+
+<!-- save/apply changes -->
+<action name="save_changes" args="messages"><![CDATA[
+context.action('model', 'submit_opaq', "Crew Block Hours ${sel_empno} ${sel_name}")
+context.action('model', 'cbh_save_changes', messages)
+context.action('update_status_bar')
+]]></action>
+
+
+<!-- update status bar with messages from server -->
+<action name="update_status_bar" args=""><![CDATA[
+context.action('refreshClient')
+context.action('setProperty', 'status_bar', 'style.backgroundColor', 
+   context.sm.resolve("${tmp_cbh_form_info[0, status_colour]}"))
+context.action('setValue', 'status_bar',
+   context.sm.resolve("${tmp_cbh_form_info[0, status_message]}"))
+]]></action>
+
+</head>
+
+
+<!-- Top menu -->
+<menu-bar>
+  <menu label="File">
+    <menu-item ref="create_button"/>
+    <menu-item ref="remove_button"/>
+    <separator/>
+    <menu-item ref="save_button"/>
+    <menu-item ref="exit_button"/>
+  </menu>
+</menu-bar>
+
+
+<box style.orientation="border">
+  <box style.constraints="North" style.orientation="border">
+    <box label="Select Crew"  style.constraints="West" style.orientation="vertical" 
+        style.height="90" style.width="200">
+      <text-field id="crew_select" label="Emp No:" style.width="150" tooltip="Employee number (extperkey)"/>
+      <button label="Get _I_nformation" tooltip="Get information for crew member">
+        <on-click>
+          get_new_crew("${crew_select}");
+        </on-click>
+      </button>
+    </box>
+
+    <box label="Crew Details" style.constraints="Center" style.orientation="vertical" 
+        style.height="90" style.left="60" editable="false">
+      <table-cell id="sel_empno" label="Emp No:" source="tmp_cbh_crew_details" 
+          row="0" column="empno" inherit="true"/>
+      <table-cell id="sel_name" label="Name:" source="tmp_cbh_crew_details" 
+          row="0" column="name" inherit="true"/>
+      <table-cell label="Rank:" source="tmp_cbh_crew_details" row="0"
+          column="rank" inherit="true"/>
+    </box>
+  </box>
+
+
+  <box style.constraints="Center" style.orientation="border"
+      style.height="600">
+
+    <box style.constraints="North" style.orientation="border" style.left="60">
+      <table-cell id="sel_typ" label="Type:" source="tmp_cbh_crew_details" 
+          row="0" column="typ" inherit="true" nullable="false"
+          style.maxRadioCount="1" style.display.column="si">
+        <on-changed>
+          change_typ("${sel_typ}");
+        </on-changed>
+      </table-cell>
+    </box>
+
+    <box label="Manual Corrections" style.constraints="Center"
+        style.orientation="border" style.height="300">
+      <box style.constraints="Center" style.orientation="vertical">
+        <!-- we have two table components showing the same table but a
+        different set of columns, too bad that columninfo can't be filtered...
+        One view shows an integer column (for landings) and the other
+        accumulators will display their values as RelTimes. -->
+        <table id="block_hour_table_i" source="tmp_cbh_acc_table" 
+            columns="seqno,typ,crew,acfamily,tim,accvalue_i"
+            filter.visible="(${tmp_cbh_crew_details[0, typ]}=landings)"
+            sort.ascending="false"
+            sort.column="acfamily"
+            style.height="9999">
+          <columninfo column="seqno" visible="false"/>
+          <columninfo column="typ" visible="false"/>
+          <columninfo column="crew" visible="false"/>
+          <columninfo column="acfamily" label="AC Family" tooltip="Aircraft family"/>
+          <columninfo column="tim" label="Time" tooltip="Booking time for the change"/>
+          <columninfo column="accvalue_i" label="Value" tooltip="Value (number)"/>   
+        </table>
+        <table id="block_hour_table_r" source="tmp_cbh_acc_table" 
+            columns="seqno,typ,crew,acfamily,tim,accvalue_r"
+            filter.visible="(!(${tmp_cbh_crew_details[0, typ]}=landings))"
+            sort.ascending="false"
+            sort.column="acfamily"
+            style.height="9999">
+          <columninfo column="seqno" visible="false"/>
+          <columninfo column="typ" visible="false"/>
+          <columninfo column="crew" visible="false"/>
+          <columninfo column="acfamily" label="AC Family" tooltip="Aircraft family"/>
+          <columninfo column="tim" label="Time" tooltip="Booking time for the change"/>
+          <columninfo column="accvalue_r" label="Value" tooltip="Value (in hours and minutes)"/>   
+        </table>
+      </box>
+
+      <box style.constraints="South" style.orientation="horizontal">
+        <button id="create_button" label="Crea_t_e" style.width="75" 
+            tooltip="Insert a new row">
+          <on-click>
+            create_new_row("${sel_typ}");
+          </on-click>
+        </button>
+        <button id="remove_button" label="Remo_v_e" style.width="75" 
+            tooltip="Remove the selected row" 
+            filter.enabled="(!(&amp;(${block_hour_table_i[seqno]}=NULL)(${block_hour_table_r[seqno]}=NULL)))">
+          <on-click>
+            delete_row("${sel_typ}");
+          </on-click>
+        </button>
+      </box>
+    </box>
+
+    <box label="Accumulated Values" style.constraints="South"
+        style.orientation="vertical" style.height="300">
+      <box style.orientation="vertical">
+        <!-- as in the example above we have two table components, one that
+        shows int-values and one that shows values as RelTime's filter.visible
+        will decide which is used -->
+        <table id="stat_table_i" source="filtered_stat_table"
+            columns="seqno,validfrom,validto,itext,acfamily,accvalue_i"
+            filter.visible="(${tmp_cbh_crew_details[0, typ]}=landings)"
+            sort.column="seqno"
+            style.height="9999">
+          <columninfo column="seqno" visible="false"/>
+          <columninfo column="validfrom" visible="false"/>
+          <columninfo column="validto" visible="false"/>
+          <columninfo column="acfamily" editable="false" label="AC Family" tooltip="Aircraft family"/>
+          <columninfo column="itext" editable="false" label="Period" tooltip="Statistics for period"/>
+          <columninfo column="accvalue_i" editable="false" label="Value" tooltip="Value (number)"/>
+        </table>
+        <table id="stat_table_r"
+            source="filtered_stat_table"
+            columns="seqno,validfrom,validto,itext,acfamily,accvalue_r"
+            style.height="9999"
+            filter.visible="(!(${tmp_cbh_crew_details[0, typ]}=landings))"
+            sort.column="seqno">
+          <columninfo column="seqno" visible="false"/>
+          <columninfo column="validfrom" visible="false"/>
+          <columninfo column="validto" visible="false"/>
+          <columninfo column="acfamily" editable="false" label="AC Family" tooltip="Aircraft family"/>
+          <columninfo column="itext" editable="false" label="Period" tooltip="Statistics for period"/>
+          <columninfo column="accvalue_r" editable="false" label="Value" tooltip="Value (in hours and minutes)"/>
+        </table>
+      </box>
+    </box>
+  </box>
+
+  <box style.constraints="South" style.orientation="vertical">
+    <!-- Function Buttons -->
+    <box style.orientation="horizontal">
+      <button id="save_button" label="${tmp_wave_values[save_label, v]}"
+          style.width="75" tooltip="Submit changes">
+        <on-click>
+          <!-- forms.messages.local.any does not look like a good way to catch errors -->
+          save_changes("${forms.messages.local.any}");
+        </on-click>
+      </button>
+      <button id="exit_button" label="${tmp_wave_values[exit_label, v]}"
+          style.width="75" tooltip="Exit application">
+        <on-click>
+          closeForm();
+        </on-click>
+      </button>
+    </box>
+
+    <box id="statusbox" style.orientation="vertical"> 
+      <text-field id="status_bar" value="" editable="false"/>
+    </box>
+  </box>
+</box>
+</views>
+
+<!-- vim: set ts=2 sw=2 et smarttab: -->

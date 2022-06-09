@@ -1,0 +1,996 @@
+/* -*- crc -*- 
+* 
+* 
+*/
+
+/*******************************************************
+Select filters
+--------------------------------------------------------
+ 
+Contents:
+  Code used by select filters
+ 
+Org: Tomas Aronsson, Oct 2002
+
+Major changes:
+  6sep2008 - pergr:
+   * Moved alot in from studio_select_cct to use miniselect form in CCR as well.
+*******************************************************/
+
+module studio_select_ccr inherits studio_select
+import fundamental;
+import attributes;
+import crew;
+import freedays;
+import levels;
+import trip;
+import duty;
+import leg;
+import crew_pos;
+import planning_area;
+import annotations;
+import training;
+import recency;
+import calendar;
+import crg_crew_pos;
+import wop;
+
+/* Trip selects that need to be redefined */
+
+redefine %trip_is_sim_for_2_fc% =
+  trip.%is_simulator% and
+  training.%pc_opc_trip_intended_for_two_fc%;
+
+/* See WP NC-FAT 115 */
+/* crew_employment */
+export %crewrank_pilot% = crew.%ce_is_pilot_in_pp%;
+export %crewrank_FC% = crew.%ce_has_rank_in_pp%("FC");
+export %crewrank_FP% = crew.%ce_has_rank_in_pp%("FP");
+export %crewrank_FR% = crew.%ce_has_rank_in_pp%("FR");
+export %crewrank_cabin% = crew.%ce_is_cabin_in_pp%;
+export %crewrank_AP% = crew.%ce_has_rank_in_pp%("AP");
+export %crewrank_AS% = crew.%ce_has_rank_in_pp%("AS");
+export %crewrank_AH% = crew.%ce_has_rank_in_pp%("AH");
+
+export %planning_group_QA% = crew.%ce_has_planning_group_in_pp%("QA");
+export %planning_group_SKD% = crew.%ce_has_planning_group_in_pp%("SKD");
+export %planning_group_SKI% = crew.%ce_has_planning_group_in_pp%("SKI");
+export %planning_group_SKN% = crew.%ce_has_planning_group_in_pp%("SKN");
+export %planning_group_SKS% = crew.%ce_has_planning_group_in_pp%("SKS");
+export %planning_group_SVS% = crew.%ce_has_planning_group_in_pp%("SVS");
+export %filter_group_MFF% = crew.%is_mff%;
+
+export %base_CPH% = crew.%ce_has_base_in_pp%("CPH");
+export %base_OSL% = crew.%ce_has_base_in_pp%("OSL");
+export %base_STO% = crew.%ce_has_base_in_pp%("STO");
+export %base_SVG% = crew.%ce_has_base_in_pp%("SVG");
+export %base_TRD% = crew.%ce_has_base_in_pp%("TRD");
+export %base_BJS% = crew.%ce_has_base_in_pp%("BJS");
+export %base_NRT% = crew.%ce_has_base_in_pp%("NRT");
+export %base_SHA% = crew.%ce_has_base_in_pp%("SHA");
+
+export %station_CPH% = crew.%ce_has_station_in_pp%("CPH");
+export %station_HKG% = crew.%ce_has_station_in_pp%("HKG");
+export %station_OSL% = crew.%ce_has_station_in_pp%("OSL");
+export %station_STO% = crew.%ce_has_station_in_pp%("STO");
+export %station_SVG% = crew.%ce_has_station_in_pp%("SVG");
+export %station_TRD% = crew.%ce_has_station_in_pp%("TRD");
+export %station_BJS% = crew.%ce_has_station_in_pp%("BJS");
+export %station_NRT% = crew.%ce_has_station_in_pp%("NRT");
+export %station_SHA% = crew.%ce_has_station_in_pp%("SHA");
+
+/* Crew Xmas group */ 
+export %crewgroup_FD_SH_1% = freedays.%is_in_xmas_group%("01");
+export %crewgroup_FD_SH_2% = freedays.%is_in_xmas_group%("02");
+export %crewgroup_FD_SH_3% = freedays.%is_in_xmas_group%("03");
+export %crewgroup_FD_SH% = 
+    %crewgroup_FD_SH_1% or
+    %crewgroup_FD_SH_2% or 
+    %crewgroup_FD_SH_3%; 
+    
+export %crewgroup_FD_LH_1% = freedays.%is_in_xmas_group%("01A");
+export %crewgroup_FD_LH_2% = freedays.%is_in_xmas_group%("02A");
+export %crewgroup_FD_LH% = 
+    %crewgroup_FD_LH_1% or
+    %crewgroup_FD_LH_2%; 
+
+export %crewgroup_CC_F% = freedays.%is_in_xmas_group%("F");
+export %crewgroup_CC_P% = freedays.%is_in_xmas_group%("P");
+export %crewgroup_CC% = 
+    %crewgroup_CC_F% or
+    %crewgroup_CC_P%; 
+
+/* crew_contract */
+export %fulltime% = crew.%cco_is_fulltime_in_pp%;
+export %parttime% = crew.%cco_is_parttime_in_pp%;
+export %variable_group% = crew.%cco_in_variable_group_in_pp%;
+export %any_fixed_group% = crew.%cco_in_any_fixed_group_in_pp%;
+export %fixed_group% = crew.%cco_in_fixed_group_in_pp%;
+export %flex_group% = crew.%cco_in_5_4_flex_group_in_pp%;
+export %fv_group% = crew.%cco_in_fv_group_in_pp%;
+export %tempcrew% = crew.%cco_is_tempcrew_in_pp%;
+export %passive_plus% = crew.%cco_is_passive_plus_in_pp%;
+
+/*Contract change (see select.etab) */
+export %crew_has_contract_change_in_pp% = 
+  crew.%cco_any_contract_change_in_period%(%pp_start%, %pp_end%);
+
+/*
+** select filters based on etabs with crewId (fastSelectionGroup*.csl)
+*/
+
+export %crew_in_fast_select_group% = not void(%crew_in_select_etab%);
+
+table fast_group_crew_table =
+    crew.%id% 
+    -> String  %crew_in_select_etab%;
+    external %csl_string_1%;
+    CrewId  -> CrewId;
+    -       -> void_string;
+end
+
+export %crew_is_lh% = crew.%has_qln_lh_in_pp%;
+export %crew_is_sh_only% =
+  (not %crew_is_lh%) and (not %has_qual_FF%);
+
+%apt_gzp_expiry% = crew.%airport_qual_validto_max%("GZP", %pp_start%);
+%apt_fae_expiry% = crew.%airport_qual_validto_max%("FAE", %pp_start%);  
+%apt_fnc_expiry% = crew.%airport_qual_validto_max%("FNC", %pp_start%);
+%apt_hmv_expiry% = crew.%airport_qual_validto_max%("HMV", %pp_start%);
+%apt_inn_expiry% = crew.%airport_qual_validto_max%("INN", %pp_start%);
+%apt_lcg_expiry% = crew.%airport_qual_validto_max%("LCG", %pp_start%);
+%apt_lcy_expiry% = crew.%airport_qual_validto_max%("LCY", %pp_start%);
+%apt_sfj_expiry% = crew.%airport_qual_validto_max%("SFJ", %pp_start%);
+%apt_smi_expiry% = crew.%airport_qual_validto_max%("SMI", %pp_start%);
+%apt_jkh_expiry% = crew.%airport_qual_validto_max%("JKH", %pp_start%);
+%apt_thu_expiry% = crew.%airport_qual_validto_max%("THU", %pp_start%);
+%apt_uak_expiry% = crew.%airport_qual_validto_max%("UAK", %pp_start%);
+%apt_us_expiry% =  crew.%airport_qual_validto_max%("US",  %pp_start%);
+%apt_ewr_expiry% = crew.%airport_qual_validto_max%("EWR", %pp_start%);
+%apt_iad_expiry% = crew.%airport_qual_validto_max%("IAD", %pp_start%);
+%apt_ord_expiry% = crew.%airport_qual_validto_max%("ORD", %pp_start%);
+%apt_sea_expiry% = crew.%airport_qual_validto_max%("SEA", %pp_start%);
+
+export %has_ap_qual_FAE% = %apt_fae_expiry% > %pp_start%;
+export %has_ap_qual_GZP% = %apt_gzp_expiry% > %pp_start%;
+export %has_ap_qual_FNC% = %apt_fnc_expiry% > %pp_start%;
+export %has_ap_qual_HMV% = %apt_hmv_expiry% > %pp_start%;
+export %has_ap_qual_INN% = %apt_inn_expiry% > %pp_start%;
+export %has_ap_qual_LCG% = %apt_lcg_expiry% > %pp_start%;
+export %has_ap_qual_LCY% = %apt_lcy_expiry% > %pp_start%;
+export %has_ap_qual_SFJ% = %apt_sfj_expiry% > %pp_start%;
+export %has_ap_qual_SMI% = %apt_smi_expiry% > %pp_start%;
+export %has_ap_qual_JKH% = %apt_jkh_expiry% > %pp_start%;
+export %has_ap_qual_THU% = %apt_thu_expiry% > %pp_start%;
+export %has_ap_qual_UAK% = %apt_uak_expiry% > %pp_start%;
+export %has_ap_qual_US% = %apt_us_expiry% > %pp_start%;
+
+export %has_ap_qual_any_US% =
+    nmax(%apt_us_expiry%, %apt_ewr_expiry%, %apt_iad_expiry%, %apt_ord_expiry%, %apt_sea_expiry%) > %pp_start%;
+    
+/* Expired quals have validto larger than 1jan1986 (default protection value)
+   but less than pp_start */
+
+export %has_exp_ap_qual_FAE% = %apt_fae_expiry% > 1jan1986 and %apt_fae_expiry% <= %pp_start%;
+export %has_exp_ap_qual_GZP% = %apt_gzp_expiry% > 1jan1986 and %apt_gzp_expiry% <= %pp_start%;
+export %has_exp_ap_qual_FNC% = %apt_fnc_expiry% > 1jan1986 and %apt_fnc_expiry% <= %pp_start%;
+export %has_exp_ap_qual_HMV% = %apt_hmv_expiry% > 1jan1986 and %apt_hmv_expiry% <= %pp_start%;
+export %has_exp_ap_qual_INN% = %apt_inn_expiry% > 1jan1986 and %apt_inn_expiry% <= %pp_start%;
+export %has_exp_ap_qual_LCG% = %apt_lcg_expiry% > 1jan1986 and %apt_lcg_expiry% <= %pp_start%;
+export %has_exp_ap_qual_LCY% = %apt_lcy_expiry% > 1jan1986 and %apt_lcy_expiry% <= %pp_start%;
+export %has_exp_ap_qual_SFJ% = %apt_sfj_expiry% > 1jan1986 and %apt_sfj_expiry% <= %pp_start%;
+export %has_exp_ap_qual_SMI% = %apt_smi_expiry% > 1jan1986 and %apt_smi_expiry% <= %pp_start%;
+export %has_exp_ap_qual_JKH% = %apt_jkh_expiry% > 1jan1986 and %apt_jkh_expiry% <= %pp_start%;
+export %has_exp_ap_qual_THU% = %apt_thu_expiry% > 1jan1986 and %apt_thu_expiry% <= %pp_start%;
+export %has_exp_ap_qual_UAK% = %apt_uak_expiry% > 1jan1986 and %apt_uak_expiry% <= %pp_start%;
+export %has_exp_ap_qual_US% = %apt_us_expiry% > 1jan1986 and %apt_us_expiry% <= %pp_start%;
+
+export %has_exp_ap_qual_any_US% =
+    let exp = nmax(%apt_us_expiry%, %apt_ewr_expiry%, %apt_iad_expiry%, %apt_ord_expiry%, %apt_sea_expiry%);
+    exp > 1jan1986 and exp <= %pp_start%;
+
+/* These work well and do not have to be changed for WP NC-FAT 115 */
+%has_qual_36% = crew.%has_acqln_in_pp%("36");
+%has_qual_37% = crew.%has_acqln_in_pp%("37");
+%has_qual_38% = crew.%has_acqln_in_pp%("38");
+%has_qual_90% = crew.%has_acqln_in_pp%("90");
+%has_qual_A2% = crew.%has_acqln_in_pp%("A2");
+%has_qual_A3% = crew.%has_acqln_in_pp%("A3");
+%has_qual_A4% = crew.%has_acqln_in_pp%("A4");
+%has_qual_A5% = crew.%has_acqln_in_pp%("A5");
+%has_qual_AL% = crew.%has_acqln_in_pp%("AL");
+%has_qual_F5% = crew.%has_acqln_in_pp%("F5");
+%has_qual_M0% = crew.%has_acqln_in_pp%("M0");
+%has_qual_M8% = crew.%has_acqln_in_pp%("M8");
+%has_qual_FF% = crew.%has_acqln_in_pp%("FF");
+%has_qual_Q4% = crew.%has_acqln_in_pp%("Q4");
+%has_qual_CJ% = crew.%has_acqln_in_pp%("CJ");
+%has_qual_EJ% = crew.%has_acqln_in_pp%("EJ");
+%has_qual_A2A3% = crew.%is_a2a3_qualified_pp_start_or_end%;
+%has_qual_A2A5% = crew.%is_a2a5_qualified_pp_start_or_end%;
+
+%last_flown_36% = %last_flown_ac_qual%("36");
+%last_flown_37% = %last_flown_ac_qual%("37");
+%last_flown_38% = %last_flown_ac_qual%("38");
+%last_flown_90% = %last_flown_ac_qual%("90");
+%last_flown_A2% = %last_flown_ac_qual%("A2");
+%last_flown_A3% = %last_flown_ac_qual%("A3");
+%last_flown_A4% = %last_flown_ac_qual%("A4");
+%last_flown_A5% = %last_flown_ac_qual%("A5");
+%last_flown_AL% = %last_flown_ac_qual%("AL");
+%last_flown_CJ% = %last_flown_ac_qual%("CJ");
+%last_flown_EJ% = %last_flown_ac_qual%("EJ");
+%last_flown_F5% = %last_flown_ac_qual%("F5");
+%last_flown_M8% = %last_flown_ac_qual%("M8");
+%last_flown_ALL% = %last_flown_ac_qual%("ALL");
+
+%last_flown_3738% = 
+    if %has_qual_37% or %has_qual_38% then 
+        nmax(if %has_qual_37% then %last_flown_37% else 1jan1986,
+             if %has_qual_38% then %last_flown_38% else 1jan1986)
+    else
+        %_place_last%;
+        
+%last_flown_363738% =
+    if crew.%is_cabin% then
+        if %has_qual_36% or %has_qual_37% or %has_qual_38% then 
+            nmax(if %has_qual_36% then %last_flown_36% else 1jan1986,
+                 if %has_qual_37% then %last_flown_37% else 1jan1986,
+                 if %has_qual_38% then %last_flown_38% else 1jan1986)
+        else 
+            %_place_last%   
+    else if %has_qual_37% or %has_qual_38% then
+        /* 37/38 for FD SKN is the same ac family and we can 
+        ** therefor check only one*/ 
+        recency.%last_flown_ac_qual%("38", %pp_start%)
+    else
+        %last_flown_36%;
+        
+%last_flown_ac_qual%(String qual) =
+    if crew.%has_acqln_in_pp%(qual) or qual = "ALL" then
+        recency.%last_flown_ac_qual%(qual, %pp_start%)
+    else
+        %_place_last%;
+        
+%_place_last% = 
+    add_years(%pp_end%, 10);    
+ 
+/* These are slow methods, please don't use them in rudobs etc... */
+/*Adopted for A3,A for flightdeck */
+%has_only_qual_A3% =
+ any(times(%nr_days_in_pp%), 
+                %_has_only_a3_on_date%(%pp_iter_date%(%times_index_0%)));
+                               
+%has_only_qual_A4% =
+ any(times(%nr_days_in_pp%), 
+                %_has_only_a4_on_date%(%pp_iter_date%(%times_index_0%)));
+                               
+%has_only_quals_A3A4% =
+          any(times(%nr_days_in_pp%), 
+                    %_has_a3a4c_on_date%(%pp_iter_date%(%times_index_0%)));
+
+%_has_only_a3_on_date%(Abstime date)=
+    let acqual1 = default(crew.%ac_qln_at_date_ix%(date,1),""),
+        acqual2 = default(crew.%ac_qln_at_date_ix%(date,2),"");
+    (acqual1 = "A3" and acqual2 <> "A4") or
+    (acqual1 <> "A4" and acqual2  = "A3");
+    
+%_has_only_a4_on_date%(Abstime date)=
+    let acqual1 = default(crew.%ac_qln_at_date_ix%(date,1),""),
+        acqual2 = default(crew.%ac_qln_at_date_ix%(date,2),"");
+    (acqual1 <> "A3" and acqual2 = "A4") or
+    (acqual1 = "A4" and acqual2  <> "A3");
+    
+%_has_a3a4c_on_date%(Abstime date)=
+    let acqual1 = default(crew.%ac_qln_at_date_ix%(date,1),""),
+        acqual2 = default(crew.%ac_qln_at_date_ix%(date,2),"");
+    (acqual1 = "A3" and acqual2 = "A4") or
+    (acqual1 = "A4" and acqual2 = "A3");
+/*
+ ** Instructor qualifications for select filters
+ */
+ 
+export %is_fd_instructor% = 
+  %crewrank_pilot% and crew.%is_instructor_in_pp%;
+
+export %is_lcp% = crew.%has_qln_in_pp%("POSITION", "LCP");
+
+export %leg_has_instructor_without_student% =
+    let instructor_code = default(leg.%instructor_code%,"");
+    leg.%has_instructor_code% and
+    not any(equal_legs,leg.%training_code_safe% = instructor_code);
+
+export %leg_has_student_without_instructor% =
+    let training_code = default(leg.%training_code%,"");
+    leg.%has_training_code% and
+    not any(equal_legs,leg.%instructor_code_safe% = training_code);
+    
+/* Flight crew */
+export %is_lifus_instr% = crew.%has_qacq_in_pp%("INSTRUCTOR", "LIFUS");
+
+%is_tri_instr% = crew.%has_qacq_in_pp%("INSTRUCTOR", "TRI");
+%is_tre_instr% = crew.%has_qacq_in_pp%("INSTRUCTOR", "TRE");
+export %is_tri_tre_instr% = %is_tri_instr% or %is_tre_instr%;
+
+%is_sfi_instr% = crew.%has_qacq_in_pp%("INSTRUCTOR", "SFI");
+%is_sfe_instr% = crew.%has_qacq_in_pp%("INSTRUCTOR", "SFE");
+export %is_sfi_sfe_instr% = %is_sfi_instr% or %is_sfe_instr%;
+
+%is_opt_instr% = crew.%has_qln_in_pp%("INSTRUCTOR", "OPT");
+%is_crm_instr% = crew.%has_qln_in_pp%("INSTRUCTOR", "CRM");
+export %is_opt_crm_instr% = %is_opt_instr% or %is_crm_instr%;
+
+%is_sup_instr% = crew.%has_qacq_in_pp%("INSTRUCTOR", "SUP");
+%is_ol_instr_ac_qual% = crew.%has_qacq_in_pp%("INSTRUCTOR", "OL");
+
+export %is_pm_instr% =
+    crew.%is_pm_mentor%(%pp_start%);
+  
+%may_be_assist% =
+    (training.%may_be_assist_pp_start% or 
+     training.%may_be_assist_pp_end% or
+     training.%may_be_assist%(%publ_period_end%)) and
+    not crew.%is_tri_tre_sfi_sfe_any_qual%(%pp_start%) and
+    not crew.%has_qln_lcp%(%pp_start%);
+  
+/* Cabin crew */
+export %is_linst_instr% = crew.%has_qacq_in_pp%("INSTRUCTOR", "LINST");
+export %is_as_instr% = crew.%has_qln_in_pp%("INSTRUCTOR", "AS");
+export %is_rec_instr% = crew.%has_qln_in_pp%("INSTRUCTOR", "REC");
+export %is_oaa_instr% = crew.%has_qln_in_pp%("INSTRUCTOR", "OAA");
+export %is_cc_instr% = crew.%has_qln_in_pp%("INSTRUCTOR", "INSTR");
+export %is_scc% = crew.%is_scc_in_pp%;
+%is_ol_instr% = crew.%has_qln_in_pp%("INSTRUCTOR", "OL");
+
+%lc_or_lcp% = 
+  training.%may_have_lc% or %is_lcp%;
+
+/* Line Check Pilots sorted at the end */
+%lc_sort% = 
+  if training.%may_have_lc% then
+    training.%lc_date%
+  else
+    add_years(%pp_start%, 100);
+    
+%lifus_or_instr% =
+  training.%reqd_training_is_any_lifus% or %is_fd_instructor%;
+
+/* Instructors sorted at the end */
+%lifus_sort% =
+  if training.%reqd_training_is_any_lifus% then
+    %pp_start%
+  else
+    %pp_end%;
+    
+%training_or_instr% =
+    training.%unperformed_training_in_pp% or
+    %is_fd_instructor%;
+  
+%training_sort% =
+  if training.%unperformed_training_in_pp% then
+    %pp_start%
+  else
+    %pp_end%;
+
+%fbf_or_lcp% =
+  training.%reqd_training_attribute_in_pp% = "FBF"
+  or %is_lcp%;
+  
+%fbf_sort% =
+  if training.%unperformed_training_in_pp% then
+    %pp_start%
+  else
+    %pp_end%;
+    
+%crew_on_any_lifus_or_t_flight% =
+    any(leg(roster), leg.%is_any_lifus% or leg.%is_t_flight%)
+    where (leg.%is_flight_duty% and leg.%starts_in_pp%);
+
+/*
+** Variables to use for annotation select filter.
+*/
+  
+%crew_has_annotation_in_period% = 
+  if  %csl_string_1% = "*" 
+  then
+    %crew_has_any_annotation_in_period%
+  else
+    %crew_has_specific_annotation_in_period%;
+
+%crew_has_any_annotation_in_period% = 
+  annotations.%annotation_count_in_period%(%csl_abstime_1%,%csl_abstime_2%) > 0;
+  
+%crew_has_specific_annotation_in_period% =  
+  default(%_crew_has_specific_annotation_in_period%, false);
+  
+%_crew_has_specific_annotation_in_period% = 
+  annotations.%code_active_in_interv%(%csl_string_1%, 
+                                               %csl_abstime_1%, 
+                                               %csl_abstime_2%); 
+  
+/* 
+** Variables used by find next/prev deadhead. 
+*/
+
+%dh_arrival_station% =
+  default(next(leg(roster), leg.%start_station%) where(leg.%in_pp%)
+         , fundamental.%base2station%(crew.%homebase_pp_end%));
+  
+%dh_departure_station% =
+  default(prev(leg(roster), leg.%end_station%) where(leg.%in_pp%)
+         , fundamental.%base2station%(crew.%homebase_pp_start%));
+
+%dh_arrival_utc% = 
+  default(next(leg(roster), leg.%start_utc%) where(leg.%in_pp%), %pp_end%);
+  
+%dh_departure_utc% =
+  default(prev(leg(roster), leg.%end_utc%) where(leg.%in_pp%), %pp_start%);
+  
+%dh_base_stations% =
+  let hb = if fundamental.%is_roster% then 
+             crew.%base_at_date%(leg.%end_utc% + leg.%time%/2)
+           else if trip.%homebase% <> "" then 
+             trip.%homebase%
+           else leg.%homebase%;
+  fundamental.%base2stations%(hb);
+  
+/*
+** Variables used for sort on recurrent month 
+*/
+
+          
+%pc_month% = default(calendar.%month_number%(training.%pc_date_1% - 24:00), 0);
+%opc_month% = default(calendar.%month_number%(training.%opc_date_1% - 24:00), 0);
+%pc_opc_month% = nmin(%pc_month%, %opc_month%);
+/* WPCCR 684 pgt in sort */
+%pgt_month% = default(calendar.%month_number%(training.%pgt_date% - 24:00), 0);
+%lc_month% = default(calendar.%month_number%(training.%lc_date% - 24:00), 0);
+%crm_month% = default(calendar.%month_number%(training.%crm_date% - 24:00), 0);
+
+%rec_month% = default(calendar.%month_number%(training.%rec_date% - 24:00), 0);
+
+
+%pc_sort_date% = default(training.%pc_date_1%, 01Jan1986 0:00);
+%opc_sort_date% = default(training.%opc_date_1%, 01Jan1986 0:00);
+%pgt_sort_date% = default(training.%pgt_date%, 01Jan1986 0:00);
+%lc_sort_date% = default(training.%lc_date%, 01Jan1986 0:00);
+%rec_sort_date% = default(training.%rec_date%, 01Jan1986 0:00);
+
+%no_rec_month% = void(training.%rec_date%);
+%no_rec_month_all% = %no_rec_month%;
+%no_crmc_month% = void(training.%crmc_date%) and crew.%is_cabin%;
+
+/*
+** PC/OPC select vaiables for use in select form
+*/
+
+/*%pc_month% = training.%pc_month_1%;
+%opc_month% = training.%opc_month_1%;
+Use definition above istead*/
+
+%pc_opc_sel_date_may% = 
+  default(if training.%may_have_pc_any% then
+            training.%pc_date_1%
+          else if training.%may_have_opc_any% then
+            training.%opc_date_1%
+          else 31Dec2035 00:00,
+          1Jan1986);
+
+%pc_opc_sel_date_must% = 
+  default(if training.%must_have_pc_any% then
+            training.%pc_date_1%
+          else if training.%must_have_opc_any% then
+            training.%opc_date_1%
+          else 31Dec2035 00:00,
+          1Jan1986);
+
+
+%pc_month_dq% = default(training.%pc_month_2%, 0);
+%opc_month_dq% = default(training.%opc_month_2%, 0);
+
+%pc_year% = default(format_time(training.%pc_date_1% -24:00, "%Y"), "0");
+%opc_year% = default(format_time(training.%opc_date_1% -24:00, "%Y"), "0");
+
+%pc_year_dq% = default(format_time(training.%pc_date_2% -24:00, "%Y"), "0");
+%opc_year_dq% = default(format_time(training.%opc_date_2% -24:00, "%Y"), "0");
+
+/*
+**  Select variable for finding OPC/PC with assigned assist missing
+*/
+
+%OPC_PC_missing_assist% =
+  if trip.%is_pc_or_opc% then
+    training.%crew_on_sim% > 0 and 
+    training.%crew_on_sim% < training.%reqd_crew_on_sim%
+  else
+    false;
+
+/* Variables for marking illegal trips in roster */
+%wop_is_illegal% = last(leg(wop),illegal_segment = 5);
+
+/* Crew rank & Seniority at pp start */
+%sort_crew_category% =
+  default(concat(%rank_sort_order%(crew.%rank_at_date%(%pp_start%)),
+		 format_int(crew.%seniority%, "%05d")),"XXXXXX");
+
+table sort_crew_cat_tab(String rank) =
+  rank	-> %rank_sort_order%;
+  "FC"	-> "FC";
+  "FP"	-> "FP";
+  "FR"	-> "FR";
+  "AP"	-> "KA";
+  "AS"	-> "KB";
+  "AH"	-> "KC";
+  -	-> "XX";
+end
+
+/* Xmas group */
+%sort_crew_xmas_group% =
+  concat(%xmas_group_sort_order%(freedays.%xmas_group%), 
+         crew.%login_name%);
+
+table sort_xmas_group_tab(String xmas_group) =
+  xmas_group	-> %xmas_group_sort_order%;
+  "01"	-> "1";
+  "02"	-> "2";
+  "03"	-> "3";
+  "01A"	-> "4";
+  "02A"	-> "5";
+  "F"	-> "6";
+  "P"	-> "7";
+  -	-> "0";
+end
+
+/* Sort performed at Show > Rosters. */
+%sort_crew_at_show_rosters% =
+  default(concat(if leg.%is_active_flight% then "A" else "D",
+                 format_int(crg_crew_pos.%assigned_function%, "%d"),
+                 %sort_crew_category%), "X");
+
+/*
+** Simple select for crew currently checked in but not departed
+*/
+
+
+
+
+/*
+** Mini Selection Form search criteria
+*/
+
+%rank_at_time%(abstime t, string rank) =
+  if rank = "F*" then
+    crew.%main_func_at_date%(t) = "F"
+  else if rank = "A*" then
+    crew.%main_func_at_date%(t) = "C"
+  else
+    locate (crew.%rank_at_date%(t), rank) <> 0;
+  
+%civicstation_at_time%(abstime t, string station) = 
+  locate(crew.%civicstation_at_date%(t), station) <> 0;
+  
+%planning_group_at_time%(abstime t, string planning_group) = 
+  locate(crew.%planning_group_at_date%(t), planning_group) <> 0;
+  
+%qln_at_time%(string type, string subtype, abstime t1, abstime t2) = 
+  crew.%has_qln_whole_period%(type, subtype, t1, t2) or
+  crew.%has_limited_qln_whole_period%(type, subtype, t1, t2);
+  
+%is_resource_crew%(abstime t, string planning_group) =
+  let skd = locate("SKD", planning_group) > 0 or locate("QA", planning_group) > 0,
+      skn = locate("SKN", planning_group) > 0,
+      sks = locate("SKS", planning_group) > 0,
+      cdp = if skn or skd  or sks then 
+                %_contract_desc_prefix%(t) 
+            else 
+                "";
+  (locate(crew.%planning_group%, planning_group) > 0) and 
+  (((skd or sks) and (cdp = "Temp")) or
+  (skn and (cdp = "Temp28" or cdp = "Temp100")));
+
+%_contract_desc_prefix%(Abstime t) = 
+  let cds = default(crew.%contract_desc_short%(t), ""),
+      pos = locate(" ", cds);
+      
+  if pos <= 0 then
+    cds 
+  else 
+    substr(cds, 1, pos - 1);
+  
+/* Leg Info common definitions (used by more than one criterion) */
+
+%wop_is_touching%(abstime t1, abstime t2) = 
+  wop.%start_utc% < t2 and wop.%end_utc% > t1;
+  
+%trip_is_touching%(abstime t1, abstime t2) =
+  trip.%start_utc% < t2 and trip.%end_utc% > t1;
+
+%duty_is_touching%(abstime t1, abstime t2) =
+  duty.%start_utc% < t2 and duty.%end_utc% > t1;
+
+%leg_is_touching%(abstime t1, abstime t2) = 
+  leg.%start_utc% < t2 and leg.%end_utc% > t1;
+
+%departure_station%(string station) = 
+  locate(leg.%start_station%, station) <> 0;
+    
+%arrival_station%(string station) =
+  locate(leg.%end_station%, station) <> 0;
+  
+/* Above/Below rank*/
+/* Returns true for all legs assigned to a different rank level (above or below)
+** decided by the argument type.
+** Only considers legs touching the time period spanning from t1 to t2.
+*/
+
+%above_below_rank%(string type, abstime t1, abstime t2) =
+  any(leg(roster), %leg_above_below_rank%(type))
+    while(leg.%start_utc% < t2)
+      where(leg.%end_utc% > t1);
+
+%leg_above_below_rank%(string type) =
+  default(if type = "BELOW"
+          then crew_pos.%lower_rank%
+               and leg.%is_active_flight%
+          else crew_pos.%higher_rank%
+               and leg.%is_active_flight%
+               and not leg.%has_training_code%
+   , False);
+
+/* Flight to/from */
+/* Returns true for all flight legs departing from the station decided by 
+** the argument fromStat and arriving at the station decided by the argument toStat.
+** Only considers legs touching the period spanning from t1 to t2.
+*/
+ 
+%flight%(string fromStat, string toStat, abstime t1, abstime t2) =
+  any(leg(roster), %leg_dep_dest%(fromStat, toStat))
+    while(leg.%start_utc% < t2)
+      where(leg.%end_utc% > t1);
+
+%leg_dep_dest%(string fromStation, string toStation) = 
+  (fromStation = "*" or %departure_station%(fromStation))
+    and (toStation = "*" or %arrival_station%(toStation))
+    and (leg.%is_flight_duty% or leg.%is_ground_transport%);
+
+/* Deadhead to/from */
+/* Returns true for all deadhead legs departing from the station decided by 
+** the argument fromStat and arriving at the station decided by the argument toStat.
+** Only considers legs touching the period spanning from t1 to t2.
+*/
+ 
+%deadhead%(string fromStat, string toStat, abstime t1, abstime t2) =
+  any(leg(roster), %leg_is_proper_deadhead%(fromStat, toStat))
+    while(leg.%start_utc% < t2)
+      where(leg.%end_utc% > t1);
+
+%leg_is_proper_deadhead%(string fromStation, string toStation) = 
+  leg.%is_deadhead% and
+    (fromStation = "*" or %departure_station%(fromStation))
+    and (toStation = "*" or %arrival_station%(toStation));
+
+/* Location */
+/* Returns true if any leg arrives at the station decided by the argument station.
+**
+** Will consider all legs of the roster, to be sure to include all possibilities
+** of a crew being at the correct airport. Hence, Yaser's code for not looking
+** at all legs is not used for this search.
+**
+** Gaps with length zero will not be considered matching. Strict inequality
+** requires the gaps to be at least one minute long.
+*/
+%location%(string station, abstime t1, abstime t2) = 
+  any(leg(roster), (%gap_before_leg%(station, t1, t2) or
+                    %gap_after_leg%(station, t1, t2)))
+  where(%leg_is_touching%(t1, t2) or overlap(t1,t2,%next_gap_start%,%next_gap_end%) > 0:00);
+
+%next_gap_start% = 
+  if not is_last(leg(trip))
+    then leg.%end_utc%
+    else void_abstime;
+    
+%next_gap_end% = 
+  if not is_last(leg(trip))
+    then next(leg(trip), leg.%start_utc%)
+    else void_abstime;
+    
+%gap_after_leg%(string station, abstime t1, abstime t2) =
+  (%leg_is_touching%(t1, t2) or overlap(t1,t2,%next_gap_start%,%next_gap_end%) > 0:00) and
+  %arrival_station%(station) and
+  %leg_ends_before_end_of_interval_and_gap_after%(t1, t2);
+  
+%gap_before_leg%(string station, abstime t1, abstime t2) =
+  (%leg_is_touching%(t1, t2) or overlap(t1,t2,%next_gap_start%,%next_gap_end%) > 0:00) and
+  %departure_station%(station) and
+  %leg_starts_after_start_of_interval_and_gap_before%(t1, t2);
+
+/* The defaults below are safe, as if there are no previous or next
+** legs, there are only gaps.
+*/
+%leg_ends_before_end_of_interval_and_gap_after%(abstime t1, abstime t2) =
+  (leg.%end_utc% < t2 and
+    default(next(leg(roster), leg.%start_utc%) > leg.%end_utc%, True) and
+    default(next(leg(roster), leg.%start_utc%) > t1, True));
+%leg_starts_after_start_of_interval_and_gap_before%(abstime t1, abstime t2) =
+  (leg.%start_utc% > t1 and
+   default(prev(leg(roster), leg.%end_utc%) < leg.%start_utc%, True) and
+   default(prev(leg(roster), leg.%end_utc%) < t2, True));
+
+/* Activity code */
+/* Returns true if any leg has the code specified by the argument 'code'.
+** Only legs which touches the period spanning from t1 to t2 are considered.
+*/
+
+export %activity_code%(string code, abstime t1, abstime t2) =
+  any(leg(roster), %leg_has_activity_code%(code))
+    while(leg.%start_utc% < t2)
+      where(leg.%end_utc% > t1);
+
+%activity_code_hb%(string code, abstime t1, abstime t2) =
+  %activity_code%(code, crew.%utc_time%(t1), crew.%utc_time%(t2));
+
+%leg_has_activity_code%(string codelist) =
+  ((leg.%is_pact% or leg.%is_ground_duty%)
+  and %_code_matches%(leg.%code%,codelist))
+  or (leg.%is_ground_transport% and %_code_matches%(activity_subtype,codelist));
+
+/* Check if a code matches any item in a comma-separated list of codes.
+ * Items may have:
+ * - a trailing "*", which serves as a wildcard
+ * - a leading "!", meaning that matches are excluded.
+ * The order of the items is not significant.
+ * There should be no blanks in the code list.
+ * Examples:
+ *  CODE   CODELIST          MATCHES
+ *   LA91   L*                Yes
+ *   LA91   VA,L*,!LA9*       No
+ *   LA91   LA*,!LA8*,!LA91   No
+ *   LA91   LA*,!LA8*,!LA92   Yes
+ *   LA91   LA*,!LA8*,!L*92   No ('L*92' will be interpreted as 'L*')
+ */
+%_code_matches%(String code, String codelist) =
+  let list = concat(",", codelist, ",");
+  any(times(length(list) - 1),
+      substr(list, %times_index_0%, 1) = ","
+      and substr(list, %times_index_0%+1, 1) <> "!"
+      and %_code_matches_item%(code, substr(list,%times_index_0%+1, 1024)))
+  and not
+  any(times(length(list) - 1),
+      substr(list, %times_index_0%, 2) = ",!"
+      and %_code_matches_item%(code, substr(list,%times_index_0%+2, 1024)));
+
+/* Helper for %_code_matches%. Handles a single item from the code list. */
+%_code_matches_item%(String code, String codelist_tail) =
+   let listitem = substr(codelist_tail, 1, locate(",", codelist_tail) - 1),
+       wild = locate("*", listitem) - 1;
+   listitem <> ""
+   and (wild = 0
+        or (wild < 0 and code = listitem)
+        or (wild > 0 and substr(code, 1, wild) = substr(listitem, 1, wild)));
+                                       
+/* Too much crew rostered */
+/* Returns True for all legs that have too many crew rostered. 
+** "Too many" may be compared to two levels of need: JAR and Service.
+** Only legs which have to many crew on the position that the current crew
+** is assigned on will be considered.
+*/
+    
+%too_much_crew%(string needtype, abstime t1, abstime t2) =
+  any(leg(roster), %leg_is_overcrewed%(needtype))
+    while(leg.%start_utc% < t2)
+      where(leg.%end_utc% > t1);
+  
+%_crewpos% = if fundamental.%flight_crew% then %times_index_0% else %times_index_0% + 4;
+  
+%leg_is_overcrewed%(string needtype) = 
+  (leg.%is_flight_duty% or needtype <> "JAR") and
+  any(times(4), %type_need%(needtype, %_crewpos%) < crew_pos.%leg_rostered_pos%(%_crewpos%));
+
+%type_need%(string needtype, int pos) = 
+  if needtype = "JAR"
+  then crew_pos.%ac_need_in_pos%(pos)
+  else crew_pos.%n_pos%(pos);
+
+/* Too few crew rostered */
+/* Returns true for all legs that have too few crew rostered. 
+** "Too few" may be compared to two levels of need: JAR and Service.
+** Only legs which have too few crew in the category that the current crew
+** is assigned on will be considered. Also, if 'include_reduced' is true,
+** CC legs with any reduced service need (AS/AH) will be considered.
+*/
+
+%too_few_crew%(string needtype, bool include_reduced, abstime t1, abstime t2) =
+  let reduced = include_reduced and crew.%is_cabin%;
+  any(leg(roster), %leg_is_underassigned%(needtype)
+                   or (reduced and %reduced_need%))
+    while(leg.%start_utc% < t2)
+      where(leg.%end_utc% > t1);
+
+%leg_is_underassigned%(String needtype) =
+  if leg.%is_active_flight%
+  then if needtype = "JAR"
+       then crew_pos.%underrostered_jar%
+       else crew_pos.%underrostered_in_pos%
+  else if leg.%is_ground_duty_leg%
+  then crew_pos.%gd_underrostered%
+  else false;
+
+
+/* Working Days */
+/*
+   Returns true if there is a trip in the roster that starts
+   at the day given by t, and touches exactly numDays.
+*/
+%working_days%(String numDays, abstime t1, abstime t2) =
+  any(trip(roster), locate(format_int(trip.%days%, "%d"), numDays) <> 0)
+    where((round_down(trip.%start_UTC%,24:00) >= round_down(t1,24:00) and
+          round_down(trip.%start_UTC%,24:00) <= round_down(t2,24:00)) and trip.%has_only_flight_duty%);
+
+/* No rounding version, because rounding with midnight-midnight local times converted to UTC
+   can capture additional days by accident. */
+%working_days_no_rounding%(String numDays, abstime t1, abstime t2) =
+    any(trip(roster), locate(format_int(trip.%days%, "%d"), numDays) <> 0)
+        where(trip.%has_only_flight_duty% and
+              trip.%start_UTC% >= t1 and
+              trip.%start_UTC% <= t2);
+
+/* Sort Expression */
+%sort_mini_selection%(string above_below_type, 
+                      string dhSearch, string dhFromStat, string dhToStat,
+                      string locationStat,
+                      string specialCode, 
+                      string overbookedNeedType,
+                      abstime t1, abstime t2) =
+  min(leg(roster), %start_date_object_fulfilling_criteria%(
+                          above_below_type,
+                          dhSearch, dhFromStat,  dhToStat,
+                          locationStat,
+                          specialCode, 
+                          overbookedNeedType,
+                          t1, t2));
+  
+%start_date_object_fulfilling_criteria%(
+                      string above_below_type, string dhSearch, string dhFromStat, 
+                      string dhToStat, string locationStat, string specialCode, 
+                      string overbookedNeedType, abstime t1, abstime t2) =
+  let time_of_matching_leg =
+        if leg.%end_utc% > t1 and
+           leg.%start_utc% < t2 and
+           (%above_below_search%(above_below_type) or
+            %deadhead_or_flight_search%(dhSearch, dhFromStat, dhToStat) or
+            %activity_code_search%(specialCode) or
+            %staffing_search%(overbookedNeedType))
+        then
+          leg.%start_utc%
+        else
+          01Jan2099 0:00,
+      time_of_matching_gap = 
+        if locationStat = "*"
+          then 01Jan2099 0:00
+          else default(%location_sort_abstime%(locationStat, t1, t2), 01Jan2099 0:00);
+      
+  %min_of_two_abstime%(time_of_matching_leg, time_of_matching_gap);
+
+
+  
+/* Set default value for 'region_at_date' for sorting in the 'Mini-Select' form */
+%planning_group_at_date%(abstime t) =
+  default(if crew.%planning_group_at_date%(t) <> "None"
+            then
+              crew.%planning_group_at_date%(t)
+            else
+              "none", "{");
+
+%min_of_two_abstime%(abstime t1, abstime t2) =
+  if t1 < t2 then t1
+  else t2;
+
+%above_below_search%(string above_below_type) =
+  if above_below_type <> "*" then
+    %leg_above_below_rank%(above_below_type)
+  else
+    false;
+
+%deadhead_or_flight_search%(string dhSearch, string dhFromStat, string dhToStat) = 
+  if dhSearch = "YES"
+    then
+      %leg_is_proper_deadhead%(dhFromStat, dhToStat)
+    else
+      if dhFromStat <> "*" or dhToStat <> "*"
+        then
+          %leg_dep_dest%(dhFromStat, dhToStat)
+        else
+          false;
+
+    
+/* Gap before and gap after will be equal most of the time, but then again,
+** if the first one matches, the arrival time of the previous leg
+** will be used, which should be the same leg as matches the second one.
+*/
+
+%location_sort_abstime%(string locationStat, abstime t1, abstime t2) =
+  let time_of_gap_before =
+        default(first(leg(roster),default(prev(leg(roster), leg.%end_utc%),
+                                                 01Jan1986 0:00))
+                where(%gap_before_leg%(locationStat, t1, t2)),01Jan2099 0:00),
+      time_of_gap_after  =
+        default(first(leg(roster), leg.%end_utc%)
+                where(%gap_after_leg%(locationStat, t1, t2)), 01Jan2099 0:00);
+   %min_of_two_abstime%(time_of_gap_before, time_of_gap_after);
+
+%activity_code_search%(string specialCode) = 
+  if specialCode <> "*" then
+    %leg_has_activity_code%(specialCode)
+  else
+    false;
+    
+%staffing_search%(string overbookedNeedType) = 
+  if overbookedNeedType <> "*"
+    then
+      if overbookedNeedType = "Overbooked"
+      then
+        %leg_is_overcrewed%(overbookedNeedType)
+      else
+        %leg_is_underassigned%(overbookedNeedType)
+    else
+      false;
+      
+/*
+** Select & sort reduced need fligths.
+*/
+
+export %reduced_need% =
+  leg.%is_flight_duty%
+  and (crew_pos.%service_need_exception_in_pos6% >= 0
+       or crew_pos.%service_need_exception_in_pos7% >= 0);
+  
+%reduced_need_after_now% =
+  leg.%start_utc% > %now% and %reduced_need%;
+    
+%reduced_need_after_now_sort% =
+  min(leg(roster), leg.%start_utc%)
+  where(%reduced_need_after_now%);
+
+
+/* Sort by marked legs in roster ("Select Crew with Similar") */
+%first_marked_leg_start% =
+  default(first(leg(roster) where (marked), leg.%start_utc%), 31Dec2099 23:59);
+
+%trip_has_variant% =
+  crr_has_base_variant;
+
+
+/* Some simple selects for APIS problems (CR 436) */
+%leg_is_apis% = leg.%is_apis%;
+%apis_problems% = 
+  %leg_is_apis% and
+  (attributes.%flight_leg_has_attr%("FCMERROR") or 
+  not crew.%is_valid_for_crew_manifest%(leg.%end_country%, leg.%end_utc%));
+
+/* SASCMS-4815
+ * Search function for BL/SB before F4/2F
+ *
+ */
+%_bl_sb_before_f4_days% = default(wop.%is_followed_by_F4%, false);
+
+%_bl_sb_before_2f_days% =
+  default(next(wop(roster), wop.%is_freeday% and
+                            first(duty(wop), duty.%code% = "F") and
+                            (wop.%end_utc% - wop.%start_utc%)/24:00 < 3), false);
+
+%_bl_sb_before_2_empty_days% =
+  default(wop.%is_followed_by_empty_days% and
+          wop.%blank_days% < 3, false);
+
+export %bl_sb_before_f4_f2% =
+  if default(is_last(duty(wop)) and
+             (duty.%is_standby% or duty.%is_blank_day%) and
+             duty.%in_pp_extended%
+            ,false)
+  then
+    %_bl_sb_before_f4_days% or %_bl_sb_before_2f_days% or %_bl_sb_before_2_empty_days%
+  else
+    false;
+
+
+/* end-of-file */

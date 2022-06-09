@@ -1,0 +1,297 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains duty time calculations and limits for both cabin crew 
+ *   and flight crew used in CCT.
+ *
+ * Sections:
+ *   1. Duty time calculations
+ *
+ * Created by:
+ *   Sten Larsson 2008-08-19
+ *
+ * Major changes:
+ *
+ */
+module duty_time_cct inherits duty_time_ccr
+
+import levels;
+import trip;
+import rescheduling;
+import bought_days;
+import crew;
+import accumulators;
+import standby;
+
+
+/****************************************************************
+ * Section 1: Duty time calculations
+ ***************************************************************/
+/*
+** 7x24 hrs
+*/
+
+/*
+** Start of 7x24hrs from check-in after time-off for SKD CC
+**
+** If the original published duty with check-in after time-off has been replaced
+** with off-duty, e.g. IL, then find the reference check-in in crew_publish_info
+** i.e. the originaly published check-in after time-off.
+** Check however that the first reference check-in found is no more than 5 days 
+** before the actual check-in, because if it is, then it relates to a preceding 
+** wop (a wop can maximum have 5 production days).
+**
+** NB! No longer applies after K12, when a normal rolling 7x24 applies.
+*/
+redefine %duty_start_7x24_SKD_CC% =
+  let start = duty.%start_hb%;
+  
+  if parameters.%k12_skd_cc_sp4_3_valid%(duty.%start_hb%) then
+    duty.%start_UTC%
+  else
+    default(prev(duty(chain), rescheduling.%reference_check_in_utc%)
+              while (duty.%has_no_duty_time_contribution% and
+                     %days_since%(start,duty.%start_hb%) < 5)
+              where (default(%days_since%(start,rescheduling.%reference_check_in_utc%) < 5,
+                             false)),
+            duty.%start_UTC%);
+
+/* Hard limit is 47:30 but Trackers want a "soft" limit 
+** at 46:30 so we reduce the limit here by 1:00
+**
+** Jira SASCMS-5602: no longer required
+*/
+redefine export %soft_limit_reduction_fc_skd% = 
+/*  if %flight_crew% and crew.%is_skd% and
+      not training.%trip_is_in_school_period_min_7x24% then
+    1:00 
+  else*/
+    0:00;
+
+redefine %compdays_duty_time_in_period_fwd%(Abstime start, Abstime stop) =               
+  sum(duty(chain)      
+    from (current) 
+    while(duty.%start_utc% < stop) 
+    where(compdays.%duty_is_compday_with_duty_time% and
+          compdays.%use_compday_duty_time%(duty.%start_hb%) and
+          duty.%start_utc% < stop and
+          duty.%end_utc% > start),
+    %trip_inf_prev_duty_time%(nmax(duty.%start_day%, crew.%hb_time%(start)),  
+                              nmin(crew.%hb_time%(stop), round_up(duty.%end_day% + 0:01, 24:00))));                   
+/*
+** SKD CC in VG have duty time for CMP days only when they are assigned in
+** CCT, not for those assigned in CCR.
+*/
+%trip_inf_prev_duty_time%(abstime st, abstime et) = 
+  let days = overlap(duty.%start_day%, duty.%end_day% + 24:00, st, et)/24:00,
+      st_date = nmax(st, duty.%start_day%);
+  sum(times(days),
+      if nmax(rescheduling.%dt_inf_prev_duty_time%(st_date + (%times_index_0%-1)*24:00),
+              rescheduling.%dt_inf_duty_time%(st_date + (%times_index_0%-1)*24:00)) = 0:00 then
+        /* Informed BL-days should count 0 hours */
+        if rescheduling.%dt_inf_any_flag%(rescheduling.%flag_blank%,
+                                          st_date + (%times_index_0%-1)*24:00) or
+           (crew.%is_skd_at_date%(st_date) and
+            crew.%in_variable_group%(st_date)) then
+          0:00
+        else
+          compdays.%compday_duty_time%(st_date)
+      else
+        if crew.%is_skd_at_date%(st_date) then
+          nmax(rescheduling.%dt_inf_prev_duty_time%(st_date + (%times_index_0%-1)*24:00),
+               rescheduling.%dt_inf_duty_time%(st_date + (%times_index_0%-1)*24:00))
+        else
+          nmin(nmax(rescheduling.%dt_inf_prev_duty_time%(st_date + (%times_index_0%-1)*24:00),
+               rescheduling.%dt_inf_duty_time%(st_date + (%times_index_0%-1)*24:00)),
+               10:30));
+ 
+/* Normal actual duty time */
+redefine export %duty_time_fc_in_period%(Abstime start_hb, Abstime stop_hb) =
+    accumulators.%actual_duty_time_2_months_fc%(start_hb, stop_hb);
+  
+/* Normal actual production days */
+redefine export %max_duty_time_2_months_fc% = void_reltime;
+
+/*
+** Duty time overtime (some restrictions)
+*/
+
+export %1x24_hrs_fwd_overtime% =
+  roster.%duty_time_in_period%(duty.%start_UTC%, duty.%start_UTC% + 1*24:00, fundamental.%night_upg%, duty.overtime);
+export %1x24_hrs_bwd_overtime% =
+  roster.%duty_time_in_period%(duty.%end_UTC% - 1*24:00, duty.%end_UTC%, fundamental.%night_upg%, duty.overtime);
+export %1x24_hrs_overtime% = nmax(%1x24_hrs_bwd_overtime%, %1x24_hrs_fwd_overtime%);
+export %7x24_hrs_overtime% = 
+  nmax(%7x24_hrs_fwd_overtime%, %7x24_hrs_bwd_overtime%);
+export %7x24_hrs_bwd_overtime% =
+  if %use_7x24_bwd% then
+    %7x24_hrs_in_period_overtime%(%7x24_hrs_bwd_start%,
+                                  %7x24_hrs_bwd_start% + 7*24:00,
+                                  %7x24_hrs_has_night_upg%,
+                                  duty.overtime)
+  else 0:00;
+export %7x24_hrs_fwd_overtime% =
+  if %use_7x24_fwd% then
+    %7x24_hrs_in_period_overtime%(%7x24_hrs_fwd_start%,
+                                  %7x24_hrs_fwd_start% + 7*24:00,
+                                  %7x24_hrs_has_night_upg%,
+                                  duty.overtime)
+  else 0:00;
+%7x24_hrs_in_period_overtime%(Abstime start, Abstime stop, Bool night_upg, DutyCalculation dutycalc) =
+  let t = roster.%duty_time_in_period%(start, stop, night_upg, dutycalc);
+  if compdays.%use_compday_duty_time%(crew.%hb_time%(start)) then
+     %compdays_duty_time_in_period%(start, stop) + 
+     t
+  else
+    t;  
+
+redefine export %nr_p_days_in_period%(Abstime start, Abstime stop,
+                                      Bool includeLA8days, Bool includeLAdays,
+                                      Bool includeBL, Bool includeCMP, Bool includePrivatelyTraded) =
+  let days_in_period = (stop - start) / 24:00;
+  days_in_period -
+  bought_days.%bought_days_in_period%(start, stop) -
+  sum(duty(roster), duty.%days_in_period%(start, stop))
+  /* Compensation days, off-duty illness and BL should not
+  ** be included in P days. */
+  where (((duty.%is_off_duty%) and
+          not (includeLA8days and duty.%is_la8%) and
+          not (includeLAdays and duty.%is_group_valid_pt_freeday%) and
+          not duty.%is_on_duty_illness% or
+          (duty.%is_blank_day% and not includeBL) or
+          (duty.%is_compensation_day% and not includeCMP) or
+          (not includePrivatelyTraded and duty.%is_privately_traded%) or
+          duty.%is_vacation%
+         ) and
+         duty.%end_hb% >= start and duty.%start_hb% < stop);
+
+/* The first duty on the roster is considered only if the rescheduling info
+* confirms it to be informed as first in wop. This prevents misinterpretation
+* when only the tail of a wop is loaded at start of the plan period. Here, we
+* assume that the start of the period IS informed, which is the normal case.
+*/
+redefine export %duty_is_first_in_wop% =
+  is_first(duty(wop)) and 
+  (not is_first(duty(chain)) or
+   rescheduling.%dt_inf_any_flag%(rescheduling.%flag_first_in_wop%, 
+                                  duty.%start_hb%));
+
+/*
+** For SKN and SKS CC overtime calculations, max duty in a calendar month is  
+** not to be reduced proportionally for qualifying days
+*/
+ 
+export %max_in_month_overtime_cc% =
+  if crew.%is_SKS% or crew.%is_SKN%  then
+    (if crew.%part_time_change_in_month% then
+       ((crew.%part_time_change_date% - duty.%start_month_start%) / 24:00) *
+       %max_duty_time_pt_factor_cc%(duty.%start_month_start%) +
+       ((duty.%start_month_end% - crew.%part_time_change_date%)  / 24:00) *
+       %max_duty_time_pt_factor_cc%(crew.%part_time_change_date%)
+     else
+       duty.%month_days% * %max_duty_time_pt_factor_cc%(duty.%start_month_start%))  
+    / duty.%month_days%
+  else
+    %max_in_month_cc_skn%;
+
+/*
+** 7x24hrs duty limit for Japanese CC
+**
+** If period includes standby call-out: 42:00
+**
+** Default: 35:00
+*/
+
+redefine %max_in_7x24_skj% = 
+  if %standby_callout_in_7x24% then
+    45:00
+  else
+    35:00;
+    
+%standby_callout_in_7x24% =
+  let start = duty.%end_day% - 7*24:00,
+      stop = duty.%end_day%;
+
+  any(trip(roster),%trip_has_standby_callout_in_7x24%(start,stop))
+  from (current) backwards
+  while (trip.%end_day% > start);               
+
+%trip_has_standby_callout_in_7x24%(Abstime start, Abstime stop) =
+  any(duty(trip),duty.%is_standby_callout% and
+                 not duty.%is_single_leg_standby_callout%)
+    where (duty.%start_UTC% < stop and duty.%end_UTC% > start);
+
+/* redefine for SKN CC K12 rule that doesn't apply in for standby call-out */
+redefine export %sh_skn_long_duty_standby_call_out% =
+  %standby_call_out% or
+  default(prev(duty(wop),%standby_call_out%),
+          false);
+
+export %standby_call_out% =
+  standby.%duty_is_standby_callout% or
+  rescheduling.%duty_inf_flag_standby_callout% or
+  rescheduling.%trip_inf_flag_standby_home%;
+
+/* Redefined for CCT% */
+redefine export %duty_time_cc_in_period%(Abstime start_hb, Abstime stop_hb) =
+  accumulators.%actual_duty_time_2_months_cc%(start_hb, stop_hb);
+  
+/* Redefined for CCT% */
+redefine export %max_duty_time_2_months_cc% =
+  accumulators.%nr_actual_p_days_2_months_cc%(%duty_time_2_months_start_check%,
+                                               round_up_month(wop.%start_hb% + 0:01))
+    * %avg_daily_duty_time_2_months_cc%;
+
+/* Redefined for CCT% */
+/*
+** SKN CC: If duty starts with standby call-out, duty time is to be counted
+** from check-in to check-out, i.e. no standby duty time included.
+** Applies only to max duty in duty period rule.
+*/
+redefine export %duty_time_reduction_sby_callout_skn_cc% =
+  if %cabin_crew% and duty.%is_SKN% and duty.%is_short_haul% and
+     first(leg(duty),leg.%is_standby_callout%) then
+    duty.%duty_time_standby_reduction_16%(duty.%start_utc%, duty.%end_utc%) -
+    %_duty_time_reduction_sby_callout_skn_cc%
+   else
+     0:00;
+
+%_duty_time_reduction_sby_callout_skn_cc% =
+  default(first(leg(duty),leg.%ci_start_utc%)
+            where (not leg.%is_standby_callout%),
+          duty.%end_utc%) -
+  duty.%start_utc%;
+
+/*
+** Agreement: CAU K06 C.1.2a, C.1.2b
+**
+** On day of execution, the previously informed duty time is used to decide
+** if a duty is extended or not, i.e. any rescheduling on the day does not
+** change the maximum duty limit.
+*/
+
+redefine export %extended_duty% =
+  let inf_prev_duty_time = rescheduling.%period_inf_prev_duty_time%
+                             (duty.%start_day%,duty.%start_day% + 24:00);
+  rest.%duty_followed_by_minimum_scheduled_rest%(duty.union) and
+  not duty.%is_long_haul% and
+  (if %now% > duty.%start_day%  and
+      inf_prev_duty_time > 0:00 then
+     inf_prev_duty_time > 10:00 + rest.%add_hrs%(%last_is_deadhead%, 1:00)
+   else
+     %planned_extended_duty%);
+
+redefine export %dutypass_is_extended% =
+  let inf_prev_duty_time = rescheduling.%period_inf_prev_duty_time%
+                             (duty.%start_day%,duty.%start_day% + 24:00);
+  if %now% > duty.%start_day%  and
+      inf_prev_duty_time > 0:00 then
+    inf_prev_duty_time > %_basic_duty_time_limits%
+  else
+    %_dutypass_is_extended% and
+    %in_duty_period_scheduled%(duty.overtime,True) > %_basic_duty_time_limits%;
+
+/* end of file */
+

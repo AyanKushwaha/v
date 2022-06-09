@@ -1,0 +1,443 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   Leg definitions for tracking
+ *
+ * Created by:
+ *   Peter Jonsson 22feb 2006
+ *
+ * Sections:
+ *   1. Redefinition of homebased dependent leg attibutes
+ *   2. Leg status definitions
+ *   3. Failobject definitions
+ *   4. Redefinitions of check-in/out
+ *   5. Redefinitions of per diem variables
+ *
+ */
+
+module leg_cct inherits leg_ccr
+
+import fundamental;
+import alert_server;
+import crew;
+import checkinout;
+import iterators;
+
+
+/*********************************************************************
+ * 1. Redefinition of homebase dependent leg attibutes
+ *********************************************************************/
+ 
+export %is_acrot% = is_acrot;
+
+redefine export %start_hb% = 
+  station_localtime(%trip_start_home_airport%, %start_utc%);
+
+redefine export %end_hb% =
+  station_localtime(%trip_start_home_airport%, %end_utc%);
+  
+redefine export %trip_homecountry% = 
+  if %is_roster% then
+    (if crew.%employment_country_change% then
+       first(leg(trip), crew.%country_at_date%(leg.%start_utc%))
+     else
+        crew.%employment_country%)
+  else
+    homebase_country;
+    
+%is_whole_day_activity% = /* Five minutes gap to start or end a day */
+  (time_of_day(%start_lt%) >= 23:55 or time_of_day(%start_lt%) <= 00:05) and
+  (time_of_day(%end_lt%) >= 23:55 or time_of_day(%end_lt%) <= 00:05) and
+  (%end_lt% - %start_lt%) > 00:10;
+
+/*********************************************************************
+ * 2. Leg status definitions
+ *********************************************************************/
+redefine export %activity_start_time_UTC% = activity_start_time;
+redefine export %activity_end_time_UTC%  = activity_end_time;
+redefine export %activity_scheduled_start_time_UTC% = activity_scheduled_start_time;
+redefine export %activity_scheduled_end_time_UTC%  = activity_scheduled_end_time;
+redefine export %activity_estimated_start_time_UTC% = activity_estimated_start_time;
+redefine export %activity_estimated_end_time_UTC%  = activity_estimated_end_time;
+redefine export %activity_actual_start_time_UTC% = activity_actual_start_time;
+redefine export %activity_actual_end_time_UTC%  = activity_actual_end_time;
+
+redefine export %activity_start_time_lt% = station_localtime(%start_station%, activity_start_time);
+redefine export %activity_end_time_lt%  = station_localtime(%end_station%, activity_end_time);
+redefine export %activity_scheduled_start_time_lt% = station_localtime(%start_station%, activity_scheduled_start_time);
+redefine export %activity_scheduled_end_time_lt%  = station_localtime(%end_station%, activity_scheduled_end_time);
+redefine export %activity_estimated_start_time_lt% = station_localtime(%start_station%, activity_estimated_start_time);
+redefine export %activity_estimated_end_time_lt%  = station_localtime(%end_station%, activity_estimated_end_time);
+redefine export %activity_actual_start_time_lt% = station_localtime(%start_station%, activity_actual_start_time);
+redefine export %activity_actual_end_time_lt%  = station_localtime(%end_station%, activity_actual_end_time);
+
+redefine export %is_standby_callout% =
+  standby.%leg_is_standby_callout%;
+redefine export %is_callout_from_standby% =
+  standby.%leg_is_callout_from_standby%;
+ 
+redefine export %is_airport_callout% =
+  standby.%leg_is_airport_callout%;
+redefine export %is_callout_from_airport% =
+  standby.%leg_is_callout_from_airport%;
+ 
+redefine export %is_sby_manual_duty_break% =
+  %is_standby_at_airport% and
+  attributes.%leg_has_duty_break_attribute%;
+
+
+redefine export %scheduled_connection_time% =
+  next(leg(duty), %activity_scheduled_start_time_UTC%)
+  - %activity_scheduled_end_time_UTC%;
+redefine export %per_diem_connection_time% = 
+  next(leg(duty), %activity_scheduled_start_time_utc%) - %end_utc%;
+  
+/* This is somewhat more general definitions of has_started and has_landed with
+   default behaviours on ground duties and OAGs. 
+   NOTE: This variable does *not* tell if a plane has
+   landed, there is no way we can know that for a fact, movement/rotation messages
+   may or may not arrive in time, i.e. there is no guarantee that actual times will
+   be written to the database.
+ */
+export %has_started% = 
+  if %is_flight_duty% and not %is_oag% then
+    not (%activity_actual_start_time_UTC% = 01JAN86 0:00)
+  else
+    fundamental.%now% >= %start_UTC%;
+export %has_landed% =
+  if %is_flight_duty% and not %is_oag% then
+    not (%activity_actual_end_time_UTC% = 01JAN86 0:00)
+  else
+    fundamental.%now% >= %end_UTC%;
+
+redefine export %returned_to_ramp% = 
+  default(statcode = "R", false);
+
+redefine export %ofdx_period_limit% =
+  %ofdx_period_goal%; /* there is no need to have another limit than "goal" in tracking */
+
+/** AOBT and ATOT **/
+%actual_off_block_time% = aobt;
+%actual_take_off_time% = atot;
+
+/* Off Block and Airborne */
+export %is_off_block% =
+    if %is_flight_duty% and not %is_oag% then
+        not (%actual_off_block_time% = 01JAN86 0:00)
+    else
+        fundamental.%now% >= %start_UTC%;
+export %is_airborne% =
+    not %has_landed% and
+    (if %is_flight_duty% and not %is_oag% then
+         not (%actual_take_off_time% = 01JAN86 0:00)
+     else
+         fundamental.%now% >= %start_UTC%);
+
+
+/*********************************************************************
+ * 3. Failobject definitions
+ * Redefinitions of failobjects for tracking rulesets.
+ * These are used by the alert server to determine alerttime and 
+ * failobject. Also used by duty and trip.
+ *********************************************************************/
+
+redefine export %failobject_departure% = alert_server.%failobject_leg_departure_str%;
+
+redefine export %failobject_arrival% = alert_server.%failobject_leg_arrival_str%;
+
+
+/****************************************************************
+ * Override of duty start / duty end
+ ***************************************************************/
+
+redefine export %checked_in% = checkinout.%leg_checked_in%;
+redefine export %checked_out% = checkinout.%leg_checked_out%;
+
+redefine export %briefing_override% =
+  default(%frozen_duty_start_rel%, %brief_assignment_override%);
+redefine export %debriefing_override% = %debrief_assignment_override%;
+
+%frozen_duty_start_rel% =
+  %activity_scheduled_start_time_UTC% - %frozen_duty_start_utc%;
+
+export %has_frozen_duty_start% = not void(%frozen_duty_start_utc%);
+
+redefine export %brief_assignment_override% = 
+  if %is_roster% 
+    then attributes.%assignment_attr_rel%("BRIEF")
+    else attributes.%ground_task_rel%("BRIEF");
+
+redefine export %debrief_assignment_override% =
+  if %is_roster% 
+    then attributes.%assignment_attr_abs%("DEBRIEF") - %end_UTC%
+    else attributes.%ground_task_abs%("DEBRIEF") - %end_UTC%;
+
+%duty_ci_override_comment% =
+  default(default(%frozen_duty_start_comment%,
+                  %brief_assignment_override_string%), "");
+%brief_assignment_override_string% =
+  if flight_duty or not flight_duty
+  then first(leg(duty), attributes.%assignment_attr_str%("BRIEF"))
+  else "DUMMY";
+
+%duty_co_override_comment% =
+  default(%debrief_assignment_override_string%, "");
+%debrief_assignment_override_string% =
+  if flight_duty or not flight_duty
+  then last(leg(duty), attributes.%assignment_attr_str%("DEBRIEF"))
+  else "DUMMY";
+
+/* Time of arrival for previous leg with debriefing */
+export %prev_debriefing_end% =
+  let this_start = %briefing_leg_std%;
+  default(
+  prev(leg(chain) where (%briefing_leg_std% <> this_start),
+    %end_utc%)
+    , 1Jan1901);
+
+/* Scheduled time of departure for the leg with briefing */
+export %briefing_leg_std% = 
+  if leg.%has_check_in%
+  then %activity_scheduled_start_time_UTC%
+  else first(leg(duty), %activity_scheduled_start_time_UTC%)
+       where(leg.%has_check_in%);
+
+/* Note: if the frozen duty start time is more than %max_briefing_diff%
+ * (defined in leg) earlier, then disregard it, since it's probably remaining
+ * from a deassigned duty (see BZ 34946)
+ */
+%frozen_duty_start_utc% =
+  if leg.%has_check_in% then
+    %_frozen_duty_start_utc%
+  else
+    void_abstime;
+%frozen_duty_start_comment% =
+  if leg.%has_check_in% then
+    %_frozen_duty_start_comment%
+  else
+    void_string;
+
+table frozen_duty_start =
+  crew.%id%, %prev_debriefing_end%, %briefing_leg_std%, %briefing_leg_std% - %max_briefing_diff%
+  -> AbsTime %_frozen_duty_start_utc%,
+     String %_frozen_duty_start_comment%;
+  external %ci_frozen_table%;
+  crew, <dutystart, >=dutystart, <dutystart
+  ->
+  dutystart, si;
+  -, -, -, - -> void_abstime, void_string;
+end
+
+%ci_frozen_table_p% = "ci_frozen";
+%ci_frozen_table% = %etab_path%(%ci_frozen_table_p%);
+
+/* These two are almost as %duty_[start/end]_utc% but they void if not overridden */
+export %duty_ci_override% =
+  %duty_departure_utc% - %briefing_override%;
+export %duty_co_override% =
+  %duty_arrival_utc% + %debriefing_override%;
+
+/*********************************************************/
+
+export %activity_id% = activity_id;
+
+
+
+export %is_manual_flight% = default(statcode = "M", false);
+
+redefine export %tail_id% = %resource_of_type%("A");
+redefine export %ac_reg% = max(ac_rotations_ref, %tail_id%);
+/*Variable just for sort. All void_string values is added at the bottom*/
+%sort_tail_id% = default(%tail_id%, "zzzzzz");
+
+/*
+ * Resources are in format "A+BU73599", "C+11613"
+ * "A" = "Aircraft", "C" = "Crew", i.e. A/C with tail ID BU73599, crew with ID
+ * 11613.
+ */
+%resource_of_type%(string t) =
+  if locate(concat(t, "+"), resource_id) = 1 then
+    substr(resource_id, 3, length(resource_id))
+  else
+    void_string;
+    
+/* ground_uuid always available in CCT */
+redefine export %uuid% = ground_uuid;
+
+/*********************************************************************
+ *   5. Leg-simulator brief/debriefing times/lengths
+ *********************************************************************/
+/* Default/calculated briefing/debriefing not considering override */
+%default_leg_sim_briefing_time_length% =
+    %activity_start_time_utc% - 
+    (%activity_scheduled_start_time_utc% - %check_in_default%);
+%default_leg_sim_debriefing_time_length% =
+  %check_out_scheduled%;
+/*                              */
+%leg_sim_briefing_time_length% =
+    leg.%activity_start_time_UTC% - %leg_sim_briefing_time_start%;
+
+%leg_sim_briefing_time_start% = %ci_start_utc%;
+%leg_sim_debriefing_time_length% = %check_out%;
+
+
+/**********************************************************************
+*    6. Duty time 
+/**********************************************************************/
+
+redefine export %preceded_by_minimum_rest_scheduled% =
+  %is_first_in_duty% and
+  leg.%rest_time_scheduled% <= rest.%minimum_time_fc%;
+  
+
+/* Standby reducement factors */
+table standby_reduced_factor_cct =
+  %cabin_crew%, %region%, %is_standby_at_home%, %is_standby_at_hotel%,
+  %is_standby_line%
+    -> redefine %standby_reduced_factor%;
+  /* Standby lines (long-haul) */
+  true,      -,     -,    -,   true -> 75;
+  false,     -,     -,    -,   true -> 50;
+  /* Standby (home) */
+  true,  "SKD",  true, false, false -> 75;
+  true,  "SKN",  true, false, false -> 75;
+  true,  "SKS",  true, false, false -> 75;
+  true,  "SKJ",  true, false, false ->  0;
+  false,     -,  true, false, false -> 50;
+  /* Standby (hotel) */
+  true,  "SKD", false,  true, false -> 70;
+  true,  "SKS", false,  true, false -> 50;
+  true,  "SKN", false,  true, false -> 75;
+  true,  "SKJ", false,  true, false ->  0;
+  false,     -, false,  true, false -> 50;
+       -,     -,     -,    -,  - -> 50;
+end
+
+/*********************************************************************
+ * 6. Redefinition of Per Diem variables
+ *********************************************************************/
+ 
+    
+redefine %_per_diem_start_time_UTC%(bool taxrules) =
+  let ATD = leg.%start_utc%,
+      STD_pp = %activity_private_passive_original_start_utc%,
+      ETD_frozen = %activity_updated_scheduled_start_time_UTC%;
+  if taxrules then
+    if crew.%is_SKN_at_date%(round_down_month(leg.%start_utc%)) then
+      ETD_frozen - %per_diem_check_in%
+    else
+      ATD
+  else
+    STD_pp - %per_diem_check_in%;
+    
+redefine %_per_diem_end_time_UTC%(bool taxrules) =
+  let ATA = leg.%end_utc%,
+      STA = leg.%activity_scheduled_end_time_utc%,
+      STA_pp = leg.%activity_private_passive_original_end_utc%;
+  if taxrules then
+  	if crew.%is_SKN_at_date%(round_down_month(leg.%start_utc%)) then
+  	  nmax(ATA, STA) + %per_diem_check_out%
+  	else
+  	  ATA
+  else
+	  if crew.%is_SKN_at_date%(round_down_month(leg.%start_utc%)) and crew.%is_cabin% then
+	    if %is_private_passive% then
+	      nmin(STA, STA_pp) + %per_diem_check_out%
+	    else
+  	    nmax(ATA, STA) + %per_diem_check_out%
+	  else 
+	    if %is_private_passive% or (STA_pp - ATA <= %per_diem_check_out% and STA_pp >= ATA) then
+	      nmin(STA, STA_pp) + %per_diem_check_out%
+	    else
+	      ATA + %per_diem_check_out%;
+
+redefine export %per_diem_start_lt% =
+  %_per_diem_start_time_UTC%(false) + (%start_lt% - %start_utc%);
+redefine export %per_diem_end_lt% =
+  %_per_diem_end_time_UTC%(false) + (%end_lt% - %end_utc%);
+
+%_start_UTC_estimated_or_scheduled% = 
+  if default(%activity_estimated_start_time_UTC%,1Jan1986) > 1Jan1986 then
+    %activity_estimated_start_time_UTC%
+  else
+    %activity_scheduled_start_time_UTC%;
+
+export %start_UTC_estimated_or_scheduled% = %_start_UTC_estimated_or_scheduled%;
+
+export %delay_sch_to_est_sign% = %_start_UTC_estimated_or_scheduled% - %activity_scheduled_start_time_UTC%;
+    
+redefine export %frozen_estimated_block_off_time% = 
+	attributes.%assignment_attr_abs%("FROZEN_EST_BLKOFF");
+
+redefine %_use_default_ci_start% = %has_frozen_estimated_block_off%;
+	
+redefine export %has_frozen_estimated_block_off% = 
+  not void(%frozen_estimated_block_off_time%)
+  and not %has_frozen_duty_start%;
+
+redefine export %activity_updated_scheduled_start_time_UTC% = 
+  if %has_frozen_estimated_block_off% then
+    %frozen_estimated_block_off_time%
+  else
+    %activity_scheduled_start_time_UTC%;
+    
+/* Variables used for duty time calculation with regard to
+   Private Passive (RFI08) and overtime/per diem
+*/
+
+%_pp_orig_start_UTC% =
+  let udor = %udor%, carrier = %flight_carrier%,
+    nr = fundamental.%str2int%(substr(attributes.%assignment_attr_str%("PRIVATE"), 13, 6)),
+    adep = substr(attributes.%assignment_attr_str%("PRIVATE"),21,3);
+  context(lp_activity, max(iterators.flight_leg_set, %start_UTC%)
+  where(%flight_carrier% = carrier 
+    and %flight_nr% = nr 
+    and %flight_suffix% = ""
+    and %our_flight_suffix% = ""
+    and %code% = "FLT"
+    and %udor% = udor
+    and %start_station% = adep)); 
+  
+%_pp_orig_end_UTC% =
+  let udor = %udor%, carrier = %flight_carrier%,
+    nr = fundamental.%str2int%(substr(attributes.%assignment_attr_str%("PRIVATE"), 13, 6)),
+    adep = substr(attributes.%assignment_attr_str%("PRIVATE"),21,3);
+  context(lp_activity, max(iterators.flight_leg_set, %end_UTC%)
+  where(%flight_carrier% = carrier 
+    and %flight_nr% = nr 
+    and %flight_suffix% = ""
+    and %our_flight_suffix% = ""
+    and %code% = "FLT"
+    and %udor% = udor
+    and %start_station% = adep));
+    
+redefine export %activity_private_passive_original_actual_start_utc% =
+  if %is_private_passive% then
+    default(%_pp_orig_start_UTC%, %activity_private_passive_original_start_utc%)
+  else
+    %start_UTC%;
+redefine export %activity_private_passive_original_actual_end_utc% =
+  if %is_private_passive% then
+    default(%_pp_orig_end_UTC%, %activity_private_passive_original_end_utc%)
+  else
+    %end_UTC%;
+    
+/*
+ * Variables uses by CommandLineCommand show_flights  
+ */
+%show_flight_crew_has_id%(AbsTime date_start, Int flight_nr) =
+  if %start_date_utc% = date_start and %is_flight_duty% and %flight_nr% = flight_nr then
+    True
+  else
+    False;
+
+
+export %has_agmt_group_qa_leg_start_utc% = crew.%has_agmt_group_qa_at_date%(leg.%start_utc%);
+
+export %limit_waiting_at_airport_when_callout% =
+  if crew.%has_agmt_group_skd_fd_at_date%(leg.%start_utc%) then 1:30
+  else if crew.%has_agmt_group_qa_at_date%(leg.%start_utc%) then 0:00
+  else 2:00;
+
+
+/* end of file */

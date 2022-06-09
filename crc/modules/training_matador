@@ -1,0 +1,295 @@
+/* -*- crc -*- */
+root module training_matador
+
+import crew;
+import crew_pos;
+import duty;
+import fundamental;
+import leg;
+import levels;
+import trip;
+import rule_exceptions;
+import training;
+import wop;
+
+rule(off) crew_must_have_instructor_qual_for_training =
+    valid %is_roster%
+          and trip.%in_pp_extended%
+          and %assignment_is_flight_instructor_event%
+          and rule_exceptions.%rule_on%(trip.%start_hb%);
+
+        all(leg(trip), crew.%has_instructor_qualification_at_date_hb%(%trip_required_instructor%, leg.%start_hb%)) where(leg.%is_active_flight%);
+
+        startdate = trip.%start_hb%;
+        remark "Instructor must have appropriate INSTRUCTOR qualification";
+        failtext %crew_must_have_instructor_qual_for_training_failtext%;
+end
+
+%crew_must_have_instructor_qual_for_training_failtext% =
+    concat("Trip requires ", %trip_required_instructor%, " qualification");
+
+%assignment_is_instructor_event% =
+    %assignment_is_flight_instructor_event%;
+
+%assignment_is_flight_instructor_event% =
+    trip.%has_active_flight%
+    and %trip_has_instructor_requirement%
+    and %_assignment_is_flight_instructor_event%;
+
+export %trip_has_instructor_requirement% =
+    any(leg(trip), not void(leg.%training_attr_any_crew%)) where(leg.%is_active_flight%);
+
+%_assignment_is_flight_instructor_event% =
+    let assigned_pos = first(leg(trip), crew_pos.%assigned_pos%);
+    if %trip_is_ilc_and_sh% and %trainee_has_restr_new_rank_on_trip% then
+         assigned_pos = 1
+    else if %trip_is_lc_and_sh% or %trip_is_ilc_and_sh% then
+         assigned_pos = 4
+    else if %trip_is_lc_and_lh% or %trip_is_ilc_and_lh% then
+        assigned_pos = 3
+    else if %trip_is_lifus% then
+        assigned_pos = 1
+     else
+        void_bool;
+
+%trip_is_lc_and_sh% =
+    %trip_is_lc% and trip.%is_short_haul%;
+
+%trip_is_lc_and_lh% =
+     %trip_is_lc% and trip.%is_long_haul%;
+
+%trip_is_ilc_and_sh% =
+    %trip_is_ilc% and trip.%is_short_haul%;
+
+%trip_is_ilc_and_lh% =
+     %trip_is_ilc% and trip.%is_long_haul%;
+
+%trip_is_lc% =
+    any(leg(trip), %leg_is_lc%);
+
+%trip_is_ilc% =
+    any(leg(trip), %leg_is_ilc%);
+
+%leg_is_lc% =
+    let training_attr = leg.%training_attr_any_crew%;
+    (training_attr = "LC");
+
+%leg_is_ilc% =
+    let training_attr = leg.%training_attr_any_crew%;
+    (training_attr = "ILC");
+
+%trip_is_lifus% =
+    any(leg(trip), %leg_is_lifus%);
+
+%leg_is_lifus% =
+    let training_attr = leg.%training_attr_any_crew%;
+    (training_attr = "LIFUS" or training_attr = "X LIFUS" or training_attr = "ZFTT LIFUS");
+
+%trip_required_instructor% =
+    %recurrent_instructor_requirement%;
+
+%recurrent_instructor_requirement% =
+    first(leg(trip), %leg_recurrent_instructor_requirement%) where(not(void(%leg_recurrent_instructor_requirement%)));
+
+%leg_recurrent_instructor_requirement% =
+    let req = leg.%training_attr_any_crew%;
+    if req = "" then
+        void_string
+    else
+        req;
+
+%trainee_has_restr_new_rank_on_trip% = any(leg(trip), %trainee_has_restr_new_rank_on_leg%);
+
+%trainee_has_restr_new_rank_on_leg% = crew.%id_has_restr_new_rank%(leg.%crewid_on_training_subtype%(%leg_recurrent_instructor_requirement%), leg.%start_date_lt%);
+
+/* Definition for matador assign */
+/* Void means it will be default rank */
+export %training_pos% =
+    if %pre_process_training_new_cabin_crew% then
+        8
+    else if crew.%is_instructor_in_pp% then
+        if %trip_has_instructor_requirement% then
+            if %trip_is_ilc_and_sh% and %trainee_has_restr_new_rank_on_trip% then
+                1
+            else if %trip_is_lc_and_sh% or %trip_is_ilc_and_sh% then
+                4
+            else if %trip_is_lc_and_lh% or %trip_is_ilc_and_lh% then
+                3
+            else if %trip_is_lifus% then
+                1
+            else
+                void_int
+        else
+            void_int
+    else
+        void_int;
+
+/*
+* Initial training cabin crew
+*/
+
+group cc_training =
+    %cabin_initial_training_header%,
+    %pre_process_training_new_cabin_crew%,
+    only_ac_type_training,
+    num_initial_training_activities,
+    %maximum_additional_initial_training_legs_buffer_p%,
+    %preferred_additional_initial_training_legs_buffer_p%,
+    no_new_trips_before_initial_training,
+    crew_must_have_initial_training,
+    release_must_have_sufficient_block_time,
+    %min_block_time_release_leg_p%,
+    release_legs_must_be_in_the_same_duty;
+
+%cabin_initial_training_header% =
+  parameter ""
+  remark "#HEADER# Cabin initial training";
+
+rule(off) only_ac_type_training =
+    valid %is_roster%
+      and %pre_process_training_new_cabin_crew%
+      and training.%needs_initial_training_in_pp%;
+    %trip_matches_training_need%;
+    remark "Cabin Initial Training: AC type training";
+end
+
+rule(off) num_initial_training_activities =
+    valid %is_roster%
+      and %pre_process_training_new_cabin_crew%
+      and training.%needs_initial_training_in_pp%;
+    %num_x_supernum_release_training_activities% <= training.%limit_x_supernum_release_training_activities% + %maximum_additional_initial_training_legs_buffer_p%;
+    remark "Cabin Initial Training: Limit number of x supernum and release legs";
+end
+
+%maximum_additional_initial_training_legs_buffer_p% =
+    parameter 6
+    remark "Cabin Initial Training: Maximum additional training legs (buffer) - Hard rule";
+
+%preferred_additional_initial_training_legs_buffer_p% =
+    parameter 4
+    remark "Cabin Initial Training: Preferred additional training legs (buffer) - used in penalty";
+
+rule(off) no_new_trips_before_initial_training =
+    valid %is_roster%
+      and not trip.%is_locked%
+      and not trip.%is_supernum%;
+    %no_x_supernum_release_legs_after_trip%;
+    startdate = trip.%start_lt%;
+    remark "Cabin Initial Training: No NEW leg before RELEASE legs";
+end
+
+rule(off) crew_must_have_initial_training =
+    valid %is_roster%
+      and %pre_process_training_new_cabin_crew%
+      and not any(wop(roster), wop.%is_locked%);
+    training.%needs_initial_training_in_pp%;
+    remark "Cabin Initial Training: Crew need cabin crew initial training";
+    failtext "Only crew with initial training can have work allocated";
+end
+
+rule(off) release_must_have_sufficient_block_time =
+    valid %is_roster%
+      and %pre_process_training_new_cabin_crew%
+      and leg.%is_release%;
+    leg.%block_time% >= %min_block_time_release_leg_p%;
+    startdate = leg.%start_lt%;
+    remark "Cabin Initial Training: Release leg must have sufficient block time";
+    failtext "Block time of release leg do not exceed minimum limit";
+end
+
+rule(off) release_legs_must_be_in_the_same_duty =
+    valid %is_roster%
+      and %pre_process_training_new_cabin_crew%
+      and any(leg(duty), leg.%is_release%);
+    count(leg(duty)) where(leg.%is_release% and leg.%is_active_flight%) >= training.%num_release_flight_needed%;
+    startdate = duty.%start_lt%;
+    remark "Cabin Initial Training: Release legs must be in the same duty";
+    failtext "Planned release legs are not in the same duty";
+end
+
+%min_block_time_release_leg_p% =
+    parameter 1:00
+    remark "Cabin Initial Training: Minimum block time release leg";
+
+
+%no_x_supernum_release_legs_after_trip% =
+    not any(leg(roster), leg.%is_x_supernum_or_release%) from(current);
+
+export %num_release_legs_after% =
+    count(leg(roster)) from(current) where(leg.%is_supernum% and leg.%is_active_flight%) - 1;
+
+export %missing_legs_to_complete_initial_training_pre_process% =
+    nmax(training.%limit_x_supernum_release_training_activities% + %preferred_additional_initial_training_legs_buffer_p% - %num_x_supernum_release_training_activities%, 0);
+
+export %surplus_legs_to_complete_initial_training_pre_process% =
+    nmax(%num_x_supernum_release_training_activities% - training.%limit_x_supernum_release_training_activities% - %preferred_additional_initial_training_legs_buffer_p%, 0);
+
+
+%num_release_training_activities% =
+    sum(trip(roster), count(leg(trip) where(leg.%is_release%)));
+
+%num_x_supernum_training_activities% =
+    sum(trip(roster), count(leg(trip) where(leg.%is_x_supernum%)));
+
+%num_x_supernum_release_training_activities% =
+    %num_x_supernum_training_activities% +
+    %num_release_training_activities%;
+
+/* Assumption: AC qual is the same for x supernum and release */
+export %leg_matches_acqual_in_x_supernum_period% =
+    (count(times(100))
+    while (not void(training.%course_type_by_match%(%pp_start%, %pp_end%, times_index(0))))
+    where(leg.%qual% = training.%_course_acqual_by_match%(%pp_start%, %pp_end%, times_index(0))
+          and training.%course_type_by_match%(%pp_start%, %pp_end%, times_index(0)) = training.%INITIAL_STR%
+          and training.%course_attribute_by_match%(%pp_start%, %pp_end%, times_index(0)) = training.%X_SUPERNUM_STR%) > 0)
+
+    and %leg_is_in_x_supernum_period%;
+
+%trip_matches_training_need% =
+    all(leg(trip), %leg_matches_acqual_in_x_supernum_period%) where (leg.%is_active_flight%);
+
+/* Assumption: Training period is the same for x supernum and release */
+%leg_is_in_x_supernum_period% =
+    count(times(100))
+    while (not void(training.%course_type_by_match%(%pp_start%, %pp_end%, times_index(0))))
+    where(leg.%start_hb% >= training.%course_start_by_match%(%pp_start%, %pp_end%, times_index(0))
+          and leg.%end_hb% <= training.%course_end_by_match%(%pp_start%, %pp_end%, times_index(0))
+          and training.%course_type_by_match%(%pp_start%, %pp_end%, times_index(0)) = training.%INITIAL_STR%
+          and training.%course_attribute_by_match%(%pp_start%, %pp_end%, times_index(0)) = training.%X_SUPERNUM_STR%) > 0;
+
+%pre_process_training_new_cabin_crew% =
+    parameter False
+    remark "Cabin Initial Training: Initial x supernum training";
+
+%_crew_is_restricted% =
+  crew.%has_restr_new_new_leg_start% or
+  crew.%has_qual_restr_new_actype_on_leg% or
+  crew.%has_restr_new_rank_leg_start% or
+  crew.%has_restr_new_refr_leg_start%;
+
+%total_cabin_crew_need% = crew_pos.%total_cabin_crew_service_need% + crew_pos.%ac_need_in_pos%(5) + crew_pos.%ac_need_in_pos%(6) + crew_pos.%ac_need_in_pos%(7);
+
+/* Penalty */
+export %roster_penalty_cabin_initial_training% =
+    sum(trip(roster), %trip_penalty_cabin_initial_training%);
+
+%trip_penalty_cabin_initial_training% =
+    if trip.%is_locked% then
+        0
+    else
+        nmax((trip.%start_date_hb% - %pp_start%)/24:00, 0)*trip.%days%; 
+
+/* Variables for pre-run script */
+%leg_is_assigned_as_cabin_training% =
+    leg.%is_x_supernum_or_release%;
+
+%roster_has_cabin_training_allocated% =
+    any(leg(roster), %leg_is_assigned_as_cabin_training%);
+
+%leg_training_sub_type% =
+    if leg.%is_release% then
+        training.%RELEASE_STR%
+    else if leg.%is_x_supernum% then
+        training.%X_SUPERNUM_STR%
+    else
+        void_string;

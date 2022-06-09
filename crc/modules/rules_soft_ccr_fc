@@ -1,0 +1,467 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   This module contains flight crew specific soft (quality) rules used 
+ *   in Carmen Crew Rostering and as studio only in Carmen Crew Tracking.
+ *
+ * Sections:
+ *    1. Blank day rules
+ *    2. Freeday rules
+ *    3. Misc
+ *    4. Lower Rank rules
+ *
+ * Created by:
+ *   Henrik Albertson, 17-Feb-2005
+ *
+ * Major changes:
+ *
+ */
+
+module rules_soft_ccr_fc inherits rules_soft_ccr
+
+import crew;
+import leg;
+import duty;
+import oma16;
+import crew_pos;
+import accumulators;
+import training;
+
+/****************************************************************
+ * Section 1: Blank day rules
+ ***************************************************************/
+
+/*
+** Note: Consider moving Blank day rules to rules_studio to exclude them
+** from optimzation phase 
+*/
+
+/*
+** Rule: 
+**    No single empty day after BL-day
+**
+** Description:
+**    No single empty day is allowed between blank days
+**
+** Agreement:
+**    soft rule
+*/
+rule sft_no_single_empty_day_after_bl_day_FC_ALL =
+  valid roster.%check_rules% and
+        trip.%in_pp% and
+        not is_last(trip(wop)) and
+        trip.%is_blank_day% and
+	rule_exceptions.%rule_on%(trip.%start_UTC%);
+  not %is_blank_day_followed_by_empty_day%;
+  startdate  = trip.%start_UTC%;
+  failobject = trip.%failobject_start%;
+  failtext "Soft: No single empty day after BL day";
+  remark "(CCR) Soft: No single empty day after BL day",
+  planner "Check that no single empty day between BL day(s).";
+end
+
+%is_blank_day_followed_by_empty_day% =
+  next(trip(wop), trip.%is_blank_day%) and
+  trip.%days_btw_trips_fwd% > 0;
+
+/*
+** Rule:
+**    Max BL-days in planning period
+**
+** Description:
+**    Maximum number of blank days per crew in one planning period
+**
+** Agreement:
+**    soft rule
+*/
+rule sft_max_bl_days_in_planning_period_FC_ALL =
+  valid roster.%check_rules% and
+        trip.%in_pp% and
+        %is_last_bl_day_in_pp%;
+
+  %bl_days_in_pp% <= %max_bl_days_in_pp% + 
+		     rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+
+  startdate = trip.%start_UTC%;
+  failobject = %bl_pp_failobject%; 
+  failtext %max_bl_days_in_pp_failtext%; 
+  remark "(CCR) Soft: Max BL days in planning period",
+  planner "Check that number of BL days in planning period doesnt exceed maximum.";
+end
+
+%is_last_bl_day_in_pp% =
+  is_last(trip(roster)) 
+  where (trip.%is_blank_day% and
+         trip.%start_hb% < %pp_end%);
+
+%max_bl_days_in_pp% = 
+  parameter 10 
+  remark "(CCR) Max BL days in planning period";
+
+%bl_days_in_pp% =  
+  trip.%bl_days_in_period%(%pp_start%, %pp_end%);
+
+/*
+** For tracking we wish to pinpoint the precise date of rule break 
+*/
+%bl_pp_failobject% = 
+  first(trip(roster),trip.%failobject_start%) 
+  where (%is_last_bl_day_in_pp%);
+
+%max_bl_days_in_pp_failtext% = 
+  concat(format_int(%bl_days_in_pp%, "(CCR) Soft: BL day(s) in planning period month is: %i "),
+         format_int(%max_bl_days_in_pp%, ", max is: %i days"));
+
+/****************************************************************
+ * Section 2: Freeday rules
+ ***************************************************************/
+
+/*
+** Rule:
+**    Min freedays before long course period
+**
+** Description:
+**    The rule checks that a long course period is preceeded by
+**    two freedays.
+**
+** Agreement:
+**    Functional
+*/
+
+rule sft_min_freedays_before_long_course_ALL =
+  valid roster.%check_rules% and
+        trip.%is_long_course_period% and
+        crew.%in_variable_group_trip_start%;
+
+  freedays.%nr_before_trip% >= %min_nr_freedays_before_long_course_period% - 
+			      rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+
+  startdate  = trip.%start_UTC%;
+  failobject = trip.%failobject_start%;
+  failtext(Int value, Int limit) =
+    concat(format_int(value, "Soft: %i freeday(s) before "),
+           format_int(limit, " long course period, min required is %i"));
+  remark "(CCR) Soft: Minimum freedays before long course period.",
+  planner "Check that a long course period is preceeded by 2 freedays.";
+end
+
+%min_nr_freedays_before_long_course_period% = 2;
+
+/****************************************************************
+ * Section 3: Misc rules
+ ***************************************************************/
+
+/*
+** Rule: 
+**    Max 3 trips in a row to specific US airports
+**
+** Description:
+**    Longhaul crew may only fly 3 consecutive trips to specific 
+**    US airports.
+**
+** Agreement:
+**    Functional
+*/
+
+rule sft_max_consecutive_trips_us_airports_FC =
+  valid wop.%in_pp% and
+        wop.%is_flight_duty% and 
+        crew.%is_long_haul_wop_start% and
+        %wop_has_arrival_in_max_consecutive_us_airports% and
+	rule_exceptions.%rule_on%(wop.%start_UTC%);
+  
+  %wop_not_above_max_consecutive_us_airport%;
+  
+  startdate = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  failtext "Soft: Maximum consecutive trips to specific US airports.";
+  remark "(CCR) Soft: Maximum consecutive trips to specific US airports.";
+end
+
+%wop_has_arrival_in_max_consecutive_us_airports% =
+  any(trip(wop), %trip_has_arrival_in_max_consecutive_us_airports%);
+
+%trip_has_arrival_in_max_consecutive_us_airports% =
+  any(leg(trip), %leg_has_arrival_in_max_consecutive_us_airports%);
+
+%leg_has_arrival_in_max_consecutive_us_airports% =
+  leg.%arrival_in_max_consecutive_us_airports% and
+  not leg.%is_deadhead% and
+  leg.%is_long_haul% and
+  leg.%departure_is_interscand%;
+
+%wop_not_above_max_consecutive_us_airport% =
+  any(leg(wop),%leg_not_above_max_consecutive_us_airport%);
+
+%leg_not_above_max_consecutive_us_airport% =
+   %last_cons_us_date% = 01Jan1986 or
+   %last_cons_us_date% <> %last_lh_date% or
+   %last_last_cons_us_date% = 01Jan1986 or
+   %last_last_cons_us_date% <> %last_last_lh_date% or
+   %last_last_last_cons_us_date% = 01Jan1986 or
+   %last_last_last_cons_us_date% <> %last_last_last_lh_date%;
+
+%last_cons_us_date% =
+  accumulators.%prev_cons_us_date%(leg.%start_UTC% - 1:00);
+%last_last_cons_us_date% =
+  accumulators.%prev_cons_us_date%(%last_cons_us_date% - 1:00);
+%last_last_last_cons_us_date% =
+  accumulators.%prev_cons_us_date%(%last_last_cons_us_date% - 1:00);
+
+%last_lh_date% =
+  accumulators.%prev_lh_date%(leg.%start_UTC% - 1:00);
+%last_last_lh_date% =
+  accumulators.%prev_lh_date%(%last_lh_date% - 1:00);
+%last_last_last_lh_date% =
+  accumulators.%prev_lh_date%(%last_last_lh_date% - 1:00);
+  
+/*
+** Rule:
+**    Subpart Q FDP extension not allowed before PC/OPC 
+**
+** Description:
+**    Check that pilots performing a PC/OPC do not have a Subpart FDP extension
+**    on the day before.
+**
+** Agreement:
+**    Base Chief Pilot
+*/
+
+rule sft_fdp_extension_before_recurrent_simulator_FC_ALL =
+  valid roster.%check_rules% and
+        duty.%in_pp_extended% and
+        duty.%is_pc_or_opc% and
+        not duty.%is_sim_instr% and
+        default(prev(duty(wop),duty.%start_day%) = duty.%start_day% - 24:00,
+                false) and
+        rule_exceptions.%rule_on%(duty.%start_day%) and
+        not crew.%is_leased_wop_start%;
+
+  not prev(duty(wop), oma16.%is_extended_fdp%);
+
+  startdate  = duty.%start_day%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext "Soft: PC/OPC must not be preceded by FDP extension";
+  remark "Soft: PC/OPC must not be preceded by FDP extension",
+  planner "Checks that a pilot's PC/OPC is not preceded by an FDP extension.";
+end
+
+/****************************************************************
+ * Section 4: Lower Rank rules
+ ***************************************************************/
+
+/*
+** Rule: 
+**    Max number of trips (longhaul) or days (shorthaul) below
+**    rank in planning period.
+**
+** Description:
+**    Enforce volume limits on lower rank production in planning
+**    period. The rule is valid for FC only.   
+**
+** Agreement:
+**    Functional
+*/
+
+rule sft_max_lower_rank_in_pp_FC_ALL =
+  valid %is_roster% and
+        wop.%in_pp% and
+        wop.%is_flight_duty% and
+        trip.%starts_in_pp% and
+        crew_pos.%trip_lower_rank% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+  %nr_lower_rank_in_pp% <= %max_lower_rank_in_pp%;
+  startdate = trip.%start_UTC%;
+  failobject = trip.%failobject_start%;
+  failtext(Int value, Int limit) =
+    concat(format_int(value, "Soft: %i lower rank "),
+           %lower_failtext%,
+           format_int(limit, " in planning period, max is %i"));
+  remark "(CCR) Soft: Maximum number of lower rank trip/days in planning period.",
+  planner "The rule checks that the amount of lower rank"
+          " trip or days doesnt exceed the maximum limit in a planning period.";
+end
+
+%lower_failtext% =
+  if crew.%is_long_haul_trip_start% then
+    "trips"
+  else
+    "days";
+
+%nr_lower_rank_in_pp% =
+  if crew.%is_long_haul_trip_start% then
+    count(trip(roster))
+    where (trip.%in_pp% and
+           crew_pos.%trip_lower_rank% and
+           trip.%has_only_flight_duty% and
+           trip.%is_long_haul% and
+           not trip.%has_training_code%)
+   else
+    sum(trip(roster), %lower_rank_days%)
+    where (trip.%in_pp% and
+           crew_pos.%trip_lower_rank% and
+           trip.%has_only_flight_duty% and
+           trip.%is_short_haul% and
+           not trip.%has_training_code%); 
+
+%lower_rank_days% =
+  count(times(trip.%days%))
+  where (%lower_rank_at_date%(round_down(trip.%start_UTC% + ((%times_index_0%-1) * 24:00), 24:00)));
+
+%lower_rank_at_date%(Abstime date) =
+  any(leg(trip), overlap(date, date + 24:00, leg.%start_UTC%, leg.%end_UTC%) > 0:00)
+  where (crew_pos.%lower_rank%);
+
+%max_lower_rank_in_pp% = 
+  parameter 1 
+  remark "(CCR) Max lower rank in planning period (LH: trips, SH : Days)";
+
+/*
+** Rule: 
+**    Minimum days between lower rank.
+**
+** Description:
+**    Check the minimum days between lower rank trips.
+**
+** Agreement:
+**    Functional rule
+*/
+rule sft_min_days_btw_lower_FC_ALL =
+  valid roster.%check_rules% and
+        wop.%in_pp% and
+        trip.%has_only_flight_duty% and
+        not trip.%has_training_code% and
+        crew_pos.%trip_lower_rank%;
+
+	%lower_rank_days_prev% >= %min_days_btw_lower_rank% - 
+			       rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+
+  startdate = trip.%start_UTC%;
+  failobject = trip.%failobject_start%;
+  failtext(int val, int limit) = 
+    concat("SBY: ", %int2str%(val),
+           " days between lower. ", %int2str%(limit),
+           " required.");
+  remark "(CCR) Soft: Minimum days between lower rank.",
+  planner "The rule checks that the days between lower rank"
+	  " doesnt exceed the minimum requirement.";
+end
+
+%lower_rank_days_prev% =
+  (round_down(trip.%start_day%,24:00) - round_up(%prev_lower_rank_date%, 24:00)) / 24:00;
+
+%prev_lower_rank_date% =
+  /* !!!! 2008-08-12 Janne C.
+          The accumulator doesn't take into account if the lower rank trip has a training code. 
+          Risky! We will probably get a wrong date, steaming from another training flight. !!!! */
+  default(accumulators.%prev_lower_rank_date%(trip.%start_UTC% - 0:01), 01jan1986); 
+
+table minimum_days_btw_standby_limit =
+  crew.%rank_at_date%(trip.%start_UTC%) -> 
+    %min_days_btw_lower_rank%;
+  "FC" -> %min_days_btw_lower_rank_FC%;
+  "FP" -> %min_days_btw_lower_rank_FP%;
+
+  - -> 0;
+end
+
+%min_days_btw_lower_rank_FC% =
+  parameter 14 
+  remark "(CCR) Minimum days between lower rank trips (FC).";
+
+%min_days_btw_lower_rank_FP% =
+  parameter 14 
+  remark "(CCR) Minimum days between lower rank trips (FP).";
+
+/*
+** Rule: 
+**    No longhaul standby line for crew that has new A340 
+**    qualification within 3 months after change.
+**
+** Description:
+**    Check that no longhaul standby is given for crew that has changed 
+**    to A340 qualification within a period after change 
+**    It is assumed that crew only changes qualification at most once 
+**    within the period chosen.
+**
+** Agreement:
+**    Functional rule
+**
+** Known Issues:
+**   The rule does not use accumulator so it is possible that we miss
+**   1 trip. This will only mean that in some few cases, the rule will
+**   be over-restrictive.
+*/
+
+rule min_days_btw_new_qual_A340_and_standby_line_FC_SKI =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        trip.%is_standby_line% and
+        crew.%has_ac_qln%(trip.%start_UTC%, "A4") and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+
+  crew.%has_ac_qln%(%check_ac_qual_break_date%, "A4");
+
+  startdate  = trip.%start_UTC%;
+  failobject = trip.%failobject_start%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext (concat("FC crew cannot do longhaul standby line within ", 
+                   %int2str%(%min_days_since_change_of_ac_qual_p%),
+                   " days of new A340 qualification: "));
+  remark "SBY: FC crew cannot do longhaul standby line while having new A340 qualification",
+  planner "The rule checks that longhaul standby is given to crew",
+          "with A340 qualification only if crew has had this",
+          "qualification for a given number of days";
+end
+
+%check_ac_qual_break_date% =
+  trip.%start_UTC% - %min_days_since_change_of_ac_qual_p% * 24:00;
+
+%min_days_since_change_of_ac_qual_p% =
+  parameter 40
+  remark "(CCR) Minimum days since new A340 qualification for LH standby line";
+
+/* Rule:
+    Check wop length for 5/4 flex crew
+  Description:
+    WP CCR 753
+   The Wop for flex crew became to long due to overlapping pp_end
+  Author:
+   Per Groenberg
+  When:
+   2008-08-21
+*/
+rule sft_max_wop_length_FC_5_4_FLEX_ALL =
+  valid roster.%check_rules% and
+        is_first(trip(wop)) and
+        %trip_in_pp_extended% and
+        trip.%is_on_duty% and
+        %crew_is_5_4_flex_and_pilot%;
+	%nr_working_days_before_offduty% - 
+    rule_exceptions.%overshoot_int%(trip.%start_UTC%)  <=  %max_day_5_4_flex_crew%;
+  startdate = trip.%start_UTC%;
+  failobject = trip.%failobject_start%;
+  failtext(int val, int limit) = 
+    concat("Func: ", %int2str%(val),
+           " days between pattern off-duties. ", %int2str%(limit),
+           " max.");
+  remark "(CCR) Func: 5/4 Flex Crew: Max onduty days between pattern off-duties.",
+  planner "The rule checks that assigned production fits in 5/4 pattern";
+end
+
+%nr_working_days_before_offduty% = 
+/* get last end_time before offduty activity */
+ (( max(trip(chain),round_up(trip.%end_hb%,24:00))  
+       from(current) while (trip.%is_on_duty%) )
+ - round_down(trip.%start_hb%,24:00))/24:00; 
+ 
+%max_day_5_4_flex_crew% = parameter 5 remark "Max production length for 5/4 flex crew";
+%trip_in_pp_extended% = 
+  trip.%start_hb% >= %pp_start% - 5*24:00 and 
+  trip.%start_hb% < %pp_end%;
+%crew_is_5_4_flex_and_pilot% = 
+  %flight_crew% and   
+  crew.%in_5_4_flex_group%(trip.%start_hb%);
+/* end of file */

@@ -1,0 +1,418 @@
+/* -*- crc -*- 
+ *
+ *
+ * Purpose:
+ *   This module contains government rules from the Civil Avaiation
+ *   Authority to be used in Carmen Crew Pairing and as studio only 
+ *   Carmen Crew Rostering and Tracking.
+ *   The module contains contains modules common to CC, FC, pairing, rostering.
+ *
+ * Sections:
+ *   1. Point rules
+ *
+ * Created by:
+ *   Henrik Mouritsen, 20070313
+ *
+ * Major changes:
+ *finish
+ */
+
+root module rules_caa_common
+import fundamental;
+import trip;
+import fdp;
+import duty;
+import leg;
+import levels;
+import rule_exceptions;
+import rules;
+import hotel;
+import base_product;
+import system_db_parameters;
+import oma16;
+import oma16_defs;
+import duty_period;
+
+/****************************************************************
+ * Section 1: EU-OPS OMA16
+ ***************************************************************/
+
+/*
+** Rule:
+**   OMA16 - maximum duty in a Flight Duty Period  
+**
+** Description:
+**    Check maximum duty in a Flight Duty Period.     
+**
+** Agreement:
+**   ORO.FTL.210 */
+
+rule caa_oma16_max_duty_in_fdp_ALL =
+  valid 
+        %caa_oma16_max_duty_in_fdp_all_valid%;
+        
+  %fdp_time% <=
+    oma16.%max_daily_fdp% -
+    %max_duty_in_fdp_soft_buffer_p% +
+    rule_exceptions.%overshoot_rel_on_off%(duty.%start_UTC%);
+    
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %caa_oma16_max_duty_in_fdp_ALL_failobject%;
+  failtext(Reltime value, Reltime limit) = 
+    %caa_oma16_max_duty_in_fdp_ALL_failtext%(value, limit);
+  remark "CAA. OMA16 max duty in FDP",
+  planner "The rule checks that duty time in a FDP is less than the maximum"
+          " allowed.";
+end
+
+/* Rule Validity */
+export %caa_oma16_max_duty_in_fdp_all_valid% =
+	trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and
+        duty_period.%is_fdp% and
+        duty_period.%is_first_duty_in_duty_period%;
+
+%max_duty_in_fdp_soft_buffer_p% =
+  parameter 0:00
+  remark "OMA16: Max duty in FDP soft buffer";
+
+%caa_oma16_max_duty_in_fdp_ALL_failtext%(Reltime value, Reltime limit) =
+  rules.%failtext_rel%(concat("CAA: OMA16 Max FDP ", 
+                              format_time(duty.%start_utc%,"%d%b"), "-",
+                              format_time(duty.%end_utc%,"%d%b"),
+                              " (max unf: ",
+                              format_time(oma16.%max_daily_fdp_uc%, "%h:%02M"),
+                              ")"), value, limit);
+
+/* Redefined in rules_caa_common_calibration_lookback */
+export %fdp_time% = fdp.%time%;
+
+%caa_oma16_max_duty_in_fdp_ALL_failobject% =
+  let start_fdp = duty.%start_utc%,
+      end_fdp = duty.%end_utc%,
+      max_duty_fdp = oma16.%max_daily_fdp%,
+      overshoot = default(rule_exceptions.%overshoot_rel%(duty.%start_UTC%), 0:00);
+  default(  last(leg(duty),
+              prev  ( leg(chain), next(leg(chain),leg.%failobject_departure%) ) 
+              where (   default (fdp.%time_in_interval%(start_fdp,leg.%end_utc%), 0:00)
+                     <= max_duty_fdp +  overshoot)
+            ) 
+            where (leg.%start_utc% < end_fdp), 
+          duty.%failobject_start%);
+                
+
+/*
+** Rule:
+**   OMA16 - maximum duty time in 7 calendar days backwards from duty start day  
+**
+** Description:
+**    Check duty time in 7 calendar days backwards from the day on which a
+**    duty ends.     
+**
+** Agreement:
+**   ORO.FTL.210
+*/
+rule caa_oma16_max_duty_in_7_days_start_day_ALL =
+  valid
+        trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and        
+        duty_period.%is_last_duty_period_on_start_day%;
+        
+  oma16.%duty_time_in_last_7_days_start_day% <=
+    oma16_defs.%max_duty_time_in_7_days% -
+    system_db_parameters.%oma16_duty_time_in_7_days_buffer%(duty_period.%last_7_days_start_day_start%) +
+    rule_exceptions.%overshoot_rel_on_off%(duty.%start_UTC%);
+    
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %caa_oma16_max_duty_in_7_days_start_day_ALL_failobject%;
+  failtext(Reltime value, Reltime limit) =
+    %caa_oma16_max_duty_in_7_days_start_day_ALL_failtext%(value, limit);
+  remark "(CCR) CAA: OMA16 max duty time in 7 days from duty start day",
+  planner "The rule checks that the total duty time in 7 calendar days"
+          " backwards from the day on which the duty starts is"
+          " less than maximum allowed.";
+end
+
+
+%caa_oma16_max_duty_in_7_days_start_day_ALL_failobject% =
+  let start_7_days = duty_period.%last_7_days_start_day_start%,
+      end_7_days = duty_period.%last_7_days_start_day_end%,
+      overshoot = default(rule_exceptions.%overshoot_rel%(duty.%start_UTC%), 0:00);
+  last(leg(duty),
+       prev(leg(chain),next(leg(chain),leg.%failobject_departure%)) where
+        (oma16.%duty_time_in_interval%(start_7_days, leg.%co_end_utc%) <=
+         oma16_defs.%max_duty_time_in_7_days% +
+         overshoot)) where
+  (leg.%start_utc% < end_7_days);
+
+%caa_oma16_max_duty_in_7_days_start_day_ALL_failtext%(Reltime value, Reltime limit) =
+  let text = if value <= oma16_defs.%max_duty_time_in_7_days% then
+               "Soft: Duty time in 7 days "
+             else
+               "CAA: OMA16 duty time in 7 days ",
+      new_limit = if value <= oma16_defs.%max_duty_time_in_7_days% then
+                    limit
+                  else
+                    oma16_defs.%max_duty_time_in_7_days%;
+  rules.%failtext_rel%(concat(text,
+                              format_time(duty_period.%last_7_days_start_day_start_day%,"%d%b"),
+                              "-",
+                              format_time(duty_period.%last_7_days_start_day_end_day%,"%d%b")),
+                        value, new_limit);
+
+/*
+** Rule:
+**   OMA16 - maximum duty time in 7 calendar days backwards from duty end day  
+**
+** Description:
+**    Check duty time in 7 calendar days backwards from the day on which a
+**    duty ends.     
+**
+** Agreement:
+**   ORO.FTL.210
+*/
+rule caa_oma16_max_duty_in_7_days_end_day_ALL =
+  valid
+        trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and
+        duty_period.%is_last_duty_period_on_end_day% and
+        duty_period.%start_day_hb_utc% <> duty_period.%end_day_hb_utc%;
+        
+  oma16.%duty_time_in_last_7_days_end_day% <=
+    oma16_defs.%max_duty_time_in_7_days% -
+    system_db_parameters.%oma16_duty_time_in_7_days_buffer%(duty_period.%last_7_days_end_day_start%) +
+    rule_exceptions.%overshoot_rel_on_off%(duty.%start_UTC%);
+    
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %caa_oma16_max_duty_in_7_days_end_day_ALL_failobject%;
+  failtext(Reltime value, Reltime limit) =
+    %caa_oma16_max_duty_in_7_days_end_day_ALL_failtext%(value, limit);
+  remark "(CCR) CAA: OMA16 max duty time in 7 days from duty end day",
+  planner "The rule checks that the total duty time in 7 calendar days"
+          " backwards from the day on which the duty ends is"
+          " less than maximum allowed.";
+end
+
+
+%caa_oma16_max_duty_in_7_days_end_day_ALL_failobject% =
+  let start_7_days = duty_period.%last_7_days_end_day_start%,
+      end_7_days = duty_period.%last_7_days_end_day_end%,
+      overshoot = default(rule_exceptions.%overshoot_rel%(duty.%start_UTC%), 0:00);
+  last(leg(duty),
+       prev(leg(chain),next(leg(chain),leg.%failobject_departure%)) where
+        (oma16.%duty_time_in_interval%(start_7_days, leg.%co_end_utc%) <=
+         oma16_defs.%max_duty_time_in_7_days% +
+         overshoot)) where
+  (leg.%start_utc% < end_7_days);
+
+%caa_oma16_max_duty_in_7_days_end_day_ALL_failtext%(Reltime value, Reltime limit) =
+  let text = if value <= oma16_defs.%max_duty_time_in_7_days% then
+               "Soft: Duty time in 7 days "
+             else
+               "CAA: OMA16 duty time in 7 days ",
+      new_limit = if value <= oma16_defs.%max_duty_time_in_7_days% then
+                    limit
+                  else
+                    oma16_defs.%max_duty_time_in_7_days%;
+  rules.%failtext_rel%(concat(text,
+                              format_time(duty_period.%last_7_days_end_day_start_day%,"%d%b"),
+                              "-",
+                              format_time(duty_period.%last_7_days_end_day_end_day%,"%d%b")),
+                        value, new_limit);
+
+
+/*
+** Rule:
+**   OMA16 - maximum extended FDPs in 7 calendar days  
+**
+** Description:
+**   Checks the number of FDP with extensions in 7 calendar days backwards
+**
+** Agreement:
+**   ORO.FTL.205
+*/
+
+rule caa_oma16_max_extended_fdps_in_7_days_ALL =
+  valid
+        trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and
+        duty_period.%is_last_duty_period_on_start_day% and
+        oma16.%is_extended_fdp%;
+        
+  oma16.%num_extended_fdps_in_last_7_days% <=
+  oma16_defs.%max_extended_fdps_in_7_days%;
+                
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %caa_oma16_max_fdp_with_extension_in_7_days_ALL_failboject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%(concat("CAA: OMA16 extended FDPs in 7 days ",
+                                format_time( duty_period.%last_7_days_start_day_start% ,"%d%b"), "-",
+                                format_time( duty_period.%last_7_days_start_day_end% - 24:00,"%d%b")),
+                         value,limit);
+  remark "(CCR) CAA: OMA16 max extended FDPs in 7 days",
+  planner "The rule checks that the number of FDPs with extension in 7 calendar"
+          " days is less than maximum allowed.";
+end
+
+%caa_oma16_max_fdp_with_extension_in_7_days_ALL_failboject% =
+  let start_7_days = duty_period.%last_7_days_start_day_start%,
+      end_7_days = duty_period.%last_7_days_start_day_end%,
+      overshoot = rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+  last(leg(duty),
+       prev(leg(chain),next(leg(chain),leg.%failobject_departure%)) where
+        (count(duty(chain))
+           from (current)
+           backwards
+           while (fdp.%start_utc% >= start_7_days)
+           where (oma16.%is_extended_fdp%) <=
+         oma16_defs.%max_extended_fdps_in_7_days% +
+         overshoot)) where
+  (leg.%start_hb% < end_7_days);
+
+
+/*
+** Rule:
+**   OMA16 - special case when late finish/night duty at homebase is followed by early start
+**
+** Description:
+**   This applies even when the late finish/night duty and early start are separated by other duties.
+**
+** Agreement:
+*/
+
+rule caa_oma16_rest_transition_late_early_ALL =
+  valid
+        duty.%in_pp% and
+        duty_period.%is_first_duty_in_duty_period% and
+        (duty_period.%is_fdp% or duty.%is_standby_at_airport%) and
+        oma16.%is_early_start_homebase% and
+        not void(oma16.%latest_late_finish_or_night_duty_end_hb%);
+        
+  oma16.%lnrs_since%(oma16.%latest_late_finish_or_night_duty_end_hb%) >= 1;
+
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext "CAA: OMA16 transition late finish/night duty - early start req. one local night rest";
+  remark "CAA: OMA16 transition late finish/night duty - early start requires one local night rest",
+  planner "The rest between a duty w late finish/night duty, and one with early start"
+          " must be at least one local night.";
+end
+
+
+/*
+** Rule:
+**   OMA16 - Rest after duty period
+**
+** Description:
+**   After > 4 h tzd duty, a rest after duty is required with at least 14 hrs, or preceding duty period, whichever is greatest.
+** 
+*/
+export rule caa_oma16_rest_after_duty_period_ALL =
+  valid %caa_oma16_rest_after_duty_valid%;
+             
+  %duty_period_rest_time_after% >= oma16.%min_rest_after_dp%
+     + oma16.%rest_after_duty_buffer%; 
+  
+  startdate = duty.%scheduled_block_off_utc%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = next(duty(chain), duty.%failobject_start%) where (duty_period.%is_first_duty_in_duty_period% and duty_period.%is_on_duty%);
+  failtext(Reltime value, Reltime limit) =
+    %caa_oma16_rest_before_duty_ALL_failtext%(value, limit);
+  remark "CAA. OMA16 min rest after duty period",
+  planner "The rule checks that the minimum rest after a duty-period "
+          " is satisfied. It also covers rest after long-haul and rest"
+          " after extended FDP.";
+end
+
+export %caa_oma16_rest_after_duty_valid% =
+    trip.%check_rules% and
+    (duty.%in_pp% or duty.%rest_ends_in_pp%) and
+    duty_period.%is_on_duty% and
+    duty_period.%is_last_duty_in_duty_period% and
+    not duty.%is_single_leg_standby_callout% and
+    not is_last(duty(chain));
+
+%caa_oma16_rest_before_duty_ALL_failtext%(Reltime value, Reltime limit) =
+  if %is_tracking% and limit <> oma16.%min_rest_after_dp% then
+    rules.%failtext_rel%("Soft: OMA16 min rest after DP", value, limit)
+  else
+    rules.%failtext_rel%("CAA: OMA16 min rest after DP", value, limit);
+
+/* Redefined in rules_caa_common_calibration_lookback */
+export %duty_period_rest_time_after% = duty_period.%rest_time_after%;
+
+/*
+** Rule:
+**   OMA16 - Rest after rotation outside homebase acclimatisation
+**
+** Description:
+**   A "rotation", called sub trip in CMS code, is the smallest series of duties starting and ending in homebase.
+**   This rule covers the rest required at homebase, after a sub trip which includes duty start/end in a station with more than 
+**   2 h time difference from homebase.  
+*/
+
+rule caa_oma16_rest_after_lh_sub_trip_ALL =
+  valid
+        duty.%in_pp% and
+        oma16.%duty_ends_rest_after_lh_sub_trip%;
+
+  oma16.%lnrs_before_duty% >= oma16.%reqd_homebase_lnr_after_previous_lh_duty% ; 
+  
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("CAA: OMA16 min local nights rest at homebase after LH" ,
+                         value,limit);
+  remark "CAA: OMA16 min local nights rest at homebase after LH",
+  planner "Rest at homebase after >=4 h tzd must be 2-5 local nights depending on tzd"
+          " and duration.";
+end
+  
+  
+/*
+** Rule:
+**  OMA16 - maximum sectors in consecutive night duties 
+**
+** Description:
+**    Check maximum sectors in consecutive night duties    
+**
+** Agreement:
+**   CS FTL.1.205 */
+rule caa_oma16_consecutive_night_duties_ALL =
+
+  valid
+        trip.%check_rules% and
+        duty.%in_pp_extended% and
+        oma16.%is_night_duty% and
+        (
+            (duty_period.%is_last_duty_in_duty_period% and 
+             default(next(duty(wop), oma16.%is_night_duty%), false)) 
+         or
+            (duty_period.%is_first_duty_in_duty_period% and 
+             default(prev(duty(wop), oma16.%is_night_duty%), false))
+        );
+        
+  fdp.%num_sectors% <= oma16.%max_sectors_per_duty_in_consecutive_night_duties%;
+   
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(int value, int limit) = 
+    rules.%failtext_int%("CAA: OMA16 max number of sectors on consecutive night duties",
+                         value, limit);
+  remark "CAA: OMA16 max number of sectors on consecutive night duties",
+  planner "The rule checks that the number of sectors per duty does not exceed 4 "
+          "when consecutive night duties are planned";
+end
+
+/* end of file */

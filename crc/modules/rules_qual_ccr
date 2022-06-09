@@ -1,0 +1,776 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains common qualification rules for flight and cabin crew 
+ *   used in Carmen Crew Rostering and as studio only Carmen Crew Tracking.
+ *
+ * Sections:
+ *   1. Aircraft qualification rules
+ *   2. Recurrent training rules
+ *
+ * Created by:
+ *   Henrik Albertson, 19-Dec-2005
+ *
+ * Major changes:
+ *
+ */
+
+root module rules_qual_ccr
+import fundamental;
+import levels;
+import leg;
+import duty;
+import trip;
+import wop;
+import roster;
+import qualification;
+import training;
+import rule_exceptions;
+import task;
+import crew;
+import recency;
+import rules;
+import keywords;
+import crew_pos;
+import model_crew;
+import system_db_parameters;
+
+/****************************************************************
+ * Section 1: Aircraft qualification rules
+***************************************************************/
+
+/*
+** Rule:
+**    Aircraft types qualification
+**
+** Description:
+**    The rule checks that crew has valid aircraft qualification.
+** 
+** Agreement:
+**   OM-A x.x.x (Recency)
+**
+** NB! Rule Exception allowed only for 36(38) and 38(36)
+*/
+export rule qln_ac_type_ok_ALL =
+  valid roster.%check_rules% and
+        not (trip.%is_locked% and keywords.%is_rostering_optimizer%) and
+       duty.%in_pp_extended% and
+        duty.%has_flight_duty% and
+        not crew.%is_leased_duty_start% and
+        not %rule_exception_allowed%;
+  
+  qualification.%leg_has_valid_ac_type%;
+  startdate  = leg.%start_UTC%;
+  severity = %severity_filter_int%(leg.%start_hb%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %qln_ac_types_failtext_leg%;
+  remark "(CCR) OMA: Aircraft qualification";
+end
+
+%qln_ac_types_failtext_leg% =
+  if qualification.%last_ac_type_expiry_date% = 1jan1986 0:00 then 
+    rules.%failtext_str%("OMA: Qual. AC-type:", crew.%ac_qlns_wop_start%, leg.%qual%)
+  else
+    if qualification.%crew_has_qual_al_and_needs_tw99% and qualification.%last_ac_type_expiry_date% > leg.%start_utc% then
+      "OMA: Qual. AC-type AL requires TW99 for A5 flight"
+    else if %_A2NX_position_missing_failtext_condition% then
+      if crew.%is_cabin% then
+        "OMA: Qual. AC-type A2NX requires Position A2NX"
+      else
+        concat("OMA: Qual. AC-type A2 requires Position A2NX ", if leg.%is_long_haul% then "for LH" else "or A2_OW for SH", " flights")
+    else
+      concat("OMA: Qual: licence expired ",leg.%qual%," ", 
+             format_time(qualification.%last_ac_type_expiry_date%,"%02d%b%Y"));
+    
+/* Rule exceptions are allowed temporarily for FC 36 <-> 38 */
+%rule_exception_allowed% =
+  %flight_crew% and
+  crew.%ac_qlns_wop_start% in ac_quals_allowed_rule_exception and
+  default(leg.%qual% in ac_quals_allowed_rule_exception,false);
+  
+set ac_quals_allowed_rule_exception =
+  "36", "37 38", "38";
+
+/* Only applicable if POSITION+A2NX (or A2_OW) is the missing document. */
+%_A2NX_position_missing_failtext_condition% =
+  qualification.%leg_requires_A2NX_position% and
+  crew.%has_qln%("ACQUAL", "A2", leg.%start_utc%) and
+  not training.%crew_has_A2NX_position_leg_start%;
+  
+/*
+** Rule:
+**    Crew under training must perform all training flights
+**
+** Description:
+**    The rule checks that the assigned training flight is correct.
+**    To get the correct training flight, the required type is looked up in
+**    table crew_training_need.etab based on index. As long as the number of
+**    required training flights of the current type is not fulfilled, that 
+**    type will be required. If the requirement is fulfilled, the next
+**    flight training type (looked up by using index) as defined in
+**    crew_training_need.etab is required.
+**    If the program is for a specific qual, other actypes are legal to fly.
+**    We check flights
+**    1. If this is the first flight during a program
+**    2. If the previous flight had a different attribute/actype
+**    3. If this is the first flight in the duty
+**
+**  Agreement:
+**    OM-A 5.2, 5.3
+**    OM-D 2
+*/
+
+export rule trng_all_training_flights_performed_ALL =
+  valid roster.%check_rules% and
+        /* Sort out the basics */
+        trip.%in_pp_extended% and leg.%is_active_flight% and
+        /* Check if there are training programs that have not been performed */
+        training.%unperformed_training_leg_start% and
+        /* We dont want warnings on every flight */
+        %leg_should_be_checked% and
+        /* Finally check if we have unplanned training */
+        training.%unplanned_training_on_leg% and
+        not %correct_training% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%)
+        and training.%is_reqd_for_ac_qual_leg_start%/* added by mikaelje HiQ 18JUN15 JIRA: SKCMS-537*/
+        and (training.%required_type_on_leg% <> "ETOPS LIFUS/LC" or not leg.%is_short_haul%);
+        /* The real logic is in the valid statement. The trigger is to get better info
+     in value and limit */
+  training.%first_unplanned_course_planned_flights_leg% >= 
+  training.%first_unplanned_course_req_flights_leg%;
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %trng_all_training_flights_performed_ALL_failtext%;
+  remark "OMA: Crew under training must perform all flight training",
+  planner "";
+end
+
+/* Acc to OM-D 2.1.6.10.11, a supernumerary leg may be scheduled during LIFUS */
+%lifus_supernum_exception% =
+  training.%reqd_training_on_leg_is_any_lifus% and leg.%is_supernum%;
+  
+%correct_training% =
+  %lifus_supernum_exception% or
+  training.%leg_training_code_safe% = training.%required_type_on_leg% or
+  training.%leg_training_code_safe% = training.%previous_required_type_on_leg%;
+  
+%leg_training_code_safe% =
+  if leg.%is_supernum% and not leg.%has_training_code% then
+    "SUPERNUM"
+  else if leg.%has_training_code% then
+    training.%leg_training_code_safe%
+  else
+    "-";
+
+/* Acc to OM-D 2.1.6.10.11, a supernumerary leg may be scheduled during LIFUS */
+%required_type_on_leg% =
+  if training.%first_unplanned_course_end_pp% < leg.%start_hb% then
+    if %leg_training_code_safe% = training.%required_type_on_leg% then
+      "TOO LATE"
+    else
+      "UNPLANNED"
+  else if (training.%reqd_training_on_leg_is_any_lifus% and 
+           not leg.%has_training_code%) then
+    "SUPERNUM"
+  else
+    training.%required_type_on_leg%;
+
+%leg_should_be_checked% =
+  /* 1. If this is the first flight during a program */
+  default(training.%course_start_leg_start%, 1jan1986) >
+  default(prev(leg(chain), leg.%start_hb%)
+          where (%_active_leg_in_pp%), 1jan1986)
+  or
+  /* 2. If the previous flight had a different attribute/actype */
+  %_training_code_qual% <>
+  default(prev(leg(chain), %_training_code_qual%)
+          where (%_active_leg_in_pp%), "NONE")
+  or
+  /* 3. If this is the first flight in the duty */
+  %leg_training_code_safe% = "NONE" and
+  is_first(leg(duty)) where (%_active_leg_in_pp%)
+  or
+  training.%required_type_on_leg% = "ETOPS LIFUS/LC" and leg.%is_long_range_aircraft% and leg.%is_long_haul%;
+  
+%_training_code_qual% =
+  concat(%leg_training_code_safe%, leg.%qual%);
+  
+%_active_leg_in_pp% =
+  leg.%is_active_flight% and leg.%starts_in_extended_pp%;
+  
+%trng_all_training_flights_performed_ALL_failtext% =
+  if (%training_first_unplanned_course_attribute_leg% = "FAM FLT" or
+      %training_first_unplanned_course_attribute_leg% = "ETOPS LIFUS/LC") then
+      if(%training_first_unplanned_course_attribute_leg% = "FAM FLT") then
+        concat("OMA: Crew on ", 
+           training.%first_unplanned_course_name_leg%,
+           " need ",
+           %training_first_unplanned_course_attribute_leg%,
+           if training.%first_unplanned_course_acqual_descr_leg% = "" then
+             " "
+           else
+             concat("(",training.%first_unplanned_course_acqual_descr_leg%,") "),
+             fundamental.%time_span_str%(training.%fam_flt_needed_start%,
+                                         training.%fam_flt_needed_end% - 0:01)
+           )
+      else(
+        /*SKCMS-2546: Fix for warning */
+        concat("OMA: Crew on ", 
+                  training.%first_unplanned_course_name_leg%,
+                  " need ",
+                  %training_first_unplanned_course_attribute_leg%,
+                  if training.%first_unplanned_course_acqual_descr_leg% = "" then
+                    " "
+                  else
+                    concat("(",training.%first_unplanned_course_acqual_descr_leg%,") "),
+                    fundamental.%time_span_str%(training.%etops_lifus_lc_needed_start%,
+                                                training.%etops_lifus_lc_needed_end% - 0:01)
+                  )
+      )
+  else
+    concat("OMA: Crew on ", 
+           training.%first_unplanned_course_name_leg%,
+           " need ",
+           %training_first_unplanned_course_attribute_leg%,
+           if training.%first_unplanned_course_acqual_descr_leg% = "" then
+             " "
+           else
+             concat("(",training.%first_unplanned_course_acqual_descr_leg%,") "),
+             fundamental.%time_span_str%(training.%first_unplanned_course_start_leg%,
+                                         training.%first_unplanned_course_end_leg%-0:01)
+           );
+
+%training_first_unplanned_course_attribute_leg% = training.%first_unplanned_course_attribute_leg%;
+
+/****************************************************************
+ * Section 2: Recurrent training rules
+ ***************************************************************/
+
+/*
+** Rule:
+**    Crew must have all recurrent dates registered
+**
+** Description:
+**    Check that crew has all their needed recurrent training
+**    types registered in the crew_document table.
+**
+** Agreement (implicitly):
+**    OM-A 5.2.11.2, 5.2.15.1, 5.2.16.3-4, 5.3.6.1
+**    OM-D 2.1.3.1-2, 2.1.4 table 2, 2.1.11.18, 2.2.2.1
+*/
+
+
+export rule qln_all_required_recurrent_dates_registered_ALL =
+  valid %qln_all_required_recurrent_dates_registered_ALL_valid%;
+
+  training.%current_acqual_required_recurrent_dates_registered_trip_start%;
+
+  startdate  = trip.%start_UTC%;
+  severity =  %severity_filter_int_chain%(%pp_start%);
+  failobject = %qln_all_required_recurrent_dates_registered_ALL_failobject%;
+  failtext %qln_all_required_dates_registered_ALL_failtext%;
+  remark "(CCR) OMA: Crew must have all required recurrent dates registered",
+  planner "Check that crew has all their needed recurrent training"
+          "types registered in the crew_document table.";
+end
+
+%qln_all_required_dates_registered_ALL_failtext% =
+    concat("OMA: Recurrent dates not registered ",
+           training.%unregistered_recurrent_types_trip_start%);
+
+%qln_all_required_recurrent_dates_registered_ALL_valid% =
+  ((%crew_is_pilot% and %qln_all_required_recurrent_dates_registered_ALL_valid_FD%)
+   or (%crew_is_cabin% and %qln_all_required_recurrent_dates_registered_ALL_valid_CC%))
+  and rule_exceptions.%rule_on%(trip.%start_UTC%);
+
+export %qln_all_required_recurrent_dates_registered_ALL_valid_FD% =
+  roster.%check_rules% and
+  not roster.%is_empty% and
+  trip.%starts_in_pp% and
+  not training.%crew_has_training_bl_during_restr% and
+  %valid_trip_for_recurrent_registered_fd% and
+  /* Training trip should not give recency warnigns */
+  not crew_pos.%trip_is_supernum% and
+  not crew.%has_restr_training_foc%(trip.%start_UTC%) and
+  not (trip.%is_school_trip% and not crew.%is_instructor_trip_start%);
+
+export %qln_all_required_recurrent_dates_registered_ALL_valid_CC% =
+roster.%check_rules% and
+  not roster.%is_empty% and
+  trip.%starts_in_pp% and
+  not training.%crew_has_training_bl_during_restr% and
+  %valid_trip_for_recurrent_registered_cc%;
+
+
+/* FD have actype dependent recurrent docs, so we handle them a bit differently */
+%valid_trip_for_recurrent_registered_fd% =
+    (is_first(trip(chain))
+    where (trip.%starts_in_pp% and %_valid_trip_for_recurrent_registered%))
+    or
+    %first_production_after_ac_change%;
+
+/* ************************************************************************** */
+
+export %valid_trip_for_recurrent_registered_cc% =
+        (is_first(trip(chain))
+    where (trip.%starts_in_pp% and %_valid_trip_for_recurrent_registered_cc%));
+
+
+export %has_flight_duty% = any(duty(trip), duty.%has_flight_duty%);
+
+export %first_production_after_ac_change% =
+  let start = crew.%qln_entry_date_trip%;
+  is_first(trip(chain))
+  where (trip.%start_hb% >= start and %_valid_trip_for_recurrent_registered%);
+
+
+
+ export %first_production_after_ac_change_cc% =
+  let start = crew.%qln_entry_date_trip%;
+  is_first(trip(chain))
+  where (trip.%start_hb% >= start and %_valid_trip_for_recurrent_registered_cc%);
+
+
+
+%_valid_trip_for_recurrent_registered% =
+trip.%is_production% and
+  not (trip.%is_skill_test% or
+       trip.%is_ilc% or
+       (trip.%is_school_trip% and not crew.%is_instructor_trip_start%));
+
+
+
+
+export %_valid_trip_for_recurrent_registered_cc% =
+  trip.%is_production% and
+  not (trip.%is_course%);
+
+
+
+
+export %qln_all_required_recurrent_dates_registered_ALL_failobject% =
+  first(duty(chain),duty.%failobject_start%)
+    where (not %all_required_recurrent_dates_registered_duty_start%);
+%all_required_recurrent_dates_registered_duty_start% =
+  training.%all_required_recurrent_dates_registered%(duty.%start_hb%);
+
+
+
+
+
+
+
+/*
+** Rule:
+**    Crew must have performed recurrent training
+**
+** Description:
+**    Check that crew have all their required checks in place,
+**    i.e. the due date has not been passed as defined in crew_document,
+**    or that a recurrent activity exists earlier in the plan.
+**
+**    For CC REC and FC PGT, a recurrent refresher must be scheduled if
+**    the previous year's recurrent training wasn't performed.
+**
+**    NB! For flight crew OPC/PC, PGT and CRM should be checked for all
+**    flights, whereas LineCheck should only be checked after the LIFUS
+**    training for absence refresher.
+**
+** Agreement:
+**    OM-A 5.2.11.2, 5.2.15.1, 5.2.16.3-4, 5.3.6.1
+**    OM-D 2.1.3.1-2, 2.1.4 table 2, 2.1.11.18, 2.2.2.1
+*/
+export rule qln_recurrent_training_performed_ALL =
+  valid %qln_recurrent_training_performed_ALL_valid%;
+   
+    (%all_needed_recurrent_training_performed_duty% and
+     %all_needed_recurrent_training_performed_trip%);
+
+  startdate  = trip.%start_utc%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %qln_recurrent_training_performed_ALL_failobject%;
+  failtext %missed_recurrent_training_failtext%;
+  remark "OMA: Crew must perform recurrent training",
+  planner "Check that crew have all their required checks in place,"
+          " i.e. the due date has not been passed as defined in crew_document,"
+          " or that a recurrent activity exists earlier in the plan."
+          " For CC REC and FC PGT, a recurrent refresher must be scheduled if"
+          " the previous school year's recurrent training wasn't performed.";
+end
+
+%active_duty_in_trip_after_rec_doc_expiry_date% =
+  default(
+  any(leg(trip), leg.%is_flt_sby_or_bl%)
+  where(leg.%end_date% >= training.%first_recurrent_doc_expiry_date%),
+  false);
+  
+     
+%qln_recurrent_training_performed_ALL_valid% =
+  roster.%check_rules% and
+  any(leg(duty), leg.%is_flt_sby_or_bl%) and
+  not training.%crew_has_training_bl_during_restr% and
+  %active_duty_in_trip_after_rec_doc_expiry_date% and
+  trip.%in_pp% and
+  (trip.%end_hb% >= training.%first_recurrent_doc_expiry_date% or
+  duty.%end_hb% >= training.%first_recurrent_doc_expiry_date%) and
+  
+  /* 1Jan1986 is unregistered docs, handled by other rule */
+  training.%first_recurrent_doc_expiry_date% > 1Jan1986 and
+  not (%crew_is_pilot% and any(leg(duty), (crew_pos.%is_supernum% and not %_LC_instructor_in_supernum%))) and
+
+  (any(leg(duty), training.%unperformed_recurrent_types_with_matching_qual%(duty.%start_hb%)) or
+  any(leg(duty), training.%unperformed_recurrent_types_with_matching_qual%(leg.%end_hb%)));
+
+
+set inst_lc_codes = "LC", "ILC";
+%_LC_instructor_in_supernum% =
+  crew_pos.%assigned_pos% = 4 and
+  leg.%instructor_code_safe% in inst_lc_codes and
+  not leg.%is_long_haul_aircraft%;
+
+%qln_recurrent_training_performed_ALL_failobject% =
+  default(%qln_recurrent_training_performed_all_failobject_calc%(true),
+          default(%qln_recurrent_training_performed_all_failobject_calc%(false),
+                  trip.%failobject_start%));
+
+%qln_recurrent_training_performed_all_failobject_calc%(Bool consider_now) =
+  first(leg(trip),
+        first(leg(chain), leg.%failobject_departure%) from (current)
+        where(leg.%is_flt_sby_or_bl% and
+              not %all_needed_recurrent_training_performed_leg% and
+              ((not consider_now) or leg.%start_utc% >= %now%)));
+
+%all_needed_recurrent_training_performed_leg% =
+  training.%all_required_recurrent_performed%(leg.%end_hb%);
+
+%all_needed_recurrent_training_performed_duty% =
+  not(
+       duty.%has_production% and
+       not (%crew_is_pilot% and %t_flight_when_only_lc_needed%) and
+       training.%nr_expired_recurrent_docs_duty_start% > 0 and
+       not training.%all_required_recurrent_performed_duty_start%);
+       
+%all_needed_recurrent_training_performed_trip% =
+  not(
+       trip.%has_production% and
+       not (%crew_is_pilot% and %t_flight_when_only_lc_needed%) and
+       training.%nr_expired_recurrent_docs_trip_end% > 0 and
+       not training.%all_required_recurrent_performed_trip_end%);
+
+%missed_recurrent_training_failtext% =
+  concat("OMA: Rec. expiry dates passed, needs: ",
+  default(%_missed_recurrent_trainings_str%, ""));
+
+%_missed_recurrent_trainings_str% =
+   
+  if training.%unperformed_recurrent_types_with_matching_ac_qual_str%(duty.%start_hb%) <> ""  then
+    training.%unperformed_recurrent_types_with_matching_ac_qual_str%(duty.%start_hb%)
+  else
+    training.%unperformed_recurrent_types_with_matching_ac_qual_str%(trip.%end_hb%);
+
+
+
+%t_flight_when_only_lc_needed% =
+    /* all(leg(trip), leg.is_t_flight) will be true of there are no active flights,
+       and we only want to disbale rule if there is an all-t-flight trip. */
+    any(leg(trip), leg.%is_t_flight%) and
+    all(leg(trip), leg.%is_t_flight%)
+    where (leg.%is_active_flight%) and
+    training.%nr_expired_recurrent_docs_trip_end% = 1 and
+    trip.%end_hb% >= training.%recurrent_type_expiry_date%("LC", %any_ac_qual%, trip.%end_hb%);
+
+/*
+** Rule:
+**    Recurrent training planned too early
+**
+** Description:
+**    Check that recurrent training is not planned too early, i.e.
+**    earlier than 3 months from due date and not across season.
+**
+**    Line check (LC) for FD extracted to new rule lc_must_not_be_planned_too_early_fc (SKCMS-1974)
+**    found in the FC submodule. Special case with %next_expiring_multi_qual_is_not_leg_qual%
+**    kept in this rule since it shouldn't be possible to rule except.
+**
+**    NOTE: This rule is in rule_exceptions_ccr and CANNOT be excepted!
+**
+** Agreement:
+**    OM-A ???
+*/
+export rule qln_recurrent_training_must_not_be_planned_too_early_ALL =
+   valid %qln_recurrent_training_must_not_be_planned_too_early_ALL_valid%;
+
+    nmax(training.%earliest_date_for_planned_recurrent% - leg.%start_date%, 0:00) +    
+    nmax(leg.%start_date% - %rec_type_expiry_date%, 0:00) = 0:00;
+
+  startdate  = leg.%start_UTC%;
+  severity =  %severity_filter_int%(leg.%start_hb%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %rec_planned_too_early_failtext%;
+  remark "(CCR) OMA: Recurrent training too early",
+  planner "Check that recurrent training is not planned too early, i.e."
+          " earlier than 3 months from due date and not across the"
+          " recurrent season.";
+end
+
+%qln_recurrent_training_must_not_be_planned_too_early_ALL_valid% =
+  roster.%check_rules% and
+  leg.%in_pp_extended% and
+  (leg.%is_recurrent% or leg.%is_cc_rec%
+  or %next_expiring_multi_qual_is_not_leg_qual%) and
+  training.%recurrent_must_not_be_planned_too_early% and
+  ((not training.%recurrent_type_has_expired%) or %has_planned_recurrent_training%) and
+  %recurrent_required% and
+  not %rec_trip_updated_document% and
+  %r_valid_rec_planned_too_early%
+
+  and %first_rec_of_type%;
+
+/* Check if there is already planned recurrent training in the planning period or in the two months before,
+** i.e. where the document might not have not yet been updated */
+%has_planned_recurrent_training% = training.%last_perf_date_for_act_of_type_for_ac_qual%(training.%rec_type%, training.%any_ac_qual%, duty.%start_hb%) >= add_months(%pp_start%, -2);
+
+%first_rec_of_type% =
+  let prev_type = default(prev(leg(trip), training.%leg_rec_type%),""),
+      next_type = default(next(leg(trip), training.%leg_rec_type%),""),
+      this_type = default(training.%leg_rec_type%,"");
+  if is_last(leg(trip)) then this_type <> prev_type
+  else if is_first(leg(trip)) then this_type <> ""
+  else this_type <> prev_type and (if next_type <> "" then
+                                      this_type = next_type
+                                   else
+                                     True);
+
+export %rec_trip_updated_document% =
+  default(any(leg(duty), leg.%is_performed_recurrent%), false);
+    
+export %recurrent_required% =
+  training.%rec_type_required%(training.%leg_rec_type%, leg.%start_utc%) or
+  (leg.%is_crmc% and not (is_first(leg(roster)) where (leg.%is_crmc%)));
+
+/*SKCMS-2861: Commented condition for (crew.%is_a2a3_qualified% or crew.%is_a2a5_qualified%) */
+export %rec_type_expiry_date% =
+  let leg_rec_type = training.%leg_rec_type%;
+
+  if leg_rec_type = "LC" then
+    training.%recurrent_type_expiry_date_incl_performed%(training.%leg_rec_type%,
+					                         leg.%qual%,
+                                        		         leg.%start_utc%, false)
+  else
+    training.%recurrent_type_expiry_date_incl_performed%(training.%leg_rec_type%,
+                                                         %any_ac_qual%,
+                                                         leg.%start_utc%, false);
+
+
+export %r_valid_rec_planned_too_early% =
+  not (training.%leg_is_invalid_for_rec_period_legality%);
+
+export %multi_qual_lc% =
+  (crew.%is_a3a4a5_qualified_at_date%(leg.%start_date%)
+   or crew.%is_a3a5_qualified_at_date%(leg.%start_date%)
+   or crew.%is_a3a4_qualified_at_date%(leg.%start_date%)) 
+  and leg.%is_lc%;
+
+export %next_expiring_multi_qual_is_not_leg_qual% =
+  /* Handles the case where upcoming lc qual is "A3 or A4" */
+  (locate(leg.%qual%, %_next_expiring_alternating_lc_qual%) = 0) and %multi_qual_lc%;
+
+/* expiry_doc_alternating_ac_qual handles the actual alternating of multi-qualified crew LC */
+%_next_expiring_alternating_lc_qual% =
+  crew.%expiry_doc_alternating_ac_qual%("REC","LC",%any_ac_qual%,leg.%start_date%);
+
+%rec_planned_too_early_failtext% =
+  if %next_expiring_multi_qual_is_not_leg_qual% then
+    concat("OMA: No LC training need for ", leg.%qual%)
+  else
+    concat("OMA: ", training.%rec_type%, " too early [",
+           format_time(training.%earliest_date_for_planned_recurrent%, "%d%b-"),
+           format_time(%rec_type_expiry_date% - 0:01, "%d%b %Y"),"]");
+
+/*
+** Rule:
+**    Min number of days between vacation and REC
+**
+** Description:
+**
+** Agreement:
+**    Functional
+*/
+export rule min_days_btw_vacation_and_rec =
+  valid roster.%check_rules% and
+        duty.%in_pp_extended% and
+        duty.%has_recurrent% and
+        %is_opc_pc_or_ast_for_fc%;
+  %days_since%(duty.%start_utc%, %vacation_end%)
+    >= %min_days_btw_vacation_and_rec_p% - rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+  startdate  = duty.%start_utc%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("Func: Days btw VAC and REC",value,limit);
+  remark "(CCR) Func: Min nr of days between vacation and REC",
+  planner "";
+end
+
+%min_days_btw_vacation_and_rec_p% = parameter 7
+  remark "Min days between vacation and REC";
+
+%is_opc_pc_or_ast_for_fc% =
+ if %crew_is_pilot% then
+    training.%duty_is_own_pc_opc% or
+    duty.%is_ast%
+ else
+   true;
+  
+%vacation_end% =
+  prev(trip(roster), trip.%end_utc%) where (trip.%is_vacation% and not (trip.%code% = "F31"));
+  
+export rule (off) no_rec_after_ac_change_ALL =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        trip.%has_cc_rec% and
+        %valid_new_acqual% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%); 
+  %check_new_ac_qual%;
+  startdate = trip.%start_utc%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = trip.%failobject_start%;
+  failtext "Func: Recurrent activity to invalid crew";
+  remark "(CCR) Func: No recurrent activities assigned to crew with new ac qualification or absence",
+  planner "";
+end
+
+%valid_new_acqual% = 
+  %date_of_last_new_ac_qual% > %pp_start% and
+  not (any(trip(roster), %trip_has_conv%)
+       from (current) backwards 
+       while (trip.%start_day% >= %date_of_last_new_ac_qual%));
+  
+%trip_has_conv% =
+    any(leg(trip), training.%leg_is_conv%);
+
+%check_new_ac_qual% =
+  trip.%start_day% < %date_of_last_new_ac_qual%;
+
+%date_of_last_new_ac_qual% = 
+  nmax(crew.%last_long_haul_qln_start%, 
+       crew.%last_short_haul_qln_start%);
+  
+/*
+** Rule:
+**    N* activity (web training) must be performed before CX7.
+**
+** Description:
+**
+** Agreement:
+**    OM-A 5.3, CR381
+*/
+export rule qln_rec_in_correct_order_CC =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        leg.%is_cc_rec% and
+        rule_exceptions.%rule_on%(leg.%start_UTC%);
+  %trigger_rec_correct_order_CC%;
+  startdate  = leg.%start_utc%;
+  severity = %severity_filter_int%(leg.%start_hb%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %rec_after_web_course_failtext%;
+  remark "OMA: Recurrent should be performed in correct order",
+  planner "";
+end
+
+%rec_after_web_course_failtext% =
+   if system_db_parameters.%additional_CX6_rec_trng%(wop.%start_UTC%) then
+     if leg.%is_cc_rec_cx7% then
+       "OMA: Recurrent web training and CX6 should be performed before CX7"
+     else if leg.%is_cc_rec_cx6% then
+       "OMA: CX6 shall be performed between Recurrent web training and CX7"
+     else
+       "OMA: Recurrent web training already performed or Recurrent web training should be performed in correct order"
+   else  
+     if leg.%is_cc_rec_cx7% then
+      "OMA: Recurrent web training should be performed before course"
+     else
+      "OMA: Recurrent web training already performed";
+
+%trigger_rec_correct_order_CC% =
+      if system_db_parameters.%additional_CX6_rec_trng%(wop.%start_UTC%) then
+        %check_for_cc_rec_all_with_agreement%
+      else 
+         %check_for_cc_rec_all_without_agreement%;
+
+%check_for_cc_rec_all_with_agreement% =
+      if leg.%is_cc_rec_cx7% then
+        %_last_web% >= %_start_of_rec% and
+        %_last_web% > %_last_cx7% and
+        %_last_cx6% > %_last_cx7% and
+        %_last_cx6% > %_last_web%
+      else if leg.%is_cc_rec_cx6% then
+        %_last_web% >= %_start_of_rec% and
+        %_last_web% > %_last_cx6% and
+        %_last_web% > %_last_cx7%
+      else 
+        %check_for_cc_rec_web_with_agreement%; 
+
+%check_for_cc_rec_web_with_agreement% =
+ if (%_last_web% > 1Jan1986 and %_last_cx7% > 1Jan1986 and %_last_cx6% = 1Jan1986) then
+        %_last_web% < nmax(%_last_cx7%, training.%ctl_time_limit%) and
+        leg.%udor%  > %_last_web% and
+        leg.%udor%  > %_last_cx7%
+ else
+     /* CTL is loaded for 3 years, _last_web will be 1Jan1986 if performed
+      before loaded period */
+      %_last_web% < nmax(%_last_cx7%, training.%ctl_time_limit%) and
+      %_last_web% < nmax(%_last_cx6%, training.%ctl_time_limit%) and
+      %_last_cx6% < nmax(%_last_cx7%, training.%ctl_time_limit%);
+
+%check_for_cc_rec_all_without_agreement% = 
+  if leg.%is_cc_rec_cx7% then
+     %_last_web% >= %_start_of_rec% and
+     %_last_web% > %_last_cx7%
+  else
+     %_last_web% < nmax(%_last_cx7%, training.%ctl_time_limit%);
+  
+%_start_of_rec% =
+  training.%earliest_rec_fixed%(training.%earliest_rec_assignment%("REC", %any_ac_qual%, leg.%start_hb%), 
+                                leg.%start_hb%);
+    
+%_last_web% = 
+  training.%last_perf_date_for_cc_rec_web%(leg.%start_utc%);
+  
+%_last_cx7% = 
+  training.%last_perf_date_for_cc_rec_cx7%(leg.%start_utc%); 
+
+%_last_cx6% = 
+  training.%last_perf_date_for_cc_rec_cx6%(leg.%start_utc%);
+
+/*
+** Rule:
+**    A qualified PM mentor should be assigned for PMM activity.
+**
+** Description:
+**
+*/
+export rule qln_pm_mentor_CC =
+  valid roster.%check_rules%
+        and fundamental.%is_roster%
+        and leg.%is_pm_mentor%;
+  crew.%is_pm_mentor%(leg.%start_hb%);
+  startdate  = leg.%start_hb%;
+  severity = %severity_filter_int%(leg.%start_hb%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext "PM: Crew should have POSITION+PMM qualification for PMM";
+  remark "PM: Crew should have mentor qualification for PMM",
+  planner "PM: Crew should have POSITION+PMM qualification for PMM (Performance Managment Meeting as Mentor)";
+end
+
+
+/* Cached expressions */
+%crew_is_pilot% = crew.%is_pilot%;
+%crew_is_cabin% = crew.%is_cabin%;
+%crew_employment_date% = model_crew.%employment_date_by_id%(crew.%id%);
+%any_ac_qual% = training.%any_ac_qual%;
+
+/* end of file */

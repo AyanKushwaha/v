@@ -1,0 +1,776 @@
+/* -*- crc -*-
+ *
+ * Purpose:
+ *   This module contains common qualification definitions for flight and cabin crew
+ *   used in aircraft qualification and airport qualification rules.
+ *
+ * Sections:
+ *   1. Aircraft types
+ *   2. Airport
+ *   3. Table lookups
+ *
+ * Created by:
+ *   Henrik Albertson, 20-Dec-2005eg_already_
+ *
+ * Major changes:
+ *   Implemented definitions for airport qualification
+ *   Improved the table lookup, submitting the date will reduce the number 
+ *   of lookups needed. HenrikA 28-Dec-2005
+ * 
+ *   Changed the structure of airport qln variables to be able to handle both
+ *   arrival and departure airport restrictions. HenrikA 12-Jan-2006
+ *
+ */
+
+root module qualification
+import fundamental;
+import base_utils;
+import levels;
+import leg;
+import duty;
+import trip;
+import crew;
+import crew_pos;
+import system_db_parameters;
+
+import accumulators;
+import training;
+import standby;
+
+/****************************************************************
+ * Section 1: Aircraft types qualification
+ ***************************************************************/
+
+export %trip_has_valid_ac_type% =
+  all(duty(trip), %duty_has_valid_ac_type%);
+
+export %duty_has_valid_ac_type% =
+  all(leg(duty), %leg_has_valid_ac_type%);
+
+export %leg_has_valid_ac_type% =
+  leg.%is_deadhead% or
+  not leg.%is_flight_duty% or
+  %crew_has_qln_leg_start% or
+  %crew_has_737_ng_cc_qln_leg_start%;
+
+export %leg_requires_A2NX_position% = leg.%qual% = "A2" and leg.%is_long_range_aircraft% and leg.%is_active_flight%;
+
+export %crew_has_qln_leg_start% =
+  if leg.%qual% = "A5" then
+    training.%crew_qualified_for_A5_leg_start%
+  else if %leg_requires_A2NX_position% then
+    training.%crew_qualified_for_A2NX_leg_start%
+  else
+    if %crew_has_qual_al_and_needs_tw99% then
+      training.%crew_qualified_for_AL_A350_leg_start%
+    else
+      crew.%has_qln%("ACQUAL", leg.%qual%, leg.%start_date%);
+
+export %crew_has_qual_al_and_needs_tw99% = %agreement_valid%("a350_qual_al_needs_tw99", leg.%start_date%) and leg.%qual% = "AL" and leg.%ac_family% = "A350";
+
+/*
+** CC with qual "36" or "38" may fly all 737-NG aircraft types.
+** CC with qual "38" may also fly 737-Classic.
+*/
+%crew_has_737_ng_cc_qln_leg_start% =
+  %cabin_crew% and
+  ((leg.%qual% = "36" and
+    crew.%has_qln%("ACQUAL", "38", leg.%start_date%)) or
+   (leg.%qual% = "38" and
+    leg.%qual_fc% <> "37" and
+    crew.%has_qln%("ACQUAL", "36", leg.%start_date%)));
+
+export %last_ac_type_expiry_date% =
+  crew.%last_ac_qln_expiry_date%(leg.%qual%, leg.%start_date%);
+    
+/****************************************************************
+ * Section 2: Airport qualification
+ ***************************************************************/
+
+/* 
+ * The following legality is checked
+ *   1. Recency, fly each restricted airport each 12 months (6 months for FNC)
+ *   2. Appropriate training has been performed
+ *        It is assumed that if there is a last flown date in the table <
+ *        recency limit above, appropriate training has been performed some time before this
+ *        (Simulator training and qualification flight is still to be defined)
+ *   3. No forbidden airports for certain crew positions
+ *        (Initial line check is still to be defined)
+ *
+ * Agreement
+ *   OM-A 5.2.11 table 4 (12 months)
+ *   OM-C OP 7.1-7.2
+ *   OM-A 4.2.5 table 3
+ *   OM-A states that the rececny limit only should be valid for FC but
+ *   Bill means that the requirements also should be valid to FP if there
+ *   is a specific airport requirement.
+ *
+ *   For FNC, either a sim or a qln flight reqains license - Not implemented yet!
+ */
+export %place%(String station) = default(%_place%(station), leg.%place%(station));
+
+%_place%(String station) =
+    if  %sb_needspecial_qual% then
+       leg.%sb_special_station%
+    else
+        leg.%place%(station);
+
+export %leg_station%(String station)=
+      if  %sb_needspecial_qual% then
+       leg.%sb_special_station%
+    else
+        station;
+
+export %leg_end_station% =
+    if  %sb_needspecial_qual% then
+       leg.%sb_special_station%
+    else
+        leg.%end_station%;
+
+export %trip_to_restricted_airport% =
+  any(duty(trip), %duty_to_restricted_airport%);
+
+%duty_to_restricted_airport% =
+  any(leg(duty), %leg_to_restricted_airport%);
+
+
+export %leg_to_restricted_airport% =
+  %arr_airport_is_restricted%;
+
+  
+%station_is_restricted%(String station)=
+%airport_is_restricted%(crew_pos.%assigned_function%, %leg_station%(station), leg.%aoc%, leg.%end_date%);
+
+
+export %leg_any_apt_restricted_airport% =
+  %arr_airport_is_restricted% or
+  %dep_airport_is_restricted%;
+  
+export %leg_additionally_restricted_airport%(String station)=
+  station in airports_with_additional_restrictions or
+  station in airports_with_additional_restrictions_course;
+  
+
+export %leg_any_apt_additionally_restricted_airport% =
+  leg.%end_station% in airports_with_additional_restrictions or
+  leg.%end_station% in airports_with_additional_restrictions_course or
+  leg.%start_station% in airports_with_additional_restrictions or
+  leg.%start_station% in airports_with_additional_restrictions_course;
+  
+set ski_airports = 
+  "EWR", "ORD", "IAD", "SEA", "BKK", "PEK", "NRT";
+  
+export %leg_to_ski_airport% =
+  leg.%end_station% in ski_airports;
+
+export %arr_airport_is_restricted% = %airport_is_restricted%(crew_pos.%assigned_function%, %leg_end_station%, leg.%aoc%, leg.%end_date%);
+
+export %dep_airport_is_restricted% = %airport_is_restricted%(crew_pos.%assigned_function%, leg.%start_station%, leg.%aoc%, leg.%start_date%);
+
+%crew_pos_assigned_function% =
+    if %sb_needspecial_qual% then
+        crew.%rank_trip_start%
+    else
+        crew_pos.%assigned_function%;
+
+%sb_special_station% = leg.%sb_special_station%;
+%sb_needspecial_qual% = not void(leg.%sb_special_station%);
+
+/*Used when creating new airport qualifications (SASCMS-4081)*/
+export %arr_airport_is_restricted_rank% =
+    %airport_is_restricted%(crew.%titlerank_at_date%(leg.%end_hb%), leg.%end_station%, leg.%aoc%, leg.%end_date%);
+
+export %crew_is_unqualified_for_apt% = 
+    default(crew.%airport_qual_validto%(%place%(leg.%end_station%), leg.%end_hb%) < leg.%end_hb%,
+            false); /*In case validto date is not set in crew_qualificationt table*/
+
+
+/* Agreement OM-C OP7.1 */
+/* String aoc should be one of "BU" or "SK" */
+%airport_is_restricted%(String assigned_func, String station, String aoc, Abstime date) =
+  if assigned_func = "FC" then 
+    %airport_requirements_for_FC%(station, aoc)
+  else if assigned_func = "FP" then
+    %airport_requirements_for_FP%(station, aoc)
+  else
+    false;
+  
+  
+/* 
+ * Airport is valid if the following is satisfied:
+ *   1. Not a restricted airport for crew restriction AND 
+ *   2.1 Aiport license has not expired OR
+ *   2.2 A requalifying activity is assigned
+ */
+
+export %airport_is_valid_for_crew_restriction%(String station) =
+     not (leg.%is_active_flight% or %sb_needspecial_qual%) or
+     %airport_allowed_for_crew_qual_restriction%(station,crew.%restriction_table%) and
+    (not %airport_is_restricted%(crew_pos.%assigned_function%, %leg_station%(station), leg.%aoc%, leg.%end_date%) or
+     crew.%airport_qual_validto_max%(%place%(station), leg.%end_hb%) >= leg.%end_hb%  or
+     %planned_requalifying_activity%(station,crew.%restriction_table%));
+
+export %leg_between_valid_airports_crew_qual_restr%(String tab) =
+  if tab = crew.%restr_acqual_table% then
+    %arr_and_dep_station_valid_for_crew_qual_restr%(tab)
+  else
+    not (leg.%is_active_flight% or %sb_needspecial_qual%)
+    or (%airport_allowed_for_crew_qual_restriction%(leg.%start_station%,tab) and
+        %airport_allowed_for_crew_qual_restriction%(leg.%end_station%,tab))
+    and (not %leg_any_apt_restricted_airport% or
+           ( crew.%airport_qual_validto_max%(leg.%area_or_airport%(leg.%start_station%),
+	                                   leg.%start_hb%) >= leg.%start_hb% and 
+             crew.%airport_qual_validto_max%(leg.%area_or_airport%(leg.%end_station%), leg.%end_hb%) >= leg.%end_hb%)
+  or (%planned_requalifying_activity%(leg.%start_station%,tab) and
+      %planned_requalifying_activity%(leg.%end_station%,tab)));
+
+export %station_valid_for_crew_qual_restr%(String station, String tab) =
+all(times(crew.%nr_restrictions_leg_start%),
+          %_station_allowed_for_leg_and_crew_qual_restriction%(
+               %times_index_0%, station, tab));
+
+
+%arr_and_dep_station_valid_for_crew_qual_restr%(String tab) =
+  not crew.%has_any_restriction_leg_start% 
+  or (  %station_valid_for_crew_qual_restr%(leg.%start_station%,tab) and
+        %station_valid_for_crew_qual_restr%(leg.%end_station%,tab)   );
+  
+%_leg_extends%(String station, Bool one_release_is_enough) =
+  leg.%is_active_flight% and
+  (crew.%airport_qual_validto%(%place%(station), leg.%end_hb%) >= leg.%end_hb% or
+   %absence_requires_qln_flight%(station) and leg.%is_release% and (one_release_is_enough or %enough_release_flights%(station))) or
+  leg.%is_airport_sim%;
+
+export %max_time_between_release_flights% = 4 * 7 * 24:00;
+
+export %enough_release_flights%(String station) =
+  let release_start = leg.%start_utc% - %max_time_between_release_flights%,
+      release_end = leg.%start_utc%;
+  
+  if station in stations_with_extra_release_requirements and
+     not crew.%has_or_had_airport_qual%(station, leg.%end_hb%)
+  then
+    /* Check for release flights in the current roster */
+    any(leg(roster), (leg.%end_station% = station) and
+                     (leg.%start_utc% < release_end) and
+                     (leg.%start_utc% >= release_start) and
+	             leg.%is_release%)
+
+    or
+    /* Check for release flights in the training log */
+    (%training_log_release_count%(release_start, %pp_start%, station) > 0)
+  else
+    true;
+
+export set stations_with_extra_release_requirements = "SMI";
+
+table training_log_release_count(Abstime st, Abstime et, String station) =
+	crew.%id%, st, et, "RELEASE", station -> Int %training_log_release_count%;
+	external "crew_training_log";
+	crew, <=tim, >=tim, typ, attr -> count(row_number);
+end
+
+table training_log_release_before(Abstime completed_before, String station) =
+	crew.%id%, completed_before, "RELEASE", station -> Abstime %tlog_time_of_release_flight_before%;
+	external "crew_training_log";
+	crew, >tim, typ, attr -> tim;
+	-, -, -, - -> void_abstime;
+end
+
+%roster_time_of_release_flight_before%(Abstime completed_before, String station) =
+  max(leg(roster), leg.%start_utc%)
+    where((leg.%end_station% = station) and
+          (leg.%start_utc% < completed_before) and
+           leg.%is_release%);
+
+export %time_of_release_flight_before%(Abstime completed_before, String station) =
+  let tlog_completed_before = nmin(%pp_start%, completed_before);
+  
+  default(%roster_time_of_release_flight_before%(completed_before, station),
+          %tlog_time_of_release_flight_before%(tlog_completed_before, station));
+
+export %leg_extends_restricted_airport_rank%(Bool one_release_is_enough) =
+  %arr_airport_is_restricted_rank% and %_leg_extends%(leg.%end_station%, one_release_is_enough);
+
+export %leg_extends_restricted_airport%(Bool one_release_is_enough) =
+  %leg_to_restricted_airport% and %_leg_extends%(leg.%end_station%, one_release_is_enough);
+
+  
+export %station_extends_restricted_airport%(String station)=
+  %station_is_restricted%(station) and %_leg_extends%(station, false);
+
+
+export %restricted_airport_is_extended%(Bool one_release_is_enough) =
+  %leg_extends_restricted_airport_rank%(one_release_is_enough) or %leg_extends_restricted_airport%(one_release_is_enough);
+
+export %leg_extending_airport% =
+    if %leg_extends_restricted_airport%(false) then
+        if leg.%is_active_flight% then
+            %place%(leg.%end_station%)
+        else
+            leg.%airport_sim%
+    else
+        void_string;
+
+export %leg_already_extended_airport% =
+    crew.%airport_qual_validto%(%leg_extending_airport%, leg.%end_hb%) =
+      %extended_qual_date_at_airport%(leg.%end_station%);
+
+export %leg_extending_airport_rank% =
+    if %leg_extends_restricted_airport_rank%(false) then
+        if leg.%is_active_flight% then
+            %place%(leg.%end_station%)
+        else
+            leg.%airport_sim%
+    else
+        void_string;
+
+export %leg_already_extended_airport_rank% =
+    crew.%airport_qual_validto%(%leg_extending_airport_rank%, leg.%end_hb%) =
+      %extended_qual_date_at_airport%(leg.%end_station%);
+
+/* We do simplifications. 
+   - We check required activity at this flight (might fail if we passed a limit
+     in planned time).
+   - We disregard aoc (which isn't logged anyway).
+   /EKG 090513 */
+export %planned_requalifying_activity%(String station, String tab) =
+  let place = %place%(station),
+      date = leg.%start_hb%,
+      cutoff = fundamental.%now% - 7*24:00;
+/*
+** First check if there is any preceding flight in the roster or training log
+** which will extend the expiry date. 
+*/
+
+      any(leg(roster), %station_extends_restricted_airport%(station) and place = %place%(leg.%end_station%))
+       where (leg.%end_hb% < date and leg.%end_hb% > cutoff) or
+      training.%last_logged_date_for_type_and_attr%("FLIGHT AIRPORT", place, fundamental.%plan_start%)
+	> cutoff or
+    /* Check if SIM AIRPORT required */
+      (if %absence_requires_sim_training%(station) then
+	any(leg(roster), leg.%is_airport_sim% and leg.%airport_sim% = place)
+	  where (leg.%end_hb% < date and leg.%end_hb% > cutoff) or
+	training.%last_logged_date_for_type_and_attr%("SIM AIRPORT", place, fundamental.%plan_start%)
+	  > cutoff
+    /* Check if RELEASE AIRPORT is required */
+      else
+	if %absence_requires_qln_flight%(station) then
+	  any(leg(roster), leg.%is_release% and place = %place%(leg.%end_station%) and %enough_release_flights%(station))
+	    where (leg.%end_hb% < date and leg.%end_hb% > cutoff) or
+	  training.%last_logged_date_for_type_and_attr%("RELEASE AIRPORT", place, fundamental.%plan_start%)
+	    > cutoff
+	else
+	  false);
+
+/* 
+ * Interpretation (OM-A 4.2.5 table 3)
+ *   1. No restriction
+ *   2. Not to be flown
+ *   3. May be flown after Initial Line Check
+ */
+export %airport_allowed_for_crew_qual_restriction%(String station, String tab) =
+  not crew.%has_any_restriction_leg_start% or
+  (station not in airports_with_additional_restrictions and
+  /*leg.%end_station%*/
+  station  not in airports_with_additional_restrictions_course) or
+  all(times(crew.%nr_restrictions_leg_start%),
+        %_station_allowed_for_leg_and_crew_qual_restriction%(%times_index_0%,station,tab));
+
+export set airports_with_additional_restrictions =
+  external String %airport_restrictions_table%."station";
+
+export set airports_with_additional_restrictions_course =
+  external String %airport_restrictions_course_table%."station";
+  
+%_station_allowed_for_leg_and_crew_qual_restriction%(Int ix, String station, String tab) =
+  let ac_qual = crew.%ac_qln_string_leg_start%;
+     (if ac_qual in training.SET3638 then
+	 %station_allowed_for_crew_and_3638_qual_restriction%(ix, station,tab) 
+	     
+      else if ac_qual = "37" then
+	%station_allowed_for_crew_and_qual_restriction%(ix, "37", station,tab) and
+	%station_allowed_for_crew_and_qual_restriction%(ix,"3738", station,tab)
+
+      else if ac_qual = "3738" then
+	%station_allowed_for_crew_and_3638_qual_restriction%(ix, station,tab) and
+	%station_allowed_for_crew_and_qual_restriction%(ix,"37", station, tab)
+        
+      else
+	%station_allowed_for_crew_and_qual_restriction%(ix, ac_qual, station,tab));
+
+%station_allowed_for_crew_and_3638_qual_restriction%( Int ix, String station, String tab) =
+    %station_allowed_for_crew_and_qual_restriction%(ix,"36", station, tab) and
+    %station_allowed_for_crew_and_qual_restriction%(ix,"38", station, tab) and
+    %station_allowed_for_crew_and_qual_restriction%(ix,"3738", station, tab);
+
+
+%_a_c_r_all%(String station) = default(%airport_course_restriction_lifus_all%(station), false);
+        
+%airport_course_restriction_num_lifus_required%(String station) =
+    default(%airport_course_restriction_lifus_num%(station), 0);
+
+%_a_r_first%(Int ix, String ac_qual, String station) =
+    if default(%airport_restriction_lifus_first%(ix, ac_qual, crew.%restriction_table%,station), false) then
+        1
+    else
+        0;
+
+%_a_r_four%(Int ix, String ac_qual, String station) = 
+    if default(%airport_restriction_lifus_four%(ix, ac_qual,crew.%restriction_table%, station), false) then
+        4
+    else
+        0;
+
+%_a_r_num%(Int ix, String ac_qual, String station) = default(%airport_restriction_lifus_num%(ix, ac_qual,crew.%restriction_table%, station), 0);
+
+%_a_r_all%(Int ix, String ac_qual,String station) = default(%airport_restriction_lifus_all%(ix, ac_qual,crew.%restriction_table%,qualification.%leg_station%(station)), false);
+
+  
+%airport_restriction_num_lifus_required%(Int ix, String ac_qual,String station) =
+    nmax(%_a_r_first%(ix, ac_qual,station), %_a_r_four%(ix, ac_qual,station), %_a_r_num%(ix, ac_qual,station));
+
+/*This gives the maximum number of lifus flights required to land at the destination
+airport, will default to 0 i no numerical value is found, i.e, 1, 4 or n*/
+%airport_restriction_max_num_lifus_required%(Int ix, String ac_qual,String station) =
+    nmax(%airport_restriction_num_lifus_required%(ix, ac_qual,station),
+         %airport_course_restriction_num_lifus_required%(station));
+
+%airport_restriction_all_lifus_required%(Int ix, String ac_qual,String station) =
+ 
+    %_a_r_all%(ix, ac_qual,station) or %_a_c_r_all%(station);
+
+%station_allowed_for_crew_and_qual_restriction%(Int ix, String ac_qual, String station, String tab) =
+    let n_req = %airport_restriction_max_num_lifus_required%(ix, ac_qual,station);
+    if tab = crew.%restr_acqual_table% then
+	void(%airport_restriction_station%(ix, ac_qual, tab, station))
+    else
+	(void(%airport_restriction_station%(ix, ac_qual, crew.%restriction_table%, station)) and
+	 void(%airport_course_restriction_station%(station)))
+	or
+	  ( if not void(%airport_restriction_station%(ix,ac_qual,crew.%restriction_table%,station))
+	    then
+	      if %airport_restriction_all_lifus_required%(ix,ac_qual,station) then
+		not leg.%is_any_lifus%
+	      else if n_req = 1 then
+		not leg.%is_any_lifus%
+	      else if n_req > 0 then
+		not training.%is_nth_any_lifus%(n_req)
+	      else
+		false
+	    else
+	      True
+	  );
+
+/* Agreement OM-C OP 7.2 note 2 & OM-A 5.2.11 table 4 */
+table test(String airport) = 
+  %_airport_qual_interval%(airport, leg.%aoc%) -> export %extended_qual_date_at_airport%;
+  "6 months"  -> add_months(leg.%start_date%, 6);
+  "1 year"    -> round_up_month(add_months(leg.%start_date%, 12))-24:00;
+  "3 years"   -> round_up_month(add_months(leg.%start_date%, 36))-24:00;
+  "5 years"   -> round_up_month(add_months(leg.%start_date%, 60))-24:00;
+  "Inf."      -> 31Dec2035 00:00;
+end
+
+
+/*
+ * A requalification activity is either a simulator training or a
+ * qualification flight. This will only be checked if the license has expired.
+ */
+
+export %airport_requalifying_activity% =
+  if %absence_requires_sim_training%(leg.%end_station%) then
+    %airport_sim_training_performed%(leg.%end_station%) and
+    (not %absence_requires_qln_flight%(leg.%end_station%) or leg.%is_release%)
+  else if %absence_requires_qln_flight%(leg.%end_station%) then
+    leg.%is_release%
+  else /* Only self-briefing is needed, a valid date must be in the table */
+    false;
+    
+/* 
+ * Sim required for all airports which do not require a qln flight, else
+ * only if > 3 years absence from airport. (OM-C OP 7.1 note 1)
+ */
+
+export %absence_requires_sim_training%(String station) =
+  %airport_requires_sim_training%(qualification.%leg_station%(station), leg.%aoc%) and
+  (not %airport_requires_qln_flight%(qualification.%leg_station%(station), leg.%aoc%) or
+   %absence_requires_completely_new_training%(station));
+
+%absence_completely_new_training_limit% = 3 * 12;
+ 
+%absence_requires_completely_new_training%(String station) =
+  leg.%end_UTC% > 
+  add_months(add_months(crew.%airport_qual_validto%(%place%(station), 
+                        leg.%end_hb%), -12), 
+              %absence_completely_new_training_limit%);
+export %absence_requires_qln_flight%(String station) =
+  crew.%rank_at_date%(leg.%end_hb%) = "FC" and
+  %airport_requires_qln_flight%(qualification.%leg_station%(station), leg.%aoc%);
+
+export %absence_requires_self_briefing%(String station) =
+  not %airport_requires_qln_flight%(qualification.%leg_station%(station), leg.%aoc%) and
+  not %airport_requires_sim_training%(qualification.%leg_station%(station), leg.%aoc%);
+
+export %airport_sim_training_performed%(String station) =
+  leg.%end_UTC% < add_months(%last_sim_training%(station), %absence_completely_new_training_limit%);
+
+%last_sim_training%(String station) =
+    let place = %place%(station);
+  default(
+          last(trip(roster), trip.%end_day%)
+          where (trip.%start_hb% >= %pp_start% and
+                 trip.%is_airport_sim% and
+                 trip.%is_sim_for_airport%(place)),
+          training.%last_logged_date_for_type_and_attr%("SIM AIRPORT", place, %pp_start%));
+
+/****************************************************************
+ * Section 3: Table lookups
+ ***************************************************************/
+%airport_restrictions_table% = %etab_path%(%airport_restrictions_table_p%);
+%airport_restrictions_table_p% =
+  parameter "apt_restrictions"
+  remark "ETAB: Table with airport restrictions based on restrictions";
+
+%check_airport_restriction_station% (Int ix, String ac, String tab, String station) =
+    let airport_restriction_station =
+         %_airport_restriction_station%(ix,ac, tab, station),
+	airport_restriction_rank =
+          default(%_airport_restriction_rank%(ix,ac,tab,station),crew.%rank%);
+
+    if not void(airport_restriction_station) then
+      if base_utils.%semicol_sep_exact_match%(crew.%rank%,
+					      airport_restriction_rank)
+      then
+	  airport_restriction_station
+      else
+	  void_string
+    else
+      void_string;
+
+%airport_restriction_station%(Int ix, String ac, String tab, String station) =
+  if void(%check_airport_restriction_station%(ix, ac, tab,station)) then
+    %check_airport_restriction_station%(ix, "ALL", tab,station)
+  else
+    %check_airport_restriction_station%(ix, ac, tab,station);
+
+
+%check_airport_restriction_lifus_all%(Int ix, String ac, String tab, String station) =
+  let airport_restriction_lifus_all =
+       %_airport_restriction_lifus_all%(ix, ac, tab, 
+                                        qualification.%leg_station%(station)),
+	airport_restriction_rank =
+          default(%_airport_restriction_rank%(ix,ac,tab,qualification.%leg_station%(station)),crew.%rank%);
+
+  if not void(airport_restriction_lifus_all) then
+      if base_utils.%semicol_sep_exact_match%(crew.%rank%, 
+					      airport_restriction_rank) then
+	airport_restriction_lifus_all
+      else
+	void_bool
+  else
+    void_bool;
+
+%airport_restriction_lifus_all%(Int ix, String ac, String tab,String station) =
+  if void(%check_airport_restriction_lifus_all%(ix, ac, tab,station)) then
+    %check_airport_restriction_lifus_all%(ix, "ALL", tab,station)
+  else 
+    %check_airport_restriction_lifus_all%(ix, ac, tab,station);
+  
+  
+%check_airport_restriction_lifus_first%(Int ix, String ac, String tab, String station) =
+ let airport_restriction_lifus_first =
+        %_airport_restriction_lifus_first%(ix, ac, tab, 
+					  qualification.%leg_station%(station)),
+	airport_restriction_rank =
+          default(%_airport_restriction_rank%(ix,ac,tab,qualification.%leg_station%(station)),crew.%rank%);
+
+  if not void(airport_restriction_lifus_first) then
+      if base_utils.%semicol_sep_exact_match%(crew.%rank%, 
+					      airport_restriction_rank) then
+	airport_restriction_lifus_first
+      else
+	void_bool
+  else
+    void_bool;
+
+
+%airport_restriction_lifus_first%(Int ix, String ac, String tab,String station) =
+  if void(%check_airport_restriction_lifus_first%(ix, ac, tab,station)) then
+      %check_airport_restriction_lifus_first%(ix, "ALL", tab,station)
+  else
+    %check_airport_restriction_lifus_first%(ix, ac, tab,station);
+
+
+%check_airport_restriction_lifus_four%(Int ix, String ac, String tab, String station) =
+  let airport_restriction_lifus_four =
+	%_airport_restriction_lifus_four%(ix, ac, tab, 
+					  qualification.%leg_station%(station)),
+	airport_restriction_rank =
+          default(%_airport_restriction_rank%(ix,ac,tab,qualification.%leg_station%(station)),crew.%rank%);
+
+  if not void(airport_restriction_lifus_four) then
+      if base_utils.%semicol_sep_exact_match%(crew.%rank%, 
+					      airport_restriction_rank) then
+        airport_restriction_lifus_four    	  
+      else
+	void_bool
+  else
+    void_bool;
+
+    
+%airport_restriction_lifus_four%(Int ix, String ac, String tab, String station) =
+  if void(%check_airport_restriction_lifus_four%(ix, ac, tab,station)) then
+      %check_airport_restriction_lifus_four%(ix, "ALL", tab, station )
+  else
+      %check_airport_restriction_lifus_four%(ix, ac, tab, station );
+
+%check_airport_restriction_lifus_num%(Int ix, String ac, String tab, String station) =
+  let airport_restriction_lifus_num =
+      %_airport_restriction_lifus_num%(ix, ac, tab, 
+				      qualification.%leg_station%(station)),
+	airport_restriction_rank =
+          default(%_airport_restriction_rank%(ix,ac,tab,qualification.%leg_station%(station)),crew.%rank%);
+
+  if not void(airport_restriction_lifus_num) then
+      if base_utils.%semicol_sep_exact_match%(crew.%rank%,
+                                    airport_restriction_rank) then
+           airport_restriction_lifus_num
+      else
+           void_int
+  else
+    void_int;
+
+
+%airport_restriction_lifus_num%(Int ix, String ac, String tab, String station) =
+  if void(%check_airport_restriction_lifus_num%(ix, ac, tab,station)) then
+      %check_airport_restriction_lifus_num%(ix, "ALL", tab,station )
+  else
+    %check_airport_restriction_lifus_num%(ix, ac, tab,station);
+
+%_crew_restriction_type_ix%(Int ix, String tab) =
+     if tab = crew.%restriction_table% then
+          crew.%restriction_type_ix%(leg.%start_hb%, ix)
+     else
+          crew.%qrestr_restr_type_ival%(ix,leg.%start_hb%,leg.%end_hb%);
+
+%_crew_restriction_subtype_ix%(Int ix, String tab) =
+      if tab = crew.%restriction_table% then
+           crew.%restriction_subtype_ix%(leg.%start_hb%, ix)
+       else
+           crew.%qrestr_restr_subtype_ival%(ix,leg.%start_hb%,leg.%end_hb%); 
+
+table airport_restriction(Int ix, String ac, String tab, String station) =
+
+/* The restriction can either be found as a restriction or a qual restriction, they are placed in different tables */
+      
+  %_crew_restriction_type_ix%(ix,tab),
+  %_crew_restriction_subtype_ix%(ix,tab),
+  station,
+  ac ->
+    String %_airport_restriction_station%,
+    Bool %_airport_restriction_lifus_all%,
+    Bool %_airport_restriction_lifus_first%,
+    Bool %_airport_restriction_lifus_four%,
+    Int %_airport_restriction_lifus_num%,
+    String %_airport_restriction_rank%;
+
+  external %airport_restrictions_table%;
+  restr_typ, restr_subtype, station, ac_qual ->
+    station, lifus_all, lifus_first, lifus_four, lifus_num, rank;
+  -, -, -, - ->
+    void_string, void_bool, void_bool, void_bool, void_int, void_string; /* No restriction */
+end
+
+%airport_course_restriction_station%(String station) =
+    %_airport_course_restriction_station%(station);
+
+%airport_course_restriction_lifus_all%(String station) = 
+    %_airport_course_restriction_lifus_all%(station);
+
+%airport_course_restriction_lifus_num%(String station) =
+    %_airport_course_restriction_lifus_num%(station);
+
+%airport_restrictions_course_table% = %etab_path%(%airport_restrictions_course_table_p%);
+%airport_restrictions_course_table_p% =
+  parameter "apt_restrictions_course"
+  remark "ETAB: Table with airport restrictions based on course";
+table airport_restriction_course (String station)=
+    station,
+    training.%course_name%(leg.%start_hb%)->
+        String %_airport_course_restriction_station%,
+        Bool %_airport_course_restriction_lifus_all%,
+        Int %_airport_course_restriction_lifus_num%;
+    external %airport_restrictions_course_table%;
+    station, course ->
+        station, lifus_all, lifus_num;
+    -, - ->
+        void_string, void_bool, void_int;
+end
+
+/* Check both arrival and departure station */
+export %airport_requirements_for_FC%(String apt, String aoc) = 
+    default(%_airport_requirements_for_FC%(apt, aoc), false);
+    
+export %airport_requirements_for_FP%(String apt, String aoc) = 
+    default(%_airport_requirements_for_FP%(apt, aoc), false);
+    
+export %airport_requires_qln_flight%(String apt, String aoc) = 
+    default(%_airport_requires_qln_flight%(apt, aoc), false);
+    
+export %airport_requires_sim_training%(String apt, String aoc) = 
+    default(%_airport_requires_sim_training%(apt, aoc), false);
+    
+table airport_requirements_ha(String apt, String aoc) =
+  apt, aoc ->
+    Bool %_airport_requirements_for_FC%,
+    Bool %_airport_requirements_for_FP%,
+    Bool %_airport_requires_qln_flight%,
+    Bool %_airport_requires_sim_training%,
+    String %_airport_qual_interval%;
+  external crew.%airport_requirements_table%;
+  Airport, aoc -> 
+    FCReq, FPReq, FCQlnReq, SimReq, valid_qual_interval;
+  -, - -> void_bool, void_bool, void_bool, void_bool, void_string;
+end
+
+/****************************************************************
+ * Section 4: Select mask for trip+sim+sby
+ ***************************************************************/
+
+export %trip_sim_sby_qual% =
+  if leg.%is_simulator% then
+    leg.%sim_leg_qual%
+  else
+    if (leg.%is_standby% and leg.%standby_code_with_qualification%) then
+      standby.%sby_ac_qual%
+    else 
+      if not leg.%is_deadhead% then
+        leg.%qual%
+      else
+        "";
+
+/*****************************************************************
+* Section 5:
+* Qualification mapping for SuccessFactors (LMS) interface
+* Nordlys: SKPROJ-431
+******************************************************************/
+    table cms_qualifications_to_lms(Bool cabin, String title_rank, String title_substr, String qual_subtype) =
+      cabin, title_rank, title_substr, qual_subtype -> %lms_qualification_name%;
+
+      y, -, "A", "MENTOR" -> "DN-Cabin MT";
+      y, -, "A", "PMM"    -> "DN-Cabin PM";
+      y, "AA", -, "ALL"   -> "DN-Cabin";
+      y, "AS", -, "ALL"   -> "DN-Cabin";
+      y, "AH", -, "ALL"   -> "DN-Cabin";
+      y, "AP", -, "ALL"   -> "DN-Cabin AP"; 
+      n, -, -, "36"       -> "DN-Pilot 737";
+      n, -, -, "37"       -> "DN-Pilot 737";
+      n, -, -, "38"       -> "DN-Pilot 737";
+      n, -, -, "A2"       -> "DN-Pilot A32";
+      n, -, -, "A3"       -> "DN-Pilot A34";
+      n, -, -, "A4"       -> "DN-Pilot A34";
+      n, -, -, "A5"       -> "DN-Pilot A34";
+      -, -, -, -          -> "";
+    end
+/* end of file */

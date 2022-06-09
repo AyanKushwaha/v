@@ -1,0 +1,583 @@
+/* -*- crc -*- 
+ *
+ * $Header$
+ *
+ * Purpose:
+ *   This module contains flight crew specific industrial rules or limits used in 
+ *   Carmen Crew Pairing and as studio only in Carmen Crew Rostering and 
+ *   Carmen Crew Tracking respectively.
+ *
+ * Sections:
+ *   1. Connection rules (minimum connection time)
+ *   2. Duty rules
+ *   3. Block time rules
+ *   4. Rest rules
+ *
+ * Created by:
+ *   Henrik Albertson, 20-Dec-2005
+ *
+ * Major changes:
+ *   Hasse Eliasson, 2009May6:
+ *     Meal Rules were moved to rules_meal_ccp_fc, so that they
+ *     could be redefined for Tracking, in a sub module using inheritance.
+ *
+ */
+
+module rules_indust_ccp_fc inherits rules_indust_ccp
+import crew_pos;
+import hotel;
+import duty_period;
+import parameters;
+
+/****************************************************************
+ * Section 1: Connection rules
+ * Rules:
+ *   - minimum connection times
+ *   (- maximum connection times)
+ ***************************************************************/
+
+/*
+** Rule: Minimum connection time
+*/
+/*
+redefine %min_connection% = connection.%min_time_FC_exception%;
+*/
+
+/****************************************************************
+ * Section 2: Duty rules
+ ***************************************************************/
+
+/*
+** Rule: Maximum duty time in a duty
+*/
+/*
+** No longer any restriction for 3 pilots/1 active landing or
+** 2 pilots short haul with long haul ac, HenrikA 13oct2006
+**
+** SKI K12: applies again to 2-pilot production.
+*/
+redefine %r_valid_duty_time_in_duty_period% =
+  (duty.%active_pilots% = 2 and
+   duty.%is_long_haul% and
+   (parameters.%k12_fc_sp4_2_valid%(duty.%start_hb%) or
+    not %duty_touches_excepted_airport%)) or
+  (parameters.%k12_fc_sp4_2_valid%(duty.%start_hb%) and
+   duty_time.%is_any_sim_instr_scand_dp%);
+  
+/* No longer any "DD" reduction, HenrikA 17oct2006 */ 
+redefine export %duty_time_in_duty_period% =
+  if parameters.%k12_fc_sp4_2_valid%(duty.%start_hb%) and
+     duty.%is_long_haul% then
+         fdp.%time%
+  else
+    duty_time.%in_duty_period%(duty.union, True);
+
+redefine %leg_duty_time_until_now% =
+    trip.%duty_time_in_period%(rest.%duty_period_start_UTC%(duty.union),
+                             leg.%co_end_utc%,
+                             fundamental.%night_upg%,
+                             duty.union);
+
+%duty_touches_excepted_airport% =
+  any(leg(duty), crew_pos.%leg_touches_excepted_airport%)
+  where(leg.%is_active_flight%);
+
+/*
+** Rule: Maximum number of night duties in a trip
+*/
+redefine %r_valid_max_night_duties_in_trip% = true;
+redefine %check_consecutive_nights% = true;
+redefine %max_night_duties% = 3;
+redefine %max_consecutive_night_duties% = 2;
+
+/*
+** Rule: Maximum number of calendar days in trip (R423)
+         R423 applies to a trip that includes European and inter-cont production
+         European production is in this context any production that is not inter-cont production
+*/
+redefine %is_rule_applied% = not trip.%is_valid_mix_production%;
+
+/*
+**	redefinitions for Rule: rule ind_max_working_days_in_trip_ALL
+*/
+redefine %max_days_in_trip% =
+  if trip.%is_long_haul% then
+    %max_days_in_trip_lh%
+  else
+    %max_days_in_trip_sh%;
+
+%max_days_in_trip_lh% = 5;
+
+/*
+**  Rule:
+** 	Max 20 hours duty in flight duty period btw end of a minimum rest period
+**  until end of next duty period that is followed by minimum rest.
+**  Description:
+**  Rule will only be valid for SKD and SKS FC crew (SH implied since LH crew has
+**  region SKI)
+**  Rule will check that the time from start of local transfer before a (active)
+**  duty that is preceded by minimum rest until the first following duty-period's
+**  check-out that is followed by minimum rest does not exceed 20 hours.
+**
+**  CMS Legality CR229 FD SH SKS and SKD.
+**
+**  NB! This doesn't assume that there is minimum rest before/after a trip.
+**  That is of course part of the normal definition of a trip, but if there
+**  for some reason isn't min rest, then it shouldn't be assumed for this rule
+**  A warning should be given if the 20hrs rule is violated, so that users
+**  don't just accept the missing min rest.
+**
+**  K11 - applies also to SKN
+*/
+
+export rule ind_max_hours_in_flight_duty_fc =
+  valid trip.%check_rules% and
+        trip.%is_regarded_sk_sh_agmt% and
+        not trip.%is_long_haul% and
+        duty.%start_hb% < %pp_end% and
+        duty.%end_hb% > %pp_start% and
+        duty.%is_on_duty% and
+        not duty.%has_no_duty_time_contribution% and
+        rest.%minimum_rest_satisfied%;
+        
+  rest.%time_since_previous_min_rest% <= %ind_max_hours_in_duty% + 
+  rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+             
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%, %duty_lh_region%));
+  failobject =  %ind_max_hours_in_flight_duty_failobject%;
+  failtext(reltime value, Reltime limit) = 
+    rules.%failtext_rel%("Coll: Dutyhours in duty period", value, limit); 
+  remark "Coll: Max. 20 hours in duty period";
+end
+/*
+%max_hours_agreement_valid% =
+  %agreement_valid%("hours_in_duty", duty.%start_hb%);
+*/
+%ind_max_hours_in_flight_duty_failobject% =
+  let start = rest.%duty_rest_end_before%;
+  default(
+    last(leg(duty), 
+         last(leg(chain), next(leg(chain), leg.%failobject_departure%))
+         from(current)
+         where(leg.%co_end_utc% - start <= %ind_max_hours_in_duty%)),
+    duty.%failobject_start%);
+       
+%ind_max_hours_in_duty% = 20:00;
+
+
+/*
+** Rule:
+**    Max changes of MD80 subtype in a duty
+**
+** Description:
+**    Check that a duty includes no more than 2 changes of
+**    MD80 subtype.
+**
+** Agreement:
+**    FC 13:34.6
+*/
+rule ind_max_MD80_subtype_changes_in_duty_FC =
+  valid trip.%check_rules% and
+        duty.%in_pp_extended% and
+        %duty_with_MD80% and
+        %duty_has_MD80_subtype_change%;
+  %nr_MD80_subtype_changes% <= %max_nr_MD80_subtype_changes% + 
+  			       rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+  startdate  = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_MD80_subtype_changes_in_duty_FC_failobject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("Coll: MD80 subtypes in duty", value, limit);
+  remark "Coll: Max changes of MD80 subtype in a duty",
+  planner "The rules checks that a duty includes no more than 2"
+          " changes of MD80 subtype.";
+end
+
+
+%ind_max_MD80_subtype_changes_in_duty_FC_failobject% = 
+  first(leg(duty), leg.%failobject_departure%)
+  where (%nr_MD80_subtype_changes_until_now% > %max_nr_MD80_subtype_changes% + 
+  			       rule_exceptions.%overshoot_int%(duty.%start_UTC%));
+  
+/* Should actually use planning area */
+%duty_with_MD80% =
+  first(leg(duty), leg.%ac_family% = "MD80") where (leg.%is_active_flight%);
+%duty_has_MD80_subtype_change% = any(leg(duty), %leg_is_MD80_subtype_change%);
+%leg_is_MD80_subtype_change% =
+  leg.%is_active_flight% and
+  default(leg.%ac_type% <> 
+          next(leg(duty), leg.%ac_type%) where (leg.%is_active_flight%),
+  false);
+
+%max_nr_MD80_subtype_changes% = 2;
+%nr_MD80_subtype_changes% = 
+  count(leg(duty))
+  where (%leg_is_MD80_subtype_change%);
+  
+%nr_MD80_subtype_changes_until_now% =
+  count(leg(duty)) from(first) to(current)
+  where (%leg_is_MD80_subtype_change%);
+
+/*
+** Rule: No duty same day when check out later than 0200
+*/
+
+redefine %r_valid_no_duty_same_day_if_late_co% = 
+    trip.%is_sks%;
+
+/*
+ * Rule: 
+ *    No more than 6 active sectors in dp
+ */
+rule ind_max_sectors_in_duty_FC =
+  valid trip.%check_rules% and
+        duty.%in_pp_extended% and
+        (not parameters.%K15_jan16_valid%(duty.%start_UTC%) or
+         not duty.%is_ac_employer_skd% or
+         parameters.%k15_jan33_valid_max_sectors_in_duty_SKD_FS%(duty.%start_UTC%)
+        ) and
+        not duty.%is_ski% and
+        duty_period.%is_on_duty% and
+        duty.%has_active_flight%;
+  fdp.%num_sectors% <= %max_nr_of_sectors_in_duty% + 
+  			       rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+  startdate  = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_sectors_in_duty_FC_failobject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("Coll: Sectors in DP", value, limit);
+  remark "Coll: Max sectors in DP",
+  planner "The rules checks that a duty only has six legs with"
+          " a seventh leg allowed only if the last leg is passive.";
+end
+
+%rules_indust_ccp_fc_param_header% = parameter "" remark "#HEADER#Active sectors(legs) per duty";
+
+export %ind_max_nr_of_sectors_in_duty_p% =
+    parameter 6
+    remark "Max number of active sectors(legs) for FC of SKS,SKN";
+
+%rules_indust_ccp_fc_param_footer% = parameter "" remark "#HEADER#...";
+
+%max_nr_of_sectors_in_duty% =
+    if last(leg(duty), leg.%is_deadhead%) then
+        %ind_max_nr_of_sectors_in_duty_p% + 1
+    else
+        %ind_max_nr_of_sectors_in_duty_p%;
+
+%ind_max_sectors_in_duty_FC_failobject% =
+  first(leg(trip), leg.%failobject_departure%)
+  where(duty_period.%legs_until_current% > %max_nr_of_sectors_in_duty% + 
+        rule_exceptions.%overshoot_int%(duty.%start_UTC%));
+  
+/*
+** Rule:
+**   - Maximum nr of legs in a FDP with extension for FC 
+**
+** Description:
+**   Check the number of legs in a FDP with subpart-q extension
+**
+**   NB! Do not be misled by the name! The rule did originally check active legs
+**   but has been changed to check active + passive legs.
+**
+** Agreement:
+**   OSL par 6.1.5 extended to all FC with separate parameters in CCT
+**   4ExNG   A new rule created in rule_indust_ccp applicable for FC and CC,
+**           so this rule is no longer applicable. 
+**   4ExNG contd.....  This rule counting active + passive legs applies again
+**                     for FC SH only!
+*/
+
+rule ind_max_active_sectors_in_FDP_with_extension_FC_ALL =
+  valid trip.%check_rules% and
+        %flight_crew% and
+        not duty.%is_SKI% and
+	    %max_sectors_agreement_valid% and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and
+        oma16.%is_extended_fdp%
+        and not (trip.%is_ac_employer_qa% and %flight_crew% and parameters.%k15qa_feb16_valid%(round_down_month(trip.%start_hb%)) ); /* SKCMS-581 */
+  fdp.%num_sectors% <=
+        %ind_max_sectors_in_fdp_with_extension% +
+                rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_active_sectors_in_duty_FC_failobject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%(concat("Coll: Max active+passive legs in FDP with extension ",
+                                duty.%region%," ",
+                                format_time(duty.%start_hb%,"%d%b")),
+                         value,limit);
+  remark "Coll: Max nr of active+passive legs in FDP with extension",
+  planner "The rule checks that the number of sectors, active + passive,",
+          " in a FDP with extension is not more than maximum allowed",
+          " (a parameter per region).";
+end
+
+%max_sectors_agreement_valid% = 
+    %agreement_valid%(%_max_sectors_in_fdp_agreement_text%, duty.%start_hb%);
+
+%_max_sectors_in_fdp_agreement_text% = 
+    if duty.%is_skd% then
+        "sectors_in_extended_fdp_skd"
+    else
+    if duty.%is_skn% then
+        "sectors_in_extended_fdp_skn"
+    else
+    if duty.%is_sks% then
+        "sectors_in_extended_fdp_sks"
+    else
+        "sectors_in_extended_fdp_oth";
+
+%nr_of_active_sectors_in_duty% = 
+  duty.%num_active_legs% +
+  %_nr_of_active_sectors_in_prev_duty%;
+
+%_nr_of_active_sectors_in_prev_duty% = 
+  if default(prev(duty(trip), duty_period.%is_split% and duty_period.%is_first_duty_in_duty_period%), false) then
+    prev(duty(trip), duty.%num_active_legs%)
+  else
+    0;
+
+%ind_max_sectors_in_fdp_with_extension% = 
+    if duty.%is_skd% then
+        system_db_parameters.%ind_max_sectors_in_fdp_with_extension_skd_p%(duty.%start_hb%)
+    else
+    if duty.%is_skn% then
+        system_db_parameters.%ind_max_sectors_in_fdp_with_extension_skn_p%(duty.%start_hb%)
+    else
+    if duty.%is_sks% then
+        system_db_parameters.%ind_max_sectors_in_fdp_with_extension_sks_p%(duty.%start_hb%)
+    else
+        system_db_parameters.%ind_max_sectors_in_fdp_with_extension_other_p%(duty.%start_hb%);
+
+
+
+%ind_max_active_sectors_in_duty_FC_failobject% =
+  first(leg(trip), leg.%failobject_departure%)
+  where(%nr_of_active_sectors_in_duty_until_now%
+        > %ind_max_sectors_in_fdp_with_extension% + 
+        rule_exceptions.%overshoot_int%(duty.%start_UTC%));
+
+%nr_of_active_sectors_in_duty_until_now% = 
+    count(leg(duty)) from(first) to(current) 
+    where(leg.%is_active_flight%) + 
+    %_nr_of_active_sectors_in_prev_duty%; 
+  
+   
+ /*
+** Rule: 
+**    Trip.end_utc last day must no be offset more than max +12hours, 
+**    compared to trip.start_utc 
+**    first days
+**
+** Description:
+**  The TIME of end at last production day shall be less than 12 h after
+**  the TIME of start of the first production day.
+**
+** Agreement:
+**    SKCMS-494 (Short haul pilots).
+** Valid:
+**    SKS,SKD,SKN
+*/
+ 
+
+rule ind_min_offset_ci_co_FC =
+  valid not base_product.%is_tracking% and
+        trip.%check_rules% and
+        trip.%is_short_haul% and
+        trip.%is_closed% and
+        not trip.%is_ac_employer_qa% and
+        trip.%has_only_flight_duty% and
+        trip.%in_pp_extended% and
+        trip.%days% >= %p_min_length_of_trip%;
+	
+	%trip_end_utc% <= %start_time_at_end_day_plus_offset% + 
+                      rule_exceptions.%overshoot_rel%(trip.%start_utc%);
+
+  startdate = trip.%start_UTC%;
+  failobject = trip.%failobject_start%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(Abstime val, Abstime limit) = 
+    rules.%failtext_abs%("Ends too late, must be trip.start_UTC in for trip + offset",val, limit);
+  remark "trip.end_utc of last leg in trip must be trip.start_UTC of first leg in wop + offset",
+  planner "This rule is valid for SH FD when number of days in trip are the same or more than parameter %p_offset%. End time for last leg in trip, may not be offset more than given in parameter %p_min_length_of_wop%, compared to leg.start_utc for first leg in trip. ";
+end
+%trip_end_utc% =
+  if time_of_day(trip.%end_utc%)=0:00 then
+    trip.%end_utc% - 0:01
+  else
+    trip.%end_utc%;
+
+
+
+%start_time_at_end_day_plus_offset% = trip.%end_UTC% 
+                                       - time_of_day(trip.%end_UTC%)
+                                       + time_of_day(trip.%start_UTC%) + 
+                                         %p_offset%;
+                                  
+%p_offset% = 
+   parameter 12:00
+   remark "Offset for max C/O time compared to C/I time";
+
+%p_min_length_of_trip% =
+   parameter  3
+   remark "Min lenght of trip for rule to be valid";
+
+
+
+
+
+
+
+
+
+/****************************************************************
+ * Section 3: Block time rules
+ ***************************************************************/
+
+/*
+** Rule:
+**    Max block time for single long haul leg
+**
+** Description:
+**    Check that the max block time for a single leg is not exceeded.
+**    The rule is only valid for flights with 2 active pilots.
+**
+** Agreement:
+**    SKI K06 p.3
+*/
+rule ind_max_block_time_single_lh_leg_FC =
+  valid trip.%check_rules% and
+        duty.%in_pp% and
+        duty.%active_pilots% = 2 and
+        (leg.%is_long_haul% or duty.%is_skn%) and
+        leg.%is_active_flight% and
+        not crew_pos.%leg_touches_excepted_airport%;
+  leg.%block_time% <= %max_block_time_single_leg% + 
+  		      rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%);
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext(Reltime value, Reltime limit) =
+    rules.%failtext_rel%("Coll: BLH", value, limit);
+  remark "(CCP) Coll: Max block time for single leg",
+  planner "The rule checks that the maximum block time for a single long haul"
+          " leg is not exceeded. It is only active for legs with 2 active pilots.";
+end
+
+%max_block_time_single_leg% = 6:30;
+
+/****************************************************************
+ * Section 4: Rest rules
+ ***************************************************************/
+
+/*
+** Rule: Minimum rest time
+*/
+redefine %r_valid_min_rest_after_duty_pass% = true;
+
+/*
+** Rule: Rest in 24hrs from c/i
+*/
+redefine %r_valid_rest_in_24hrs_from_ci% =
+  duty.%is_short_haul% and
+  not rest.%is_short%;
+
+/*
+** Rule: Night rest required before/after short stop
+**   NB! Not valid for SKN (CR 221)
+**
+**   NB: K11 - valid for SKN again!
+*/
+redefine %r_valid_night_rest_surrounding_short_stop% = 
+  true;
+
+
+
+
+
+/*
+** Rule:
+**    No split duties 
+**
+** Description:
+**    The rule checks that split duty according to the Subpart Q definition
+**    is not assigned:
+**
+**    1) Before K11 for SKN FC
+**
+**    2) After K11 for SKD/SKN/SKS FC at homebase
+**
+**    It is necessary because FC SH after K11 no longer have any union rules 
+**    for minimum rest, and Subpart Q allows split duty at homebase,
+**    but the FC unions don't want it!
+**
+** Agreement:
+**    OSL 6.1.5 (CR 306)
+**    K11 FC SH SKD/SKN/SKS 6.1.8
+*/
+
+/*
+** NB! This is the original version of the rule, and existed only in this
+** module, CCP rules are however not included in Matador, which meant that
+** two trips could be assigned with split duty between them.
+**
+** The new version follows, and checks only for split duty between duty periods.
+** Another version has been added in rules_indust_ccr_fc, that checks for
+** split duty between trips, i.e. at home base, to solve the Matador problem.
+*/
+
+rule (off) ind_no_split_duty_fc =
+  valid trip.%check_rules%
+        and not trip.%is_ski%
+        and duty.%arrives_at_homebase%
+        and trip.%in_pp% 
+        and trip.%is_on_duty% 
+        and not duty.%is_split_duty_exception% 
+        and rule_exceptions.%rule_on%(duty.%start_utc%);
+
+  not (duty_period.%is_split% and duty_period.%is_first_duty_in_duty_period%);
+  
+  startdate = duty.%start_utc%;
+  severity =  first(leg(duty), %severity_filter_int%(leg.%start_utc%,%duty_lh_region%));
+  failobject = next(duty(trip), duty.%failobject_start%);
+  failtext "Coll: Split duty - Not Allowed";
+  remark "Coll: No split duties",
+  planner "The rule checks before K11 that no split duty according to OMA16 " 
+          " is scheduled for SKN FC, or after K11 that no split duty is"
+          " scheduled for SKD/SKN/SKS FC at homebase";
+end
+  
+rule ind_no_split_duty_after_duty_period_fc =
+  valid trip.%check_rules%
+        and not trip.%is_ski% 
+        and duty.%arrives_at_homebase% 
+        and trip.%in_pp% 
+        and trip.%is_on_duty% 
+        and not is_last(duty(trip)) 
+        and not duty.%is_split_duty_exception% 
+        and rule_exceptions.%rule_on%(duty.%start_utc%);
+
+  not (duty_period.%is_split% and duty_period.%is_first_duty_in_duty_period%);
+  
+  startdate = duty.%start_utc%;
+  severity =  first(leg(duty), %severity_filter_int%(leg.%start_utc%,%duty_lh_region%));
+  failobject = next(duty(trip), duty.%failobject_start%);
+  failtext "Coll: Split duty - Not Allowed";
+  remark "Coll: No split duties after duty_period",
+  planner "The rule checks before K11 that no split duty according to OMA16 " 
+          " is scheduled for SKN FC, or after K11 that no split duty is"
+          " scheduled for SKD/SKN/SKS FC at homebase";
+end
+
+redefine %ind_max_number_checkin_per_day_agmt_valid% =
+    False; /* temporary disable
+    if duty.%is_ac_employer_qa% then parameters.%k15qa_feb16_valid%(duty.%start_hb%)
+  	else if duty.%is_ac_employer_sk_sh% then parameters.%k15sk_jan16_valid%(duty.%start_hb%)
+		else False; / * LH */
+	
+/* end of file */
+
+

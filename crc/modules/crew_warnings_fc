@@ -1,0 +1,685 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains flight crew warnings
+ *
+ * Sections:
+ *   1. Warning definitions
+ *
+ * Created by:
+ *   Jonas Carlsson, April 2007
+ *
+ * Major changes:
+ *
+ */
+
+module crew_warnings_fc inherits crew_warnings
+
+import qualification;
+import duty_time;
+import wop;
+
+/****************************************************************
+ * Section 1: Warning definitions
+ ***************************************************************/
+ 
+table fd_warnings(Int section, Int priority) = 
+  section, 
+  priority -> 
+    redefine export String %section_group%,
+    redefine export Bool %section_priority_warning%,  
+    redefine export String %section_priority_code%,    
+    redefine export String %section_priority_descr%; 
+  
+  /* OPC */
+  1, 1 -> "Recurrent", %warning_s1%, %warning_s1_code%, %warning_s1_description%;
+  1, 2 -> "Recurrent", %warning_s2%, %warning_s2_code%, %warning_s2_description%;
+          
+  /* PC */
+  2, 1 -> "Recurrent", %warning_y1%, %warning_y1_code%, %warning_y1_description%;
+  2, 2 -> "Recurrent", %warning_y2%, %warning_y2_code%, %warning_y2_description%;
+  
+  /* PGT */
+  3, 1 -> "Recurrent", %warning_e1%, %warning_e1_code%, %warning_e1_description%;
+  3, 2 -> "Recurrent", %warning_e2%, %warning_e2_code%, %warning_e2_description%;
+ 
+  /* LC */
+  4, 1 -> "Recurrent", %warning_c1%, %warning_c1_code%, %warning_c1_description%;
+  4, 2 -> "Recurrent", %warning_c2%, %warning_c2_code%, %warning_c2_description%;
+  
+  /* Absence 46-90 days */
+  5, 1 -> "Absence", %warning_41%, %warning_41_code%, %warning_41_description%;
+  
+  /* Absence >90 days */
+  6, 1 -> "Absence", %warning_a1%, %warning_a1_code%, %warning_a1_description%;
+  
+  /* Recency - lack of landings */
+  7, 1 -> "Recency", %warning_t1%, %warning_t1_code%, %warning_t1_description%;
+  
+  /* SKI Airport qualifications */
+  8, 1 -> "Airport qual", %warning_d1%, %warning_d1_code%, %warning_d1_description%;
+  8, 2 -> "Airport qual", %warning_d2%, %warning_d2_code%, %warning_d2_description%;
+  
+  /* SKI LCP airports */
+  9, 1 -> "LCP warning", %warning_l1%, %warning_l1_code%, %warning_l1_description%;
+  9, 2 -> "LCP warning", %warning_l2%, %warning_l2_code%, %warning_l2_description%;
+  
+  /* OPC/PC planned too close after vacation */
+  10, 1 -> "Recurrent", false, "", ""; /* Dummy warning since there is no real v1 warning */
+  10, 2 -> "Recurrent", %warning_v2%, %warning_v2_code%, %warning_v2_description%; 
+  
+  /* Lack of registration of recurrent dates */
+  11, 1 -> "Lack of registration", %warning_r1%, %warning_r1_code%, %warning_r1_description%;
+
+  /* Training need warnings */
+  12, 1 -> "Training", %warning_u1%, %warning_u1_code%, %warning_u1_description%;
+  
+  /* FCI airport requirements */
+  13, 1 -> "Airport qual", %warning_d1_fci%, %warning_d1_code%, %warning_d1_fci_description%;
+  13, 2 -> "Airport qual", %warning_d2_fci%, %warning_d2_code%, %warning_d2_fci_description%;
+  /* Default match used for counting the number of rows */
+  -, - -> void_string, void_bool, void_string, void_string;
+end
+
+
+/* Doc expirys are default protected to 1Jan1986, but this will also generate an
+   R warning */
+%doc_exp%(Abstime expiry) =
+  if expiry = 1Jan1986 then void_abstime
+  else expiry;
+  
+/*
+** S: OPC needed in pp (prio 1)
+** Warn if OPC document is expired at end of pp and there is no OPC activity
+** in pp. This implies that crew must perform OPC during pp.
+*/
+
+%crew_opc_1_expires_in_pp% =
+    training.%opc_date_1_incl_perf%(%warning_period_check_performed_end%)
+    <= %warning_period_end%;
+%crew_opc_2_expires_in_pp%  = 
+    training.%opc_date_2_incl_perf%(%warning_period_check_performed_end%)
+    <= %warning_period_end%;
+redefine %warning_s1% =
+  not %warning_y1% and
+  (if not crew.%is_double_qualified% then 
+    %crew_opc_1_expires_in_pp%
+  else if not training.%pc_opc_match_pp_start% then 
+    %crew_opc_1_expires_in_pp% or
+    %crew_opc_2_expires_in_pp%
+  else
+    false);
+%warning_s1_code% = "S";
+%warning_s1_description% = 
+  if crew.%is_double_qualified% then
+    if %crew_opc_1_expires_in_pp% then
+      concat(training.%opc_code_1%, " needed in pp, expiry date is ",
+             %expiry_date_inclusive%(training.%opc_date_1%))
+    else
+      concat(training.%opc_code_2%, " needed in pp, expiry date is ",
+             %expiry_date_inclusive%(training.%opc_date_2%))
+  else
+    concat("OPC needed in pp, expiry date is ",
+           %expiry_date_inclusive%(training.%opc_date_1%));
+            
+/*
+** s: OPC needed in month after pp (prio 2)
+** Warn if OPC document is expires during themonth after pp and there is no OPC
+** activity planned in the month after pp. This implies
+** that crew must perform OPC during the month after pp
+*/
+
+%crew_opc_1_expires_in_month_after_pp% =
+    let exp = training.%opc_date_1_incl_perf%(%a_month_after_warning_period%);
+    exp > %warning_period_end% and
+    exp <= %a_month_after_warning_period%;
+%crew_opc_2_expires_in_month_after_pp% =
+    let exp = training.%opc_date_2_incl_perf%(%a_month_after_warning_period%);
+    exp > %warning_period_end% and
+    exp <= %a_month_after_warning_period%;
+redefine %warning_s2% = 
+  not (%warning_y1% or %warning_y2%) and
+  (if not crew.%is_double_qualified% then 
+    %crew_opc_1_expires_in_month_after_pp%
+  else if not training.%pc_opc_match_pp_start% then 
+     %crew_opc_1_expires_in_month_after_pp%
+     or
+     %crew_opc_2_expires_in_month_after_pp%
+  else
+    false);
+%warning_s2_code% = "s";
+%warning_s2_description% = 
+  if crew.%is_double_qualified% then
+    if %crew_opc_1_expires_in_month_after_pp% then
+      concat(training.%opc_code_1%, " needed in month after pp, expiry date is ",
+             %expiry_date_inclusive%(training.%opc_date_1%))
+    else
+      concat(training.%opc_code_2%, " needed in month after pp, expiry date is ",
+             %expiry_date_inclusive%(training.%opc_date_2%))
+  else
+    concat("OPC needed in month after pp, expiry date is ",
+         %expiry_date_inclusive%(training.%opc_date_1%));
+  
+/*
+** Y: PC needed in pp (prio 1)
+** Warn if PC document is expired at pp_end. This implies 
+** that crew must perform PC during pp.
+*/
+
+%crew_pc_1_expires_in_pp% =
+    %doc_exp%(training.%pc_date_1_incl_perf%(%warning_period_check_performed_end%))
+    <= %warning_period_end%;
+%crew_pc_2_expires_in_pp% = 
+    %doc_exp%(training.%pc_date_2_incl_perf%(%warning_period_check_performed_end%))
+    <= %warning_period_end%;
+redefine %warning_y1% =
+  if not crew.%is_double_qualified% then 
+    %crew_pc_1_expires_in_pp%
+  else
+   %crew_pc_1_expires_in_pp%
+   or
+   %crew_pc_2_expires_in_pp%;
+%warning_y1_code% = "Y";
+%warning_y1_description% = 
+  if crew.%is_double_qualified% then
+    if %crew_pc_1_expires_in_pp% then
+      concat(training.%pc_code_1%, " needed in pp, expiry date is ",
+             %expiry_date_inclusive%(training.%pc_date_1%))
+    else
+      concat(training.%pc_code_2%, " needed in pp, expiry date is ",
+             %expiry_date_inclusive%(training.%pc_date_2%))
+  else
+    concat("PC needed in pp, expiry date is ",
+           %expiry_date_inclusive%(training.%pc_date_1%));
+
+/*
+** y: PC needed month after pp (prio 2)
+** Warn if PC document is expired at pp_end + 1 month. This implies
+** that crew must perform PC during month after pp
+*/
+
+%crew_pc_1_expires_in_month_after_pp% =
+    let exp = training.%pc_date_1_incl_perf%(%a_month_after_warning_period%);
+    exp > %warning_period_end% and
+    exp <= %a_month_after_warning_period%;
+%crew_pc_2_expires_in_month_after_pp% = 
+    let exp = training.%pc_date_2_incl_perf%(%a_month_after_warning_period%);
+    exp > %warning_period_end% and
+    exp <= %a_month_after_warning_period%;
+redefine %warning_y2% = 
+  if not crew.%is_double_qualified% then
+    %crew_pc_1_expires_in_month_after_pp%
+  else 
+    %crew_pc_1_expires_in_month_after_pp%
+    or
+    %crew_pc_2_expires_in_month_after_pp%;
+%warning_y2_code% = "y";
+%warning_y2_description% = 
+  if crew.%is_double_qualified% then
+    if %crew_pc_1_expires_in_month_after_pp% then
+      concat(training.%pc_code_1%, " needed in month after pp, expiry date is ",
+             %expiry_date_inclusive%(training.%pc_date_1%))
+    else
+      concat(training.%pc_code_2%, " needed in month after pp, expiry date is ",
+             %expiry_date_inclusive%(training.%pc_date_2%))
+  else
+    concat("PC needed in month after pp, expiry date is ",
+         %expiry_date_inclusive%(training.%pc_date_1%));
+
+/*
+** E: PGT needed in pp (prio 1)
+** Warn if PGT document is expired at pp_end. This implies 
+** that crew must perform PGT during pp.
+*/
+
+%next_pgt_date% = 
+    default(training.%recurrent_type_expiry_date%(%next_pgt_activity%, %any_ac_qual%, %warning_period_end%), 31Dec2099);
+%next_pgt_activity% =
+    "PGT";
+
+%crew_pgt_expires_in_pp% = 
+  %next_pgt_date% <= %warning_period_end%;
+redefine %warning_e1% =
+  %crew_pgt_expires_in_pp% and 
+  not training.%recurrent_performed%(%next_pgt_activity%, %any_ac_qual%, %warning_period_check_performed_end%);
+%warning_e1_code% = "E";
+%warning_e1_description% = 
+  concat("PGT needed in pp, expiry date is ",
+         %expiry_date_inclusive%(%next_pgt_date%));
+
+/*
+** e: PGT needed month after pp (prio 2)
+** Warn if PGT document is expired at pp_end + 1 month. This implies
+** that crew must perform PGT during month after pp
+*/
+
+%crew_pgt_expires_in_month_after_pp% = 
+  %next_pgt_date% > %warning_period_end% and
+  %next_pgt_date% <= %a_month_after_warning_period%;
+redefine %warning_e2% = 
+  %crew_pgt_expires_in_month_after_pp% and 
+  not (training.%recurrent_performed%(%next_pgt_activity%, %any_ac_qual%, %a_month_after_warning_period%) or 
+   training.%recurrent_performed%("PGTREF", %any_ac_qual%, %warning_period_end%));
+%warning_e2_code% = "e";
+%warning_e2_description% = 
+  concat("PGT needed in month after pp, expiry date is ",
+         %expiry_date_inclusive%(%next_pgt_date%));
+  
+/*
+** C: Line check needed in pp (prio 1)
+** Warn if LC document is expired at pp end. This implies 
+** that crew must perform LC during pp.
+*/
+
+%crew_lc_date_in_pp% = 
+  default(training.%recurrent_type_expiry_date%("LC", %any_ac_qual%, %warning_period_start%), 31Dec2099);
+%crew_lc_expires_in_pp% = 
+  let ac_qual = training.%recurrent_type_expiry_ac_qual%("LC", %any_ac_qual%, %crew_lc_date_in_pp%);
+  %crew_lc_date_in_pp% <= %warning_period_end% and
+  /* Handles the case where upcoming lc qual is "A3 or A4" */
+  ((ac_qual = "A3 or A4" and (crew.%has_acqln_in_pp%("A3") or crew.%has_acqln_in_pp%("A4")))
+    or crew.%has_acqln_in_pp%(ac_qual));
+  
+redefine %warning_c1% =
+  %crew_lc_expires_in_pp% and 
+  not training.%recurrent_performed%("LC", %any_ac_qual%, %warning_period_check_performed_end%);
+%warning_c1_code% = "C";
+%warning_c1_description% = 
+  concat("Line check needed in pp, expiry date is ",
+         %expiry_date_inclusive%(%crew_lc_date_in_pp%));
+
+/*
+** c: Line check needed month after pp (prio 2)
+** Warn if LC document is expired at pp_end + 1 month. This implies
+** that crew must perform LC during month after pp
+*/
+
+%crew_lc_date_in_month_after_pp% = 
+  default(training.%recurrent_type_expiry_date%("LC", %any_ac_qual%, %warning_period_end%), 31Dec2099);
+%crew_lc_expires_in_month_after_pp% = 
+  %crew_lc_date_in_month_after_pp% > %warning_period_end% and
+  %crew_lc_date_in_month_after_pp% <= %a_month_after_warning_period%;
+redefine %warning_c2% = 
+  %crew_lc_expires_in_month_after_pp% and 
+  not training.%recurrent_performed%("LC", %any_ac_qual%, %a_month_after_warning_period%);
+%warning_c2_code% = "c";
+%warning_c2_description% = 
+  concat("Line check needed in month after pp, expiry date is ",
+         %expiry_date_inclusive%(%crew_lc_date_in_month_after_pp%));
+  
+  
+/*
+** Absence warnings:
+** 4: Absence 46-90 days (prio 1)
+** Warn if crew is absent at end of planning period.
+** Flight crew only fly one ac-family so absence from ac-type and absence from 
+** flight duty is one and the same thing.
+*/
+
+%absence_descr% =
+  %_absence_descr%(%crew_ac_qln1_pp_end%);
+  
+redefine %warning_41% =
+  not %warning_u1% and
+  crew.%has_ac_qln%(fundamental.%plan_end%, %crew_ac_qln1_pp_end%) and
+  absence.%absent_46_90%(%warning_period_end%-0:01); 
+  
+%warning_41_code% = "4";
+%warning_41_description% =
+  %absence_descr%;
+
+/*
+** A: Absence >90 days (prio 1)
+** Warn if crew is absent >90 at end of planning period
+** Flight crew only fly one ac-family so absence from ac-type and absence from 
+** flight duty is the same thing.
+*/
+%_absence_warning_valid% =
+  crew.%has_ac_qln%(fundamental.%plan_end%, %crew_ac_qln1_pp_end%) and
+  absence.%at_date%(fundamental.%plan_end%);
+  
+redefine %warning_a1% =
+  not %warning_u1% and %_absence_warning_valid% and
+  absence.%absent_91%(%warning_period_end%-0:01);
+  
+%warning_a1_code% = "A";
+%warning_a1_description% =
+  %absence_descr%;
+
+/*
+** T: Recency - lack of landings (prio 1)
+*/
+
+%recency_expiry_date% = 
+  round_down(recency.%expiry_date_min%(if recency.%has_expired_at_pp_start% then
+                                            %pp_start% 
+                                           else 
+                                            %pp_end%, "ALL"), 24:00);
+%recency_warning_invalid_at_date%(Abstime date) = 
+  any(trip(roster), trip.%has_only_flight_duty%)
+  where(trip.%start_hb% > date and 
+        trip.%start_hb% < %pp_end%);
+  
+%recency_warning_invalid_at_pp_start% = 
+  %recency_warning_invalid_at_date%(%pp_start%);
+  
+%recency_warning_invalid_at_pp_end% = 
+  %recency_warning_invalid_at_date%(%recency_expiry_date%) or
+  crew.%ac_qlns_at_date%(%recency_expiry_date%) = "FF";
+  
+%recency_expired_at_pp_start% = 
+  recency.%has_expired_at_pp_start% and
+  not %recency_warning_invalid_at_pp_start%;
+  
+%recency_expired_at_pp_end% = 
+  recency.%has_expired_at_pp_end%;
+  
+redefine %warning_t1% =
+  /* If training program has been created we can disable this warning */
+  not %warning_u1% and
+  %recency_expired_at_pp_end% and
+  not (crew.%has_restr_training_capt_in_pp% or crew.%has_restr_training_dct_foc_refr_in_pp%);
+  
+%warning_t1_code% = "T";
+%warning_t1_description% =
+  if %recency_expired_at_pp_start% then
+    format_time(%last_recent_date%,
+                "Last recent date was %02d%b%Y, needs T-FLT or SIM")
+  else
+    format_time(%last_recent_date%,
+                "Last recent date is %02d%b%Y, will need T-FLT or SIM");
+    
+%last_recent_date% = round_down(%recency_expiry_date% - 0:01, 24:00);
+
+/*
+** D: SKI FCI Airport qualification expires in pp (prio 1)
+*/
+
+%crew_valid_for_d_warning% =   
+  /* Only SKI pilots */
+  crew.%is_long_haul_pp_start% and
+  crew.%rank_pp_start% = "FC";
+
+/* If there are new SKI airports they should be added here.
+   Used by warnings D/d/L/l */
+set ski_airport_set = "EWR", "ORD", "IAD", "BKK", "PEK", "PVG", "NRT";
+
+%nr_ski_airports% =
+  max(times(20), %times_index_0%)
+  while(not void(%ski_airport%(%times_index_0%)));
+                 
+table ski_airport_tab(Int row) =
+  row-> %ski_airport%;
+  1 -> "EWR";
+  2 -> "ORD";
+  3 -> "IAD";
+  4 -> "BKK";
+  5 -> "PEK";
+  6 -> "PVG";
+  7 -> "NRT";
+  - -> void_string;
+end
+
+/* Table lookups */
+table airport_req_table(Int row) = 
+  row -> String %airport_with_req%;
+  external crew.%airport_requirements_table%;
+  row_number -> airport;
+  -          -> void_string;
+end
+
+%nr_airports_with_req% = 
+  count(times(100)) while (not void(%airport_with_req%(%times_index_0%)));
+
+/* Expiry date */
+%expiry_date_for_airport%(String airport) = 
+  crew.%airport_qual_validto%(%airport_or_area%(airport), %warning_period_end%);
+  
+/* Airport or area */
+%airport_or_area%(String airport) =
+  leg.%area_or_airport%(airport);
+  
+/* Description for a single airport */
+%warning_d_description_for_airport%(String airport) =
+  concat(airport,
+         if %airport_or_area%(airport) <> airport then
+            concat(" (", %airport_or_area%(airport), ")")
+         else "",
+         " (",
+         crg_date.%print_date%(%expiry_date_for_airport%(airport)),
+         "), ");
+
+/* D */
+%airport_req_expire_in_pp%(String airport) = 
+  %expiry_date_for_airport%(airport) <= %warning_period_end%;
+
+redefine %warning_d1% = 
+  %crew_valid_for_d_warning% and
+  any(times(%nr_airports_with_req%),
+      %warning_d1_for_airport%(%airport_with_req%(%times_index_0%)));
+%warning_d1_for_airport%(String airport) =
+  airport in ski_airport_set and
+  %airport_req_expire_in_pp%(airport);
+%warning_d1_code% = "D";
+%warning_d1_description% = 
+  /* Cut away trailing comma and blank space */
+  substr(%_warning_d1_description%, 1, length(%_warning_d1_description%) - 2);
+%_warning_d1_description% = 
+  concat("Airport qualification(s) expire in pp: ", 
+         cat(times(%nr_airports_with_req%),
+             %warning_d_description_for_airport%(%airport_with_req%(%times_index_0%)))
+         where(%warning_d1_for_airport%(%airport_with_req%(%times_index_0%))));
+  
+/*
+** d: SKI FCI Airport qualification expires month after pp (prio 2)
+*/
+
+/* d */
+%airport_req_expire_in_month_after_pp%(String airport) = 
+  %expiry_date_for_airport%(airport) <= %a_month_after_warning_period% and
+  %expiry_date_for_airport%(airport) > %warning_period_end%;
+redefine %warning_d2% = 
+  %crew_valid_for_d_warning% and
+  any(times(%nr_airports_with_req%),
+      %warning_d2_for_airport%(%airport_with_req%(%times_index_0%)));
+%warning_d2_for_airport%(String airport) =
+  airport in ski_airport_set and
+  %airport_req_expire_in_month_after_pp%(airport);
+%warning_d2_code% = "d";
+%warning_d2_description% = 
+  /* Cut away trailing comma and blank space */
+  substr(%_warning_d2_description%, 1, length(%_warning_d2_description%) - 2);
+%_warning_d2_description% = 
+  concat("Airport qualification(s) expire month after pp: ", 
+         cat(times(%nr_airports_with_req%),
+             %warning_d_description_for_airport%(%airport_with_req%(%times_index_0%)))
+         where(%warning_d2_for_airport%(%airport_with_req%(%times_index_0%))));
+         
+
+/* FCI addition to D warning. 
+** Instructors must fly to PEK/NRT or BKK at least once a year */
+
+/* FCI important airports */
+set fci_airport_set = "PEK", "NRT", "BKK";
+
+/* Expiry date */
+%fci_due_date_for_airport%(String airport) =
+  if airport = "PEK" or airport = "NRT" then
+    add_years(nmax(accumulators.%last_ski_lcp_airp_landing%("PEK", %warning_period_end%),
+                   accumulators.%last_ski_lcp_airp_landing%("NRT", %warning_period_end%)),1)
+  else
+    add_years(accumulators.%last_ski_lcp_airp_landing%(airport, %warning_period_end%), 1);
+    
+/* Description for a single airport */
+%warning_d1_fci_description_for_airport%(String airport) =
+  concat(airport,
+         " (",
+         crg_date.%print_date%(%due_date_for_airport%(airport)),
+         "), ");
+
+%crew_valid_for_d_fci_warning% =   
+  /* Only SKI pilots */
+  crew.%is_long_haul_pp_start% and
+  /* All FCI (instructors) */
+  crew.%is_instructor%(%warning_period_start%);
+  
+/* D */
+%fci_airport_due_in_pp%(String airport) = 
+  %fci_due_date_for_airport%(airport) < %warning_period_end%;
+  
+redefine %warning_d1_fci% = 
+  %crew_valid_for_d_fci_warning% and
+  any(times(%nr_ski_airports%),
+      %warning_d1_fci_for_airport%(%ski_airport%(%times_index_0%)));
+  
+%warning_d1_fci_for_airport%(String airport) =
+  airport in fci_airport_set and
+  %fci_airport_due_in_pp%(airport);
+
+%warning_d1_fci_description% = 
+  /* Cut away trailing comma and blank space */
+  substr(%_warning_d1_fci_description%, 1, length(%_warning_d1_fci_description%) - 2);
+%_warning_d1_fci_description% = 
+  concat("Airport due in pp: ", 
+         cat(times(%nr_ski_airports%),
+             %warning_d1_fci_description_for_airport%(%ski_airport%(%times_index_0%)))
+         where(%warning_d1_fci_for_airport%(%ski_airport%(%times_index_0%))));
+  
+/* d */
+/* Expiry date */
+%fci_airport_due_month_after_pp%(String airport) = 
+  %fci_due_date_for_airport%(airport) <= %a_month_after_warning_period% and
+  %fci_due_date_for_airport%(airport) > %warning_period_end%;
+  
+redefine %warning_d2_fci% = 
+  %crew_valid_for_d_fci_warning% and
+  any(times(%nr_ski_airports%),
+      %warning_d2_fci_for_airport%(%ski_airport%(%times_index_0%)));
+  
+%warning_d2_fci_for_airport%(String airport) =
+  airport in fci_airport_set and
+  %fci_airport_due_month_after_pp%(airport);
+%warning_d2_fci_description% = 
+  /* Cut away trailing comma and blank space */
+  substr(%_warning_d2_fci_description%, 1, length(%_warning_d2_fci_description%) - 2);
+  
+%_warning_d2_fci_description% = 
+  concat("Airport due in pp: ", 
+         cat(times(%nr_ski_airports%),
+             %warning_d2_fci_description_for_airport%(%ski_airport%(%times_index_0%)))
+         where(%warning_d2_fci_for_airport%(%ski_airport%(%times_index_0%))));
+  
+%warning_d2_fci_description_for_airport%(String airport) =
+  concat(airport,
+         " (",
+         crg_date.%print_date%(%due_date_for_airport%(airport)),
+         "), ");
+  
+/*
+** L: SKI LCP airport is due in pp (prio 1)
+*/
+
+/* Expiry date */
+%due_date_for_airport%(String airport) = 
+  add_years(accumulators.%last_ski_lcp_airp_landing%(airport, %warning_period_end%), 1);
+
+/* Description for a single airport */
+%warning_l_description_for_airport%(String airport) =
+  concat(airport,
+         " (",
+         crg_date.%print_date%(%due_date_for_airport%(airport)),
+         "), ");
+
+%crew_valid_for_l_warning% =   
+  /* Only SKI pilots */
+  crew.%is_long_haul_pp_start% and
+  /* Only LCP pilots */
+  crew.%has_qln_lcp%(%warning_period_start%);
+  
+/* L */
+%airport_due_in_pp%(String airport) = 
+  %due_date_for_airport%(airport) < %warning_period_end%;
+  
+redefine %warning_l1% = 
+  %crew_valid_for_l_warning% and
+  any(times(%nr_ski_airports%),
+      %warning_l1_for_airport%(%ski_airport%(%times_index_0%)));
+  
+%warning_l1_for_airport%(String airport) =
+  airport in ski_airport_set and
+  %airport_due_in_pp%(airport);
+%warning_l1_code% = "L";
+%warning_l1_description% = 
+  /* Cut away trailing comma and blank space */
+  substr(%_warning_l1_description%, 1, length(%_warning_l1_description%) - 2);
+%_warning_l1_description% = 
+  concat("Airport due in pp: ", 
+         cat(times(%nr_ski_airports%),
+             %warning_l_description_for_airport%(%ski_airport%(%times_index_0%)))
+         where(%warning_l1_for_airport%(%ski_airport%(%times_index_0%))));
+  
+/*
+** l: SKI LCP airport is due month after pp (prio 2)
+*/
+
+/* l */
+%airport_due_in_month_after_pp%(String airport) = 
+  %due_date_for_airport%(airport) <= %a_month_after_warning_period% and
+  %due_date_for_airport%(airport) > %warning_period_end%;
+  
+redefine %warning_l2% = 
+  %crew_valid_for_l_warning% and
+  any(times(%nr_ski_airports%),
+      %warning_l2_for_airport%(%ski_airport%(%times_index_0%)));
+%warning_l2_for_airport%(String airport) =
+  airport in ski_airport_set and
+  %airport_due_in_month_after_pp%(airport);
+%warning_l2_code% = "l";
+%warning_l2_description% = 
+  /* Cut away trailing comma and blank space */
+  substr(%_warning_l2_description%, 1, length(%_warning_l2_description%) - 2);
+%_warning_l2_description% = 
+  concat("Airport due month after pp: ", 
+         cat(times(%nr_ski_airports%),
+             %warning_l_description_for_airport%(%ski_airport%(%times_index_0%)))
+         where(%warning_l2_for_airport%(%ski_airport%(%times_index_0%))));
+  
+/*
+** v: OPC/PC planned too close after vacation (prio 2)
+*/
+
+export %warning_v2_p% = 
+  parameter 7
+  remark "Min days between end of vacation and OPC/PC";
+redefine %warning_v2% = 
+  any(trip(roster), training.%trip_is_own_pc_opc% and
+      (%vacation_ends_too_close%(trip.%start_day%)))
+  where(trip.%starts_in_pp%);
+%vacation_ends_too_close%(Abstime date) = 
+  any(trip(roster), trip.%is_vacation% and not (trip.%code% = "F31"))
+  where(trip.%end_day% >= date - (%warning_v2_p% * 24:00) and
+        trip.%end_day% < date);
+%warning_v2_code% = "v";
+%warning_v2_description% = "OPC/PC planned too close after vacation";
+
+
+/*
+** R: Lack of registration of recurrent dates PC OPC LC PGT RCRM (prio 1)
+*/
+
+redefine %warning_r1% = 
+  not training.%all_required_recurrent_dates_registered%(%warning_period_check_performed_end%);
+%warning_r1_code% = "R";
+%warning_r1_description% = 
+  concat("Recurrent ", 
+         training.%unregistered_recurrent_types%(%warning_period_check_performed_end%),
+         " dates must be registered");
+
+  
+/* Cached */
+%any_ac_qual% = training.%any_ac_qual%;  
+  
+/* end of file */
+

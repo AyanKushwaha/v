@@ -1,0 +1,381 @@
+/* -*- crc -*-
+ * 
+ *
+ * Purpose:
+ *
+ * Created by:
+ *   Stefan Hansson, 11-Jun-2007
+ *
+ * Major changes:
+ *
+ */
+
+module rescheduling_cct inherits rescheduling
+
+import attributes;
+import crew;
+import checkinout;
+import leg;
+import parameters;
+import publish;
+import freedays;
+import base_break;
+
+
+%trip_ci_is_loaded% = first(duty(trip),
+  duty.%departs_from_homebase% or base_break.%duty_break_starts_trip%);
+%trip_co_is_loaded% = last(duty(trip),
+  duty.%arrives_at_homebase% or base_break.%duty_break_ends_trip%);
+
+export %leg_is_noninformed_ci_change_via_override% =
+  trip.%is_on_duty% and 
+  not void(leg.%brief_assignment_override%) and 
+  (if is_first(leg(trip)) then 
+     %trip_ci_is_loaded%
+     and %trip_checkin_hb% <> %trip_inf_checkin%
+   else if is_first(leg(duty)) then
+     %duty_closest_checkin% <> %duty_inf_checkin%  
+   else
+     false);
+
+export %leg_is_noninformed_co_change_via_override% =
+  trip.%is_on_duty%
+  and is_last(leg(trip))
+  and %trip_co_is_loaded%
+  and not void(leg.%debrief_assignment_override%)
+  and %trip_scheduled_checkout_hb% <> %trip_inf_checkout%;
+
+/* Used in %trip_flags% (in root module) */
+redefine %trip_will_be_rescheduled_from_prod_to_standby% =
+    %trip_to_be_published%
+    and (trip.%is_standby%
+       or default(trip.%is_blank_day%
+                  and next(trip(wop), trip.%is_standby%), false))
+  and %trip_inf_any_production%;
+
+/*  from freeday to production */
+redefine %duty_will_be_rescheduled_from_freeday_to_prod% =
+    %trip_to_be_published% and trip.%is_on_duty%
+    and %duty_inf_any_freeday%;
+    
+%trip_to_be_published% =
+    any(leg(trip),
+        leg.%starts_in_pp%
+        and void(publish.%dnp_start%(crew.%id%, leg.%start_utc%)));
+
+
+/* Used in %trip_flags% (in root module) */
+redefine %trip_will_be_rescheduled_from_prod_to_standby_late% =
+  default(%trip_will_be_rescheduled_from_prod_to_standby%
+          and %trip_inf_checkin% - %trip_informed_at_latest_hb% < 48:00, false);
+
+redefine export %duty_will_be_inf_cancelled% =
+    any(leg(duty), leg.%is_nop% 
+        or attributes.%leg_has_roster_attr%("CANCELLEDFLIGHT"));
+
+redefine export %trip_will_be_inf_cancelled_late% =
+  let limit = if crew.%is_SKS% then 14:00 else 12:00;
+  default(
+    trip.%is_off_duty% 
+    and (%trip_inf_checkin% - default(%trip_informed_at_latest_hb%, 31dec2099) <= limit
+         or %trip_inf_checkin% - %now_hb% <= limit)
+    and (%trip_inf_checkin% - default(%trip_informed_at_latest_hb%, 31dec2099) > 0:00
+         or %trip_inf_checkin% - %now_hb% > 0:00)
+  , false);
+
+redefine export %trip_will_be_inf_cancelled_after_checkin% =
+  default(
+    (trip.%is_off_duty% or
+     (trip.%duty_time%(duty.union, True) < 4:00 and
+      trip.%duty_time%(duty.union, True) < %dt_inf_duty_time%(trip.%start_hb%)))
+    and %trip_inf_any_production%
+    and not %trip_will_be_inf_cancelled_late%
+    and (%trip_inf_checkin% - default(%trip_informed_at_latest_hb%, 31dec2099) <= 0:00
+         or %trip_inf_checkin% - %now_hb% <= 00:00)
+  , false);
+  
+/* F7S flag (sticky) is only set during publish */
+redefine %trip_is_f7s% = false;
+
+%trip_will_be_manually_informed% =
+  not void(publish.%info_p_start%(crew.%id%, trip.%start_hb%));
+  
+%trip_informed_at_latest_hb% =
+  if %trip_will_be_manually_informed% then
+    nmin(%now_hb%, default(%_trip_informed_at_latest_hb%,%now_hb%))
+  else
+    %_trip_informed_at_latest_hb%;
+    
+%_trip_informed_at_latest_hb% =
+  checkinout.%crew_next_visit_at_portal%
+  + first(leg(trip), leg.%homebase_tz_corrector%);
+    
+redefine export %trip_inf_rescheduled_from_prod_to_standby% =
+  %trip_inf_any_flag%(%flag_prod2standby%);
+
+redefine export %trip_inf_rescheduled_from_prod_to_standby_late% =
+  %trip_inf_any_flag%(%flag_prod2standby_late%);
+
+redefine export %trip_inf_is_cancelled_production% =
+  %trip_inf_any_flag%(%flag_prod_cancelled%);
+
+redefine export %duty_inf_is_cancelled_production% =
+  %duty_inf_any_flag%(%flag_prod_cancelled%);
+
+export %duty_inf_rescheduled_from_prod_to_standby_late% =
+  %duty_inf_any_flag%(%flag_prod2standby_late%);
+
+
+/*******************************************************************************
+* INFORMATION FOR BLANK DAY RUDOBS
+*******************************************************************************/
+/*
+** In the crew_publish_info table (accessed via %dt_inf_xx% variables) a day:
+** - currently INFORMED as blank has the category %pcat_blank%.
+** - that at any point has been INFORMED as a blank has the %flag_blank% set.
+**
+** So, all days that shall have a blank-day-rudob have the flag, 
+** but only those currently INFORMED have the category.
+**
+** The variables below are based on crew_publish_info data. 
+*/
+
+/* Find, if any, the next blank day from and including the given offset */
+export %blank_day_start%(Abstime offs) =
+  let maxdays = (%pp_end_date% - offs) / 24:00;
+  first(times(maxdays), %dt_inf_start%(offs + ((%times_index_0% - 1) * 24:00)))
+  where(%dt_inf_any_flag%(%flag_blank%, offs + ((%times_index_0% - 1) * 24:00)));
+
+/* Get the type of blank day (INFORMED or not), given a blank day date */
+export %blank_day_is_informed%(Abstime date) =
+  %dt_inf_pcat%(date) = %pcat_blank%;
+
+/* Get number of days with the same type (INFORMED or not) as the given start */
+%blank_day_length%(Abstime start) =
+  let maxdays = (%pp_end_date% - start) / 24:00,
+      is_inf = %blank_day_is_informed%(start);
+  count(times(maxdays))
+  while(%blank_day_of_same_type%(start + ((%times_index_0% - 1) * 24:00), is_inf))
+  * 24:00;
+  
+/* True if the given date is a blank day of a specific type (INFORMED or not) */
+%blank_day_of_same_type%(Abstime date, bool is_inf) =
+  if is_inf
+  then %blank_day_is_informed%(date)
+  else %dt_inf_any_flag%(%flag_blank%, date);
+  
+/* This ugly hack would not be needed if Rave was recurrent. */
+table blank_day_start_by_index_table(Int idx) =
+  idx -> export %blank_day_start_by_index%, export %blank_day_length_by_index%;
+  1   -> %blank_day1_start%, %blank_day1_length%;
+  2   -> %blank_day2_start%, %blank_day2_length%;
+  3   -> %blank_day3_start%, %blank_day3_length%;
+  4   -> %blank_day4_start%, %blank_day4_length%;
+  5   -> %blank_day5_start%, %blank_day5_length%;
+  6   -> %blank_day6_start%, %blank_day6_length%;
+  7   -> %blank_day7_start%, %blank_day7_length%;
+  8   -> %blank_day8_start%, %blank_day8_length%;
+  9   -> %blank_day9_start%, %blank_day9_length%;
+  10  -> %blank_day10_start%,%blank_day10_length%;
+  -   -> void_abstime, void_reltime;
+end
+/* The variables below are used in module studio_config, in such a way that
+ * they only are evaluated if a lower-numbered variable is non-void.
+ */
+ 
+%blank_day1_start%  = %blank_day_start%(%pp_start_date%);
+%blank_day2_start%  = %blank_day_start%(%blank_day1_start% + %blank_day1_length%);
+%blank_day3_start%  = %blank_day_start%(%blank_day2_start% + %blank_day2_length%);
+%blank_day4_start%  = %blank_day_start%(%blank_day3_start% + %blank_day3_length%);
+%blank_day5_start%  = %blank_day_start%(%blank_day4_start% + %blank_day4_length%);
+%blank_day6_start%  = %blank_day_start%(%blank_day5_start% + %blank_day5_length%);
+%blank_day7_start%  = %blank_day_start%(%blank_day6_start% + %blank_day6_length%);
+%blank_day8_start%  = %blank_day_start%(%blank_day7_start% + %blank_day7_length%);
+%blank_day9_start%  = %blank_day_start%(%blank_day8_start% + %blank_day8_length%);
+%blank_day10_start% = %blank_day_start%(%blank_day9_start% + %blank_day9_length%);
+                                                                  
+%blank_day1_length%  = %blank_day_length%(%blank_day1_start%);
+%blank_day2_length%  = %blank_day_length%(%blank_day2_start%);
+%blank_day3_length%  = %blank_day_length%(%blank_day3_start%);
+%blank_day4_length%  = %blank_day_length%(%blank_day4_start%);
+%blank_day5_length%  = %blank_day_length%(%blank_day5_start%);
+%blank_day6_length%  = %blank_day_length%(%blank_day6_start%);
+%blank_day7_length%  = %blank_day_length%(%blank_day7_start%);
+%blank_day8_length%  = %blank_day_length%(%blank_day8_start%);
+%blank_day9_length%  = %blank_day_length%(%blank_day9_start%);
+%blank_day10_length% = %blank_day_length%(%blank_day10_start%);
+                                                                  
+export %blank_day_informed%(Int idx)
+  = %blank_day_is_informed%(%blank_day_start_by_index%(idx));
+
+export %wop_is_rescheduled% =
+  any(trip(wop), %trip_is_rescheduled%);
+
+/* 'true' if trip has been modified since last INFORM, in such a way that
+ resecheduling rules may be affected.
+ !! Please note that the value 'false' does NOT necessarily mean that the trip
+    is not rescheduled; it only means that there has not been any rescheduling
+    that might trigger a rule failure.
+ */
+export %trip_is_rescheduled% =
+  publish.%trip_in_scheduled_period%
+  and (%trip_pcat% <> %trip_inf_pcat%
+       or %trip_has_rescheduled_checkin%
+       or %trip_has_rescheduled_checkout%
+       or %trip_has_rescheduled_flags%)
+  and (trip.%end_hb% > %crew_pp_inf_start%)
+  and (trip.%start_hb% < %crew_pp_inf_end%)
+  and (not %trip_pcat_ignore%);
+
+export %trip_has_rescheduled_checkin% =
+  default(%trip_inf_checkin_diff% > 0:00 or
+          (%trip_inf_checkin_diff% < 0:00 and
+           %trip_scheduled_checkout_hb% + 
+           last(leg(trip),rest.%minimum_time_plan%) > %trip_inf_checkin%),
+          false);
+
+export %trip_has_rescheduled_checkout% =
+  default(not void(%trip_scheduled_checkout_hb%)
+          and not first(duty(trip),
+                        standby.%duty_is_standby_callout%
+                        or standby.%duty_is_airport_callout%)
+          and %trip_inf_checkout_diff% <> 0:00, false);
+  
+%trip_has_rescheduled_flags% =
+  %trip_vacation_change%
+  or %trip_F7S_change%
+  or %trip_standby_line_change%
+  or %trip_standby_home_change%
+  or %trip_long_haul_change%
+  or %trip_homerest_change%
+  or %trip_short_rest_change%
+  or %trip_standby_airport_change%
+  /*or %trip_stopover_change%*/
+  ;
+  
+export %trip_vacation_change% =
+  trip.%is_vacation% <> %trip_inf_flag_vacation%;
+%trip_F7S_change% =
+  trip.%is_F7S% <> %trip_sched_flag_F7S%;
+%trip_standby_line_change% =
+  trip.%is_standby_line% <> %trip_inf_flag_standby_line%;
+%trip_standby_home_change% =
+  trip.%is_home_standby% <> %trip_inf_flag_standby_home%;
+%trip_long_haul_change% =
+  %trip_is_long_haul% <> %trip_inf_flag_long_haul%;
+%trip_homerest_change% =
+  trip.%end_hb% < %crew_pp_inf_end% 
+  and %trip_has_homerest% <> %trip_inf_flag_homerest%;
+%trip_short_rest_change% =
+  any(duty(trip), rest.%duty_is_short_scheduled%)
+  <> %trip_inf_flag_short_stop%;
+%trip_standby_airport_change% =
+  any(duty(trip), last(leg(duty), leg.%is_standby_at_airport%))
+  <> %trip_inf_flag_standby_at_airport%;
+  
+export %trip_is_rescheduled_production% =
+  %trip_inf_any_production%
+  and %trip_is_rescheduled%;
+
+/* For these values, negative means earlier than informed */
+export %trip_inf_checkin_diff% =
+  %trip_checkin_hb% - %trip_inf_checkin%;
+export %trip_inf_checkout_diff% =
+  %trip_scheduled_checkout_hb% - %trip_inf_prev_checkout%;
+
+/* 'true' if duty has been modified since last INFORM, in such a way that
+ extended FDP flag (x-flag) may be affected.
+ */
+export %duty_is_rescheduled% =
+  publish.%trip_in_scheduled_period%
+  and ( %duty_has_rescheduled_checkin%
+       or %duty_has_rescheduled_checkout%);
+
+%duty_has_rescheduled_checkin%=
+ default(%duty_inf_checkin_diff% <> 0:00, false);
+
+%duty_has_rescheduled_checkout% =
+ default(%duty_inf_checkout_diff% <> 0:00, false);
+
+%duty_inf_checkin_diff% = 
+    %duty_closest_checkin%
+    - %duty_inf_checkin%;
+
+%duty_inf_checkout_diff% = 
+    %duty_closest_scheduled_checkout_hb%
+    - %duty_inf_checkout%;
+
+/*SKCMS-24: Made informed checkout time lookup work correctly even when duty ends after midnight*/
+%duty_inf_checkout% = %period_inf_checkout%(%duty_start_date_hb%, %duty_end_date_hb%);
+/*last(leg(duty), %leg_inf_checkout%);*/
+
+export %valid_checkout_rescheduling_fc_skn% =
+    trip.%is_on_duty%
+    and crew.%is_skn%
+    and %trip_has_rescheduled_checkout%
+    and %trip_is_short_haul%
+    and %flight_crew%
+    and %trip_scheduled_checkout_hb% > %trip_inf_checkout% + 2:00;
+    
+export %valid_checkout_rescheduling_fc_k11% =
+    trip.%is_on_duty% and
+    %trip_has_rescheduled_checkout% and
+    %trip_is_short_haul% and
+    %flight_crew% and
+    not crew.%is_ski% and
+    %trip_scheduled_checkout_hb% > %trip_inf_prev_checkout%;
+    
+export %check_out_previous_trip% =
+  default(prev(trip(roster),last(duty(trip),duty.%end_hb%)
+                              where (not duty.%has_no_duty_time_contribution%))
+            where (trip.%is_on_duty% and
+                   any(duty(trip),not duty.%has_no_duty_time_contribution%)),
+          first(trip(roster),trip.%start_day%));
+
+redefine export %do_not_update_prev_inf_duty_time% =
+  let days = duty.%days%;
+  cat(times(days), %day_in_duty_is_inf_illness%(%times_index_0%), ",");
+
+export %day_in_duty_is_inf_illness%(Int dutyDay) =
+  let st = %duty_start_date_hb% + (dutyDay-1)*24:00,
+      et = %duty_start_date_hb% + dutyDay*24:00;
+	
+	if duty.%is_illness% and %inf_illness%(st, et) then "True" else "False";
+
+/*export %day_is_privately_traded_str%(Abstime date) =
+  if attributes.%roster_has_attr_at_date%(attributes.%roster_privatelytraded%, date) then "True" else "False";
+
+export %day_is_privately_traded%(Abstime date) =
+  attributes.%roster_has_attr_at_date%(attributes.%roster_privatelytraded%, date);
+*/
+
+export %duty_on_production_day_before_ptd% =
+	if duty.%is_privately_traded% then
+		attributes.%roster_str%(attributes.%roster_privatelytraded%, crew.%id%, duty.%start_utc%) = "Production"
+	else
+		void_bool; 
+redefine export %duty_J3_code% =
+	if duty.%is_privately_traded% then
+		if not duty.%is_freeday% then
+			if %duty_on_production_day_before_ptd% then "J3P P" else "J3F P"
+		else
+			if %duty_on_production_day_before_ptd% then "J3P F" else void_string
+	else
+		void_string;
+
+export %leg_is_J3P_freeday% = duty.%is_privately_traded% and %duty_on_production_day_before_ptd% and duty.%is_freeday%;
+export %leg_is_J3P_production% = duty.%is_privately_traded% and %duty_on_production_day_before_ptd% and not duty.%is_freeday%;
+export %leg_is_J3F_production% = duty.%is_privately_traded% and not %duty_on_production_day_before_ptd% and not duty.%is_freeday%;
+
+export %due_problem_outside_own_schedule_k11_fc% = 
+  parameters.%k11_fc_sp3_2_valid%(trip.%start_hb%) and
+  any(leg(trip),attributes.%leg_has_roster_attr%(attributes.%roster_outsideown%));
+
+export %latest_rescheduled_check_out_fc% =
+  if %due_problem_outside_own_schedule_k11_fc% then
+    %trip_inf_prev_checkout% + 1:00
+  else
+    %trip_inf_prev_checkout% + 2:00;
+
+
+/* end of file */

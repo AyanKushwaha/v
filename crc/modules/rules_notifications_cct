@@ -1,0 +1,567 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains notification rules used in tracking.
+ *
+ *   The purpose of the rules is to, via the Alert Monitor, inform about roster
+ *   changes and textual notifications that require trackers to contact crew
+ *   that otherwise will not get the information at a planned check-in/out.
+ *
+ *   Note that the rules are enabled for the alert_server only. The rules are
+ *   evaluated looking at entries in the crew_notifications table. These entries
+ *   are based on the latest saved data; the contents are kept up-to-date when
+ *   roster changes are introduced, either via an interactive Studio session or
+ *   when changes are handled by external interfaces (flight movements, crew
+ *   portal, etc).
+ *
+ * Created by:
+ *   Peter Jonsson 20-Mar-2006                                                 
+ *
+ * Major changes:
+ *   Andres Salvador 2008-Mar-01
+ *   Stefan Hansson 2008-Dec-10
+ *     Reworked according to "System Specification: Roster Changes v0.5" 
+ *
+ */
+ 
+root module rules_notifications_cct
+import fundamental;
+import crew;
+import leg;
+import levels;
+import roster;
+import checkinout;
+import publish;
+import rescheduling;
+import rule_exceptions;
+import rules_resched_cct;
+import alert_server;
+
+/*
+* Defines how many days before planning period start that are included
+* in the data period when loading from db. (Fixed to 10 days).
+*/
+/*%data_period_db_pre% = 10 * 24:00;
+**
+**%pre_pp_start% = %pp_start% - %data_period_db_pre%;
+*/
+           
+%crew_next_visit_at_portal% =
+  default(checkinout.%crew_next_visit_at_portal%, 31dec2099);
+  
+/* This string will be inserted into the failmsg of a notification regarding
+* a standby callout. It's used (see %notif_pending_is_sbycall% below) to detect
+* whether rule notif_pending_sbycall or notif_pending_other shall be in effect.
+* See also carmusr.tracking.CrewNotificationFunctions.py.
+*/
+export %notification_failmsg_sbycall_indicator% = "SBYCALL";
+%_failmsg_indicates_sbycall%(String failmsg) =
+  default(locate(%notification_failmsg_sbycall_indicator%, failmsg) > 0, false);
+  
+/*
+** Access to the 'crew_notification' table.
+**
+** It's large, so in order to avoid rave using up too much memory,
+** this definition is intended to be the only rave access point to the table.
+**
+** Note that all rave lookups are for non-delivered notifications, i.e. all
+** entries with a non-void 'crew_notification.delivered' value are excluded.
+**
+** Notification type is expressed as a subtype range [subtype_from..subtype_to]:
+** M = Manual
+**       subtype "*Alert" (excludes "!NoAlert")
+** A = Automatic (any subtype)
+**       subtype "A".."z" (excludes subtypes for typ "Manual")
+** P = Automatic (PreliminaryAssignment = Do-Not-Publish)
+**       subtype "PreliminaryAssignment"
+** X = Any Alertable
+**      subtype "*".."z" (any subtype; typ "Manual" and "Automatic")
+**
+** Automatic notifications are created with contents according to rave
+** definitions defined in module rules_resched_cct.
+*/
+/* M */ %MF% = "*";                     %MT% = "@";
+/* A */ %AF% = "A";                     %AT% = "z";
+/* P */ %PF% = "PreliminaryAssignment"; %PT% = "PreliminaryAssignment";
+/* X */ %XF% = "*";                     %XT% = "z";
+
+table crew_notification_table(String subtype_from, String subtype_to,
+                              Abstime deadline_from, Abstime deadline_to,
+                              Int matchno) =
+  crew.%id%,
+  1Jan1901,
+  deadline_from, deadline_to,
+  subtype_from, subtype_to,
+  matchno -> String %notification_idnr%,
+             Abstime %notification_deadline%,
+             AbsTime %notification_alerttime_voidy%,
+             AbsTime %notification_st_voidy%,
+             String %notification_failmsg_voidy%;
+  External "crew_notification";
+  "crew",
+  > "delivered", /* "1Jan1901 > delivered" matches void, i.e. non-delivered */
+  <= "deadline", >= "deadline",
+  <= "typ_subtype", >= "typ_subtype",
+  match_number -> "idnr",
+                  "deadline",
+                  "alerttime",
+                  "st",
+                  "failmsg";
+  -, -, -, -, -, -, -
+  -> void_string, 31Dec2099, 31Dec2099, 31Dec2099, void_string;
+end
+
+%in_crew_notification_period%(Abstime utc) =
+  utc >= publish.%notification_valid_start%
+  and utc < publish.%notification_valid_end%;
+
+/* Calculate the alerttime for the alert icon.
+ *
+ * Alerts will be generated if crew has no portal visit between now and the
+ * notification deadline. In that case, the icon will be placed at alerttime.
+ *
+ * If there is an alerttime exception then use it.
+ *
+ * For a standby callout notification, the default alerttime is the deadline
+ * (which is the same as the callout time, i.e. the standby leg end time).
+ *
+ * Otherwise use the minimum of the deadline and the change start time -5h.
+ * The -5h is a default that in practice will be used if the roster change
+ * doesn't have a deadline that was set by a rescheduling rule.
+ * Special case: if the deadline is set according to a mandatory checkin,
+ * then the alert time will be 5h before the checkin time.
+ * 
+ * The change start time should never be void, but just in case: ignore it.
+ * The deadline is never void.
+ *
+ * Note: In all cases, the alerttime will never be later than the deadline.
+ */
+%notification_alerttime%(String typ_from, String typ_to,
+                         Abstime dl_from, Abstime dl_to,
+                         Int matchno) =
+  let alerttime_utc = default(
+        %notification_alerttime_voidy%(typ_from, typ_to, dl_from, dl_to, matchno),
+        31Dec2099),
+      deadline_utc = default(
+        %notification_deadline%(typ_from, typ_to, dl_from, dl_to, matchno),
+        31Dec2099),
+      failmsg = default(
+        %notification_failmsg_voidy%(typ_from, typ_to, dl_from, dl_to, matchno),
+        "");
+  if alerttime_utc < 31Dec2099 or %_failmsg_indicates_sbycall%(failmsg)
+  then nmin(deadline_utc, alerttime_utc)
+  else if %_deadline_is_at_checkin%(deadline_utc)
+       then nmin(%crew_next_visit_at_portal%,
+                 default(%_deadline_inf_checkin_utc%(deadline_utc), 31dec2099)
+                 ) - 5:00
+  else nmin(deadline_utc, default(
+       %notification_st_voidy%(typ_from, typ_to, dl_from, dl_to, matchno) - 5:00,
+       31Dec2099));
+  
+%_deadline_is_at_checkin%(Abstime deadline_utc) =
+  deadline_utc = %crew_next_visit_at_portal% - 0:01;
+  
+%_deadline_inf_checkin_utc%(Abstime deadline_utc) =
+  rescheduling.%crew_time_utc%(rescheduling.%dt_inf_checkin%(deadline_utc));
+  
+/*
+* %xx_tx% variables for use in times-loops. They depend on %times_index_0%.
+*/
+
+%notification_exists_tx%(String typ_from, String typ_to,
+                         Abstime dl_from, Abstime dl_to) =
+  not void(%notification_idnr%(typ_from, typ_to, dl_from, dl_to, %times_index_0%));
+
+%notif_manual_exists_tx% =
+  %notification_exists_tx%(%MF%, %MT%, %loaded_data_period_start%, 31Dec2099);
+%notif_manual_deadline_tx% =
+  %notification_deadline%(%MF%, %MT%, %loaded_data_period_start%, 31Dec2099, %times_index_0%);
+
+%notif_auto_exists_tx% =
+  %notification_exists_tx%(%AF%, %AT%, %loaded_data_period_start%, 31Dec2099);
+%notif_auto_deadline_tx% =
+  %notification_deadline%(%AF%, %AT%, %loaded_data_period_start%, 31Dec2099, %times_index_0%);
+%notif_auto_st_voidy_tx% =
+  %notification_st_voidy%(%AF%, %AT%, %loaded_data_period_start%, 31Dec2099, %times_index_0%);
+%notif_auto_st_tx% =
+  default(%notif_auto_st_voidy_tx%, %notif_auto_deadline_tx%);
+  
+%notif_auto_alerttime_voidy_tx% =
+  %notification_alerttime_voidy%(%AF%, %AT%, %loaded_data_period_start%, 31Dec2099, %times_index_0%);
+%notif_auto_notpub_exists_tx% =
+  %notification_exists_tx%(%PF%, %PT%, %loaded_data_period_start%, 31Dec2099);
+%notif_auto_notpub_deadline_tx% =
+  %notification_deadline%(%PF%, %PT%, %loaded_data_period_start%, 31Dec2099, %times_index_0%);
+%notif_auto_notpub_st_voidy_tx% =
+  %notification_st_voidy%(%PF%, %PT%, %loaded_data_period_start%, 31Dec2099, %times_index_0%);
+%notif_auto_notpub_st_tx% =
+  default(%notif_auto_notpub_st_voidy_tx%, %notif_auto_notpub_deadline_tx%);
+
+/*
+* Find attributes for a specific notification identified by its deadline.
+* Note: These variables can't be used within a %xx_tx% variable, since that
+*   would result in nested times-iterators, so %times_index_0% would fail.
+*/
+
+%notification_alerttime_at_deadline%(String typ_from, String typ_to, Abstime dl) =
+  %notification_alerttime%(typ_from, typ_to, dl, dl, 1);
+%notification_failmsg_at_deadline%(String typ_from, String typ_to, Abstime dl) =
+  default(%notification_failmsg_voidy%(typ_from, typ_to, dl, dl, 1), "(message)");
+%notification_st_at_deadline%(String typ_from, String typ_to, Abstime dl) =
+  default(%notification_st_voidy%(typ_from, typ_to, dl, dl, 1), dl);
+
+  
+/*
+** Rule:
+**   There are non-delivered manual notifications, and there is no planned visit 
+**   to the portal before the earliest deadline.
+** Note:
+**   There may exist non-formal manual notifications for which the user
+**   specified that no alerts are to be generated (subtype = '!NoAlert').
+**   These are obviously ignored by this rule (even if the deadline is set).
+*/
+rule notif_manual =
+  valid roster.%check_rules%
+    and not crew.%is_leased%(%pp_start%)
+    and alert_server.%check_alert_rules%;
+
+  void(%notif_manual_deadline%);
+  
+  startdate = %notif_manual_alerttime%;
+  deadline  = %notif_manual_alert_monitor_icon_tail_line_end%;
+
+  failtext concat("Notification: ", %notif_manual_failmsg%);
+  severity = %severity_filter_int_chain%(%notif_manual_deadline%);
+  failobject = alert_server.%failobject_no_object%(%notif_manual_alerttime%);
+
+  remark "(CCT) Func: A manual notification needs to be delivered.",
+  planner "Rule creates an alert when a manual notification "
+          "is not delivered, and there is no planned check-in/out event.";
+end
+
+%notif_manual_deadline% =
+  min(times(9999), %notif_manual_deadline_tx%)
+  where(%crew_next_visit_at_portal% > %notif_manual_deadline_tx%
+        and %in_crew_notification_period%(%notif_manual_deadline_tx%))
+  while(%notif_manual_exists_tx%);
+
+%notif_manual_alerttime% =
+  %notification_alerttime_at_deadline%(%MF%, %MT%, %notif_manual_deadline%);
+%notif_manual_failmsg% =
+  %notification_failmsg_at_deadline%(%MF%, %MT%, %notif_manual_deadline%);
+
+%notif_manual_alert_monitor_icon_tail_line_end% = 
+  nmax(%notif_manual_alerttime%, round_down(%now%, 0:10));
+
+
+/*
+** Rule:
+**   A crew has no planned visit to the portal (mandatory check-in/out) before
+**   a non-delivered notification's deadline (or alert time if set by the user).
+** Note:
+**   There are three separate rules in order to enable distinguishable
+**   alert icons for notifications regarding: 
+**     - standby callouts (which always have a specified alert time),
+**     - changes with a specific deadline according to a recheduling rule, and
+**     - other roster changes.
+*/
+rule notif_pending_sbycall =
+  valid roster.%check_rules%
+    and not crew.%is_leased%(%pp_start%)
+    and alert_server.%check_alert_rules%
+    and not void(%notif_pending_deadline%);
+  
+  not %notif_pending_is_sbycall%;
+  
+  startdate = %notif_pending_alerttime%;
+  deadline  = %notif_pending_alert_monitor_icon_tail_line_end%;
+
+  failtext concat("Callout: ", %notif_pending_failmsg%);
+  severity =  %severity_filter_int_chain%(%notif_pending_alerttime%);
+  failobject = alert_server.%failobject_no_object%(%notif_pending_alerttime%);
+
+  remark "(CCT) Func: Crew alert for uninformed standby call.",
+  planner "Checks for a non-delivered standby callout notification, where ",
+          "crew has no planned visit to the portal (mandatory check-in/out) ",
+          "before the notification's alert time ",
+          "(normally the call-out time).";
+end
+
+rule notif_pending_resched_rule =
+  valid roster.%check_rules%
+    and not crew.%is_leased%(%pp_start%)
+    and alert_server.%check_alert_rules%
+    and not void(%notif_pending_deadline%);
+  
+  not %notif_pending_is_resched_rule%;
+  
+  startdate = %notif_pending_alerttime%;
+  deadline  = %notif_pending_alert_monitor_icon_tail_line_end%;
+
+  failtext concat("Change: ", %notif_pending_failmsg%);
+  severity =  %severity_filter_int_chain%(%notif_pending_alerttime%);
+  failobject = alert_server.%failobject_no_object%(%notif_pending_alerttime%);
+
+  remark "(CCT) Func: Uninformed change, deadline according to recheduling rule.",
+  planner "Checks for a non-delivered roster change notification with a ",
+          "specific deadline according to a rescheduling rule, where ",
+          "crew has no planned visit to the portal (mandatory check-in/out) ",
+          "before the notification's alert time ",
+          "(normally the deadline according to the rescheduling rule).";
+end
+
+rule notif_pending_other =
+  valid roster.%check_rules%
+    and not crew.%is_leased%(%pp_start%)
+    and alert_server.%check_alert_rules%
+    and not void(%notif_pending_deadline%);
+  
+  not %notif_pending_is_other%;
+  
+  startdate = %notif_pending_alerttime%;
+  deadline  = %notif_pending_alert_monitor_icon_tail_line_end%;
+
+  failtext concat("Change: ", %notif_pending_failmsg%);
+  severity =  %severity_filter_int_chain%(%notif_pending_alerttime%);
+  failobject = alert_server.%failobject_no_object%(%notif_pending_alerttime%);
+
+  remark "(CCT) Func: Uninformed non-standby call change, default deadline.",
+  planner "Checks for a non-delivered roster change notification with no ",
+          "specific deadline, where ",
+          "crew has no planned visit to the portal (mandatory check-in/out) ",
+          "before the notification's alert time ",
+          "(normally 5h before the modified/removed/added roster activity).";
+end
+
+/* If this variable is non-void, there is at least one notification that causes
+* a rule_notif_xx violation (red, yellow or blue phone icon). In that case, the
+* value is used to lookup related values for the rule's alert specific details.
+*/
+%notif_pending_deadline% =
+  min(times(9999), %notif_pending_deadline_tx%)
+  while(%notif_auto_exists_tx%);
+
+/* Notification deadline if crew has no portal visit before the alerttime (or
+*    deadline if no specific alerttime has been set).
+* If there IS a portal visit, then return void (no alert for this notification).
+*/
+%notif_pending_deadline_tx% =
+  let alert_or_deadline_time =
+    nmin(default(%notif_auto_alerttime_voidy_tx%, %notif_auto_deadline_tx%),
+         %notif_auto_deadline_tx%);
+  if %crew_next_visit_at_portal% > alert_or_deadline_time
+     and %in_crew_notification_period%(%notif_auto_st_tx%)
+  then %notif_auto_deadline_tx%
+  else void_abstime;
+
+/* These variables are used for rule details in case %notif_pending_deadline%
+*  is non-void, i.e. only in case a rule is violated.
+*/
+%notif_pending_alerttime% =
+  %notification_alerttime_at_deadline%(%AF%, %AT%, %notif_pending_deadline%);
+%notif_pending_st% =
+  %notification_st_at_deadline%(%AF%, %AT%, %notif_pending_deadline%);
+%notif_pending_failmsg% =
+  %notification_failmsg_at_deadline%(%AF%, %AT%, %notif_pending_deadline%);
+%notif_pending_is_sbycall% =
+  %_failmsg_indicates_sbycall%(%notif_pending_failmsg%);
+%notif_pending_is_resched_rule% =
+  (not %notif_pending_is_sbycall%)
+  and %notif_pending_deadline%
+   <> rules_resched_cct.%default_notification_deadline_utc%(%notif_pending_st%);
+%notif_pending_is_other% =
+  not (%notif_pending_is_sbycall% or %notif_pending_is_resched_rule%);
+
+/* If 'deadline' is set in a rule, the Alert Monitor draws a line between the
+ * alert icon an the 'deadline'.
+ * For the 'notif_pending' rules, if the alert icon (@%notif_pending_alerttime%)
+ * appears before 'now', there shall be a line drawn to the now-line.
+ * For such rule violations, this leads to the Alert Generator updating the
+ * 'track_alert' table every minute. Since this high precision  not really is
+ * required, we use a round_down of the %now% value.
+ */
+%notif_pending_alert_monitor_icon_tail_line_end% =
+  nmax(%notif_pending_alerttime%, round_down(%now%, 0:10));
+  
+/*
+** Rule:
+**   A change is not informed to crew and the deadline has passed.
+** Description:
+**   A more serious alert is defined indicating that an overdue notification
+**   is in effect. Appears at the deadline time of the next event.
+** Notes:
+**   A notification that violates this rule always also violates a
+**   notif_pending_xx rule (see above). 
+*/
+rule notif_overdue =
+  valid roster.%check_rules%
+    and not crew.%is_leased%(%pp_start%)
+    and alert_server.%check_alert_rules%
+    and not void(%notif_pending_deadline%);
+
+  void(%notif_overdue_deadline%);
+  
+  startdate = %notif_overdue_deadline%;
+
+  failtext concat("Overdue: ", %notif_overdue_failmsg%);
+  severity = %severity_filter_int_chain%(%notif_overdue_deadline%);
+  failobject = alert_server.%failobject_no_object%(%notif_overdue_deadline%);
+
+  remark "(CCT) Func: Uninformed change, overdue deadline.",
+  planner "Additional alert for an uninformed change, "
+          "for which the deadline has passed.";
+end
+
+%notif_overdue_deadline% =
+  min(times(9999), %notif_auto_deadline_tx%)
+  where(%now% > %notif_auto_deadline_tx%)
+  while(%notif_auto_exists_tx%);
+  
+%notif_overdue_alerttime% =
+  %notification_alerttime_at_deadline%(%AF%, %AT%, %notif_overdue_deadline%);
+%notif_overdue_failmsg% =
+  %notification_failmsg_at_deadline%(%AF%, %AT%, %notif_overdue_deadline%);
+%notif_overdue_st% =
+  %notification_st_at_deadline%(%AF%, %AT%, %notif_overdue_deadline%);
+
+
+/*
+** Rule:
+**   A change is done but it is marked as do-not-publish.
+** Description:
+**   An alert must be shown when a change is under a 'do not publish' mark,
+**   even if a crew has a planned check-in/out after the current date.
+*/
+rule notif_notpub =
+  valid roster.%check_rules%
+    and not crew.%is_leased%(%pp_start%)
+    and alert_server.%check_alert_rules%;
+
+  void(%notif_notpub_deadline%);
+  
+  startdate = %notif_notpub_alerttime%;
+  deadline  = %notif_notpub_alert_monitor_icon_tail_line_end%;
+
+  failtext concat("Publish: ", %notif_notpub_failmsg%);
+  severity = %severity_filter_int_chain%(%notif_notpub_alerttime%);
+  failobject = alert_server.%failobject_no_object%(%notif_notpub_alerttime%);
+
+  remark "(CCT) Func: Change is inside a do-not-publish period.",
+  planner "Rule creates an alert when a change is marked as "
+          "do-not-publish, even if there is a planned check-in/out event.";
+end
+
+%notif_notpub_deadline% =
+  min(times(9999), %notif_notpub_deadline_tx%)
+  while(%notif_auto_notpub_exists_tx%);
+  
+%notif_notpub_deadline_tx% =
+  if %in_crew_notification_period%(%notif_auto_notpub_st_tx%)
+  then %notif_auto_notpub_deadline_tx%
+  else void_abstime;
+
+%notif_notpub_alerttime% =
+  %notification_alerttime_at_deadline%(%PF%, %PT%, %notif_notpub_deadline%);
+%notif_notpub_failmsg% =
+  %notification_failmsg_at_deadline%(%PF%, %PT%, %notif_notpub_deadline%);
+%notif_notpub_st% =
+  %notification_st_at_deadline%(%PF%, %PT%, %notif_notpub_deadline%);
+
+%notif_notpub_alert_monitor_icon_tail_line_end% =
+  nmax(%notif_notpub_alerttime%, round_down(%now%, 0:10));
+
+/*
+** Rule (alert server only):
+**   A missed to check-out alert is created if crew misses to check-out and
+**     a there is, or will be, an auto-notification alert due to crew not being
+**     informed as expected.
+**   The alert is NOT created if the notification closest
+**     is a "not published"-alert.
+**   The alert will be visible in the alert monitor during a time window after
+**     the checkout time. The default window is 30 minutes after and "forever".
+** Note:
+**   The rule will NOT be evaluated if there is no registered check-in/out time
+**   for the crew. (Since we're looking at check-outs, the crew should at least
+**   have the corrresponding check-in before registered.) 
+*/
+rule notif_missed_checkout =
+  valid roster.%check_rules%
+    and not crew.%is_leased%(%pp_start%)
+    and alert_server.%check_alert_rules%
+    and checkinout.%leg_has_mandatory_co%
+    and leg.%end_utc% > checkinout.%cio_ciotime%
+    and %now% > %leg_notif_missed_checkout_triggered_at%
+    and %now% < %leg_notif_missed_checkout_obsolete_at%
+    and %leg_with_co_is_last_cio_before_now%;
+ 
+  void(%leg_notif_pending_deadline_with_st_after%)
+  or default(%leg_notif_notpub_deadline_with_st_after%, 31Dec2099)
+     <= %leg_notif_pending_deadline_with_st_after%;
+  
+  startdate = %leg_notif_missed_checkout_triggered_at%;
+
+  failtext format_time(%leg_notif_pending_alerttime_with_st_after%,
+                       "Missed C/O: Notification at %d%b %02H:%02M");
+  severity = %severity_filter_int_chain%(leg.%end_utc%);
+  failobject =
+    alert_server.%failobject_no_object%(%leg_notif_missed_checkout_triggered_at%);
+
+  remark "(CCT) Func: Uninformed change, deadline after missed check-out.",
+  planner "Rule creates a missed check-out alert when a crew did not perform ",
+          "the last mandatory check-out, and a notification deadline exists ",
+          "before the next planned check-in.";
+end
+  
+/*
+ * Deadline of first notification regarding a change after the current leg,
+ *   or void if no such notification exists.
+ * (+ alerttime for the failtext.)
+ */
+
+%leg_notif_pending_deadline_with_st_after% =
+  let st_floor = leg.%end_utc%;
+  min(times(9999), %notif_pending_deadline_tx%)
+    where(%notif_auto_st_tx% >= st_floor)
+    while(%notif_auto_exists_tx%);
+
+%leg_notif_notpub_deadline_with_st_after% =
+  let st_floor = leg.%end_utc%;
+  min(times(9999), %notif_notpub_deadline_tx%)
+    where(%notif_auto_notpub_st_tx% >= st_floor)
+    while(%notif_auto_notpub_exists_tx%);
+
+%leg_notif_pending_alerttime_with_st_after% =
+  %notification_alerttime_at_deadline%(%AF%, %AT%,
+       %leg_notif_pending_deadline_with_st_after%);
+
+/* 
+ * Time window after a missed c/o during which notif_missed_checkout is violated.
+ * (The alert is only to be visible during a limited time period.)
+ */
+
+%notif_missed_checkout_violation_timeout% =
+  parameter 0:30
+  remark "Missed C/O rule: Time after missed C/O that the alert appears.";
+  
+%leg_notif_missed_checkout_triggered_at% =
+  checkinout.%leg_checkout_utc% + %notif_missed_checkout_violation_timeout%;
+  
+%notif_missed_checkout_obsolete_timeout% =
+  parameter 0:00 /* Default is to keep the alert "forever". */
+  remark "Missed C/O rule: Time after missed C/O that the alert is removed.";
+  
+%leg_notif_missed_checkout_obsolete_at% =
+  if %notif_missed_checkout_obsolete_timeout% <= %notif_missed_checkout_violation_timeout%
+  then 31Dec2099
+  else checkinout.%leg_checkout_utc% + %notif_missed_checkout_obsolete_timeout%;
+
+/* True if he current leg (assumed to be a checkout leg) is the last ci/co
+*  before now. Used to ensure that there is at most one notif_missed_checkout
+*  violation on a roster; on the last co before now.
+*/
+%leg_with_co_is_last_cio_before_now% =
+  not any(leg(chain), checkinout.%leg_has_mandatory_ci%)
+      from(next) forwards while(checkinout.%leg_checkin_utc% < %now%);
+

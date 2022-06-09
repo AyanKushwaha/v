@@ -1,0 +1,144 @@
+# Builds Rave rulesets and Crew Portal. Also packages and publishes build artifacts if parameter publish=true.
+#
+# Required variables in pipeline (these need to be set dynamically and therefore can't be passed as parameters):
+#   major: major version of release (normally branch name)
+#   minor: minor version of release (normally a counter per branch)
+
+
+parameters:
+- name: publish # Whether or not to publish artifacts
+  type: boolean
+  default: false
+- name: explorer # Whether or not to compile explorer version of Rave rulesets
+  type: boolean
+  default: true
+
+
+stages:
+- stage:
+  ${{ if eq(parameters['publish'], true) }}:
+    displayName: 'Build and publish Tracking CARMUSR'
+  ${{ if eq(parameters['publish'], false) }}:
+    displayName: 'Build CARMUSR'
+  variables:
+    release: $(major)_$(minor)
+    carmusrpath: /opt/Carmen/CARMUSR_Tracking/build_$(release)
+    # Build.SourceBranchName only includes the very last part of the branch name, no folders
+    ${{ if startsWith(variables['Build.SourceBranch'], 'refs/heads/') }}:
+      fullBranchname: $[ replace(variables['Build.SourceBranch'], 'refs/heads/', '') ]
+    ${{ if startsWith(variables['Build.SourceBranch'], 'refs/pull/') }}:
+      fullbranchname: $[ replace(variables['System.PullRequest.SourceBranch'], 'refs/heads/', '') ]
+  jobs:
+
+  - job: SetupCARMUSR
+    pool:
+      name: CMS Agent
+    workspace:
+      clean: all
+    steps:
+    - checkout: none
+      
+      # The built-in checkout step often randomly fails for unknown reasons, so we have to work around it.
+      # Also, this way, we can place the git clone on the NFS share and only have to check out once.
+    - bash: git clone -b $(fullbranchname) --depth 1 --single-branch git@ssh.dev.azure.com:v3/flysas/SAS-CMS/Tracking $(carmusrpath)
+      failOnStderr: false # Git writes to stderr even when nothing is wrong
+      displayName: 'Clone CARMUSR'
+
+    - bash: |
+        cd $(carmusrpath)
+        ./makelinks.sh -m $(release)
+      failOnStderr: true
+      displayName: 'Create symlinks for CARMSYS, CARMDATA and CARMTMP'
+
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: git switch main; git pull
+        workingDirectory: '/opt/Carmen/cms_accounts'
+      displayName: 'Update cms_accounts'
+
+    - bash: |
+        mkdir -m 775 -p /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_$(release)/logfiles
+        mkdir -m 775 -p /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_$(release)/logfiles/DIG
+        mkdir -m 775 -p /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_$(release)/logfiles/sge
+        mkdir -m 775 -p /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_$(release)/logfiles/tmp
+        mkdir -m 775 -p /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_$(release)/carmtmp_behave
+        mkdir -m 775 -p /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_$(release)/run
+        mkdir -m 775 -p /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_$(release)/ftp
+        mkdir -m 775 -p /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_$(release)/ftp/imported
+        ln -nfs /opt/Carmen/CARMTMP/ftp/in /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_$(release)/ftp/in
+        ln -nfs /opt/Carmen/CARMTMP/ftp/out /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_$(release)/ftp/out
+
+
+      failOnStderr: true
+      displayName: 'Create new CARMTMP directory for Tracking'
+
+
+  - job: BuildRaveRulesets
+    cancelTimeoutInMinutes: 2 
+    pool:
+      name: CMS Agent
+      demands:
+      - rave
+
+    workspace:
+      clean: all
+
+    dependsOn: SetupCARMUSR
+
+    condition: succeeded()
+    strategy:
+      maxParallel: 2
+      matrix: 
+          all:
+            compileSwitch: "all"
+          ${{ if eq(parameters['explorer'], true) }}:
+            explorer_all:
+              compileSwitch: "-e -r explorer all"  
+    steps:
+      # fetchDepth set to 1 since we only need the latest revision
+    - checkout: none
+
+    - bash: $(carmusrpath)/bin/admin/compileRulesets.sh $(compileSwitch)
+      displayName: 'Compile rulesets for all (CCT)'
+
+
+  - job: PublishArtifacts
+    cancelTimeoutInMinutes: 2 
+    pool:
+      name: CMS Agent
+      demands:
+      - rave
+    workspace:
+      clean: all
+    dependsOn:
+      - BuildRaveRulesets
+    condition: and(succeeded(), eq('${{parameters.publish}}', 'true'))
+    steps:
+      # fetchDepth set to 1 since we only need the latest revision
+    - checkout: none
+
+      # The ArchiveFile task doesn't have any exclude parameters, so running tar manually
+      # Need to use -p argument to preserve permissions
+    - script: 'tar -pczvf "$(Build.ArtifactStagingDirectory)/CARMUSR-$(Build.BuildId).tar.gz" * --exclude=".git" --exclude="bids_user/**/target"'
+      workingDirectory: '$(carmusrpath)'
+      failOnStderr: true
+      displayName: 'Archive Tracking CARMUSR'
+
+    - publish: '$(Build.ArtifactStagingDirectory)/CARMUSR-$(Build.BuildId).tar.gz'
+      artifact: 'carmusr'
+      displayName: 'Publish Tracking CARMUSR'
+
+    - script: 'tar -pczvf "$(Build.ArtifactStagingDirectory)/CARMTMP_CCT-$(Build.BuildId).tar.gz" *'
+      workingDirectory: '$(carmusrpath)/current_carmtmp_cct'
+      failOnStderr: true
+      displayName: 'Archive Tracking CARMTMP'
+
+    - publish: '$(Build.ArtifactStagingDirectory)/CARMTMP_CCT-$(Build.BuildId).tar.gz'
+      artifact: 'carmtmp_cct'
+      displayName: 'Publish Tracking CARMTMP'
+
+    - bash: |
+        rm -rf /opt/Carmen/CARMUSR/build_$(major)_*
+        rm -rf /opt/Carmen/CARMTMP/$(whoami)/CARMTMP/*
+      displayName: 'Clean up build directories'

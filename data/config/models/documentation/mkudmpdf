@@ -1,0 +1,414 @@
+#!/usr/bin/env python
+#
+# mkupdmpdf [-d outdir] [-o outfile] schemafile*
+#
+
+import os,sys,getopt,string
+import reportlab.pdfgen.canvas
+import reportlab.pdfbase.pdfmetrics
+
+############################################################
+# Miscellaneous
+############################################################
+
+def tobool(s):
+    return s in ('true','True','TRUE',True)
+
+def quote(s):
+    """Escape special chars (underscore,dollar,percent,ampersand) for LaTeX.
+
+    Add LaTeX escaping to special characters, except where already escaped.
+    This function attempts to produce usable LaTeX code from text input, whether
+    or not the input is (partly) already in LaTeX style or is just plain text.
+    """
+    s2 = ''.join( [ '\\' * (c in '_$%&') + c for c in s ] )
+    # Reduce all double backslashes to single (heuristics):
+    s3 = s2.replace("\\\\","\\")
+    # ...except where at end of line -- change back to double:
+    s4 = s3.replace("\\\n","\\\\")
+    return s4
+
+def findtext(thing):
+    for e in thing['__elements']:
+	if e['__tag']=='text':
+	    return e['__text']
+    return ''
+
+def findtextMod(thing, modName, entName):
+    for emodule in modext:
+        if emodule['name']==modName:
+            for ething in emodule['__elements']:
+                if ething['name']==entName:
+                    result = findtext(ething)
+                    if result != '':
+                        return result
+                    else:
+                        return findtext(thing)
+    return findtext(thing)
+
+############################################################
+# Simple XML parser
+############################################################
+
+import xml.dom.minidom
+
+def rebuildelement(e):
+    text=''
+    children=[]
+    elements=[]
+    dict={}
+    attrs=e.attributes
+    for i in xrange(attrs.length):
+	a=attrs.item(i)
+	dict[a.name]=a.nodeValue
+    for n in e.childNodes:
+	if n.nodeType==xml.dom.minidom.Node.ELEMENT_NODE:
+	    n=rebuildelement(n)
+	    elements.append(n)
+	    children.append(n)
+	elif n.nodeType in (xml.dom.minidom.Node.TEXT_NODE,
+			    xml.dom.minidom.Node.CDATA_SECTION_NODE):
+	    text+=n.data
+	    children.append(n.data)
+    dict['__tag']=e.tagName
+    dict['__children']=children
+    dict['__elements']=elements
+    dict['__text']=text
+    return dict
+
+def parsexml(f):
+    return rebuildelement(xml.dom.minidom.parse(f).documentElement)
+
+############################################################
+# Graphics functions
+############################################################
+
+fontsize=12
+leading=0.3
+boxwidth=215
+inset=4
+shadow=3
+
+entityfont=('Helvetica-Bold',fontsize)
+fieldnamefont=('Helvetica',fontsize)
+fieldtypefont=('Helvetica-Oblique',fontsize)
+fieldtypereqfont=('Helvetica-BoldOblique',fontsize)
+fkfont=('Helvetica-Bold',fontsize-2)
+
+f=reportlab.pdfbase.pdfmetrics.getFont(fieldtypereqfont[0]).face
+lineheight=(1+leading)*fieldtypereqfont[1]*(f.ascent-f.descent)/1000
+midofs=fieldtypereqfont[1]*(f.ascent+f.descent)/2000
+
+def leftstring(canvas,f,x,y,i,s):
+    canvas.setFont(f[0],f[1])
+    canvas.drawString(x+i,y,s)
+
+def centerstring(canvas,f,x,y,w,s):
+    canvas.setFont(f[0],f[1])
+    sw=canvas.stringWidth(s,f[0],f[1])
+    canvas.drawString(x+(w-sw)/2,y,s)
+
+def rightstring(canvas,f,x,y,i,w,s):
+    canvas.setFont(f[0],f[1])
+    sw=canvas.stringWidth(s,f[0],f[1])
+    canvas.drawString(x+w-i-sw,y,s)
+
+basiccolor=(0.97,0.95,0.82)
+prelcolor=(0.82,0.95,0.97)
+
+def fillarea(canvas,x,y,lines,prel=False):
+    if not prel:
+    	canvas.setFillColorRGB(*basiccolor)
+    else:
+	canvas.setFillColorRGB(*prelcolor)
+    canvas.rect(x,y,boxwidth,-lines*lineheight,stroke=0,fill=1)
+    canvas.setFillColorRGB(0,0,0)
+
+def drawseparator(canvas,x,y):
+    canvas.line(x,y,x+boxwidth,y)
+
+def shadowrect(canvas,x,y,y0,isext=False):
+    path=reportlab.pdfgen.pathobject.PDFPathObject()
+    path.moveTo(x,y)
+    path.lineTo(x+shadow,y-shadow)
+    path.lineTo(x+boxwidth+shadow,y-shadow)
+    path.lineTo(x+boxwidth+shadow,y0-shadow)
+    path.lineTo(x+boxwidth,y0)
+    path.lineTo(x+boxwidth,y)
+    path.close()
+    canvas.setFillColorRGB(0.5,0.5,0.5)
+    canvas.drawPath(path,stroke=0,fill=1)
+    canvas.setFillColorRGB(0,0,0)
+    if isext:
+	path=reportlab.pdfgen.pathobject.PDFPathObject()
+	path.moveTo(x,y0)
+	path.lineTo(x+boxwidth,y0)
+	canvas.setDash(4,4)
+	canvas.drawPath(path,stroke=1,fill=0)
+	canvas.setDash()
+	path=reportlab.pdfgen.pathobject.PDFPathObject()
+	path.moveTo(x,y0)
+	path.lineTo(x,y)
+	path.lineTo(x+boxwidth,y)
+	path.lineTo(x+boxwidth,y0)
+	canvas.drawPath(path,stroke=1,fill=0)
+    else:
+	canvas.rect(x,y,boxwidth,y0-y)
+
+############################################################
+# Process entity
+############################################################
+
+def entityheight(ekeys,enonkeys):
+    if enonkeys:
+	h=lineheight/2
+    else:
+	h=0
+    return h+(len(ekeys)+len(enonkeys)+2)*lineheight
+
+def drawdescstr(canvas,f,x,y):
+    if f.get('reference'):
+	leftstring(canvas,fkfont,x,y,-10,'FK')
+    leftstring(canvas,fieldnamefont,x,y,20,f.get('desc',''))
+
+def drawdesc(canvas,ename,edesc,ekeys,enonkeys,x,y):
+    leftstring(canvas,entityfont,x,y,20,edesc)
+    y-=lineheight/2
+    for f in ekeys:
+	y-=lineheight
+	drawdescstr(canvas,f,x,y)
+    if enonkeys:
+	y-=lineheight/2
+    for f in enonkeys:
+	y-=lineheight
+	drawdescstr(canvas,f,x,y)
+
+def drawfield(canvas,x,y,fld):
+    fname=fld['name']
+    #print "fname=", fname
+    ftypename=fld.get('type') or fld['reference']
+    size=fld.get('size')
+    if size:
+	ftypename='%s(%s)'%(ftypename,size)
+    alen=fld.get('arraylength')
+    if alen:
+	ftypename='%s[%s]'%(ftypename,alen)
+    fisreq=tobool(fld.get('nonnull') or fld.get('pk'))
+    leftstring(canvas,fieldnamefont,x,y,inset,fname)
+    if fisreq:
+	font=fieldtypereqfont
+    else:
+	font=fieldtypefont
+    rightstring(canvas,font,x,y,inset,boxwidth,ftypename)
+
+def drawentity(canvas,ename,ekeys,enonkeys,x,y,prel):
+    centerstring(canvas,entityfont,x,y,boxwidth,ename)
+    y-=lineheight/2
+    y0=y
+    fillarea(canvas,x,y,len(ekeys)+len(enonkeys)+1,prel)
+    if ekeys:
+	for f in ekeys:
+	    y-=lineheight
+	    drawfield(canvas,x,y,f)
+	if enonkeys:
+	    y-=lineheight/2
+	    drawseparator(canvas,x,y)
+    for f in enonkeys:
+	y-=lineheight
+	drawfield(canvas,x,y,f)
+    y-=lineheight/2
+    shadowrect(canvas,x,y,y0)
+
+def doentity(file,ent,entities,prel):
+    ename=ent['name']
+    edesc=ent.get('desc','')
+    ekeys=[]
+    enonkeys=[]
+    for fld in ent['__elements']:
+	if fld['__tag']!='field':
+	    continue
+	elif fld.get('pk') == "true":
+	    ekeys.append(fld)
+	else:
+	    enonkeys.append(fld)
+    eh=entityheight(ekeys,enonkeys)
+    canvas=reportlab.pdfgen.canvas.Canvas(file)
+    canvas.setPageSize((250*72/25.4,eh+2*lineheight))
+    drawentity(canvas,ename,ekeys,enonkeys,15,eh,prel)
+    drawdesc(canvas,ename,edesc,ekeys,enonkeys,15+boxwidth+30,eh)
+    canvas.save()
+    return len(ekeys) + len(enonkeys)
+
+def drawextension(canvas,ename,efields,x,y,prel):
+    centerstring(canvas,entityfont,x,y,boxwidth,ename)
+    y-=lineheight/2
+    y0=y
+    fillarea(canvas,x,y,len(efields)+0.5,prel)
+    for f in efields:
+	y-=lineheight
+	drawfield(canvas,x,y,f)
+    y-=lineheight/2
+    shadowrect(canvas,x,y,y0,True)
+
+def doextension(file,ext,entities,prel):
+    ename=ext['entityname']
+    edesc=ext.get('desc','')
+    efields=[]
+    for fld in ext['__elements']:
+	if fld['__tag']=='field':
+	    efields.append(fld)
+    eh=entityheight(efields,[])
+    canvas=reportlab.pdfgen.canvas.Canvas(file)
+    canvas.setPageSize((250*72/25.4,eh+2*lineheight))
+    drawextension(canvas,ename,efields,15,eh,prel)
+    drawdesc(canvas,ename,edesc,efields,[],15+boxwidth+30,eh)
+    canvas.save()
+    return len(efields)
+
+def doextrefs(file, ents, exts):
+	if len(exts) > 0:
+	    tex.write('\\subsubsection{Extensions}\n')
+	    if ents > 0:
+	        tex.write('This module also extends the ')
+	    else:
+	        tex.write('This module extends the ')
+	    i = 0
+	    for ext in exts:
+	        if i > 0:
+	            if i == len(exts)-1:
+	                tex.write(' and ')
+	            else:
+	                tex.write(', ')
+	        tex.write('%s (\\ref{%s_%s})' % (ext[1].replace('_','\\_'), ext[0], ext[1]))
+	        i += 1
+	    if len(exts) > 1:
+	        tex.write(' entities.\n')
+	    else:
+	        tex.write(' entity.\n')
+
+############################################################
+# Process files
+############################################################
+
+opts,files=getopt.getopt(sys.argv[1:],'d:o:e:')
+
+
+outdir='figures'
+outfile='figures.tex'
+docextfile=None
+for opt,arg in opts:
+    if opt=='-d': outdir=arg
+    elif opt=='-o': outfile=arg
+    elif opt=='-e': docextfile=arg
+
+modext=[]
+modent={}
+
+entities={}
+modules=[]
+
+if docextfile != None:
+    dmod=parsexml(docextfile)
+    for module in dmod['__elements']:
+        modext.append(module)
+        for thing in module['__elements']:
+            if thing['__tag']=='entity':
+                modent[thing['name']]=thing
+        
+for f in files:
+    davemodel=parsexml(f)
+    for module in davemodel['__elements']:
+	modules.append(module)
+	for thing in module['__elements']:
+	    if thing['__tag']=='entity':
+		entities[thing['name']]=thing
+
+entnum=1
+extnum=1
+tex=open(os.path.join(outdir,outfile),'w')
+
+tex.write('\\setcounter{secnumdepth}{4}\n')
+tex.write('\\setcounter{tocdepth}{4}\n')
+
+entnum0 = 0
+exts=[]
+
+num_ent = 0
+num_ext = 0
+for module in modules:
+    doextrefs(tex, entnum0, exts)
+    exts = []
+    entnum0 = 0
+
+    tex.write('\\subsection{Module %s}\n'%quote(module['name']))
+    tex.write('\n')
+    tex.write(quote(findtext(module)))
+    tex.write('\n')
+
+    for thing in module['__elements']:
+
+	tag=thing['__tag']
+	if tag=='entity':
+	    name=quote(thing['name'])
+	    prel=False
+	    try:
+	        quote(thing['desc']).index('PREL')
+	        prel=True
+	    except:
+	        pass
+	    incname='entity-%d'%entnum
+	    incfile=os.path.join(outdir,incname)
+	    entnum+=1
+	    entnum0 += 1
+	    tex.write('\\subsubsection{Entity %s}\n'%name)
+	    tex.write('\n')
+	    tex.write(quote(findtextMod(thing, module['name'], thing['name'])))
+	    tex.write('\n')
+	    #tex.write('\\begin{figure}[hbtp]\n')
+	    #tex.write('  \\centering\n')
+	    tex.write('\\includegraphics[scale=.8]{%s}\n'%incfile)
+	    #tex.write('  \\caption{Entity %s}\n'%name)
+	    #tex.write('  \\label{fig:%s}\n'%incname)
+	    #tex.write('\\end{figure}\n')
+	    tex.write('\n')
+	    #print 'module %s defines entity %s' % (quote(module['name']), name)
+	    num_ent += doentity(incfile+'.pdf',thing,entities,prel)
+            
+	    for emodule in modules:
+	        for ething in emodule['__elements']:
+	            etag=ething['__tag']
+	            if etag=='extension':
+	                ename=quote(ething['entityname'])
+	                eprel=False
+	                try:
+			    quote(ething['desc']).index('PREL')
+	                    eprel=True
+	                except:
+	                    pass
+	                if ename == name:
+	                    emodulename=quote(emodule['name'])
+	                    #print 'module %s extends entity %s' % (emodulename, name)
+	                    eincname='extension-%d'%extnum
+	                    eincfile=os.path.join(outdir,eincname)
+	                    extnum+=1
+	                    tex.write('\\paragraph{Extension from module %s}\n' % emodulename)
+	                    tex.write('\n')
+	                    #print '\\label{%s_%s}\n' % (emodulename.replace('\\',''), ename.replace('\\',''))
+	                    tex.write('\\label{%s_%s}\n' % (emodulename.replace('\\',''), ename.replace('\\','')))
+	                    tex.write(findtextMod(ething, emodule['name'], ething['entityname']))
+	                    tex.write('\n')
+	                    tex.write('\\includegraphics[scale=.8]{%s}\n'%eincfile)
+	                    tex.write('\n')
+	                    #print '    doextension(%s,%s,%s)' % (eincfile+'.pdf',ething,'')
+	                    num_ext += doextension(eincfile+'.pdf',ething,entities,eprel)
+	elif tag=='enum':
+	    print '### UNSUPPORTED Enum '+module['name']
+	elif tag=='extension':
+	    emodulename=quote(module['name'])
+	    ename=quote(thing['entityname'])
+	    ext = (emodulename.replace('\\',''), ename.replace('\\', '') )
+	    exts.append( ext )
+
+doextrefs(tex, entnum0, exts)
+
+tex.close()

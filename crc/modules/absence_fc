@@ -1,0 +1,266 @@
+/* -*- crc -*-
+ *
+ * Purpose:
+ *   This module contains flight crew specific absence definitions
+ *   used in absence refresher rules, costs and select filters.
+ *
+ * Sections:
+ *   1. Functions
+ *
+ * Created by:
+ *   Henrik Albertson, 30apr2007
+ *
+ * Major changes:
+ */
+
+module absence_fc inherits absence
+
+/****************************************************************
+ * Section 1: Functions
+ ***************************************************************/
+/*
+** Redefinitions of functions in parent module
+*/
+redefine %type_at_date%(String ac_qual, Abstime date) = crew.%ac_qlns_at_date%(date);
+
+%_last_flown_ac_qual_excl_sim%(Abstime date) =
+  round_up(recency.%last_flown_ac_qual%("", date), 24:00);
+  
+%_last_flown_ac_qual%(Abstime date) =
+  default(round_up(nmax(recency.%last_flown_ac_qual%("", date),
+                        training.%last_simulator_date%(date)), 24:00), 1Jan1986);
+  
+%last_flown%(Abstime date) =
+  let last_flown = %_last_flown_ac_qual%(date),
+      last_flown_excl_sim = %_last_flown_ac_qual_excl_sim%(date),
+      last_ground_training = %ground_training_date%("", date),
+      aoc = if crew.%is_skn_at_date%(date) then "BU" else "SAS",
+      limit = %_limit%(aoc),
+      hard_limit = %_hard_limit%(aoc),
+      last_sim = training.%last_simulator_date%(date),
+      last_flown_at_last_sim = %_last_flown_ac_qual%(last_sim),
+      last_flown_at_ground_training = %_last_flown_ac_qual%(last_ground_training);
+  if last_flown = last_flown_excl_sim then
+    /* There is no simulator affecting absence */
+    last_flown
+  else
+    /* We have a simulator changing absence */
+    if last_flown <> last_ground_training
+    then
+      /* We have a normal recurrent PC/OPC, so we are not absent */
+      last_flown
+    else
+      if %days_since%(date, last_ground_training) <= %_max_days_from_ground_training%(aoc) then
+        /* We have an FFS/ASF assigned */
+        if %days_since%(last_ground_training, last_flown_at_ground_training) > hard_limit then
+          /* The FFS/ASF was required, absence should be based on last flown at time of FFS/ASF */
+          last_flown_at_ground_training
+        else
+          /* The FFS/ASF was optional, we are no longer absent */
+          last_flown
+      else
+        /* We have another simulator, which is affecting absence */
+        if %days_since%(last_sim, last_flown_at_last_sim) > limit then
+          /* We were absent at last sim, the sim should not be used for absence */
+          last_flown_at_last_sim
+      else
+        /* We were not absent at last sim, the sim maintance presence */
+        last_flown;
+  
+export %at_date%(Abstime date) =
+  /* Flight crew don't have actype-dependent absence */
+  let aoc = if crew.%is_skn_at_date%(date) then "BU" else "SAS";
+  %days_at_date%(date) > %_limit%(aoc);
+  
+export %at_date_a3_a5%(Abstime date) =
+  let aoc = if crew.%is_skn_at_date%(date) then "BU" else "SAS";
+  if crew.%is_multi_qualified_at_date%(date) then
+    if crew.%is_a3a5_qualified% then
+        %days_at_date_a3_a5%(date) > %_limit%(aoc)
+    else %days_at_date%(date) > %_limit%(aoc)
+  else %days_at_date%(date) > %_limit%(aoc); 
+
+export %at_leg_start% = %at_date%(leg.%start_UTC%);
+export %at_leg_start_a3_a5% = %at_date_a3_a5%(leg.%start_UTC%);
+
+%days_at_date%(Abstime date) =
+    %days_since%(round_down(date, 24:00),
+            round_up(%last_flown%(date), 24:00));
+
+
+%days_at_date_a3_a5%(Abstime date) =
+  if crew.%is_multi_qualified_at_date%(date) then
+    if crew.%is_a3a5_qualified% then
+      %days_since%(round_down(date, 24:00), 
+                  round_up(recency.%last_flown_ac_qual%(leg.%qual%, leg.%start_utc%), 24:00))
+    else %days_since%(round_down(date, 24:00),
+                round_up(%last_flown%(date), 24:00))
+  else %days_since%(round_down(date, 24:00),
+            round_up(%last_flown%(date), 24:00));
+
+export %days% = %days_at_date%(leg.%start_UTC%);
+export %days_with_a3a5_specific_absence% = %days_at_date_a3_a5%(leg.%start_UTC%);
+
+/*
+ * 4 different checks depending on absence days
+ * - Absence 46-90 days: Either ground or flight training
+ * - Absence 91-120 days: Either ground or flight training.
+ * - Absence 121-180 days: Both ground and flight training required
+ * - Absence > 180 days: Check only ground training performed,
+ *   training flights are defined in crew_training_need and will
+ *   be checked by the rules covering training.
+ */
+redefine export %reqd_training_str_at_date%(String ac_qual, Abstime date) =
+  %_req_str_full_at_date%(ac_qual, date, %_req_str%(ac_qual, date));
+  
+redefine %reqd_gnd_training_str_at_date%(String ac_qual, Abstime date) =
+  %_req_str_full_at_date%(ac_qual, date, %_req_gnd_str%(ac_qual, date));
+
+redefine %reqd_flt_training_str_at_date%(String ac_qual, Abstime date) =
+  %_req_str_full_at_date%(ac_qual, date, %_req_flt_str%(ac_qual, date));
+
+%_req_str_full_at_date%(String ac_qual, Abstime date, String req_str) =
+  concat("Absence ", 
+         ac_qual,
+         ", ",
+         %_level_str%(ac_qual, date),
+         format_time(%_start%(ac_qual, date), " since %02d%02b%Y"),
+         ", needs ",
+         req_str);
+  
+%_req_str%(String ac_qual, Abstime date) =
+  let gnd = %_req_gnd_str%(ac_qual, date),
+      flt = %_req_flt_str%(ac_qual, date);
+  if gnd = "" then flt
+  else if flt = "" then gnd
+  else concat (gnd, " and ", flt);
+  
+redefine export %absence_sim% =
+  default(
+  any(leg(trip), training.%leg_is_own_sim% and
+                 (leg.%is_asf% or leg.%is_ffs%)), false);
+  
+table absence_level(String ac_qual, Abstime date) =
+  alias days = %days_at_date%(date),
+        aoc = recency.%aoc_for_ac_qln%(ac_qual),
+        req_flights = if ac_qual = "CJ" then 4 else 2;
+  aoc, days ->
+            %_level%,
+            export %_start%,
+            %_level_str%,
+            %_req_gnd_str%,
+            %_req_flt_str%,
+            %_req_gnd_type%,
+            %_req_flt_type%,
+            %_req_flights%;
+  "SAS", (46, 90)   -> 1, date - (days-46)*24:00, "46-90 days", 
+                      "",
+                      format_int(req_flights, "FFS/ASF or %i flights with non-restricted"),
+                      %absence_sim%,
+                      %_companion_is_non_restricted%,
+                      req_flights;
+  "SAS", (91, 120)  -> 2, date - (days-91)*24:00, "91-120 days", 
+                      "",
+                      format_int(req_flights, "FFS/ASF or %i T-flights with TRI/TRE"),
+                      %absence_sim%,
+                      leg.%is_t_flight% and training.%leg_has_tri_tre%,
+                      req_flights;
+  "SAS", (121, 180)  -> 3, date - (days-121)*24:00, "121-180 days", 
+                      "FFS/ASF", format_int(req_flights,  "%i T-flights"),
+                      %absence_sim%,
+                      leg.%is_t_flight%,
+                      req_flights;
+  -, >180             -> 4, date - (days-181)*24:00, "More than 181 days",
+                      "Refresher",
+                      "",
+                      %absence_sim%,
+                      false,
+                      0;
+  "BU", (46, 90)   -> 1, date - (days-46)*24:00, "46-90 days", 
+                      "",
+                      format_int(req_flights, "FFS/ASF or %i flights with non-restricted"),
+                      %absence_sim%,
+                      %_companion_is_non_restricted%,
+                      req_flights;
+  "BU", (91, 120)  -> 11, date - (days-91)*24:00, "91-120 days",
+                      "",
+                      "1 T-flight with TRI/TRE",
+                      false,
+                      leg.%is_t_flight% and training.%leg_has_tri_tre%,
+                      1;
+  "BU", (121, 180)  -> 12, date - (days-121)*24:00, "121-180 days", 
+                      "FFS/ASF", format_int(2,  "%i T-flights"),
+                      %absence_sim%,
+                      leg.%is_t_flight%,
+                      2;
+   -, -             -> 0, 1jan1986, "", "", "", false, false, 1000;
+end
+
+table absence_levels(Abstime date) =
+  %_level%(crew.%ac_qln%(date, 1), date) ->
+    export %absent_46_90%,
+    export %absent_91_120%,
+    export %absent_121_180%,
+    export %absent_181%;
+  1   -> true,  false, false, false;
+  2   -> false, true,  false, false;
+  11  -> false, true,  false, false;
+  3   -> false, false, true,  false;
+  12  -> false, false, true,  false;
+  4   -> false, false, false, true;
+  -   -> false, false, false, false;
+end
+
+export %absent_91%(Abstime date) =
+  %_level%(crew.%ac_qln%(date, 1), date) > 1;
+
+redefine %_reqd_flight_training_legs%(String ac_qual, Abstime date) =
+  %_req_flights%(ac_qual, date);
+
+redefine %_reqd_flight_training_type%(String ac_qual, Abstime date) =
+  %_req_flt_type%(ac_qual, date);
+
+%_companion_is_non_restricted% =
+  let crew_id = crew.%id%,
+      main_func = crew.%main_func%;
+  any(equal_legs, not crew.%has_any_restriction_leg_start%) 
+  where (%is_roster% and main_func = crew.%main_func% and not (crew.%id% = crew_id));
+
+redefine %_ground_training_date%(String ac_qual, Abstime date) =
+  nmax(training.%last_perf_date_for_act_of_type%("FFS", date),
+       training.%last_perf_date_for_act_of_type%("ASF", date),
+       %last_planned_course_date%(date));
+
+%last_planned_course_date%(abstime date) =
+  default(last(leg(roster), leg.%end_date%)
+          where ((leg.%code% = "TH1" or leg.%code% = "SI1") and leg.%end_date% < date),
+          01jan1986);
+  
+/* Leg dependent */
+redefine %_nr_flight_training_legs%(String ac_qual, Abstime date) =
+  let aoc = recency.%aoc_for_ac_qln%(ac_qual),
+      stop = if %_max_days_from_ground_training%(aoc) = 0 then 31dec2026
+             else if %days_at_date%(date) <= 120 and %days_at_date%(date) > 45 then
+              /* No ground training required, not exactly clear how close to
+                 flights need to be */
+               leg.%start_utc% + %_max_days_from_ground_training%(aoc) * 24:00
+             else if %days_at_date%(%ground_training_date_leg_start%) > %hard_limit% then
+               /* FFS ground training requires T-flights within 14 days */
+               %ground_training_date_leg_start% + 14 * 24:00
+             else %ground_training_date_leg_start% + %_max_days_from_ground_training%(aoc) * 24:00;
+  count(leg(roster))
+  from (current) forwards
+  while (leg.%start_date% <= stop and
+         /* Special case for CC SKN AL: No other active flights after training than A3A4 *
+         /* Not allowed to mix legs belonging to different aoc's during training */
+         %aoc% = aoc and
+         not (leg.%is_blank_day% or leg.%is_standby%) and
+        (not leg.%is_flight_duty% or
+         leg.%is_deadhead% or
+         not %_check_qual%(ac_qual) or
+         %_reqd_flight_training_type%(ac_qual, date)))
+  where (leg.%is_active_flight% and
+         %_check_qual%(ac_qual));
+
+/* end of file */
+

@@ -1,0 +1,624 @@
+/* -*- crc -*-
+ *
+ *
+ * Purpose:
+ *      This module contains logic and rules for Short Ground Training - SGT
+ *      used in Carmen Crew Rostering
+ *
+ */
+
+module short_ground_training_ccr inherits short_ground_training
+
+import fundamental;
+import base_utils;
+import levels;
+import leg;
+import duty;
+import trip;
+import wop;
+import roster;
+import crew;
+import rule_exceptions;
+import freedays;
+import rest;
+import duty_period;
+import rules_indust_ccr;
+import attributes;
+import bunkering;
+import meal;
+import model_freedays;
+import accumulators;
+import base_calendar;
+import training;
+import duty_time;
+import theme_prod;
+
+group params =
+    %SGT_header%,
+    %SGT_activity_code%,
+    %SGT_activity_duration%,
+    %SGT_max_duty_time%,
+    %SGT_buffer%,
+    %SGT_earliest_start_time%,
+    %SGT_latest_end_time%,
+    %SGT_ignores_meal_break%,
+    %SGT_assign_target%,
+    leave_room_for_SGT_activity,
+    max_desired_crew_on_SGT;
+
+export %SGT_header% =
+    parameter ""
+    remark "#HEADER# Short Ground Training";
+export %SGT_activity_code% =
+    parameter ""
+    remark "Short Ground Training Activity Code (blank code turns off functionality)";
+%SGT_activity_duration% =
+    parameter 2:00
+    remark "Short Ground Training Activity Duration";
+%SGT_max_duty_time% =
+    parameter 12:00
+    remark "Short Ground Training Max Combined Duty Time";
+%SGT_buffer% =
+    parameter 0:30
+    remark "Short Ground Training Buffer";
+%SGT_earliest_start_time% =
+    parameter 9:00
+    remark "Short Ground Training Earliest Start Time";
+%SGT_latest_end_time% =
+    parameter 17:00
+    remark "Short Ground Training Latest End Time";
+export %SGT_ignores_meal_break% =
+    parameter true
+    remark "Short Ground Training can break meal rules";
+redefine export %SGT_cost% =
+    parameter 1000
+    remark "7.15       Space needed for Short Ground Training";
+%SGT_assign_target% =
+    parameter 0
+    remark "Short Ground Training Target to Assign (0 = unlimited)";
+
+set SGT_avoid_categories = "SIM", "EDU", "REC";
+
+%duty_length_with_SGT%(bool before) =
+    let duty_time = if before then first(duty(wop), duty.%time%) else last(duty(wop), duty.%time%);
+    duty_time + %SGT_buffer% + %SGT_activity_duration%;
+
+%same_day_wop_extension_with_SGT%(bool before) =
+    if before then
+        wop.%start_hb% - %SGT_buffer% - %SGT_activity_duration%
+    else
+        wop.%end_hb% + %SGT_buffer% + %SGT_activity_duration%;
+
+%SGT_must_be_on_separate_day%(bool before) =
+    if before then %SGT_must_be_on_previous_day% else %SGT_must_be_on_following_day%;
+
+%SGT_must_be_on_previous_day% =
+    /* extended duty too long */
+    %duty_length_with_SGT%(true) > %SGT_max_duty_time%
+    or
+    /* extended wop starts too early for SGT */
+    time_of_day(%same_day_wop_extension_with_SGT%(true)) < %SGT_earliest_start_time%;
+
+%SGT_must_be_on_following_day% =
+    /* extended duty too long */
+    %duty_length_with_SGT%(false) > %SGT_max_duty_time%
+    or
+    /* extended wop ends too late in day for SGT */
+    time_of_day(%same_day_wop_extension_with_SGT%(false)) > %SGT_latest_end_time%
+    or
+    /* extended wop breaches midnight */
+    round_down(%same_day_wop_extension_with_SGT%(false), 24:00) > wop.%end_day%;
+
+%wop_extension_with_SGT%(bool before, bool separate_day) =
+    if separate_day then
+        if before then
+            /* Make sure min connection time is respected, also minimum rest (+2:00 buffer),
+               also latest finish before free weekend and checkout before days off */
+            nmin(wop.%start_day% - (24:00 - %SGT_latest_end_time%) - %SGT_activity_duration%,
+                 wop.%start_hb% - levels.%min_duty_connection_time_p% - %SGT_activity_duration%,
+                 if wop.%is_on_duty% then
+                    wop.%start_hb% - first(leg(wop), rest.%minimum_time% + 2:00) - %SGT_activity_duration%
+                 else wop.%start_day%,
+                 if wop.%first_trip_is_fw% then
+                    wop.%start_day% - (24:00 - freedays.%free_we_latest_start%) - %SGT_activity_duration%
+                 else wop.%start_day%,
+                 wop.%start_day% - (24:00 - first(trip(wop), rules_indust_ccr.%check_out_time_limit%)) - %SGT_activity_duration%)
+        else
+            /* Make sure min connection time is respected, also minimum rest */
+            nmax(wop.%end_day% + 24:00 + %SGT_earliest_start_time% + %SGT_activity_duration%,
+                 wop.%end_hb% + levels.%min_duty_connection_time_p% + %SGT_activity_duration%,
+                 if wop.%is_on_duty% then
+                    wop.%end_hb% + last(leg(wop), rest.%minimum_time%) + %SGT_activity_duration%
+                 else wop.%end_day%)
+    else
+        %same_day_wop_extension_with_SGT%(before);
+
+/* Start time of SGT activity for the wop */
+%SGT_start_time%(bool before, bool separate_day) =
+    if before then
+        %wop_extension_with_SGT%(before, separate_day)
+    else
+        %wop_extension_with_SGT%(before, separate_day) - %SGT_activity_duration%;
+/* End time of SGT activity for the wop */
+%SGT_end_time%(bool before, bool separate_day) =
+    %SGT_start_time%(before, separate_day) + %SGT_activity_duration%;
+
+redefine export %SGT_leg% =
+    %SGT_activity_code% <> ""
+    and leg.%code% = %SGT_activity_code%;
+
+%wop_includes_SGT% = any(leg(wop), %SGT_leg%);
+
+%SGT_assigned% =
+    any(wop(roster), %wop_includes_SGT%)
+        where (wop.%in_pp%);
+
+/* SGT is needed if
+     - Code is not "" (SGT is turned off)
+     - SGT code has not been previously assigned this calendar year
+     - SGT is not currently assigned
+*/
+%SGT_needed% =
+    %SGT_activity_code% <> ""
+    and not (training.%nr_acts_of_code_in_ival%(%SGT_activity_code%, round_down_year(%pp_start%), %pp_start%) > 0)
+    and not %SGT_assigned%;
+
+/* Check sufficient rest time to place the total activity in, enough blank space to place activity
+   and various legality/other checks */
+%wop_is_candidate_for_SGT_activity%(bool before, bool separate_day) =
+    %has_SGT_potential%(before, separate_day)
+    and %SGT_legality_ok%(before, separate_day);
+
+/* wops that may be used for short ground training */
+/* Text field in the table is only used for documentation */
+%has_SGT_potential%(bool before, bool separate_day) =
+    all(times(21), %_has_SGT_potential%(base_utils.%ti0%, before, separate_day));
+table has_SGT_potential(int ix, bool before, bool separate_day) =
+    ix, before, separate_day
+        -> string %has_SGT_potential_text%,
+           bool %_has_SGT_potential%;
+
+     1,      -,     - -> "All: Make sure start/end times are not too early/late",
+                         time_of_day(%SGT_start_time%(before, separate_day)) >= %SGT_earliest_start_time%
+                         and
+                         time_of_day(%SGT_end_time%(before, separate_day)) <= %SGT_latest_end_time%;
+
+     2,   true,  true -> "Day Before: Starts in PP but not on 1st day",
+                         wop.%starts_in_pp% and (wop.%start_hb% >= %pp_start% + 24:00);
+     2,   true, false -> "Before: Starts in PP",
+                         wop.%starts_in_pp%;
+     2,  false,  true -> "Day After: Ends in PP but not on last day",
+                         wop.%ends_in_pp% and (wop.%end_hb% < %pp_end% - 24:00);
+     2,  false, false -> "After: Ends in PP",
+                         wop.%ends_in_pp%;
+
+     3,      -, false -> "Before/After: Same day must be attached to on duty wop",
+                         wop.%is_on_duty%;
+     3,   true,  true -> "Day Before: Should not go next to a single day off duty",
+                         if wop.%is_off_duty% then wop.%days% >= 2 else
+                         if default(prev(wop(chain), wop.%is_off_duty%), false) then
+                            prev(wop(chain), wop.%days% >= 2)
+                         else true;
+     3,  false,  true -> "Day After: Should not go next to a single day off duty",
+                         if wop.%is_off_duty% then wop.%days% >= 2 else
+                         if default(next(wop(chain), wop.%is_off_duty%), false) then
+                            next(wop(chain), wop.%days% >= 2)
+                         else true;
+
+     4,   true,  true -> "Day Before: If connects to on duty, should be generated by that wop",
+                         /* more than 72:00 as any shorter will connect an on duty to a wop */
+                         if wop.%is_on_duty% then true else
+                         if prev(wop(chain), not wop.%is_on_duty%) then true else
+                         wop.%start_day% - prev(wop(chain), wop.%end_day%) > 72:00;
+     4,  false,  true -> "Day After: If connects to on duty, should be generated by that wop",
+                         if wop.%is_on_duty% then true else
+                         if next(wop(chain), not wop.%is_on_duty%) then true else
+                         next(wop(chain), wop.%start_day%) - wop.%end_day% > 72:00;
+
+     5,   true,     - -> "Day Before/Before: Room to place SGT",
+                         %wop_extension_with_SGT%(true, separate_day) - prev(wop(chain), wop.%end_hb%) > 0:00;
+     5,  false,     - -> "Day After/After: Room to place SGT",
+                         next(wop(chain), wop.%start_hb%) - %wop_extension_with_SGT%(false, separate_day) > 0:00;
+
+     6,      -,  true -> "Day Before/After: Wop must be <= 4 days long",
+                         if wop.%is_on_duty% then
+                            wop.%days% <= 4
+                         else
+                            true;
+
+     7,   true,  true -> "Day Before: If this would link a wop, combined length must be <= 5 days",
+                        if prev(wop(chain), wop.%is_on_duty%) then
+                            if prev(wop(chain), last(trip(wop), trip.%days_between_trips%)) <= trip.%min_valid_freedays% then
+                                if wop.%is_on_duty% then
+                                    wop.%days% + prev(wop(chain), wop.%days%) + 2 <= 5
+                                else
+                                    prev(wop(chain), wop.%days%) + 2 <= 5
+                            else
+                                true
+                        else
+                            true;
+     7,  false,  true -> "Day After: If this would link a wop, combined length must be <= 5 days",
+                        if next(wop(chain), wop.%is_on_duty%) then
+                            if last(trip(wop), trip.%days_between_trips%) <= trip.%min_valid_freedays% then
+                                if wop.%is_on_duty% then
+                                    wop.%days% + next(wop(chain), wop.%days%) + 2 <= 5
+                                else
+                                    next(wop(chain), wop.%days%) + 2 <= 5
+                            else
+                                true
+                        else
+                            true;
+
+     8,      -,     - -> "Avoid Longterm Illness",
+                         not any(duty(wop), duty.%is_longterm_illness%);
+
+     9,   true, false -> "Before: Not split duty",
+                         not first(trip(wop), duty_period.%trip_has_split_duty%);
+     9,  false, false -> "After: Not split duty",
+                         not last(trip(wop), duty_period.%trip_has_split_duty%);
+
+    10,   true, false -> "Before: Not Longhaul",
+                         not first(trip(wop), trip.%is_long_haul%);
+    10,  false,     - -> "After: Not Longhaul",
+                         not last(trip(wop), trip.%is_long_haul%);
+
+    11,      -, false -> "Before/After: Not standby",
+                         not wop.%is_standby%;
+    11,   true,  true -> "Day After: Not standby",
+                         not wop.%is_standby%;
+
+    12,      -, false -> "Before/After: Not Blank Day",
+                         not wop.%is_blank_day%;
+    12,  false,  true -> "Day After: Not Blank Day",
+                         not wop.%is_blank_day%;
+
+    13,   true, false -> "Before: Not Categories SIM/EDU/REC",
+                         not first(trip(wop), trip.%category_code% in SGT_avoid_categories);
+    13,  false, false -> "After: Not Categories SIM/EDU/REC",
+                         not last(trip(wop), trip.%category_code% in SGT_avoid_categories);
+
+    14,   true, false -> "Before: Not training attribute",
+                         not first(trip(wop), any(leg(trip), attributes.%leg_has_training_code%));
+    14,  false, false -> "After: Not training attribute",
+                         not last(trip(wop), any(leg(trip), attributes.%leg_has_training_code%));
+
+    15,   true,  true -> "Day Before: In production block",
+                         crew.%in_production_block%(wop.%start_day% - 24:00);
+    15,   true, false -> "Before: In production block",
+                         crew.%in_production_block%(wop.%start_day%);
+    15,  false,  true -> "Day After: In production block",
+                         crew.%in_production_block%(wop.%end_day% + 24:00);
+    15,  false, false -> "After: In production block",
+                         crew.%in_production_block%(wop.%end_day%);
+
+    16,   true,     - -> "Day Before/Before: Not vacation",
+                         not wop.%is_vacation%;
+
+    17,   true,  true -> "Day Before: No other activity on that day",
+                         not (prev(wop(chain), wop.%end_day% + 24:00) = wop.%start_day%);
+    17,  false,  true -> "Day After: No other activity on that day",
+                         not (next(wop(chain), wop.%start_day% - 24:00) = wop.%end_day%);
+
+    18,   true, false -> "Before: Check wop CI vs CO time (FC only)",
+                         if not %flight_crew% then true else
+                         rules_indust_ccr.%co_time_not_zero%
+                         <= rules_indust_ccr.%ci_time_at_co_day_plus_offset% - %SGT_buffer% - %SGT_activity_duration%;
+    18,   true,  true -> "Day Before: Check wop CI vs CO time (FC only)",
+                         if not %flight_crew% then true else
+                         rules_indust_ccr.%co_time_not_zero%
+                         <= (rules_indust_ccr.%co_time_not_zero% - time_of_day(rules_indust_ccr.%co_time_not_zero%)
+                            + time_of_day(%wop_extension_with_SGT%(before, separate_day)) + rules_indust_ccr.%ci_co_offset_p%);
+    18,  false,     - -> "Day After/After: Check wop CI vs CO time (FC only)",
+                         if not %flight_crew% then true else
+                         rules_indust_ccr.%co_time_not_zero% + %SGT_buffer% + %SGT_activity_duration%
+                         <= rules_indust_ccr.%ci_time_at_co_day_plus_offset%;
+
+    19,  false,  true -> "Day After: Not after crew available end",
+                         (wop.%end_day% + 24:00) < crew.%available_end%;
+
+    20,   true, false -> "Before: Do not exceed special schedule MaxLegs",
+                         if first(trip(wop), crew.%has_spec_sched_in_trip%("MaxLegs")) then
+                            first(duty(wop), duty.%num_legs% + 1 <= crew.%_spec_sched_limit_int_to%("MaxLegs", duty.%start_day%))
+                         else
+                            true;
+    20,  false, false -> "After: Do not exceed special schedule MaxLegs",
+                         if last(trip(wop), crew.%has_spec_sched_in_trip%("MaxLegs")) then
+                            last(duty(wop), duty.%num_legs% + 1 <= crew.%_spec_sched_limit_int_to%("MaxLegs", duty.%start_day%))
+                         else
+                            true;
+
+    21,      -,  true -> "Day Before/After: Do not violate special schedule time off",
+                         void(crew.%spec_sched_limit_none%("TimeOff", %SGT_start_time%(before, separate_day)));
+
+     -,      -,     - -> void_string, true;
+end
+
+/* When linking an SGT next to an off duty, sometimes it closes the
+   distance to an on duty wop and so takes up 2 freedays */
+%SGT_on_separate_day_uses_two_days%(bool before) =
+    if wop.%is_on_duty% then false else
+    if before then
+        if prev(wop(chain), wop.%is_on_duty%) then
+            prev(wop(chain), last(trip(wop), trip.%days_between_trips%)) <= trip.%min_valid_freedays%
+        else
+            false
+    else
+        if next(wop(chain), wop.%is_on_duty%) then
+            last(trip(wop), trip.%days_between_trips%) <= trip.%min_valid_freedays%
+        else
+            false;
+%SGT_freeday_modifier%(bool before) =
+    default(if %SGT_on_separate_day_uses_two_days%(before) then 2 else 1, 1);
+
+/* 1 if the SGT touches the weekend */
+%SGT_weekend_modifier%(bool before, bool separate_day) =
+    let date = %SGT_start_time%(before, separate_day),
+        day_of_week = base_calendar.%wd_from_abs%(date);
+    if day_of_week = base_calendar.%saturday%
+        or day_of_week = base_calendar.%sunday%
+        or base_calendar.%is_holiday_cat%(date, "SE", base_calendar.%hol_cat_weekend_freeday%)
+    then 1 else 0;
+
+%SGT_legality_ok%(bool before, bool separate_day) =
+    all(times(19), %SGT_legality%(base_utils.%ti0%, before, separate_day))
+    where(%SGT_valid%(base_utils.%ti0%, before, separate_day));
+table SGT_legality(int ix, bool before, bool separate_day) =
+    ix, before, separate_day
+        -> string %SGT_legality_text%,
+           bool %SGT_valid%,
+           bool %SGT_legality%;
+
+     1,      -,  true -> "Day Before/After: Min freeday per month",
+                         /* only check if crew need freeday check */
+                         model_freedays.%fdc_valid%(crew.%id%, %pp_start%, round_up_month(%pp_start% + 0:01)),
+                         /* pretend less freedays */
+                         (freedays.%crew_month_possibly_scheduled%(%pp_start%, round_up_month(%pp_start% + 0:01))
+                          - %SGT_freeday_modifier%(before))
+                         >= bunkering.%crew_month_entitled_freedays%(%pp_start%, round_up_month(%pp_start% + 0:01));
+
+     2,      -,  true -> "Day Before/After: Min freeday per month",
+                         wop.%start_month_start% >= %pp_start% and bunkering.%min_required_in_1_month% > 0,
+                         freedays.%nr_qualifying_in_1_month% - %SGT_freeday_modifier%(before)
+                         >= bunkering.%min_required_in_1_month%;
+
+     3,  false,  true -> "Day After: Min freeday per month (carry-in wop)",
+                         wop.%start_month_start% < %pp_start% and wop.%end_month_start% >= %pp_start%
+                         and default(next(wop(chain), bunkering.%min_required_in_1_month% > 0)
+                                        where (wop.%start_month_start% >= %pp_start%), false),
+                         next(wop(chain), freedays.%nr_qualifying_in_1_month%) where (wop.%start_month_start% >= %pp_start%)
+                            - %SGT_freeday_modifier%(before)
+                         >= next(wop(chain), bunkering.%min_required_in_1_month%) where (wop.%start_month_start% >= %pp_start%);
+
+     4,   true,  true -> "Day Before: Max working days between freedays",
+                         /* use rule legality */
+                         prev(wop(chain), rules_indust_ccr.%ind_max_working_days_btw_freedays_ALL_valid%),
+                         /* Pretend extra work days */
+                         prev(wop(chain), freedays.%work_days_btw_freedays% + next(wop(chain), %SGT_freeday_modifier%(before))
+                                          <= rules_indust_ccr.%max_days_btw_freedays%);
+     4,  false,  true -> "Day After: Max working days between freedays",
+                         /* use rule legality */
+                         rules_indust_ccr.%ind_max_working_days_btw_freedays_ALL_valid%,
+                         /* Pretend extra work days */
+                         freedays.%work_days_btw_freedays% + %SGT_freeday_modifier%(before)
+                         <= rules_indust_ccr.%max_days_btw_freedays%;
+
+     5,      -,  true -> "Yearly freeday balance",
+                         /* only check if crew need freeday check */
+                         model_freedays.%fdc_valid%(crew.%id%, %pp_start%, round_up_month(%pp_start% + 0:01)),
+                         /* pretend less freedays */
+                         rules_indust_ccr.%fdc15_balance_pp_start% + %SGT_freeday_modifier%(before)
+                         <= freedays.%fdc15_month_margin%(%pp_start%, 0);
+
+     6,   true,  true -> "Day Before: Min freedays preceding on duty wop",
+                         /* use rule legality */
+                         wop.%is_on_duty% and
+                         default(
+                            prev(wop(chain), last(duty(wop), rules_indust_ccr.%ind_min_freedays_after_duty_all_VALID%))
+                                where(wop.%is_on_duty%), false),
+                         /* pretend less freedays */
+                         prev(wop(chain), last(duty(wop), nmin(freedays.%freedays_after_duty%,
+                                                               wop.%days_to_next_on_duty_wop%)
+                                                          - next(wop(chain), %SGT_freeday_modifier%(before))
+                                            >= freedays.%min_required_freedays_after_duty_total%))
+                            where(wop.%is_on_duty%);
+
+     7,  false,  true -> "Day After: Min freedays following on duty wop",
+                         /* use rule legality */
+                         wop.%is_on_duty% and
+                         last(duty(wop), rules_indust_ccr.%ind_min_freedays_after_duty_all_VALID%),
+                         /* pretend less freedays */
+                         last(duty(wop), freedays.%freedays_after_duty% - %SGT_freeday_modifier%(before)
+                            >= freedays.%min_required_freedays_after_duty_total%);
+
+                         /* Adding SGT to a 4 day wop to make it 5 day needs an extra freeday */
+     8,  false,  true -> "Day After: Min freedays following on duty extended wop",
+                         /* use rule legality */
+                         wop.%is_on_duty% and wop.%days% = 4 and
+                         last(duty(wop), rules_indust_ccr.%ind_min_freedays_after_duty_all_VALID%),
+                         /* pretend less freedays vs extended minimum */
+                         last(duty(wop), freedays.%freedays_after_duty% - %SGT_freeday_modifier%(before)
+                            >= freedays.%min_required_freedays_after_duty_total% + 1);
+
+     9,      -,  true -> "Day Before/After: Min freedays preceding off duty wop",
+                         /* use rule legality */
+                         not wop.%is_on_duty% and
+                         default(
+                            prev(wop(chain), last(duty(wop), rules_indust_ccr.%ind_min_freedays_after_duty_all_VALID%))
+                                where(wop.%is_on_duty%), false),
+                         /* pretend less freedays, truncating to placement of SGT */
+                         prev(wop(chain), last(duty(wop), nmin(freedays.%freedays_after_duty%,
+                                                               wop.%days_to_next_on_duty_wop%,
+                                                               (round_down(%SGT_start_time%(before, separate_day), 24:00)
+                                                                  - wop.%end_day% - 24:00) / 24:00)
+                                                          >= freedays.%min_required_freedays_after_duty_total%))
+                            where(wop.%is_on_duty%);
+
+                         /* If wop < 5 days the above checks 4/5 will not have triggered as FD VG freedays
+                            only required when wop is 5 days long and the min_required is 0 otherwise */
+    10,    true,  true -> "Day Before: FD VG special case Min freedays preceding wop",
+                         /* check FD VG with < 5 day wop and use rule legality */
+                         %flight_crew% and crew.%in_variable_group_pp_start% and wop.%days% < 5
+                         and prev(wop(chain), last(duty(wop), rules_indust_ccr.%ind_min_freedays_after_duty_all_VALID%)),
+                         /* The worst case is 3 days required, check for that while pretending we have less */
+                         prev(wop(chain), last(duty(wop), freedays.%freedays_after_duty% -
+                                                          next(wop(chain), %SGT_freeday_modifier%(before))) >= 3)
+                         and
+                         /* Also check that if this wop will become 5+ days, enough freedays afterwards */
+                         (if wop.%days% >= 4 then last(duty(wop), freedays.%freedays_after_duty% >= 3) else true);
+
+    11,  false,  true -> "Day After: FD VG special case Min freedays following wop",
+                         /* check FD VG with < 5 day wop and use rule legality */
+                         %flight_crew% and crew.%in_variable_group_pp_start% and wop.%days% < 5
+                         and last(duty(wop), rules_indust_ccr.%ind_min_freedays_after_duty_all_VALID%),
+                         /* The worst case is 3 days required, check for that while pretending we have less */
+                         last(duty(wop), freedays.%freedays_after_duty% - %SGT_freeday_modifier%(before)) >= 3;
+
+    12,   true, false -> "Before: Meal breaks",
+                         /* Check depending on parameter */
+                         not %SGT_ignores_meal_break%,
+                         /* Extend duty by SGT time vs meal break times */
+                         first(duty(wop),
+                            default(first(leg(duty), (meal.%time_to_next_meal_break%
+                                                      + %SGT_activity_duration%
+                                                      + %SGT_buffer%) <= meal.%max_time_btw_meal_breaks%)
+                                        where(meal.%is_meal_break_ok%),
+                                    (duty.%time% + %SGT_activity_duration% + %SGT_buffer%)
+                                    <= first(leg(duty), meal.%max_time_to_first_meal_break%)));
+
+    12,  false, false -> "After: Meal breaks",
+                         /* Check depending on parameter */
+                         not %SGT_ignores_meal_break%,
+                         /* Extend duty by SGT time vs meal break times */
+                         last(duty(wop),
+                            last(leg(duty), (meal.%time_to_next_meal_break%
+                                             + leg.%check_out%
+                                             + %SGT_activity_duration%
+                                             + %SGT_buffer%) <= meal.%max_time_btw_meal_breaks%));
+
+    13,  false,  true -> "Day After: Min freedays before vacation",
+                         /* use rule legality */
+                         next(wop(chain), first(duty(wop), rules_indust_ccr.%ind_min_freedays_in_cnx_with_VA_ALL_valid%)),
+                         /* pretend less freedays */
+                         next(wop(chain), first(duty(wop), freedays.%nr_before_VA%
+                                                           - prev(wop(chain),%SGT_freeday_modifier%(before))
+                                                           >= freedays.%min_before_VA%));
+
+    14,      -,     - -> "All cases: Do not block free weekend",
+                         true,
+                         overlap(accumulators.%last_free_weekend%(freedays.%free_we_period_end_by_date%(%pp_start%)),
+                                 accumulators.%last_free_weekend%(freedays.%free_we_period_end_by_date%(%pp_start%))
+                                    + freedays.%free_we_length%,
+                                 %SGT_start_time%(before, separate_day),
+                                 %SGT_start_time%(before, separate_day) + %SGT_activity_duration%) = 0:00;
+
+    15,   true, false -> "Before: Watch late checkout in previous wop",
+                         true,
+                         prev(wop(chain), last(trip(wop), (rules_indust_ccr.%planned_check_out%
+                                                           + %SGT_buffer% + %SGT_activity_duration%)
+                                                          <= rules_indust_ccr.%check_out_time_limit%));
+
+                         /* If any extra rest is required, don't use for SGT */
+    16,   true,  true -> "Day Before: Minimum buffered rest before trip",
+                         first(trip(wop), rest.%additional_rest_for_flight_before% > 0:00),
+                         false;
+    16,  false,  true -> "Day After: Minimum buffered rest after trip",
+                         last(trip(wop), rest.%additional_rest_for_flight_after% > 0:00),
+                         false;
+
+    17,      -,  true -> "Day Before/After: Do not block additional free weekend days (Cabin)",
+                         not %flight_crew% and rules_indust_ccr.%ind_additional_weekend_days_in_period_sks_valid_crew%,
+                         rules_indust_ccr.%sum_of_additional_weekend_days_in_period%(%pp_start%)
+                            - %SGT_weekend_modifier%(before, separate_day) >= 2;
+
+    18,      -,     - -> "All cases: Max duty time in calendar month for parttime crew (Cabin)",
+                         not %flight_crew%
+                         and rules_indust_ccr.%ind_max_duty_time_in_calendar_month_pt_cc_parttime_SKS_monthly_parttime_SKD_valid%,
+                         accumulators.%duty_time_planned_skd%(
+                            round_down_month(%pp_start%), round_up_month(%pp_start% + 0:01)) + %SGT_activity_duration%
+                         <= duty_time.%max_duty_in_calendar_month_pt_cc%(%pp_start%);
+
+    19,      -,     - -> "All cases: Max duty time in 7 days",
+                         wop.%is_on_duty%,
+                         last(duty(wop), duty_time.%7_days_start_day%
+                                          + theme_prod.%p_buffer_max_duty_time_7_days%
+                                          + %SGT_activity_duration%
+                                          <= rules_indust_ccr.%max_duty_time_in_7_days%);
+
+     -,      -,     - -> void_string, true, true;
+end
+
+/* Pick SGT start time
+        Same day > Different day, Before > After */
+%chosen_start_time_for_SGT_activity% =
+    default(first(wop(roster), %SGT_start_time%(true, false))
+                where (wop.%touches_pp%
+                       and %wop_is_candidate_for_SGT_activity%(true, false)
+                       and not %SGT_must_be_on_separate_day%(true)),
+    default(first(wop(roster), %SGT_start_time%(false, false))
+                where (wop.%touches_pp%
+                       and %wop_is_candidate_for_SGT_activity%(false, false)
+                       and not %SGT_must_be_on_separate_day%(false)),
+    default(first(wop(roster), %SGT_start_time%(true, true))
+                where (wop.%touches_pp%
+                       and %wop_is_candidate_for_SGT_activity%(true, true)),
+    default(first(wop(roster), %SGT_start_time%(false, true))
+                where (wop.%touches_pp%
+                       and %wop_is_candidate_for_SGT_activity%(false, true)),
+            1jan86))));
+
+%chosen_start_time_for_SGT_activity_makes_sense% =
+    %chosen_start_time_for_SGT_activity% >= %pp_start%;
+
+/* Rule is only checked when there is something that might provide SGT
+   Off duty excepted from this check even though they can provide SGT to avoid
+   problems with illegal rosters when no work is assigned yet */
+%any_potential_SGT% =
+    any(wop(roster), %has_SGT_potential%(true, false)
+                     or %has_SGT_potential%(false, true)
+                     or %has_SGT_potential%(true, true)
+                     or %has_SGT_potential%(false, true))
+    where(wop.%touches_pp% and wop.%is_on_duty%);
+
+rule leave_room_for_SGT_activity =
+    valid roster.%check_rules%
+          and %SGT_assign_target% = 0
+          and %SGT_needed%
+          and %any_potential_SGT%
+          and rule_exceptions.%rule_on%(%pp_start%);
+
+    %chosen_start_time_for_SGT_activity_makes_sense%;
+
+    startdate = %pp_start%;
+    failtext "Need to leave room for a short ground training activity";
+    remark "Rule: Leave room for short ground training activity";
+end
+
+/* The constraint works as a counterweight to the cost.
+   As each SGT is assigned the cost reduces. Once the maximum is reached,
+   the constraint cost increases by the same amount as the reduction making it
+   a net 0 effect on the cost to assign more SGT. This means it will no longer
+   drive the optimiser to assign more SGT, but will not stop an SGT being assigned to
+   additional crew if it makes no other difference to do so. */
+constraint max_desired_crew_on_SGT =
+    valid %SGT_activity_code% <> ""
+          and %SGT_assign_target% > 0;
+
+    count(sp_crew_chains)
+    where(%chosen_start_time_for_SGT_activity_makes_sense%)
+    <= %SGT_assign_target%;
+
+    cost = %SGT_cost%;
+    remark "Constraint: Max crew on SGT";
+end
+
+/* used by cost */
+redefine export %missing_SGT% =
+    %SGT_needed%
+    and not %chosen_start_time_for_SGT_activity_makes_sense%;
+
+/* used by script to identify who to assign to */
+export %SGT_to_be_assigned% =
+    %SGT_needed%
+    and %chosen_start_time_for_SGT_activity_makes_sense%;
+
+/* end of file */

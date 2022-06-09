@@ -1,0 +1,989 @@
+/* -*- crc -*- * 
+ * 
+ * Purpose:
+ *   This module contains functional rules common to CC, FC, rostering and tracking.
+ *
+ * Sections:
+ *   1. Soft rules
+ *
+ * Created by:
+ *   Henrik Mouritsen, 20071010
+ *
+ * Major changes:
+ *
+ */
+
+root module rules_soft_ccr_cct
+
+import roster;
+import fundamental;
+import levels;
+import crew;
+import crew_pos;
+import oma16;
+import wop;
+import trip;
+import duty;
+import leg;
+import rule_exceptions;
+import training;
+import rules;
+import base_product;
+
+/****************************************************************
+ * Section 1: Soft rules
+ ***************************************************************/
+
+/*
+** Rule:
+**    Prevent check out after midnight from overlapping next
+**    activity.
+**
+** Description:
+**    Functional rule for optimisation and manually assignments.
+*/
+rule sft_no_midnight_overlap_ALL =
+  valid roster.%check_rules% and
+        fundamental.%is_roster% and 
+        trip.%in_pp_extended% and
+        trip.%is_complete% and
+        trip.%has_flight_duty% and 
+        last(duty(trip), duty.%check_out_after_midnight%) and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+
+  %trip_no_midnight_overlap%; 
+
+  startdate = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = next(trip(roster), trip.%failobject_start%);
+  failtext "Soft: Overlap with check out after midnight";
+  remark "(CCR) Soft: Overlap with trip checking out after midnight";
+end
+
+%trip_no_midnight_overlap% =
+  default(last(duty(trip), duty.%end_hb%) < next(trip(roster), trip.%start_hb%), true); 
+  
+/****************************************************************
+ * Section 2: Special schedule rules
+ ***************************************************************/
+/*
+** Rule:
+**    Special schedule forbidden activity
+**
+** Description:
+**    Check that crew is not assigned a forbidden activity as defined in 
+**    special schedule table. Either the task group code or the task code
+**    may be entered.
+**
+**    NB! It is assumed that only activities on trip level is defined
+**        as forbidden activities.
+*/
+rule sft_spec_sched_forbidden_act_ALL =
+  valid roster.%check_rules% and
+        crew.%has_spec_sched% and
+        wop.%in_pp% and
+        crew.%has_spec_sched_in_trip%("ForbiddenAct") and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+  all(duty(trip), %spec_sched_act_ok%);
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = trip.%failobject_start%;
+  failtext
+    concat("SpecSched: Activity ", %task_group_or_code_failtext%, ", not allowed");
+  remark "(CCR) SpecSched: Forbidden activity",
+  planner "Check that crew is not assigned a trip with forbidden"
+          " activity as defined in special schedule table. The"
+          " task group code should be entered, along with valid dates";
+end
+
+%spec_sched_act_ok% =
+  void(default(%spec_sched_task_category%,
+               default(%spec_sched_task_group%, %spec_sched_task_code%)));
+%spec_sched_task_category% =
+  crew.%spec_sched_limit_str%("ForbiddenAct", duty.%category_code%, duty.%start_day%);
+%spec_sched_task_group% =
+  crew.%spec_sched_limit_str%("ForbiddenAct", duty.%group_code%, duty.%start_day%);
+%spec_sched_task_code% =
+  crew.%spec_sched_limit_str%("ForbiddenAct", duty.%code%, duty.%start_day%);
+
+%task_group_or_code_failtext% =
+  first(duty(trip), %_task_group_or_code_failtext%)
+  where (not %spec_sched_act_ok%);
+
+%_task_group_or_code_failtext% =
+  if not void(%spec_sched_task_category%) then
+    concat("category ", duty.%category_code%)
+  else if not void(%spec_sched_task_group%) then
+    concat("group ", duty.%group_code%)
+  else
+    concat("code ", duty.%code%);
+
+/*
+** Rule:
+**    Special schedule not below rank
+**
+** Description:
+**    Check that crew defined in special schedule table acting as lower is not
+**    defined as forbidden to fly lower.
+*/
+rule sft_spec_sched_forbidden_lower_rank_FC =
+  valid roster.%check_rules% and
+        crew.%has_spec_sched% and
+        wop.%in_pp% and
+        wop.%is_on_duty% and
+        trip.%has_flight_duty% and
+        crew.%has_spec_sched_in_trip%("ForbiddenAct") and
+        crew_pos.%trip_lower_rank% and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+        
+  %spec_sched_lower_rank_ok%;
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = trip.%failobject_start%;
+  failtext "SpecSched: Below rank not allowed"; /* in period ddmmmyyyy-ddmmmyyyy";*/
+  remark "(CCR) SpecSched: Forbidden to fly as lower rank",
+  planner "Check that crew is not assigned a trip acting as lower"
+          " rank, as defined in special schedule table. The text"
+          " Lower should be entered, along with valid dates.";
+end
+
+%spec_sched_lower_rank_ok% = 
+  void(crew.%spec_sched_limit_str%("ForbiddenAct", "LOWER", trip.%start_hb%));
+
+/*
+** Rule:
+**    Special schedule forbidden aircraft family
+**
+** Description:
+**    Check that crew is not assigned a forbidden aircraft family
+**    as defined in special schedule table.
+**
+**    NB! The rule is defined on trip level thus checking if any
+**        leg in trip is flown with forbidden aircraft.
+** Pergr 09Sep2008, WP CCR 370, also possible to forbid acqual
+*/
+rule sft_spec_sched_forbidden_ac_fam_ALL =
+  valid roster.%check_rules% and
+        crew.%has_spec_sched% and
+        wop.%in_pp% and
+        wop.%is_on_duty% and
+        trip.%has_flight_duty% and
+        crew.%has_spec_sched_in_trip%("ForbiddenAcFam") and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+        
+  not %trip_forbidden_ac%;
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = first(leg(trip), leg.%failobject_departure%)
+               where (%leg_forbidden_ac_fam%);
+  failtext
+    concat("SpecSched: Aircraft ", %forbidden_ac_string%, 
+           ", not allowed");
+  remark "(CCR) SpecSched: Forbidden aircraft family or qual",
+  planner "Check that crew is not assigned a trip with a forbidden"
+          " aircraft family or qual as defined in special schedule table. The"
+          " ac family name should be entered, along with valid dates";
+end
+%trip_forbidden_ac% = %trip_forbidden_ac_fam% or %trip_forbidden_ac_qual%;
+%trip_forbidden_ac_fam% = any(duty(trip), %duty_forbidden_ac_fam%);
+%duty_forbidden_ac_fam% =
+  any(leg(duty), %leg_forbidden_ac_fam%)
+  where (leg.%is_active_flight%);
+  
+%leg_forbidden_ac_fam% =
+  not void(crew.%spec_sched_limit_str%("ForbiddenAcFam", leg.%ac_family%, leg.%start_date%));
+  
+%trip_forbidden_ac_qual% = any(duty(trip), %duty_forbidden_ac_qual%);
+%duty_forbidden_ac_qual% =
+  any(leg(duty), %leg_forbidden_ac_qual%)
+  where (leg.%is_active_flight%);
+  
+%leg_forbidden_ac_qual% =
+  not void(crew.%spec_sched_limit_str%("ForbiddenAcFam", leg.%qual%, leg.%start_date%)) ;
+
+%forbidden_ac_string% =
+    let qual_str = default(%first_forbidden_qual%,""),
+        fam_str = %forbidden_ac_fams%;
+    if (%trip_forbidden_ac_qual% and %trip_forbidden_ac_fam%)
+    then
+        concat(qual_str,", ",fam_str)  
+    else if %trip_forbidden_ac_qual%
+    then
+        qual_str
+    else    
+        fam_str;
+        
+%first_forbidden_qual% = 
+   first(leg(trip), leg.%qual%) where(%leg_forbidden_ac_qual%);
+%first_forbidden_fam% = 
+   first(leg(trip), leg.%ac_family%) where(%leg_forbidden_ac_fam%);
+   
+%forbidden_ac_fams% = 
+   let qual_str = default(cat(times(3),default(%qual_to_fam%(%times_index_0%),""),",") 
+                    where (%qual_forbidden%(%times_index_0%)),"");
+   if qual_str <> ""
+   then qual_str
+   else /*Default, in case crew has no matching qual */
+    default(%first_forbidden_fam%,"");
+
+%qual_forbidden%(Int ix) =
+        not void(crew.%spec_sched_limit_str%("ForbiddenAcFam", 
+                                              %qual_to_fam%(ix),
+                                              trip.%start_hb%)) 
+        or 
+        not void(crew.%spec_sched_limit_str%("ForbiddenAcFam", 
+                                              %qual_to_fam%(ix),
+                                              trip.%end_hb%));
+%qual_to_fam%(Int ix) = 
+ leg.%_ac_family%(leg.%ac_type_by_qual%(default(crew.%ac_qln_at_date_ix%(trip.%start_hb%,ix),"")));  
+                                         
+/*
+** Rule:
+**    Special schedule trip length
+**
+** Description:
+**    Check that crew is not assigned a trip length shorter or longer than
+**    the allowed interval as defined in special schedule table.
+*/
+rule sft_spec_sched_trip_length_ALL =
+  valid roster.%check_rules% and
+        crew.%has_spec_sched% and
+        (trip.%starts_in_pp% or trip.%ends_in_pp%) and
+        trip.%is_on_duty% and
+        trip.%has_flight_duty% and
+        crew.%has_spec_sched_in_trip%("TripLength") and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+        
+  %spec_sched_trip_length_ok%;
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = trip.%failobject_start%;
+  failtext %spec_sched_trip_length_failtext%;
+  remark "(CCR) SpecSched: Max trip length",
+  planner "Check that crew is not assigned a trip length outside"
+          " the intervals defined in special schedule table. The"
+          " min allowed and max allowed trip length should be"
+          " entered, along with valid dates";
+end
+
+%spec_sched_trip_length_ok% =
+  if void(crew.%spec_sched_limit_int%("TripLength", trip.%days%, trip.%start_day%))
+  then not void(crew.%spec_sched_limit_int%("TripLength", trip.%days%, trip.%end_day%))
+  else true;
+
+%spec_sched_trip_length_failtext% =
+  let value = trip.%days%,
+      lower = if void(crew.%_spec_sched_limit_int_from%("TripLength", trip.%start_day%))
+              then crew.%_spec_sched_limit_int_from%("TripLength", trip.%end_day%)
+              else crew.%_spec_sched_limit_int_from%("TripLength", trip.%start_day%),
+      upper = if void(crew.%_spec_sched_limit_int_to%("TripLength", trip.%start_day%))
+              then crew.%_spec_sched_limit_int_to%("TripLength", trip.%end_day%)
+              else crew.%_spec_sched_limit_int_to%("TripLength", trip.%start_day%),
+      limit = if lower = upper
+              then format_int(upper, "%i day")
+              else concat(format_int(lower, "%i-"), format_int(upper, "%i day"));
+  concat(format_int(value, "SpecSched: Trip length is %i day"), %plural%(value),
+         ", only ", limit, " trips allowed");
+
+/*
+** Rule:
+**    Special schedule time off
+**
+** Description:
+**    Check that crew is not assigned an on duty activity if the date and 
+**    valid weekday is entered in the special schedule table as only time off.
+**
+**    NB! The rule is checked on trip level for performance reasons. This implies
+**        that if several duties are illegal only the first duty will raise an
+**        illegality, i.e. it may look like it's only one illegal duty.
+*/
+rule sft_spec_sched_time_off_ALL =
+  valid roster.%check_rules% and
+        crew.%has_spec_sched% and
+        wop.%in_pp% and
+        wop.%is_on_duty% and
+        crew.%has_spec_sched_in_trip%("TimeOff") and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+        
+  %spec_sched_time_off_ok%;
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = first(duty(trip), duty.%failobject_start%)
+               where (not void(%_spec_sched_time_off_ok%) and duty.%is_on_duty%);
+  failtext %spec_sched_time_off_failtext%;
+  remark "(CCR) SpecSched: Time off",
+  planner "Check that crew is not assigned a trip that has an on duty"
+          " activity on a time off day defined in special schedule table."
+          " The valid weekdays (in interval 1-7) should be entered,"
+          " along with valid dates";
+end
+
+%spec_sched_time_off_ok% = 
+  all(duty(trip), void(%_spec_sched_time_off_ok%))
+  where (duty.%is_on_duty%);
+
+%_spec_sched_time_off_ok% =
+  default(
+    crew.%spec_sched_limit_int%("TimeOff", duty.%start_weekday%, duty.%start_day%),
+  crew.%spec_sched_limit_int%("TimeOff", duty.%end_weekday%, duty.%end_day%));
+
+%spec_sched_time_off_failtext% =
+  let value = first(duty(trip), duty.%code%)
+              where (not void(%_spec_sched_time_off_ok%) and duty.%is_on_duty%);
+  concat("SpecSched: Activity ", value, 
+         " not allowed, only off duty activities");
+
+/*
+** Rule:
+**    Special schedule check in
+**
+** Description:
+**    Check that crew is not assigned a duty with a check in time on a valid
+**    weekday earlier than defined in special schedule table.
+**
+**    NB! The rule is checked on trip level for performance reasons. This implies
+**        that if several duties are illegal only the first duty will raise an
+**        illegality, i.e. it may look like it's only one illegal duty.
+*/
+rule sft_spec_sched_ci_ALL =
+  valid roster.%check_rules% and
+        crew.%has_spec_sched% and
+        wop.%in_pp% and
+        wop.%is_on_duty% and
+        trip.%has_flight_duty% and
+        crew.%has_spec_sched_in_trip%("CheckIn") and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+  %spec_sched_ci_ok%;
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = first(duty(trip), duty.%failobject_start%);
+  failtext %spec_sched_ci_failtext%;
+  remark "(CCR) SpecSched: Earliest c/i",
+  planner "Check that crew is not assigned a trip with a duty with"
+          " check in time earlier than defined in special schedule"
+          " table. The valid weekdays (in interval 1-7) should be"
+          " entered, along with valid dates";
+end
+
+%spec_sched_ci_ok% =
+  first(duty(trip), %_spec_sched_ci_ok%) or
+  %spec_sched_ci_trip_does_not_span_limit%;
+  
+%_spec_sched_ci_ok% =
+  default(duty.%start_od% >= %spec_sched_ci_time_limit%,false);
+
+%spec_sched_ci_time_limit% =
+  crew.%spec_sched_limit_time%("CheckIn", duty.%start_weekday%, duty.%start_day%);
+
+%spec_sched_ci_trip_does_not_span_limit% =
+  void(%spec_sched_ci_trip_spans_limit_time%);
+
+%spec_sched_ci_trip_spans_limit_time% = 
+  crew.%spec_sched_limit_span_time%("CheckIn");
+
+%spec_sched_ci_failtext% =
+  let value = trip.%start_hb%,
+      limit = default(trip.%start_day% + first(duty(trip),%spec_sched_ci_time_limit%),
+                      crew.%spec_sched_limit_valid_from%("CheckIn") +
+                      %spec_sched_ci_trip_spans_limit_time%);
+  concat(format_time(value, "SpecSched: Check in time is %d%b%y %02H:%02M, "),
+         format_time(limit, "earliest start is %d%b%y %02H:%02M"));
+
+/*
+** Rule:
+**    Special schedule check out
+**
+** Description:
+**    Check that crew is not assigned a duty with a check out time on a valid
+**    weekday later than defined in special schedule table.
+**
+**    NB! The rule is checked on trip level for performance reasons. This implies
+**        that if several duties are illegal only the first duty will raise an
+**        illegality, i.e. it may look like it's only one illegal duty.
+*/
+rule sft_spec_sched_co_ALL =
+  valid roster.%check_rules% and
+        crew.%has_spec_sched% and
+        wop.%in_pp% and
+        wop.%is_on_duty% and
+        trip.%has_flight_duty% and
+        crew.%has_spec_sched_in_trip%("CheckOut") and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+        
+  %spec_sched_co_ok%;
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = last(duty(trip), duty.%failobject_end%);
+  failtext %spec_sched_co_failtext%;
+  remark "(CCR) SpecSched: Latest c/o",
+  planner "Check that crew is not assigned a trip with a duty with"
+          " check out time later than defined in special schedule"
+          " table. The valid weekdays (in interval 1-7) should be"
+          " entered, along with valid dates";
+end
+
+/*
+** OK if last duty check-out is on the day where there is a special latest
+** check-out and is not later than it, or if the trip doesn't span the special
+** check-out day.
+*/
+%spec_sched_co_ok% =
+  last(duty(trip), %_spec_sched_co_ok%) or
+  %spec_sched_co_trip_does_not_span_limit%;
+  
+%_spec_sched_co_ok% =
+  default(duty.%end_od% <= %spec_sched_co_time_limit%, false);
+  
+%spec_sched_co_time_limit% = 
+  crew.%spec_sched_limit_time%("CheckOut", duty.%start_weekday%, duty.%start_day%);
+  
+%spec_sched_co_trip_does_not_span_limit% =
+  void(%spec_sched_co_trip_spans_limit_time%);
+
+%spec_sched_co_trip_spans_limit_time% = 
+  crew.%spec_sched_limit_span_time%("CheckOut");
+
+%spec_sched_co_failtext% =
+  let value = trip.%end_hb%,
+      limit = default(trip.%end_day% + last(duty(trip),%spec_sched_co_time_limit%),
+                      crew.%spec_sched_limit_valid_from%("CheckOut") +
+                      %spec_sched_co_trip_spans_limit_time%);
+  concat(format_time(value, "SpecSched: Check out time is %d%b%y %02H:%02M, "),
+         format_time(limit, "latest end is %d%b%y %02H:%02M"));
+
+/*
+** Rule:
+**    Special schedule max duty per day
+**
+** Description:
+**    Check that crew is not assigned a duty with more duty time than defined
+**    in special schedule table.
+**
+**    NB! The rule is checked on trip level for performance reasons. This implies
+**        that if several duties are illegal only the first duty will raise an
+**        illegality, i.e. it may look like it's only one illegal duty.
+*/
+rule sft_spec_sched_duty_per_day_ALL =
+  valid roster.%check_rules% and
+        crew.%has_spec_sched% and
+        wop.%in_pp% and
+        wop.%is_on_duty% and
+        trip.%has_flight_duty% and
+        crew.%has_spec_sched_in_trip%("MaxDuty") and
+        not crew.%is_leased_duty_start%;
+  
+  duty.%duty_time_spec_sched%(duty.union, True) <=
+  %spec_sched_duty_time_limit% + rule_exceptions.%overshoot_rel%(duty.%start_utc%);
+
+  startdate  = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(Reltime value, Reltime limit) =
+    %spec_sched_duty_time_failtext%(value, limit);
+  remark "(CCR) SpecSched: Max duty per day",
+  planner "Check that crew is not assigned trip consisting of a duty"
+          " with duty time greater than defined in special schedule."
+          " The valid dates must also be entered";
+end
+
+%spec_sched_duty_time_limit% = 
+  crew.%_spec_sched_limit_time%("MaxDuty", duty.%start_day%);
+
+%spec_sched_duty_time_failtext%(Reltime value, Reltime limit) =
+  concat(format_time(value, "SpecSched: Duty time in duty day is %H:%02M, "),
+         format_time(limit, "max is %H:%02M hrs"));
+
+/*
+** Rule:
+**    Special schedule max legs
+**
+** Description:
+**    Check that crew is not assigned a duty with more legs than defined in
+**    special schedule table.
+**
+**    NB! The rule is checked on trip level for performance reasons. This implies
+**        that if several duties are illegal only the first duty will raise an
+**        illegality, i.e. it may look like it's only one illegal duty.
+*/
+rule sft_spec_sched_legs_in_duty_pass_ALL =
+  valid roster.%check_rules% and
+        crew.%has_spec_sched% and
+        wop.%in_pp% and
+        wop.%is_on_duty% and
+        trip.%has_flight_duty% and
+        crew.%has_spec_sched_in_trip%("MaxLegs") and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+        
+  %spec_sched_max_legs_ok%;
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = first(duty(trip), duty.%failobject_start%)
+               where (not %_spec_sched_max_legs_ok%);
+  failtext %spec_sched_max_legs_failtext%;
+  remark "(CCR) SpecSched: Max legs per duty pass",
+  planner "Check that crew is not assigned trip consisting of a duty pass"
+          " with more legs than defined in special schedule table."
+          " The valid dates must also be entered";
+end
+
+%spec_sched_max_legs_ok% = all(duty(trip), %_spec_sched_max_legs_ok%);
+%_spec_sched_max_legs_ok% =
+  duty.%num_legs% <= %spec_sched_max_legs_limit%;
+
+%spec_sched_max_legs_limit% = 
+  crew.%_spec_sched_limit_int_to%("MaxLegs", duty.%start_day%);
+
+%spec_sched_max_legs_failtext% =
+  let value = first(duty(trip), duty.%num_legs%)
+              where (not %_spec_sched_max_legs_ok%),
+      limit = first(duty(trip), %spec_sched_max_legs_limit%)
+              where (not %_spec_sched_max_legs_ok%);
+  concat(format_int(value, "SpecSched: Nr legs in duty pass is %i, "),
+         format_int(limit, "max is %i legs"));
+
+/*
+** Rule:
+**    Special schedule max blh per leg
+**
+** Description:
+**    Check that crew is assign a leg with more blh than defined in 
+**    special schedule table.
+**
+**    NB! The rule is checked on trip level for performance reasons. This implies
+**        that if several legs are illegal only the first leg will raise an
+**        illegality, i.e. it may look like it's only one illegal leg.
+*/
+rule sft_spec_sched_blh_per_leg_ALL =
+  valid roster.%check_rules% and
+        crew.%has_spec_sched% and
+        wop.%in_pp% and
+        wop.%is_on_duty% and
+        trip.%has_flight_duty% and
+        crew.%has_spec_sched_in_trip%("MaxBlh") and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+  
+  %spec_sched_max_blh_ok%;
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = first(leg(trip), leg.%failobject_departure%)
+               where (not %_spec_sched_max_blh_ok%);
+  failtext %spec_sched_max_blh_failtext%;
+  remark "SpecSched: Max blh per leg",
+  planner "Check that crew is not assigned a trip consisting of a"
+          " leg with more block hours than defined in special schedule"
+          " table. The valid dates must also be entered";
+end
+
+%spec_sched_max_blh_ok% = all(leg(trip), %_spec_sched_max_blh_ok%);
+%_spec_sched_max_blh_ok% = leg.%block_time% <= %spec_sched_max_blh_limit%;
+%spec_sched_max_blh_limit% = crew.%_spec_sched_limit_time%("MaxBlh", leg.%start_date%);
+
+%spec_sched_max_blh_failtext%=
+  let value = first(leg(trip), leg.%block_time%)
+              where (not %_spec_sched_max_blh_ok%),
+      limit = first(leg(trip), %spec_sched_max_blh_limit%)
+              where (not %_spec_sched_max_blh_ok%);
+  concat(format_time(value, "SpecSched: Blh in leg is %h:%02M, "),
+         format_time(limit, "max is %h:%02M hrs"));
+
+/*
+** Rule:
+**    Special schedule forbidden destination
+**
+** Description:
+**    Check that crew is not assigned a trip that touches a
+**    forbidden destination as defined in table.
+**
+**    NB! The rule is checked on trip level for performance reasons. This implies
+**        that if several legs are illegal only the first leg will raise an
+**        illegality, i.e. it may look like it's only one illegal leg.
+*/
+rule sft_spec_sched_forbidden_dest_ALL =
+  valid roster.%check_rules% and
+        crew.%has_spec_sched% and
+        wop.%in_pp% and
+        wop.%is_on_duty% and
+        trip.%has_flight_duty% and
+        crew.%has_spec_sched_in_trip%("ForbiddenDest") and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+        
+  %spec_sched_dest_ok%;
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = first(leg(trip), leg.%failobject_departure%)
+               where (not %_spec_sched_dest_ok%);
+  failtext %spec_sched_forbidden_dest_failtext%;
+  remark "(CCR) SpecSched: Forbidden destination",
+  planner "Check than crew is not assigned a trip that thouches"
+          " a forbidden destination, as defined in special schedule"
+          " table. The valid dates must also be entered.";
+end
+
+%spec_sched_dest_ok% = all(duty(trip), %spec_sched_dest_ok_duty%);
+%spec_sched_dest_ok_duty% = all(leg(duty), %_spec_sched_dest_ok%);
+%_spec_sched_dest_ok% = 
+  void(crew.%spec_sched_limit_str%("ForbiddenDest", leg.%end_station%, leg.%start_date%));
+
+%spec_sched_forbidden_dest_failtext% =
+  let value = first(leg(trip), leg.%end_station%)
+              where (not %_spec_sched_dest_ok%);
+  concat("SpecSched: Destination ", value, " is not allowed");
+
+/*
+** Rule: 
+**    Check that "inactive" crew are not given duty.
+**
+** Description:
+**    The rule check that inactive crew such as retired
+**    or crew with part_time_factor 0 doesnt receive any duty.
+**    It is assumed that crew can only change "active/inactive" state 
+**    once throughout wop duration.
+**
+** Agreement:
+**    Functional
+*/
+
+rule sft_no_duty_for_inactive_crew_ALL =
+  valid %is_roster% and
+        wop.%in_pp% and
+        wop.%is_on_duty% and
+        rule_exceptions.%rule_on%(wop.%start_hb%);
+
+  not crew.%is_inactive_at_date%(wop.%end_hb%);
+
+  startdate = wop.%start_hb%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = wop.%failobject_start%;
+  failtext "Soft: No duty for inactive crew";
+  remark "(CCR) Soft: No duty for inactive crew",
+  planner "The rule checks that crew doesnt receive production"
+	  " in an inactive state. An inactive state could be "
+	  " retirement. ";
+end
+
+/*
+** Rule:
+**    Not two trips in the same day
+**
+** Description:
+**    Functional rules preventing the optimiser and planner assign two duties on
+**    the same day. The section consists of 2 rules, one regulating trips inside
+**    wops and one regulating between wops.
+*/
+rule sft_not_two_trips_in_same_day_in_wop_ALL =
+  valid roster.%check_rules% and
+        wop.%in_pp% and
+        wop.%is_on_duty% and
+        not %_trip_skip_illness% and
+        not trip.%has_late_check_out% and
+        /* Standby callouts can break duty/trip - do not check */
+        not trip.%is_standby% and
+        not trip.%is_single_leg_standby_callout% and
+        not crew.%has_restr_training_capt_dct_foc_refr_wop_start% and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+        
+  trip.%end_day% < next(trip(wop),trip.%start_day%) 
+                        where (not %_trip_skip_illness% and
+                               not trip.%is_rest%);
+  startdate = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,
+                                                    %duty_lh_region%));
+  failobject = next(trip(wop), trip.%failobject_start%) 
+                    where (not %_trip_skip_illness%);
+  failtext "Soft: Not two trips in same day (in wop)";
+  remark "(CCR) Soft: Not two trips in the same day (in wop)";
+end
+
+%_trip_skip_illness% =
+  first(duty(trip), duty.%is_illness% or duty.%is_child_illness%);
+
+/* Old Comment: Is this really needed? Isn't this covered in freeday rules? */
+export rule sft_not_two_trips_in_same_day_btw_wop_ALL =
+  valid roster.%check_rules% and
+        wop.%in_pp% and
+        (wop.%is_off_duty% and
+         next(wop(chain), wop.%is_on_duty%) or
+         wop.%is_on_duty% and
+         next(wop(chain), wop.%is_off_duty%)) and
+        not crew.%is_leased_wop_start% and
+        rule_exceptions.%rule_on%(wop.%start_UTC%);
+  wop.%end_day% < next(wop(roster),wop.%start_day%);
+  severity = next(wop(roster),
+    first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%)));
+  failobject = next(wop(roster), wop.%failobject_start%);
+  startdate = wop.%start_UTC%;
+  failtext "Soft: Not two duties in the same day (btwn wop's)";
+  remark "(CCR) Soft: Not two duties in the same day (btwn wop's)";
+end
+
+/*
+** Rule:
+**    Certain qualifications not below rank
+**
+** Description:
+**    Check that crew with qual defined in parameter as forbidden to fly lower
+**    doesn't fly lower.
+*/
+rule (off) sft_qual_forbidden_lower_rank_FC =
+  valid roster.%check_rules% and
+        wop.%in_pp% and
+        wop.%is_on_duty% and
+        trip.%has_only_flight_duty% and
+        crew_pos.%trip_lower_rank% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+  not %crew_is_fbr_forbidden%;
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = trip.%failobject_start%;
+  failtext %qual_forbidden_fbr_failtext%;
+  remark "(CCR) FBR: Qualification forbidden to fly as lower rank",
+  planner "Check that crew is not assigned a trip acting as lower"
+          " rank, if having a qualification as defined in parameter.";
+end
+
+set quals_forbidden_fbr_p =
+  parameter "INSTR", "LCP"
+  remark "Qualifications not allowed for below rank";
+  
+%crew_is_fbr_forbidden% =
+    not void(%_qual_forbidden_fbr_failtext%);
+    
+%_qual_forbidden_fbr_failtext% =
+    if crew.%is_instructor_trip_start% and "INSTR" in quals_forbidden_fbr_p then 
+        "INSTR"
+    else if crew.%is_lcp_trip_start% and "LCP" in quals_forbidden_fbr_p then 
+        "LCP"
+    else void_string;
+
+%qual_forbidden_fbr_failtext% =
+    concat(%_qual_forbidden_fbr_failtext%, " not allowed to fly below rank");
+
+rule sft_correct_type_for_recurrent_ALL =
+  valid roster.%check_rules% and
+        %valid_sft_correct_type_for_recurrent%;
+        /* Shouldn't be rule excepted since functionality depends on it */
+  %trigger_sft_correct_type_for_recurrent%;
+  startdate = leg.%start_UTC%;
+  severity = %severity_filter_int%(leg.%start_hb%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %failtext_sft_correct_type_for_recurrent%;
+  remark "Func: Recurrent activities should be of correct type";
+end
+
+%valid_sft_correct_type_for_recurrent% =
+    (leg.%is_cc_rec% or
+     leg.%is_recurrent% and not leg.%is_rec% or
+     leg.%is_emg_pgt% or
+     leg.%is_ac_demo%) and
+    leg.%starts_in_pp%;
+
+export %trigger_sft_correct_type_for_recurrent% =
+    if training.%leg_is_rehearsal% or training.%leg_is_cabin_training% then
+        leg.%is_pact%
+    else if leg.%is_pgt% and training.%crew_needs_pgt_refresher% then
+        leg.%is_ground_duty_leg% and training.%leg_is_valid_pgt_refresher%
+    else if leg.%is_emg_pgt% and training.%valid_new_pgt_code% then
+        not training.%any_type_specific_pgt_before_leg_start%
+    else if leg.%is_ac_demo% then
+        training.%valid_ac_demo%
+    else
+        leg.%is_ground_duty_leg%;
+
+%failtext_sft_correct_type_for_recurrent% =
+    if training.%leg_is_rehearsal% then
+        "Rehearsal training should be personal activity"
+    else if training.%leg_is_cabin_training% then
+        "Cabin courses should be personal activity"
+    else if leg.%is_pgt% and training.%crew_needs_pgt_refresher% and leg.%is_ground_duty_leg% then
+        if training.%leg_is_valid_pgt_refresher%
+        then "Crew needs a PGT refresher"
+        else "PGT refresher should have correct code"
+    else if leg.%is_ac_demo% then
+        "AC Demo needs correct qualification code"
+    else if leg.%is_pgt% and training.%crew_needs_pgt_refresher% and leg.%is_pact% then
+        "PGT refresher should be ground duty"
+    else if leg.%is_pgt% and leg.%is_ground_duty_leg% then
+        "Crew should not have PGT refresher"
+    else if leg.%is_emg_pgt% then
+        "Emergency PGT shouldn't be after type specific PGT"
+    else
+        "Recurrent training should be ground duty";
+  
+
+/*
+** Rule:
+**    Crew with mismatching employment and contract should be illegal
+**
+** Description:
+**    If employment and contracts mismatch in any way, CMS cannot, with 
+**    certainty, know which area crew belongs to when fetching from database. 
+**    They will therefore be illegal until this is corrected.
+**
+** Functional rule:
+*/
+rule func_crew_correct_employment_and_contract_all =
+  valid %is_roster% and
+        crew.%has_mismatch%;
+  not crew.%has_uncorrected_mismatch%;
+  startdate = %crew_mismatch_start%;
+  failtext %crew_mismatch_failtext%;
+  severity =  %severity_filter_int_chain%(fundamental.%plan_start%);
+  failobject = %func_crew_correct_employment_and_contract_all_failobject%;
+  remark "Func: Crew must have matching contracts and employments";
+end
+
+%crew_mismatch_start% =
+    if crew.%has_employment_without_contract% then
+        crew.%first_day_wo_contract%
+    else
+        crew.%first_day_wo_employment%;
+        
+%crew_mismatch_failtext% =
+    concat("Crew lacks ",
+           if crew.%has_employment_without_contract% then "contract "
+           else "employment ",
+           format_time(%crew_mismatch_start%, " from %d%b%Y"));
+    
+%func_crew_correct_employment_and_contract_all_failobject% =
+  default(first(leg(chain), leg.%failobject_departure%) 
+          where(leg.%start_utc% > %now%),
+          first(leg(chain), leg.%failobject_departure%));
+          
+
+  
+rule sft_activity_not_allowed_on_day_ALL =
+  valid roster.%check_rules% and
+        leg.%in_pp% and
+        not leg.%is_flight_duty%;
+  training.%activity_allowed%;
+  startdate = leg.%start_UTC%;
+  failtext concat("Activity ", leg.%code%, " not allowed on ", format_time(round_down(leg.%start_hb%, 24:00),"%02d%02b%02y"));
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  remark "Soft: Activity not allowed on day",
+  planner "Checks that an activity is allowed on a day.";
+end
+     
+/*
+** Rule:
+**    Max 4 legs per day during the first 20 LIFUS / ZFTT LIFUS legs
+**
+*/
+
+%max_legs_per_day_first_20_lifus% = 4;
+
+
+rule sft_max_legs_per_day_first_20_lifus_legs = 
+    valid roster.%check_rules% and
+        duty.%in_pp% and
+        duty.%has_any_lifus% and
+        duty.%has_active_flight% and
+        first(leg(duty), training.%is_nth_any_lifus%(20));
+
+    duty.%num_active_legs% <= %max_legs_per_day_first_20_lifus% + rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+
+    startdate = duty.%start_UTC%;
+    severity =  %severity_filter_int%(duty.%start_utc%,%duty_lh_region%);
+    failtext "SOFT: Max 4 legs per day during first 20 LIFUS legs";
+    remark "SOFT: Max 4 legs per day, during first 20 LIFUS legs",
+    planner "Soft rule: According to STOOL LIFUS guidelines, the first 20 legs should",
+    " only be planned in duties containing less than 4 legs (SKCMS-297)";
+end
+
+/*
+** Rule:
+**  No extensions during the first 20 LIFUS legs
+** Flight duty time should not be extended during the first 20 LIFUS legs
+** If any of the 20 first legs are planned in a flight duty with extension,
+*/
+
+rule sft_no_fdp_extension_during_20_first_lifus_legs = 
+    valid roster.%check_rules% and
+        duty.%in_pp% and
+        duty.%has_any_lifus% and duty.%has_active_flight% and
+        not crew.%has_agmt_group_ski_fd% and
+        first(leg(duty), training.%is_nth_any_lifus%(20));
+
+        not oma16.%is_extended_fdp%;
+ 
+        startdate = duty.%start_UTC%;
+        severity = %severity_filter_int%(duty.%start_utc%, %duty_lh_region%);
+        failobject = first(leg(duty), leg.%failobject_departure%);
+        failtext "SOFT: No FDP with extension during first 20 LIFUS legs";
+        remark "SOFT: No FDP with extension during first 20 LIFUS legs",
+        planner "Soft rule: According to STOOL LIFUS guidelines, any ",
+        "flight duty period with extension should not be planned ",
+        "during the first 20 LIFUS legs (SKCMS-297)";
+end
+
+/*
+** Rule:
+**    Max heavy destination trips in calendar month
+**
+** Description:
+**    Soft rule to limit heavy destinations for crew.
+**    Assuming arrival to airport equals departure from 
+**    airport. Then it is only needed to check for a trip to these
+**    airports.
+*/
+rule (off) sft_max_heavy_destination_in_calendar_month =
+  valid roster.%check_rules% and
+        base_product.%is_rostering% and
+        not crew.%is_temporary% and
+        trip.%has_flight_duty% and
+        trip.%start_hb% >= %pp_start% and
+        trip.%start_hb% <= %publ_period_end% and
+        %trip_to_heavy_destination%;
+        
+        
+  %number_trips_to_heavy_destinations_in_month% <= %limit_heavy_destinations_per_month_p% + 
+						   rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+  startdate = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %sft_heavy_destination_failobject%; 
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("Soft: Max heavy destination in month", value, limit);
+  remark "Soft: Max trips to heavy destination in calendar month";
+end
+
+%sft_heavy_destination_failobject% =
+  first(leg(trip), leg.%failobject_departure%) where
+    (%leg_to_heavy_destination%);
+            
+%trip_to_heavy_destination% = any(duty(trip), %duty_to_heavy_destination%);
+%duty_to_heavy_destination% = any(leg(duty), %leg_to_heavy_destination%);
+%leg_to_heavy_destination% = leg.%end_station% in heavy_destinations and %heavy_dest_round_trip_not_lh%;
+set heavy_destinations = parameter "LPA", "TFS"
+  remark "Soft: Heavy destinations to limit per month:";
+
+%limit_heavy_destinations_per_month_p% =
+parameter 2
+remark "Soft: Number of heavy destinations limit per month";
+  
+%number_trips_to_heavy_destinations_in_month% =
+  count(trip(roster))
+  from (current) backwards
+  while (trip.%start_hb% >= %pp_start%)
+  where (%trip_to_heavy_destination%);
+  
+/* For short haul heavy destinations, we should only consider the ones that are planned as round trips/back-2-back flights. 
+For long haul heavy destinations we don't care about this */
+%heavy_dest_round_trip_not_lh% =
+if default(leg.%is_long_haul%, false) 
+then true 
+else default(leg.%end_station% = next(leg(duty), leg.%start_station%),false);
+
+/* end of file */
+

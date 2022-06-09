@@ -1,0 +1,211 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   Additional soft rules regarding cockpit crew to be used in tracking.
+ *
+ * Sections:
+ *
+ * Created by:
+ *   Per Grönberg 03-04-2008
+ *
+ * Major changes:
+ *
+ */
+module rules_soft_cct_fc inherits rules_soft_cct
+/*import fundamental;
+import levels;
+import trip;
+import crew;
+import crew_pos;
+import leg;
+import duty;
+import bought_days;
+*/
+
+
+
+
+/*
+** Rule:
+**    Maximum number of bought days (FX) is 20 for the groups SKD/SKID and SKN/SKIN_FD.
+**
+** Description:
+**    Check that maximum number of sold days is 20 in a calendar year.
+**
+**    When crew has sold 12 or more days in a calendar year the rule triggers indicating that crew
+**    is closing in on 20 sold days (FX).
+**
+** Functional rule:
+**    User request, Jira SKCMS-1645
+*/
+
+export rule sft_num_sold_days_year_all =
+  valid %sft_num_sold_days_year_all_valid%;
+
+  bought_days.%bought_days_in_period%(round_down_year(duty.%start_utc%), round_up(duty.%end_utc%, 24:00)) <= 11 + rule_exceptions.%overshoot_int%(duty.%start_scheduled_utc%);
+
+  startdate  = duty.%start_scheduled_utc%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %sft_num_sold_days_year_failobject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("Soft: Crew has sold 12 or more FX days in the calendar year",value,limit);
+  remark "(CCT) Func: Close to SOLD days per year limit",
+  planner "The rule checks that the number of SOLD days in a calendar year "
+          "does not exceed the limit"
+          " The rule is valid for all FD groups.";
+end
+
+%sft_num_sold_days_year_all_valid% =
+    roster.%check_rules% and
+    crew.%is_pilot% and
+    duty.%in_pp% and not void(bought_days.%type_on_day_no_forced%(duty.%start_day%));
+
+%sft_num_sold_days_year_failobject% =
+    first(leg(duty), leg.%failobject_departure%);
+
+
+
+
+
+
+/*
+** Rule:
+**    No overcrewed cockpits are allowed (alert_server only)
+**
+** Description:
+**    Any roster containing overcrewed cockpits in flights is considered
+**    illegal.
+**
+** Functional rule:
+*/
+export rule sft_comp_no_overcrewed_cockpits =
+  valid alert_server.%check_alert_rules% and
+        %is_roster% and leg.%in_pp_extended% and
+        not leg.%is_deadhead% and 
+        not leg.%is_oag% and
+        not leg.%is_pact% and
+        %position_to_check% and
+        not crew.%is_leased_duty_start%;
+
+  %comp_rostered_pos_cockpit% <= %comp_need_pos_cockpit% + 
+    rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%);
+
+  startdate = leg.%activity_scheduled_start_time_UTC%;
+  failtext(Int value, Int limit) = 
+    concat("Soft: Overcrewed: ", crew_pos.%assigned_function%, format_int(value, ":%d"), format_int(limit, "(%d)"));
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  remark "(CCT) Func: No overcrewed cockpits are allowed.",
+  planner "The rule checks that no cockpits are overcrewed. "
+          "The rule checks that the booked number of crew is "
+          "smaller or equal than the need for the first four "
+          "crew positions.";
+end
+
+%comp_rostered_pos_cockpit% = crew_pos.%leg_rostered_pos%(crew_pos.%assigned_pos%);
+%comp_need_pos_cockpit% = crew_pos.%need_in_pos%(crew_pos.%assigned_pos%);
+%position_to_check% =
+  crew_pos.%assigned_function% = "FC" or
+  crew_pos.%assigned_function% = "FP" or
+  crew_pos.%assigned_function% = "FR";
+
+/*
+** Rule:
+**    No open trips are allowed (alert_server only)
+**
+** Description:
+**    Any open trip (even overbooked) are considered
+**
+** Functional rule:
+**    System specification Tracking, 
+**
+** Checks open-time flight duty trips.
+**   - The rule fails if the trip contains any leg with open
+**       time in a crew position that is not fully rostered.
+**   - The fail object is the first such leg within the trip.
+**   - Trips with only manually created flights are excluded.
+**   - The fail message will include:
+**       - the number of calendar days covered by underrostered legs,
+**       - the first and last station touched by underrostered legs,
+**       - the underrostered crew positions that can be resolved with 
+**           legs in the trip, and by which number (which always is less
+**           than or equal to the assigned value in the trip).
+**     Example: "Soft: open time 2 days, 1AP, 1AH (CPH-AMS)"
+*/
+
+export rule sft_open_no_open_positions_FC =
+  valid alert_server.%check_alert_rules% and
+        not fundamental.%is_roster% and
+        any(leg(trip), leg.%fd_employer_is_SAS%) and
+        trip.%in_pp_extended% and
+        trip.%is_operating% and
+        not %trip_all_deadhead% and
+        not %trip_all_manual% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+        
+  crew_pos.%trip_assigned% = 0; /* Just to avoid trips with no complement */
+  
+  startdate = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = first(leg(trip), leg.%failobject_departure%);
+  failtext %sft_open_no_open_positions_failtext%;
+  remark "(CCT) Func: Do not allow open time",
+  planner ""
+          "This rule is used to generate alerts for the alert server."
+          " A trip is of course not illegal just because all positions are"
+          " not covered, but this is the only way to let the alert"
+          " server recognize the open time.";
+end
+  
+/*
+** Rule:
+**    Maximum number of sold days in calendar month.
+**
+** Description:
+**    Soft rule to check that the maximum number of sold days doesn't exceed the
+**    preferred monthly limits.
+**
+**    Tries to prevent pilots from selling too many days early in the year,
+**    so that the yearly quota isn't already exhausted when there is a need to 
+**    buy days near the end of the year.
+**
+**    Applies for SKD.
+**
+*/
+rule sft_max_num_sold_days_month_SKD =
+  valid roster.%check_rules% and
+        crew.%is_skd% and
+        wop.%in_pp% and
+        wop.%is_last_on_duty_in_month% and
+        not crew.%is_leased_wop_start%;
+
+  %bought_days_in_calendar_month% <= %sft_max_sold_days_in_calendar_month% + 
+				    rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+
+  startdate  = wop.%start_utc%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %sft_max_num_sold_days_month_SKD_failobject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("Soft: Preferred FX/VX days per calendar month",value,limit);
+  remark "Soft: Max 4 FX/VX days preferred per calendar month.",
+  planner "Check that the number of sold days in calendar month "
+          "doesn't exceed the preferred limit";
+end
+
+%sft_max_sold_days_in_calendar_month% = 4;
+
+%bought_days_in_calendar_month% =
+  compdays.%bought_days_in_calendar_month%(wop.%start_UTC%);
+
+%sft_max_num_sold_days_month_SKD_failobject% =
+  let start = wop.%start_month_start%;
+  default(first(duty(chain), duty.%failobject_start%) where
+            (duty.%start_day% >= start and
+             bought_days.%bought_days_in_period%(start, duty.%end_day% + 24:00) >
+             %sft_max_sold_days_in_calendar_month%),
+          wop.%failobject_start%);
+          
+/* end of file */
+

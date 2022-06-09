@@ -1,0 +1,288 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   This module contains functions and fundamental definitions for
+ *   bought days (freedays, compensation days and vacation). 
+ *   In the database the type of the day is stored as an integer. Rave is
+ *   used to convert the number to a type.
+ *
+ * Sections: 
+ *   1. External table definitions and lookups
+ *   2. Day type conversion
+ *   3. Functions for retrieving information about bought days
+ *
+ * Created by:
+ *   Markus Kollind, 9 Feb 2007
+ *
+ * Major changes:
+ *
+ */
+
+root module bought_days
+
+import fundamental;
+import keywords;
+import levels;
+import leg;
+import crew;
+import wop;
+import trip;
+import iterators;
+import duty;
+import task;
+/****************************************************************
+ * Section 1: External table definitions and lookups
+ ***************************************************************/
+%table% = leg.%bought_table%;
+
+table bought_day_table(AbsTime t) = 
+  crew.%id%, t -> 
+    export String %type_on_day%, 
+    export String %comment_on_day%, 
+    export String %username_on_day%,
+    export Abstime %start_time_t%,
+    export Abstime %end_time_t%,
+    export String %account_name_on_day%;
+  external %table%;
+  crew, (start_time, end_time( -> day_type   , si  , uname, start_time, end_time, account_name ;
+  -   , -        -> void_string, void_string, void_string, void_abstime, void_abstime, void_string;
+end
+
+/* BOUGHT_FORCED is a special marking, typically not counted when counting bought days for compensation.
+   This alternative function for type excludes those account markings */
+export %type_on_day_no_forced%(Abstime t) =
+  if %is_co_type_account_name%(%account_name_on_day%(t)) then void_string 
+  else %type_on_day%(t);
+
+table rudob_bought_day_table(Int match) =
+  crew.%id%, round_down(fundamental.%loaded_data_period_start%, 24:00), match ->
+    export AbsTime %start_time%, export String %bought_day_comment%, 
+    export String %bought_day_username%, export String %bought_day_type%,
+    export AbsTime %end_time%,
+    export String %account_name_for_match%;
+  external %table%;
+  crew, <=start_time, match_number -> start_time, si, uname, day_type, end_time, account_name;
+  - , -, -                       -> void_abstime, void_string, void_string, void_string, void_abstime, void_string;
+end
+
+export %is_co_type_account_name%(String account_name) =
+  account_name = %co_on_f_account_name%;
+
+export %bought_days_length%(Int match)=
+let end_time=%end_time%(match),start_time=%start_time%(match);
+if not void(end_time) and not void(start_time)
+then 
+  end_time-start_time
+else
+  00:00  
+;
+
+
+export %types_in_period%(AbsTime start_time, AbsTime end_time)=
+  cat(times((end_time-start_time)/24:00),
+      default(%type_on_day%(start_time+(%times_index_0%-1)*24:00),""))
+;
+export %matching_bought_period_exists%(String type, AbsTime start_time, int days, String account) =
+      if %account_name_on_day%(start_time) = "BOUGHT_F3_2" and days = 2 then
+           %_matching_bought_period_exists%(type, start_time, 1, "BOUGHT_F3_2")
+      else
+           %_matching_bought_period_exists%(type, start_time, days, account);
+
+%_matching_bought_period_exists%(String type, AbsTime start_time, int days, String account) =
+      let end_t = start_time+days*24:00;
+      %type_on_day%(start_time) = type and
+      %start_time_t%(start_time) = start_time and 
+      %end_time_t%(start_time) = end_t and
+      (account = "*" or 
+       %account_name_on_day%(start_time)= account);  
+      
+
+export %bought_type_days_in_period%(String type, AbsTime start_time, AbsTime end_time)=
+  count(times((end_time-start_time)/24:00))
+        where(not void(%type_on_day_no_forced%(start_time+(%times_index_0%-1)*24:00)) and
+              (type = "COUNT_ALL" or
+               (type = "COUNT_FREEDAYS" and 
+                  %code_is_freeday%(%type_on_day_no_forced%(start_time+(%times_index_0%-1)*24:00))
+                ) or
+               (  type = "COUNT_BLANKDAYS" and 
+                  %code_is_blankday%(%type_on_day_no_forced%(start_time+(%times_index_0%-1)*24:00))
+                ) or 
+               /*VAD VAH are high rate SKN VA */
+               (type in va_equivalent_bought_codes and
+                %type_on_day_no_forced%(start_time+(%times_index_0%-1)*24:00) in va_equivalent_bought_codes) or
+               type = %type_on_day_no_forced%(start_time+(%times_index_0%-1)*24:00)));        
+
+table bought_days_iterate_tbl(Int ix, Abstime s, Abstime e) =
+    crew.%id%, ix, s, e -> 
+    Abstime %_bdi_start%, Abstime%_bdi_end%, export String %bdi_type%, export String %bdi_account%;
+  external %table%;
+  crew, match_number, <end_time, >start_time -> start_time, end_time, day_type, account_name;
+  -   , -,            -,         -           -> void_abstime, void_abstime, void_string, void_string;
+end
+
+export %bdi_start%(Int ix, Abstime s, Abstime e) =
+  nmax(s, %_bdi_start%(ix, s, e));
+
+export %bdi_end%(Int ix, Abstime s, Abstime e) =
+  nmin(e, %_bdi_end%(ix, s, e));
+
+export %bdi_type_no_forced%(Int ix, Abstime s, Abstime e) =
+  let r = %bdi_account%(ix, s, e);
+  if %is_co_type_account_name%(r) then void_string
+  else r;
+ 
+export %BDI_MAX% = 10; /* used as maximum per month */  
+
+export %bdi_count%(Abstime s, Abstime e) =
+  max(times(%BDI_MAX%), %times_index_0%)
+  where (not void(%bdi_start%(%times_index_0%, s, e)));  
+
+/****************************************************************
+ * Section 2: Type conversion
+              Functions for converting types from the database
+              stored integer to a user presentable string
+              This is to easily change the user feedback for the
+              types without changing the contenten of the table.
+ ***************************************************************/
+
+
+export %type_shall_be_recreated%(string type) = 
+  %code_is_buyable%(type);
+
+
+
+/*********************************************************************
+ * Section 3: Functions for retrieving information about a bought day 
+ *********************************************************************/
+export %account_name% = "BOUGHT"; /* Do not change unless bought account name changed*/
+export %qa_account_name% = "BOUGHT_QA"; /* Do not change unless bought account name changed*/
+export %bl_account_name% = "BOUGHT_BL"; /* Do not change unless bought account name changed*/
+export %comp_account_name% = "BOUGHT_COMP"; /* Do not change unless bought account name changed*/ 
+export %bought8_account_name% = "BOUGHT_8"; /* Do not change unless bought account name changed*/
+export %bought_f3s_account_name% = "BOUGHT_COMP_F3S"; /* Do not change unless bought account name changed*/
+export %bought_f3_account_name% = "BOUGHT_F3"; /* Do not change unless bought account name changed*/
+export %bought_f3_2_account_name% = "BOUGHT_F3_2"; /* Do not change unless bought account name changed*/
+export %co_on_f_account_name% = "BOUGHT_FORCED";  
+export %leg_is_bought% = 
+  leg.%is_bought%;
+
+%leg_code%(AbsTime a1, AbsTime a2) = 
+  first(leg(chain), leg.%code%)
+  where (leg.%start_hb% < a2 and leg.%end_hb% > a1 and 
+         not leg.%is_locked% and
+         not leg.%is_bought%);/*day already bought*/
+
+export %leg_bought_type% =  
+  default(default(%type_on_day%(leg.%start_hb%), %type_on_day%(leg.%end_hb%)), "");
+
+export %duty_bought_type% =
+  default(first(leg(duty) where (%leg_bought_type% <> ""), %leg_bought_type%), "");
+  
+export %days_may_be_bought%(AbsTime a1, AbsTime a2) =
+  let code = %leg_code%(a1,a2);
+  if %code_is_buyable%(code) 
+  then code
+  else void_string;
+
+/*Codes stated by sas in CR27 - pergr*/
+%code_is_buyable%(string code) =
+    not (code in non_buyable_codes) and
+     (%code_is_off_duty_day%(code)
+       or
+     %code_is_blankday%(code));
+
+%code_is_off_duty_day%(string code) =
+      let  task = task.%group%(code);
+     (task in buyable_task_groups and
+     (substr(code,1,1) = "F" or
+      substr(code,1,2) = "LA" or
+      substr(code,1,2) = "VA"));
+     
+%code_is_freeday%(string code) =
+  task.%is_freeday%(code);
+     
+%code_is_blankday%(string code) =
+      let  task = task.%group%(code);
+      (task = "BL" and
+       substr(code,1,2) = "BL");
+      
+set buyable_task_groups = "VAC", "PFR", "FRE", "CMP" , "LOA", "PPF", "F4XNG";
+
+/* F33 can't be bought according to CR240. ATM this is the only one */
+set non_buyable_codes = "F33";
+
+export set va_equivalent_bought_codes = "VA", "VAH", "VAD";
+
+/* Returns true if any day in the trip is a bought day. */
+export %in_trip% = 
+  /* Check that another trip hasn't already marked this bought day */
+  if default(prev(trip(chain), trip.%end_day%) = trip.%start_day%, false) 
+  then
+      false
+  else
+      any(times((trip.%end_day%-trip.%start_day%+24:00)/24:00),
+        not void(%type_on_day%(trip.%start_day%+(%times_index_0%-1)*24:00)))
+; 
+
+/* Returns the number of bought days in the trip with the given type. */
+export %nr_of_type_in_trip%(String type) =
+  count(times(trip.%days%))
+  where(%type_on_day%(trip.%start_day% + (%times_index_0%-1)*24:00) = type);
+export %comment_of_type_in_trip%(String type) =
+  cat(times(trip.%days%), %comment_on_day%(trip.%start_day% + (%times_index_0%-1)*24:00))
+  where(%type_on_day%(trip.%start_day% + (%times_index_0%-1)*24:00) = type);
+
+export %comments_in_trip% = 
+  cat(times(trip.%days%), concat(%comment_on_day%(trip.%start_day% + (%times_index_0%-1)*24:00),
+				 if %comment_on_day%(trip.%start_day% + (%times_index_0%-1)*24:00)="" then "" else ", "))
+  where(not void(%type_on_day%(trip.%start_day% + (%times_index_0%-1)*24:00)));
+
+/* Returns the number of bought days in the trip with the given type. */
+export %nr_in_trip% =
+  count(times(trip.%days%))
+  where(not void(%type_on_day%(trip.%start_day% + (%times_index_0%-1)*24:00)));
+
+export %bought_days_in_period%(Abstime a1, Abstime a2) =
+   %bought_type_days_in_period%("COUNT_ALL", a1, a2);
+
+export %blh_of_bought_freedays_in_period%(Abstime start, Abstime stop) =
+  sum(duty(roster), duty.%block_time_in_period_caa%(start, stop))
+  where (first(leg(duty), %leg_is_bought%) and
+         wop.%start_utc% < stop and
+         wop.%end_utc% > start);
+  
+
+/*
+** Variables for accumulation of all bought days
+** regardless of type
+*/
+
+export %first_leg_in_day_date% = 
+  let start_date = leg.%start_date%;
+  first(leg(duty), %bought_day_date%) 
+  where(leg.%start_date% = start_date and %leg_is_bought%);
+  
+export %is_first_leg_in_day_date% = 
+  let start_date = leg.%start_date%;
+  is_first(leg(duty)) where (leg.%start_date% = start_date and %leg_is_bought%);
+ 
+%crew_has_bought_prod_in_period%(AbsTime start_time, Abstime end_time, String crew_id) = 
+  any(leg(chain),%leg_is_bought%) 
+  where(overlap(leg.%start_hb%,leg.%end_hb%,start_time,end_time)>00:00
+        and keywords.%crr_crew_id%=crew_id);
+  
+%bought_day_date% = 
+  if leg.%start_date% = leg.%end_date% or 
+     not void(leg.%bought_time%(leg.%start_hb%)) then 
+    leg.%start_date%
+  else 
+    leg.%end_date%;
+    
+/* Used in BuyDays.py.
+ * This is a fix, the crew variable should retrieve the correct value.
+ */
+%crew_station_at_date%(Abstime date) = 
+  let station = crew.%station_at_date%(date);
+  if station = "STO" then "ARN" else station;
+
+/* end of file */

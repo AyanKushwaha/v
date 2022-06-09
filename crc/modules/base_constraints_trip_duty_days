@@ -1,0 +1,285 @@
+/* -*- crc -*-
+
+Base constraints for trip duty days.
+------------------------------------
+
+Use: Rave code for base constraints for trip duty days
+     Definitions needed for both APC and Studio.
+
+Contents:
+
+     1. Constraint Table
+     -------------------
+        Defines the lookups in the constraint table
+
+     2. Period Definition
+     --------------------
+        Helper variables for determining validity period
+
+     3. Constraint Definitions
+     -------------------------
+        The constraint definitions
+
+     4. Alias Definitions
+     --------------------
+        Alias definitions for the reporting
+
+***********************************************************************/
+
+root module base_constraints_trip_duty_days
+
+import fundamental;
+import trip;
+import levels;
+import base_constraints_common_definitions;
+
+/* Rave group for the parameter form */
+group constraints_group =
+    %_constraints_header%,
+    min_total_trip_length_constraint,
+    max_total_trip_length_constraint,
+    min_ratio_trip_length_constraint,
+    max_ratio_trip_length_constraint,
+    base_constraints_common_definitions.%bc_trip_duty_days_table_name_p%,
+    %display_pos_based_trip_len_distribution%;
+
+export %_constraints_header% =
+    parameter ""
+    remark "Trip duty days constraints#HEADER#";
+
+/***********************************************************************
+ * 1. Constraint Table
+ * -------------------
+ *
+ * Lookups in the constraint table
+ ***********************************************************************/
+
+%bc_table_name% = concat("SpLocal/", base_constraints_common_definitions.%bc_trip_duty_days_table_name_p%);
+
+export %display_pos_based_trip_len_distribution% =
+    parameter false
+    remark "(BC T.p1): Display trip duty days KPIs based on position";
+
+table base_constraint_table(Int bc_row_number) =
+    bc_row_number ->
+        String %bc_base%,
+        String %bc_position%,
+        Abstime %bc_valid_from_date%,
+        Abstime %bc_valid_to_date%,
+        Int %bc_num_days%,
+        String %bc_type%,
+        Int %bc_limit_value%,
+        Int %bc_excess_cost%;
+
+    external %bc_table_name%;
+
+    "row_number" ->
+        "base", "position", "valid_from_date_hb", "valid_to_date_hb",
+        "trip_duty_days", "type", "limit", "excess_cost";
+
+end
+
+/**************************************************************************
+ * 2. Period Definition
+ * --------------------
+ *
+ * Variables which define the size of the period in which to apply the
+ * constraints.
+ **************************************************************************/
+
+/* This variable returns the number of duty days in a trip for weekly plans
+   and also for dated plans if the trip starts within the validity period.
+*/
+%trip_duty_days_in_valid_interval%(Abstime i_start_date, Abstime i_end_date) =
+    if %trip_starts_in_interval%(trip.%start_date_hb%, i_start_date, i_end_date) then
+        trip.%duty_days_hb%
+    else
+        0;
+
+/* Filter functions */
+
+%consider_this_trip%(Int bc_row_index, Abstime start_date) =
+    %trip_starts_in_interval%(start_date, %valid_period_start_adj%(bc_row_index),
+                              %valid_period_end_adj%(bc_row_index));
+
+/* The following two variables are used to adjust the validity periods
+   in the table. In weekly problems, we ignore
+   the validity periods in the table */
+
+%valid_period_start_adj%(Int bc_row_index) =
+    if %bc_is_dated_mode% then
+        %bc_common_from_date_adjusted%(%bc_valid_from_date%(bc_row_index))
+    else
+        %bc_period_start_date%;
+
+%valid_period_end_adj%(Int bc_row_index) =
+    if %bc_is_dated_mode% then
+        %bc_common_to_date_adjusted%(%bc_valid_to_date%(bc_row_index))
+    else
+        %bc_period_end_date%;
+
+/**************************************************************************
+ * 3. Constraint Definitions
+ * -------------------------
+ *
+ **************************************************************************/
+%bc_trip_start_date_hb% =
+    base_constraints_common_definitions.%_trip_start_date_hb%;
+
+%bc_trip_duty_days_hb% =
+    base_constraints_common_definitions.%_trip_duty_days_hb%;
+
+/* Min/max trips constraint definitions */
+
+export constraint min_total_trip_length_constraint =
+    foreach row in set(1, %bc_num_constraint_rows%)
+    alias(%total_trip_duty_days_alias%(row))
+    where(default(%bc_type%(row) = "MinTripsTotal"
+                  and %bc_cost%(row) > 0, false));
+
+    sum(default_context,
+    nonadditive(%chain_homebase%,
+    base_constraints_common_definitions.%_trip_duty_days_hb%,
+    base_constraints_common_definitions.%_trip_start_date_hb%))
+    >= %bc_limit_value%(row);
+
+    nonadditive(String base, Int cal_days, Abstime start_date_hb) =
+        %bc_trip_duty_days%(row, base, cal_days, start_date_hb);
+
+    cost = %bc_cost%(row);
+    remark "(BC T.1) Min trips with X duty days";
+end
+
+export constraint max_total_trip_length_constraint =
+    foreach row in set(1, %bc_num_constraint_rows%)
+    alias(%total_trip_duty_days_alias%(row))
+    where(default(%bc_type%(row) = "MaxTripsTotal"
+                  and %bc_cost%(row) > 0, false));
+
+    sum(default_context,
+    nonadditive(%chain_homebase%,
+    base_constraints_common_definitions.%_trip_duty_days_hb%,
+    base_constraints_common_definitions.%_trip_start_date_hb%))
+    <= %bc_limit_value%(row);
+
+    nonadditive(String base, Int cal_days, Abstime start_date_hb) =
+        %bc_trip_duty_days%(row, base, cal_days, start_date_hb);
+
+    cost = %bc_cost%(row);
+    remark "(BC T.2) Max trips with X duty days";
+end
+
+%bc_trip_duty_days%(Int row, String base, Int cal_days, Abstime start_date_hb) =
+    if %trip_length_constraint_applicable%(row, base, start_date_hb)
+       and cal_days = %bc_num_days%(row) then
+       base_constraints_common_definitions.%_assigned_by_name_chain%(%bc_position%(row))
+    else
+        0;
+
+/* Min/max trips ratio constraint definition */
+
+export constraint min_ratio_trip_length_constraint =
+    foreach row in set(1, %bc_num_constraint_rows%)
+    alias(%alias_text_for_row_ratio%(row))
+    where(default(%bc_type%(row) = "MinTripsRatio"
+                  and %bc_cost%(row) > 0, false));
+
+   sum(default_context, nonadditive(%chain_homebase%, %bc_trip_duty_days_hb%, %bc_trip_start_date_hb%)) >= 0;
+
+    nonadditive(String base, Int cal_days, Abstime start_date_hb) =
+        %bc_ratio_trip_days%(row, base, cal_days, start_date_hb);
+
+    cost = %bc_cost%(row);
+    remark "(BC T.3) Min ratio of trips with X duty days";
+end
+
+export constraint max_ratio_trip_length_constraint =
+    foreach row in set(1, %bc_num_constraint_rows%)
+    alias(%alias_text_for_row_ratio%(row))
+    where(default(%bc_type%(row) = "MaxTripsRatio"
+                  and %bc_limit_value%(row) < 100
+                  and %bc_cost%(row) > 0, false));
+
+    sum(default_context, nonadditive(%chain_homebase%, %bc_trip_duty_days_hb%, %bc_trip_start_date_hb%)) <= 0;
+
+    nonadditive(String base, Int cal_days, Abstime start_date_hb) =
+        %bc_ratio_trip_days%(row, base, cal_days, start_date_hb);
+
+    cost = %bc_cost%(row);
+    remark "(BC T.4) Max ratio of trips with X duty days";
+end
+
+%bc_ratio_trip_days%(Int row, String base, Int cal_days, Abstime start_date_hb) =
+    if %trip_length_constraint_applicable%(row, base, start_date_hb) then
+        %bc_assigned_by_name_chain%(%bc_position%(row))
+        * (%trip_duty_days_indicator%(row, cal_days) - %bc_limit_value%(row))
+    else
+        0;
+
+%trip_duty_days_indicator%(Int row, Int cal_days) =
+    if cal_days = %bc_num_days%(row) then
+        100
+    else
+        0;
+
+/* Number of rows in base constraints table */
+%bc_num_constraint_rows% =
+    default(fundamental.%num_rows_in_table%(%bc_table_name%), 0);
+
+%bc_cost%(Int row) =
+    default(%bc_excess_cost%(row), 0);
+
+/**************************************************************************
+ * 4. Alias definitions
+ * --------------------
+ *
+ **************************************************************************/
+
+%total_trip_duty_days_alias%(Int row) =
+    default(%alias_text_for_row_common%(row),
+            %unexpected_void_str%);
+
+%alias_text_for_row_ratio%(Int row) =
+    default(concat(%alias_text_for_row_common%(row), format_int(%bc_limit_value%(row), ", %d%) ("),
+                   %trip_duty_days_ratio%(row)),
+            %unexpected_void_str%);
+
+%trip_duty_days_ratio%(Int row) =
+    let total_trip = sum(default_context, %bc_assigned_by_name_chain%(%bc_position%(row)))
+                        where(%trip_length_constraint_applicable%(row, %chain_homebase%, %bc_trip_start_date_hb%)),
+
+        X_day_trip = sum(default_context, %bc_assigned_by_name_chain%(%bc_position%(row)))
+                        where(%trip_length_constraint_applicable%(row, %chain_homebase%, %bc_trip_start_date_hb%)
+                              and %bc_trip_duty_days_hb% = %bc_num_days%(row));
+    if total_trip = 0 then
+        msgr("N/A")
+    else
+        format_int(%div_rounds%(X_day_trip * 100, total_trip), "%d%");
+
+%bc_assigned_by_name_chain%(String pos_code) =
+    base_constraints_common_definitions.%_assigned_by_name_chain%(pos_code);
+
+%alias_text_for_row_common%(Int row) =
+    concat(%bc_base%(row), ", ",
+           %bc_position%(row), ", ",
+           %_bc_period_output_when_not_daily%(row), ", ",
+           format_int(%bc_num_days%(row), "%d-"),
+           if %bc_num_days%(row) > 1 then msgr("days") else msgr("day"));
+
+%_bc_period_output_when_not_daily%(Int row) =
+    if %bc_is_dated_mode% then
+        concat(%bc_output_day_name%(%valid_period_start_adj%(row)),
+               "-", %bc_output_day_name%(%valid_period_end_adj%(row)))
+    else
+        msgr("All days");
+
+%trip_length_constraint_applicable%(Int row, String base, Abstime start_date) =
+    (%bc_base%(row) = base or %bc_base%(row) = "*")
+    and (%bc_assigned_by_name_chain%(%bc_position%(row)) > 0)
+    and %consider_this_trip%(row, start_date);
+
+%trip_starts_in_interval%(Abstime start_date, Abstime i_start_date, Abstime i_end_date) =
+    if %bc_is_dated_mode% then
+        start_date >= i_start_date and start_date <= i_end_date
+    else
+        true;

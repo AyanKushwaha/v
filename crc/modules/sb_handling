@@ -1,0 +1,545 @@
+/*  -*- crc -*-
+ *
+ *
+ * Purpose:
+ *   Standby definitions definitions.
+ *
+ * Created by:
+ *  Niklas Johansson Initial, 25-Mar-13
+ *
+ * Agreement:
+ *   
+ *
+ * Description:
+ *   Definitions used in standby handling for optimization and rules 
+ * 
+ * Major changes:
+ *
+ */
+root module sb_handling
+import fundamental;
+import base_utils;
+import levels;
+import leg;
+import duty;
+import trip;
+import crew_pos;
+import rule_exceptions;
+import parameters;
+import attributes;
+import planning_area;
+
+export %upper_cat% = fundamental.%upper_cat%;
+export %lower_cat% = fundamental.%lower_cat%;
+export %sb_base% =
+    parameter "CPH" remark "SB base";
+    
+
+
+export %time_interval% = parameter 0:30 remark "SB separation interval";
+export %leg_start% = leg.%start_lt% - leg.%check_in_default%;
+export %leg_start_tod% = time_of_day(%leg_start_time%);
+export %leg_start_date% = round_down(%leg_start%, 24:00);
+export %leg_start_time% = round_down(%leg_start%, %time_interval%);
+
+
+
+export %duty_start% = duty.%start_lt%;
+export %duty_end% = duty.%end_lt%;
+export %duty_start_date% = round_down(%duty_start%, 24:00);
+export %duty_start_wd% = format_time(%duty_start%,"%a");
+export %leg_start_wd% = format_time(%leg_start_time%,"%a");
+
+/*export %table_standby_need% = %etab_path%(%table_standby_need_p%);
+export %table_standby_need_p% = 
+  parameter "standby_need"
+  remark "SB Standby qualification constraints";*/
+rule only_1_sb_activity_in_duty_ALL =
+  valid trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty.%is_standby%;
+  duty.%num_legs% <= 1 +
+    rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+  startdate = duty.%start_UTC%;
+  severity = %severity_filter_int%(duty.%start_hb%,%duty_lh_region%);
+  /*failobject = %caa_subq_max_duty_in_fdp_ALL_failobject%;
+  failtext(Reltime value, Reltime limit) =
+    %caa_subq_max_duty_in_fdp_All_failtext%(value, limit);*/
+  remark "CAA: max legs in sb duty",
+  planner "The rule checks that only 1 sb activity per duty is allowed.";
+end
+
+
+export %no_upper_assigned% = crew_pos.%no_upper_assigned%;
+export %no_lower_assigned% = crew_pos.%no_lower_assigned%;
+
+%sb_reduction_factor% = parameter 5;
+
+export %sb_length_match_no%(String base, AbsTime sb_date, String category, Int sbLength) =
+    let red = nmax(sbLength, 2),
+    tmp_match_no = default(%_sb_length_match_no%(base, sb_date, category, sbLength), 0),
+    match_no = default(nmax(nmin(tmp_match_no,1), ((tmp_match_no + red - 2) / red)), 0);
+    default(if %use_sb_length_override% then
+        nmax(%_sb_length_match_no_override%(base, sb_date, category, sbLength) - 1, match_no)
+    else
+        match_no, match_no);
+    
+export %sb_bound_length_match_no%(String base, AbsTime sb_date, String category, Int sbLength) =
+    %sb_length_match_no%(base, sb_date, category, sbLength) + 1;
+    /*let red = nmax(sbLength, 2),
+    sbs = default(%_sb_length_match_no%(base, sb_date, category, sbLength), 0),
+    minsbs = if sbLength >= 5 then 0 else nmin(sbs, 2),
+    match_no = nmax((sbs + red - 1) / red, minsbs);
+    default(if %use_sb_length_override% then
+        nmax(%_sb_length_match_no_override%(base, sb_date, category, sbLength), match_no)
+    else
+        match_no, match_no);*/
+
+export %use_sb_length_override% = parameter false 
+    remark "Use SB lenght override";
+
+export %use_sb_length_etable% = parameter false
+    remark "Use SB lenght in Etable(True) Dtable(False)";
+
+%_sb_length_match_no%(String base, AbsTime sb_date, String category, Int sbLength) =
+    if %use_sb_length_etable% then
+        %_sb_length_match_no_old%(base, sb_date, category, sbLength)
+    else
+        %__sb_length_match_no%(base, sb_date, category, sbLength);
+
+table sb_dated_length_match_needs(String base, AbsTime sb_date, String category, Int sbLength) =
+  base, sb_date, category, sbLength -> Int %_sb_length_match_no_old%;
+    external %sb_daily_length_table_p%;
+  "Base", "SBdate", "Cat", "Length" -> "NoStarts";
+  -, -, -, - -> void_int;
+end
+
+table sb_dated_length_match_needs_db(String base, AbsTime sb_date, String category, Int sbLength) =
+  base, sb_date, category, sbLength, planning_area.%crew_planning_group%,  planning_area.%planning_area_trip_ac_fam% -> Int %__sb_length_match_no%;
+    external "sb_daily_lengths";
+  "base", "sby_date", "rank", "Length", "planning_group", "crew_qual" -> "no_of_starts";
+  -, -, -, -, -, - -> void_int;
+end
+
+table sb_dated_length_match_needs_override(String base, AbsTime sb_date, String category, Int sbLength) =
+  base, sb_date, category, sbLength -> Int %_sb_length_match_no_override%;
+    external %sb_daily_length_override_table_p%;
+  "Base", ("StartDate", "EndDate"), "Cat", "Length" -> "NoStarts";
+  -, -, -, - -> void_int;
+end
+
+export %sb_daily_length_override_table_p%  = parameter
+    "SBDailyLengthOverride.etab" remark "SB Production override Length table";
+
+export %sb_daily_length_table_p% = parameter
+    "SBDailyLength.etab" remark "SB Production Length table";
+
+export %sb_default_duty_time% = parameters.%sb_default_duty_time%;
+
+export %sb_default_block_time% = parameters.%sb_default_block_time%; 
+
+export %sb_handling_table_p% =
+    parameter "SBDailyNeed" remark "SB Daily need table";
+    
+export %default_upper_need% = parameter 3 remark "Default upper need";
+export %default_lower_need% = parameter 3 remark "Default lower need";
+export %use_default_need_values% = parameter false remark "Use default need values";
+
+%leg_upper_need_for_date% =
+    if %use_default_need_values% then
+        %default_upper_need%
+    else
+        default(%upper_need%(sb_handling.%sb_base%,  %leg_start_date%), %default_upper_need%);
+
+%duty_upper_need_for_date% =
+        first(leg(duty),%leg_upper_need_for_date%);
+        
+%leg_lower_need_for_date% =
+    if %use_default_need_values% then
+        %default_lower_need%
+    else
+        default(%lower_need%(sb_handling.%sb_base%,  %leg_start_date%), %default_lower_need%);
+        
+%leg_sb_need_for_date% =
+    %leg_upper_need_for_date% + %leg_lower_need_for_date%;
+        
+%duty_lower_need_for_date% =
+    first(leg(duty),%leg_lower_need_for_date%);
+    
+export %duty_sb_need_for_date% =
+    %duty_upper_need_for_date% + %duty_lower_need_for_date%;
+
+table sb_dated_total_needs_(String base, AbsTime sb_date) =
+  base, sb_date ->
+                 Int %upper_need_old%,
+                 Int %lower_need_old%;
+    external %sb_handling_table_p%;
+  "Base", "SBdate" -> "upper", "lower";
+  -, - -> 0, 0;
+end
+
+table sb_dated_total_needs_db(String base, AbsTime sb_date) =
+  base, sb_date,fundamental.%main_cat%,
+               planning_area.%planning_area_trip_ac_fam%,
+               planning_area.%crew_planning_group%  ->
+                 Int %_upper_need%,
+                 Int %_lower_need%;
+    external "sb_daily_needs";
+  "base", "sby_date", "category", "crew_qual", "planning_group"  -> "upper", "lower";
+  -, -, -, -, - -> 0, 0;
+end
+
+export %use_sb_need_etable% =
+    parameter false
+    remark "Use SB need defined in Etable(true) Dtable (false)";
+
+export %upper_need%(String base, AbsTime sb_date) =
+    if %use_sb_need_etable% then
+        %upper_need_old%(base, sb_date)
+    else
+        %_upper_need%(base, sb_date);
+
+export %lower_need%(String base, AbsTime sb_date) =
+     if %use_sb_need_etable% then
+        %lower_need_old%(base, sb_date)
+    else
+        %_lower_need%(base, sb_date);
+
+export %sb_type_compostion_table_p% = parameter "SBTypeComposition.etab" remark "SB Type definitions table";
+table sb_type_compostion(String base, String category, special_sb_type type, String WeekDay, int sb_need) =
+  base, category, type, WeekDay, sb_need -> export Int %_upper_comp%, export Int %_lower_comp%, export SBCodeType %_code_type%, export SBPlacement %_sb_type_placement%, export Bool %_sb_duty_limitation%, export Bool %_sb_block_limitation%, export Bool %_active%, export SBImportance %normal_sb_importance%, export int %sb_type_priority%;
+    external %sb_type_compostion_table_p%;
+    "Base", "Cat", "Type", "WeekDay", ("MinSBNeed", "MaxSBNeed"( -> "Upper", "Lower", "CodeType", "BlockPlacement", "DutyLimitation", "BlockLimitation", "Active", "Importance", "Priority";
+  -, -, -, -, - -> void_int, void_int, NoneCodeType, NoneSB, void_bool, void_bool, void_bool, NotImportant, void_int;
+end
+
+export %sb_predefined_table_p% = parameter "SBPredefined.etab" remark "Predefined SB table";
+table predefined_sb_table(String base, String category, String fltNo, Reltime dep_time, String WeekDay, int sb_need) =
+  base, category, fltNo, dep_time, WeekDay, sb_need -> export Reltime %predefine_sb_start%, export Reltime %predefine_sb_end%, export Int %predefined_upper_comp%, export Int %predefined_lower_comp%, export SBCodeType %predefined_code_type%, export Bool %predefined_active%, export int %predefined_priority%;
+    external %sb_predefined_table_p%;
+    "Base", "Cat", "FlightNum", "Departure", "WeekDay", ("MinSBNeed", "MaxSBNeed"( -> "SBStart", "SBEnd", "Upper", "Lower", "CodeType", "Active", "Priority";
+  -, -, -, -, -, - -> void_reltime, void_reltime, void_int, void_int, NoneCodeType, void_bool, void_int;
+end
+table after_predefined_sb_table(String base, String category, Reltime dep_time, String WeekDay) =
+  base, category, dep_time, WeekDay -> export SBPlacement %_predefined_sb_type_placement%, export SBImportance %_predefined_sb_importance%;
+    external %sb_predefined_table_p%;
+    "Base", "Cat", "SBStart", "WeekDay" -> "BlockPlacement", "Importance";
+  -, -, -, - -> NoneSB, NotImportant;
+end
+export %flight_name_flight% =
+  concat(leg.%flight_carrier%, format_int(leg.%flight_nr%, "%03d"));
+
+export %duty_flight_start% =
+  time_of_day(duty.%start_hb_level%);
+/*export %min_sb_need%(special_sb_type comp_type) =
+    default(%_min_sb_need%(comp_type, sb_handling.%duty_start_wd%),
+            %_min_sb_need%(comp_type, "*"));
+
+%_min_sb_need%(special_sb_type comp_type, string weekDay)   =
+    default(sb_handling.%_min_sb_neede%(sb_handling.%sb_base%, fundamental.%main_cat%, comp_type, weekDay),
+                                                            sb_handling.%_min_sb_neede%("*", fundamental.%main_cat%, comp_type, weekDay));*/
+
+export %trip_sb_importance% =
+    first(leg(trip), %sb_importance%) where (%is_tailored_standby%);
+    
+export %sb_importance% = 
+    let retVal = %sb_importance_func%(%sb_activity_type%, %leg_start_wd%, %leg_sb_need_for_date%);
+    if retVal = NotImportant then
+        %sb_importance_func%(%sb_activity_type%, "*", %leg_sb_need_for_date%)
+    else
+        retVal;
+
+export %duty_sb_importance_func%(special_sb_type comp_type) =
+    let retVal = %sb_importance_func%(comp_type, %duty_start_wd%, %duty_sb_need_for_date%);
+    if retVal = NotImportant then
+        %sb_importance_func%(comp_type, "*", %duty_sb_need_for_date%)
+    else
+        retVal;
+     
+export %sb_importance_func%(special_sb_type comp_type, string weekday, int sb_need) =
+    let retVal =    %_sb_importance%(
+                sb_handling.%sb_base%,
+                fundamental.%main_cat%,
+                comp_type,
+                weekday, sb_need);
+    if retVal = NotImportant then
+        %_sb_importance%(
+              "*",
+              fundamental.%main_cat%,
+              comp_type,
+                weekday, sb_need)
+    else
+        retVal;
+        
+%_sb_importance%(String base, String category, special_sb_type type, String WeekDay, int sb_need) =
+    if type = SpecialPreDefined then
+         %predefined_sb_importance%(base, category, WeekDay)
+    else
+        %normal_sb_importance%(base, category, type, WeekDay, sb_need);
+
+
+%sb_placement% =
+    let retVal = %sb_placement_func%(%sb_activity_type%, %leg_start_wd%, %leg_sb_need_for_date%);
+    if retVal = NoneSB then
+        %sb_placement_func%(%sb_activity_type%, "*", %leg_sb_need_for_date%)
+    else
+        retVal;
+        
+%trip_sb_placement% =
+    first(leg(trip),%sb_placement%) where (%is_tailored_standby%);
+    
+export %duty_sb_placement_func%(special_sb_type comp_type) =
+    let retVal = %sb_placement_func%(comp_type, %duty_start_wd%, %duty_sb_need_for_date%);
+    if retVal = NoneSB then
+        %sb_placement_func%(comp_type, "*", %duty_sb_need_for_date%)
+    else
+        retVal;
+     
+export %sb_placement_func%(special_sb_type comp_type, string weekday, int sb_need) =
+    if comp_type = SpecialPreDefined then
+        %predefined_sb_type_placement%(comp_type, weekday, sb_need)
+    else
+        %normal_sb_type_placement%(comp_type, weekday, sb_need);
+
+%normal_sb_type_placement%(special_sb_type comp_type, string weekday, int sb_need) =
+        let retVal =    %_sb_type_placement%(
+                sb_handling.%sb_base%,
+                fundamental.%main_cat%,
+                comp_type,
+                weekday, sb_need);
+    if retVal = NoneSB then
+        %_sb_type_placement%(
+              "*",
+              fundamental.%main_cat%,
+              comp_type,
+                weekday, sb_need)
+    else
+        retVal;
+
+
+%sb_activity_type% =
+    if void(leg.%sb_qual_attr%) then
+        fundamental.%_sb_type_no_qual%(leg.%homeairport%, leg.%code%, leg.%start_utc%, leg.%end_utc%, leg.%sb_int_attr%)
+    else
+        fundamental.%_sb_type%(leg.%homeairport%, leg.%code%, leg.%start_utc%, leg.%end_utc%, leg.%sb_qual_attr%, leg.%sb_int_attr%);
+
+export %sb_extra_info% =
+    if void(leg.%sb_qual_attr%) then
+        fundamental.%_sb_extra_info_no_qual%(leg.%homeairport%, leg.%code%, leg.%start_utc%, leg.%end_utc%, leg.%sb_int_attr%)
+    else
+        fundamental.%_sb_extra_info%(leg.%homeairport%, leg.%code%, leg.%start_utc%, leg.%end_utc%, leg.%sb_qual_attr%, leg.%sb_int_attr%);
+
+%no_sb_in_trip% =
+    count(leg(trip)) from(first) to (current);
+    
+%correct_sb_placement%(SBPlacement place) =
+    if place = FirstSB then
+        is_first(leg(trip))
+    else if place = FirstTwoSB then
+        %no_sb_in_trip% <= 2
+    else if place = LastSB then
+        is_last(leg(trip))
+    else if place = NotLastSB then
+        trip.%num_duties% <= 1 or not is_last(leg(trip))
+    else if place = FisrtLastSB then
+        is_first(leg(trip)) or is_last(leg(trip))
+    else if place = SingleSB then
+        is_first(leg(trip)) and is_last(leg(trip))
+    else if place = SingleSBnotlastinwop then
+        is_first(leg(trip)) and is_last(leg(trip))
+    else 
+        True;
+        
+%correct_wop_sb_placement%(SBPlacement place) =
+    True;
+
+%is_tailored_standby_old% = leg.%is_standby% and leg.%sb_lookup_check_old%;
+%is_tailored_standby% = leg.%is_standby% and %sb_lookup_check%;
+%trip_is_tailored_standby% = any(leg(trip), %is_tailored_standby%);
+%sb_lookup_check% =
+    leg.%sb_lookup_check%;
+
+group sb_rules =
+    only_tailored_sb_activity_first_last_trip_ALL, 
+    only_tailored_sb_activity_first_last_wop_ALL,
+    only_one_airport_sb_activity_trip_ALL,
+    only_1_sb_activity_in_duty_ALL,
+    max_time_between_sb_activities_ALL,
+    min_time_between_sb_activities_ALL;
+
+    
+export %leg_correct_sb_placement% =
+    %correct_sb_placement%(%sb_placement%);
+
+export %trip_correct_sb_placement% =
+    %correct_wop_sb_placement%(%trip_sb_placement%);
+
+export %max_sb_connection_time% = parameter 24:00
+    remark "Max time between sb activites";
+
+rule max_time_between_sb_activities_ALL =
+  valid trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty.%is_standby% and
+        next(duty(trip), duty.%is_standby%);
+        duty.%connection_time% <= %max_sb_connection_time% + rule_exceptions.%overshoot_rel%(duty.%start_utc%);
+  startdate = duty.%start_UTC%;
+  failobject = last(leg(duty),leg.%failobject_departure%);
+  failtext(Reltime value, Reltime limit) =
+    concat("Soft: time between sb:s is",
+           %reltime2str%(value), ", max is ",
+           %reltime2str%(limit));
+  remark "(CCP) Soft: Max time between sb:s",
+  planner "The rule checks that the max allowed time between sbs"
+          " is satisified. The max time can be"
+          " changed by a parameter.";
+end
+
+rule min_time_between_sb_activities_ALL =
+  valid trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty.%is_standby% and
+        duty.%sb_duty% >= %sb_duty_time_to_have_extended_rest% and
+        next(duty(trip), duty.%is_standby%);
+        %min_sb_connection_time% <= duty.%connection_time% + rule_exceptions.%overshoot_rel%(duty.%start_utc%);
+  startdate = duty.%start_UTC%;
+  failobject = last(leg(duty),leg.%failobject_departure%);
+  failtext(Reltime value, Reltime limit) =
+    concat("Soft: time between sb:s is",
+           %reltime2str%(value), ", min is ",
+           %reltime2str%(limit));
+  remark "(CCP) Soft: Min time between sb:s",
+  planner "The rule checks that the min allowed time between sbs"
+          " is satisified when first sb convers heavy duty. The min time can be"
+          " changed by a parameter.";
+end
+
+export %sb_duty_time_to_have_extended_rest% = parameter 13:00
+    remark "How much duty a SB should cover to have extended rest";
+
+export %min_sb_connection_time% = parameter 13:00
+    remark "min connection time for sb close to max FDP";
+
+export %show_only_wrongly_placed_sb_with_must% =
+    parameter true
+    remark "Only show illegaly placed SB:s that must be placed at certaint possition";
+
+%_sb_trip_valid% = %sb_importance% = Must;
+
+%sb_trip_valid% =
+    if %show_only_wrongly_placed_sb_with_must% then
+        %_sb_trip_valid%
+    else
+        true;
+
+rule only_tailored_sb_activity_first_last_trip_ALL =
+  valid trip.%check_rules% and
+        leg.%in_pp_extended% and
+        %is_tailored_standby% and
+        %sb_trip_valid%;
+        %leg_correct_sb_placement% or
+    rule_exceptions.%rule_off%(leg.%start_UTC%);
+  startdate = leg.%start_UTC%;
+  severity =  %severity_filter_int%(leg.%start_hb%,%duty_lh_region%);
+  /*failobject = %caa_subq_max_duty_in_fdp_ALL_failobject%;*/
+  failtext %correct_sb_placement_failtext%(%sb_placement%);
+  remark "SOFT: tailored sb must be first/last in trip",
+  planner "The rule checks that tailored sb activities are correctly placed in trip.";
+end
+
+/*Not possible by rule must be handled by cost */
+
+
+%_sb_wop_valid% = %trip_sb_importance% = Must;
+%sb_wop_valid% =
+    if %show_only_wrongly_placed_sb_with_must% then
+        %_sb_wop_valid%
+    else
+        true;
+
+rule only_tailored_sb_activity_first_last_wop_ALL =
+  valid 
+        trip.%check_rules% and
+        trip.%in_pp_extended% and
+        %trip_is_tailored_standby% and
+        %sb_wop_valid%;
+        %trip_correct_sb_placement% or
+    rule_exceptions.%rule_off%(trip.%start_UTC%);
+  startdate = trip.%start_UTC%;
+  severity =  %severity_filter_int%(trip.%start_hb%,%duty_lh_region%);
+  failtext %correct_wop_sb_placement_failtext%(%trip_sb_placement%);
+  remark "SOFT: tailored sb must be first/last in wop",
+  planner "The rule checks that tailored sb activities are correctly placed in trip.";
+end
+
+%no_airport_sbs% =
+    count(leg(trip)) where (leg.%is_standby_at_airport%);
+
+rule only_one_airport_sb_activity_trip_ALL =
+  valid trip.%check_rules% and
+        trip.%in_pp_extended% and
+        trip.%has_airport_standby%;
+        %no_airport_sbs% <= 1 +
+    rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+  startdate = trip.%start_UTC%;
+  severity =  %severity_filter_int%(trip.%start_UTC%,%duty_lh_region%);
+  /*failobject = %caa_subq_max_duty_in_fdp_ALL_failobject%;
+  failtext %correct_sb_placement_failtext%(%sb_placement%);*/
+  remark "CAA: only 1 airport sb in trip",
+  planner "The rule checks that only 1 airport sb activity per trip is allowed.";
+end
+
+%correct_sb_placement_failtext%(SBPlacement place) =
+    concat("SB must be placed",  %format_sbplacement%(place), "in trip.");
+    
+%format_sbplacement%(SBPlacement place) =
+    if place = FirstSB then
+        "First"
+    else if place = LastSB then
+        "Last"
+    else if place = FisrtLastSB then
+        "First or Last"
+    else if place = SingleSB then
+        "Single"
+    else if place = EveryWhereSB then
+        "Everywhere"
+    else if place = NotLastSB then
+        "Not last"
+    else
+        "not defined";
+    
+%correct_wop_sb_placement_failtext%(SBPlacement place) =
+    concat("SB must be placed",  %format_wop_sbplacement%(place), "in wop.");
+    
+%format_wop_sbplacement%(SBPlacement place) =
+    if place = Singlesbnotlastinwop then
+        "Not last"
+    else
+        "not defined";
+        
+export %One_shoot_variable_crewing_valid_slices% = String;
+export %One_shoot_variable_crewing_valid_compositions% = String;
+
+/*Todo fix better definition*/
+%predefined_sb_type_placement%(special_sb_type comp_type, string weekday, int sb_need) =
+    let code_type =
+                %_predefined_sb_type_placement%(duty.%start_base%, fundamental.%main_cat%, %duty_predefined_departure%, %duty_weekday%);
+    if code_type = NoneSB then
+            %_predefined_sb_type_placement%(duty.%start_base%, fundamental.%main_cat%, %duty_predefined_departure%, "*")
+    else
+        code_type;
+
+export %duty_predefined_flight_nr% =
+    first(leg(duty),  sb_handling.%flight_name_flight%);
+
+export %duty_predefined_departure% =
+   sb_handling.%duty_flight_start%;
+
+export %duty_weekday% =
+    sb_handling.%duty_start_wd%;
+
+export %duty_sb_need% =
+   sb_handling.%duty_sb_need_for_date%;
+
+%predefined_sb_importance%(String base, String category, String WeekDay) =
+    %_predefined_sb_importance%(duty.%start_base%, fundamental.%main_cat%, %duty_predefined_departure%, WeekDay);

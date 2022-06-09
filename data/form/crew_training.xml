@@ -1,0 +1,560 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- $Header$ -->
+<views>
+
+<!-- 
+TODO: Enable access rights as in CrewInfo 
+TODO: Set attribute "tooltip" for all columns 
+-->
+<head>
+  
+<title>Crew Training</title>
+
+<alias id="valid_documents" source="crew_document_set" />
+<alias id="system_table" source="tmp_ctl_sys"/>
+
+<alias id="tmp_ctl_need_head" source="tmp_ctl_need" />
+<alias id="tmp_ctl_need_row" source="tmp_ctl_rows" />
+
+<on-loaded>
+  setEventEnabled(on-changed,false);
+  model("init_wave_client", "ctl_init_tables");
+</on-loaded>
+
+<on-opened>
+  setEventEnabled(on-changed,false);
+  setFontSize("status_bar","11");
+  setFontSize("log_list", "11");
+  setFontSize("landing_list", "11");
+  setFontSize("head_list", "11");
+  setFontSize("row_list", "11");
+  setFontSize("document_list", "11");
+  setValue("tabbed_view", "tmp_ctl_document");
+  set_log_filter("tmp_ctl_log");
+  setValue("crew_select", "${tmp_ctl_crew_summary[0,emp_no]}");
+  setFilter("tmp_ctl_need_head", "(part=1)");
+  setEventEnabled(on-changed,true);
+</on-opened>
+
+<on-closing>
+  form_exit();
+</on-closing>
+
+<!-- Exit function. Checks for unsaved changes -->
+<action name="form_exit" args=""><![CDATA[
+context.action('setEventEnabled', 'on-changed', 'false')
+context.action('model', 'submit_trans')
+context.action('model', 'ctl_check_for_changes')
+context.action('refreshClient')
+context.action('setEventEnabled', 'on-changed', 'true') 
+unsaved_changes = context.sm.resolve("${tmp_ctl_form_info[0,unsaved_changes]}")
+if unsaved_changes == "true":
+  context.action('openForm', 'warn.xml', 'modal',
+                 "title=Crew Training: Unsaved Changes",
+                 "msg=<b>There are unsaved changes.</b><br><br>" + \
+                        "Exit anyway?")
+else:
+  context.action('closeForm')
+]]></action>
+
+<!-- Search new crew. Checks for unsaved changes -->
+<action name="get_crew_data" args="id"><![CDATA[
+id = id.strip()
+if id in ('NULL', ''):
+  return
+
+context.action('setEventEnabled', 'on-changed', 'false')
+context.action('setValue', 'warn_yes', 'true')
+current_crewid = context.sm.resolve("${tmp_ctl_crew_summary[0,crew_id]}")
+if current_crewid != 'NULL':
+  context.action('model', 'submit_trans')
+  context.action('model', 'ctl_check_for_changes')
+  context.action('refreshClient')
+  if context.sm.resolve("${tmp_ctl_form_info[0,unsaved_changes]}") == "true":
+    current_empno = context.sm.resolve("${tmp_ctl_crew_summary[0,emp_no]}")
+    msg1 = "There are unsaved changes for crew %s." % current_empno
+    if id in (current_crewid, current_empno):
+      msg2 = "Do you want to revert to previous values?"
+    else:
+      msg2 = "Do you want to discard them and select crew %s instead?" % id
+    context.action('setValue', 'warn_yes', 'false')
+    context.action('openForm', 'warn.xml', 'modal',
+                   "title=Crew Training: Unsaved Changes",
+                   "msg=<B>%s</B><P>%s" % (msg1, msg2),
+                   "ifyes=parent.setValue(warn_yes,true)")
+if context.sm.resolve("${warn_yes}") == 'true':
+  context.action('lockInput', 'true')
+  context.action('model', 'ctl_set_crew', id)
+  context.action('show_status')
+  context.action('lockInput', 'false')
+context.action('setEventEnabled', 'on-changed', 'true')
+]]></action>
+
+<!-- Visualize current crew training status -->
+<action name="show_status" args=""><![CDATA[
+context.action('refreshClient')
+context.action('setProperty', 'status_bar', 'style.backgroundColor', 
+               context.sm.resolve("${tmp_ctl_form_info[0,status_color]}"))
+context.action('setValue', 'status_bar',
+               context.sm.resolve("${tmp_ctl_form_info[0,status_message]}"))
+]]></action>
+
+
+<!-- Log filter. Filters log entries depending on chosen type -->
+<action name="set_log_filter" args="table"><![CDATA[
+def filter(id):
+  val = context.sm.resolve('${%s}' % id) or 'NULL'
+  if val in ('NULL','false'):
+    return None
+  elif val == 'true':
+    return True
+  else:
+    return val
+
+global ctl_check_defs
+try:
+  ctl_check_defs
+except:
+  ctl_check_defs = {
+    'tmp_ctl_log': {
+      'rec_sim_check':    ('SIM REC',),
+      'rec_ground_check': ('EDU REC',),
+      'education_check':  ('EDUCATION',),
+      'flight_check':     ('FLT TRAINING',),
+      'apt_check':        ('AIRPORT',),
+      'instr_check':      ('INSTR',),
+      'misc_check':       ('MISC',),
+      },
+    'tmp_ctl_landing': {
+      'landing_check':    ('LANDING',),
+      'flown_check':      ('FLOWN',),
+      },
+    }
+
+tim_filters = []
+typ_filters = []
+    
+if filter('date_filter_fr_id'):
+  tim_filters.append("(tim>%s)" % filter('date_filter_fr_id'))
+if filter('date_filter_to_id'):
+  tim_filters.append("(tim<=%s 23:59)" % filter('date_filter_to_id'))
+
+for check in ctl_check_defs[table]:
+  if filter(check):
+    typ_filters.extend(['(grp=%s)' % typ for typ in ctl_check_defs[table][check]])
+
+if tim_filters and typ_filters:
+  ldap = "(&%s%s)" % ("".join(tim_filters), "(|%s)" % "".join(typ_filters))
+elif tim_filters:
+  ldap = "(&%s(grp=NONAME))" % "".join(tim_filters)
+elif typ_filters:
+  ldap = "(|%s)" % "".join(typ_filters)
+else:
+  ldap = "(grp=NONAME)"
+
+context.action('print', ldap)
+context.action('setFilter', table, ldap)
+]]></action>
+
+<!-- Create a new row using cbi_create_new_row, and select it -->
+<action name="create_new_row" args="tab_view, rowid"><![CDATA[
+model_source = tab_view
+table_id = model_source.split("_")[-1] + "_list"
+view = context.sm.getContext().getView(model_source, context.comp)
+row_ids = [str(row) for row in view.getEntityIterator(0)]
+context.action('model', 'submit_trans')
+context.action('model', 'ctl_add_row', tab_view, rowid)
+context.action('show_status')
+row_part = 0
+for row in view.getEntityIterator(0):
+  if str(row) not in row_ids:
+    context.action('setFocus', table_id, str(row_part), '0')
+    break
+  row_part += 1
+]]></action>
+
+<!-- Remove selected rows, select first row after removed rows -->
+<action name="remove_selected_rows" args="tab_view"><![CDATA[
+model_source = tab_view
+table_id = model_source.split("_")[-1] + "_list"
+view = context.sm.getContext().getView(model_source, context.comp)
+row_ids_before = [str(row) for row in view.getEntityIterator(0)]
+rows = len(row_ids_before)
+current_row_part = '0'
+
+ct = ""
+ts = ""
+# Training Need: If detail row with part=1 is to be removed we need to do some tricks.
+# 
+if tab_view == 'tmp_ctl_need_row' and rows > 1:
+  # Training Need: Get the current part value.
+  # If part=1 we will resort to Tricks Inc.
+  current_row_part = context.sm.resolve('${row_list[part]}')
+  
+context.action('deleteRow', table_id)
+
+row_ids_after = [str(row) for row in view.getEntityIterator(0)]
+
+if tab_view == 'tmp_ctl_need_row' and rows > 1:
+  # Training Need: Renumber the part field, we need in sequence
+  # and this will assure that there always is a part=1
+  for part in range(len(row_ids_after), 0, -1):
+    context.action('setTableValue', tab_view, str(part - 1), 'part', part)
+
+context.action('model', 'submit_trans')
+context.action('model', 'ctl_del_row', tab_view)
+context.action('show_status')
+
+# Set focus after removal of row
+for part in range(len(row_ids_before), 0, -1):
+  if row_ids_before[part-1] not in row_ids_after:
+    if part < len(row_ids_before):
+      row_after_part = row_ids_after.index(row_ids_before[part])
+      context.action('setFocus', table_id, str(row_after_part), '0')
+    break
+    
+
+]]></action>
+
+<!-- Wrap of deleteRow to enable one button for all tabs
+<action name="remove_row" args="table"><![CDATA[
+if table == "tmp_ctl_document":
+  context.action('deleteRow', "document_list")
+elif table == "tmp_ctl_need":
+  context.action('deleteRow', "need_list")
+]]></action> -->
+
+</head>
+
+<!-- Helpers (hidden) -->
+
+<hbox visible="false">
+  <check-box id="warn_yes" value="false"/>
+</hbox>
+
+<!-- Top menu -->
+
+<menu-bar>
+  <menu label="File">
+    <menu-item ref="save_button"/>
+    <menu-item ref="exit_button"/>
+  </menu>
+</menu-bar>
+
+<box style.orientation="border" style.height="600">
+  <vbox style.constraints="North" style.border="empty">
+    <box style.orientation="border" style.border="empty">
+      <!-- Crew Selection Box -->
+      <vbox label="Select Crew" style.width="200" style.constraints="West">
+        <vbox style.border="empty">
+          <text-field id="crew_select" label="Crew Emp No:">
+            <on-changed>get_crew_data("${crew_select}")</on-changed>
+          </text-field>
+          <button label="Get _I_nformation" filter.enabled="(!(crew_select=[[NULL| *]]))">
+            <on-click>get_crew_data("${crew_select}")</on-click>
+          </button>
+        </vbox>
+      </vbox>
+    
+      <!-- Crew Summary Box -->
+      
+      <vbox label="Crew Summary" style.constraints="Center">
+        <hbox style.border="empty">
+          <vbox style.border="empty">
+            <table-cell source="tmp_ctl_crew_summary" row="0" editable="false" 
+                        id="sum_emp_no"  label="Emp No:"      column="emp_no"     style.left="80"/>
+            <table-cell ref="sum_emp_no" label="Surname:"     column="last_name"  style.left="80"/>
+            <table-cell ref="sum_emp_no" label="First Names:" column="first_name" style.left="80"/>
+          </vbox>                                                                   
+          <text value="     "/>                                                        
+          <vbox style.border="empty">                                                                    
+            <table-cell ref="sum_emp_no" label="Rank:"     column="rank"     style.left="65"/>
+            <table-cell ref="sum_emp_no" label="Base:"     column="homebase" style.left="65"/>
+            <table-cell ref="sum_emp_no" label="AC Quals:" column="ac_quals" style.left="65"/>
+          </vbox>                                                  
+          <text value="     "/>                                                        
+          <vbox style.border="empty">                                                   
+            <table-cell ref="sum_emp_no" label="Pattern Group:" column="pattern"          style.left="95"/>
+            <table-cell ref="sum_emp_no" label="Duty Percent:"  column="part_time_factor" style.left="95"/>
+          </vbox>
+        </hbox>
+      </vbox>
+      
+      <vbox label="Rehearsal Rec" style.width="250" style.constraints="East">
+        <hbox style.border="empty">
+          <table-cell source="tmp_ctl_rehearse" row="0" 
+                      label="Crew valid for rehearsel rec:" column="is_allowed" style.left="180"/>
+        </hbox>
+      </vbox>
+      
+    </box>
+  </vbox>
+  
+  <!-- Tabbed View -->
+  
+  <box style.constraints="Center" style.orientation="border" label=" ">
+    <tabbed-box style.border="empty" id="tabbed_view" style.width="1000" style.constraints="Center">
+
+      <!-- Training Log -->
+      <vbox id="tmp_ctl_log" label="Training Log">
+        <table id="log_list" source="tmp_ctl_log"
+               columns="typ,code,tim,attr,onroster,grp"
+               style.autoresize="off"
+               sort.column="tim"
+               sort.ascending="false"
+               style.height="9999"
+               editable="false">
+          <columninfo column="typ" label="Type"/>
+          <columninfo column="code" label="Code"/>
+          <columninfo column="tim" label="Date"/>
+          <columninfo column="attr" label="Attribute"/>
+          <columninfo column="onroster" label="On roster"/>
+          <columninfo column="grp" label="Group" visible="false"/>
+        </table>
+      </vbox>
+    
+      <!-- Crew Landings -->
+      <vbox id="tmp_ctl_landing" label="Flight Log">
+        <table id="landing_list" source="tmp_ctl_landing"
+               columns="typ,code,tim,onroster,grp"
+               style.autoresize="off"
+               sort.ascending="false"
+               sort.column="tim"
+               style.height="9999"
+               editable="false">
+          <columninfo column="attribute" label="Type"/>
+          <columninfo column="code" label="Code"/>
+          <columninfo column="tim" label="Date"/>
+          <columninfo column="onroster" label="On roster"/>
+          <columninfo column="grp" label="Group" visible="false"/>
+        </table>
+      </vbox> 
+    
+      <!-- Training Need -->
+      <vbox id="tmp_ctl_need" label="Training Need">
+        <vbox>
+          <vbox id="head_need" label="Training Type">
+            <table id="head_list" source="tmp_ctl_need_head"
+               columns="id,part,course,course_subtype,validfrom,modvalidto"
+               style.autoresize="off"
+               sort.ascending="true"
+               sort.column="validfrom"
+               style.height="9999"
+               editable="true"
+               table.selectionmode="SINGLE">
+              <columninfo column="id" label="Id" visible="false"/>
+              <columninfo column="part" label="Order" visible="false"/>
+              <columninfo column="course" label="Course Type" width="200"/>
+              <columninfo column="course_subtype" label="Course Subtype" width="200"/>
+              <columninfo column="validfrom" label="Start" width="100"/>
+              <columninfo column="modvalidto" label="End" width="100"/>
+              <on-changed>
+                <!--  If type or date is changed we need to change in the detail row view  -->
+                <!--set_detail_rows(${head_list[id]}, ${head_list[course]}, ${head_list[validfrom]});-->
+                setFilter("tmp_ctl_need_row", "(id=${head_list[id]})");
+                refreshClient();
+              </on-changed>
+              <on-selection-changed>
+                clearSelection(row_list);
+                setFilter("tmp_ctl_need_row", "(id=${head_list[id]})");
+                refreshClient();
+              </on-selection-changed>
+            </table>
+          <hbox style.border="empty">
+            <button label="Crea_t_e" style.width="75"
+                    filter.enabled="(!(${tmp_ctl_crew_summary[0,crew_id]}=[[NULL| *]]))">
+              <on-click>create_new_row("tmp_ctl_need_head", NULL)</on-click> 
+            </button>
+            <button id="remove_button_head" label="Remo_v_e" style.width="75"
+                    filter.enabled="(!(${head_list}=NULL))">
+                <on-click>remove_selected_rows("tmp_ctl_need_head")</on-click>
+            </button>
+          </hbox>
+          </vbox>
+          <vbox id="rows_need" label="Training Detail Rows">
+            <table id="row_list" source="tmp_ctl_need_row"
+               columns="id,part,attribute,flights,maxdays,acqual,si"
+               style.autoresize="off"
+               sort.ascending="true"
+               sort.column="part"
+               style.height="9999"
+               editable="true">
+              <columninfo column="id" label="HeaderId" visible="false"/>
+              <columninfo column="part" label="Order" editable="false" width="70"/>
+              <columninfo column="attribute" label="Type" width="100"/>
+              <columninfo column="flights" label="Needed Flights" width="100"/>
+              <columninfo column="maxdays" label="Max Days" width="100"/>
+              <columninfo column="acqual" label="Optional AC Qual" width="100"/>
+              <columninfo column="si" label="Comment" width="340"/>
+            </table>
+            <hbox style.border="empty">
+              <button label="Create" style.width="75"
+                      filter.enabled="(!(${head_list}=NULL))">
+                <on-click>create_new_row("tmp_ctl_need_row", ${head_list[id]})</on-click> 
+              </button>
+              <button id="remove_button_row" label="Remove" style.width="75"
+                      filter.enabled="(&amp;(${tmp_ctl_need_row._rowcount}>1)(!(${row_list}=NULL)))">
+                <on-click>remove_selected_rows("tmp_ctl_need_row")</on-click>
+              </button>
+            </hbox>
+          </vbox>
+        </vbox>
+      </vbox>
+    
+      <!-- Crew Document -->
+      <vbox id="tmp_ctl_document" label="Training Document">
+        <table id="document_list" source="tmp_ctl_document" 
+               columns="validfrom,modvalidto,doc,ac_qual,issuer,si"
+               style.autoresize="off"
+               sort.column="validfrom"
+               style.height="9999"
+               sort.ascending="false">
+          <columninfo column="validfrom" label="Valid From"/>
+          <columninfo column="modvalidto" label="Valid To"/>
+          <columninfo column="doc" label="Document"
+                      column.view="valid_documents"
+                      style.display.column="subtype"/>
+          <columninfo column="ac_qual" label="AC Qual"
+                      filter.editable="(|(${document_list[doc]}=${doc_exclude_condition[0,doctyp]})(${document_list[doc]}=${doc_exclude_condition[1,doctyp]})(${document_list[doc]}=${doc_exclude_condition[2,doctyp]}))"/>
+          <columninfo column="issuer" label="Issuer"/>
+          <columninfo column="si" label="SI" width="350"/>
+          <on-changed>
+            setFilter("valid_documents", "(typ=REC)");
+            refreshClient();
+          </on-changed>
+          <on-selection-changed>
+            setFilter("valid_documents", "(typ=REC)");
+            refreshClient();
+          </on-selection-changed>
+        </table>
+      </vbox>
+      
+      <on-changed> <!-- Switched tabview -->
+        clearSelection(log_list);
+        clearSelection(landing_list);
+        clearSelection(head_list);
+        clearSelection(row_list);
+        clearSelection(document_list);
+        setFilter("tmp_ctl_need_row", "(id=${head_list[id]})");
+      </on-changed>
+    </tabbed-box>
+    
+    <!-- Buttons or filters that operate on the currently visible tab -->
+    <hbox id="xx" style.constraints="South" style.height="30">
+  
+      <button label="_R_efresh" style.width="75"
+              filter.enabled="(!(${tmp_ctl_crew_summary[0,crew_id]}=[[NULL| *]]))">
+        <on-click>
+          model("submit_trans");
+          model("ctl_refresh", ${tabbed_view});
+          show_status();
+          set_log_filter("tmp_ctl_log");
+          set_log_filter("tmp_ctl_landing");
+        </on-click>
+      </button>
+    
+      <!-- Buttons for Training Need & Document tabs -->
+      <hbox filter.visible="(|(tabbed_view='tmp_ctl_document')(tabbed_view='tmp_ctl_need'))" style.border="empty">
+        <!-- Create button: For both tabs -->
+        <button label="Crea_t_e" style.width="75"
+                filter.visible="(!(tabbed_view='tmp_ctl_need'))"
+                filter.enabled="(!(${tmp_ctl_crew_summary[0,crew_id]}=[[NULL| *]]))">
+          <on-click>create_new_row(${tabbed_view}, NULL)</on-click> 
+        </button>
+        
+        <!-- Remove button: One of two versions depending on tab -->
+        <button id="remove_button" label="Remo_v_e" style.width="75"
+                filter.visible="(tabbed_view=tmp_ctl_document)"
+                filter.enabled="(!(${document_list}=NULL))">
+          <on-click>remove_selected_rows(${tabbed_view})</on-click>
+        </button>
+      </hbox>
+      
+      <!-- Filters for Training & Flight Log tabs -->
+      <hbox filter.visible="(|(tabbed_view='tmp_ctl_log')(tabbed_view='tmp_ctl_landing'))">
+           
+        <!-- Date filter: Both tabs -->
+        <text value="   "/>
+        <hbox style.border="empty">
+          <hbox><text value="Show dates from:"/></hbox>
+          <hbox style.border="empty" style.width="100">
+            <table-cell id="date_filter_fr_id"
+                        source="system_table" 
+                        row="0"
+                        column="timefr" 
+                        date.format="ddMMMyyyy" 
+                        style.width="90"
+                        style.left="0">
+              <on-changed>
+                set_log_filter("tmp_ctl_log");
+                set_log_filter("tmp_ctl_landing");
+              </on-changed>
+            </table-cell>
+          </hbox>
+          <hbox><text value=" until:"/></hbox>
+          <hbox style.border="empty" style.width="100">
+            <table-cell ref="date_filter_fr_id"
+                        id="date_filter_to_id"
+                        column="timeto"/> 
+          </hbox>
+        </hbox>
+      
+        <!-- Filter checkboxes, visibility/contents differs for each tab -->
+        <text value="   "/>
+        <hbox filter.visible="(tabbed_view='tmp_ctl_log')" style.border="empty">
+          <check-box id="rec_sim_check" label="Rec-Sim  "       value="true">
+            <on-changed>set_log_filter("tmp_ctl_log")</on-changed>
+          </check-box>
+          <check-box ref="rec_sim_check" id="rec_ground_check" label="Rec-Gnd  "  value="true"/>
+          <check-box ref="rec_sim_check" id="education_check"  label="Education  "   value="true"/>
+          <check-box ref="rec_sim_check" id="flight_check"     label="Flights  "     value="true"/>
+          <check-box ref="rec_sim_check" id="apt_check"        label="Airport  "     value="true"/>
+          <check-box ref="rec_sim_check" id="instr_check"      label="Instr  " value="true"/>
+          <check-box ref="rec_sim_check" id="misc_check"       label="Misc  "        value="true"/>
+        </hbox>
+      
+        <hbox filter.visible="(tabbed_view='tmp_ctl_landing')" style.border="empty">
+          <check-box id="landing_check" label="Landings  "       value="true">
+            <on-changed>set_log_filter("tmp_ctl_landing")</on-changed>
+          </check-box>
+<!--          <check-box ref="landing_check" id="airport_check" label="Airports  " value="true"/>-->
+          <check-box ref="landing_check" id="flown_check"   label="Flown  "    value="true"/>
+        </hbox>
+      </hbox>
+    </hbox>
+  </box>
+  
+  <!-- General buttons and status bar at the bottom -->
+  <vbox style.constraints="South">
+  
+    <!-- Buttons -->
+    <hbox>
+      <button id="save_button" style.width="75" label="${tmp_wave_values[save_label,v]}"
+              filter.enabled="(!(${tmp_ctl_crew_summary[0,crew_id]}=[[NULL| *]]))">
+        <on-click>
+          lockInput(true);
+          setEventEnabled(on-changed,false);
+          setTableValue("tmp_ctl_form_info", 0, "error_table", ${tabbed_view} );
+          setValue("status_bar", ${tabbed_view});
+          model("submit_opaq", "Crew Training");
+          model("ctl_save_changes", ${forms.messages.local.any});
+          show_status();
+          setSelectedTab("${tmp_ctl_form_info[0, error_table]}");
+          setEventEnabled(on-changed,true);
+          lockInput(false);
+        </on-click>
+      </button>
+      
+      <button id="exit_button" style.width="75" label="${tmp_wave_values[exit_label,v]}">
+        <on-click>form_exit()</on-click>
+      </button>
+    </hbox>
+  
+    <!-- Status Bar -->
+    <box id="statusbox" style.constraints="South"> 
+      <text-field id="status_bar" value="" editable="false"/>
+    </box>
+  </vbox>
+</box>
+
+</views>

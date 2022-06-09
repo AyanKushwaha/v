@@ -1,0 +1,226 @@
+/* -*- crc -*-
+ *
+ * Support module for checkin and checkout (ACCI).
+ *
+ * Note:
+ *
+ * All calculation using UTC, all presentation using local time.
+ *
+ * Some of the variables will return void, which is OK, this is
+ * taken care of in the calling Python module.
+ *
+ * [acosta:06/219@10:45] Renamed variable names to be consistent.
+ */
+
+module report_cio
+
+import checkinout;
+import crew;
+import crew_pos;
+import duty;
+import duty_code;
+import fundamental;
+import keywords;
+import leg;
+import levels;
+import packed_roster;
+import publish;
+import model_crew;
+
+/* Help variables **************************************************** {{{1 */
+%has_departed% = leg.%start_UTC% < %now%;
+%has_not_arrived% = leg.%end_UTC% > %now%;
+
+%is_co_activity% = 
+  %has_departed% and leg.%requires_cio% and not checkinout.%leg_cio_stat_is_co%;
+%is_ci_activity% = 
+  %has_not_arrived% and leg.%requires_cio% and not checkinout.%leg_cio_stat_is_ci%;
+
+
+/* Variables used in report ****************************************** {{{1 */
+/* dutycd {{{2 */
+export %dutycd% = duty_code.%leg_code%;
+export %co_dutycd% =
+  last(leg(chain), %dutycd%) where (%is_co_activity%);
+
+/* activityid {{{2 */
+%activityid% = leg.%flight_name%;
+export %co_activityid% = %co_flight_name%;
+
+/* origsdt-utc {{{2 */
+/* Startdate of origin of flight */
+%origsdt_utc% = leg.%udor%;
+export %co_origsdt_utc% =
+  last(leg(chain), %origsdt_utc%) where (%is_co_activity%);
+
+/* stnfr {{{2 */
+%stnfr% = leg.%start_station%;
+export %co_stnfr% =
+  last(leg(chain), %stnfr%) where (%is_co_activity%);
+
+/* std {{{2 */
+%std% = leg.%activity_scheduled_start_time_lt%;
+export %co_std% =
+  last(leg(chain), %std%) where (%is_co_activity%);
+export %ci_std% =
+  first(leg(chain), %std%) where (%is_ci_activity%);
+
+/* sta {{{2 */
+%sta% = leg.%activity_scheduled_end_time_lt%;
+export %co_sta% =
+  last(leg(chain), %sta%) where (%is_co_activity%);
+export %ci_sta% =
+  first(leg(chain), %sta%) where (%is_ci_activity%);
+
+/* eta {{{2 */
+%eta% = leg.%activity_estimated_end_time_lt%;
+export %co_eta% =
+   last(leg(chain), %eta%) where (%is_co_activity%);
+
+/* (Empty) perkey {{{2 */
+
+/* flight_name {{{2 */
+export %flight_name% = packed_roster.%current_activity_code%(false, 0);
+export %co_flight_name% =
+  last(leg(chain), %activityid%) where (%is_co_activity%);
+export %ci_flight_name% =
+  first(leg(chain), %activityid%) where (%is_ci_activity%);
+
+/* udor {{{2 */
+export %co_udor% =
+  last(leg(chain), leg.%udor%) where (%is_co_activity%);
+export %ci_udor% =
+  first(leg(chain), leg.%udor%) where (%is_ci_activity%);
+
+/* checkin {{{2 */
+%checkin% = leg.%duty_start_lt%;
+export %ci_checkin% =
+  first(leg(chain), %checkin%) where (%is_ci_activity%);
+
+/* actype {{{2 */
+export %ci_actype% =
+  first(leg(chain), leg.%ac_type%) where (%is_ci_activity%);
+
+/* PIC, Pilot in command {{{2 */
+export %pic% = max(equal_legs, crew.%id%)
+  where (crew_pos.%acting_commander%);
+export %pic_logname% =
+  max(equal_legs, crew.%login_name%) where (crew.%id% = %pic%);
+
+export %ci_pic% =
+  first(leg(chain), %pic%) where (%is_ci_activity%);
+export %ci_pic_logname% =
+  first(leg(chain), %pic_logname%) where (%is_ci_activity%);
+
+/* AP, C/A 1 {{{2 */
+export %ca1% =
+  max(equal_legs, crew.%id%) 
+  where (crew_pos.%chief_of_cabin%);
+export %ca1_logname% =
+  max(equal_legs, crew.%login_name%) where (crew_pos.%chief_of_cabin%);
+
+export %ci_ca1% =
+  first(leg(chain), %ca1%) where (%is_ci_activity%);
+export %ci_ca1_logname% =
+  first(leg(chain), %ca1_logname%) where (%is_ci_activity%);
+
+/* ci_deadhead {{{2 */
+export %ci_deadhead% =
+  first(leg(chain), leg.%is_deadhead%) where (%has_not_arrived%);
+
+/* ci_to_sby {{{2 */
+export %ci_to_ap_sby% =
+  first(leg(chain), leg.%is_standby_at_airport%) where (%has_not_arrived%);
+
+/* Passive duties **************************************************** {{{1 */
+/* [acosta:08/143@13:19] Now using definitions in leg module */
+export %is_deadhead_until_next_checkout% =
+  %until_next_checkout% and leg.%is_deadhead%;
+
+
+
+/* Information valid until next checkin/checkout ********************* {{{1 */
+export %until_next_checkout% =
+    %has_not_arrived% and (leg.%end_utc% <= %next_checkout%);
+
+%next_checkout% =
+  default(
+    first(leg(chain) where (%has_not_arrived% and checkinout.%leg_has_mandatory_co%),
+      leg.%end_utc%),
+    last(leg(chain), leg.%end_utc%));
+
+
+
+/* Next duty ********************************************************* {{{1 */
+export %next_udor% =
+  first(leg(chain), leg.%udor%) where (%has_not_arrived% and leg.%is_on_duty%);
+
+export %next_std% =
+  first(leg(chain), %std%) where (%has_not_arrived% and leg.%is_on_duty%);
+
+export %next_flight_name% =
+  first(leg(chain), %activityid%) where (%has_not_arrived% and leg.%is_on_duty%);
+
+export %next_req_cio% =
+  first(leg(chain), leg.%requires_cio% or leg.%is_simulator%) where (%has_not_arrived% and leg.%is_on_duty%);
+
+export %next_checkin% =
+  first(leg(chain), %checkin%) where (%has_not_arrived% and leg.%is_on_duty%);
+
+export %next_is_pact% =
+  first(leg(chain), leg.%is_pact%) where (%has_not_arrived% and leg.%is_on_duty%);
+
+
+/* For crew lists **************************************************** {{{1 */
+export %is_next_active_flight% =
+  is_first(leg(chain)) where (%is_ci_activity% and not leg.%is_deadhead%);
+
+export %next_is_passive% =
+  first(leg(chain) where (%is_ci_activity%), leg.%is_deadhead%);
+
+export %next_is_active_another_day% =
+  first(leg(chain) where (%is_ci_activity%), 
+    leg.%is_deadhead% and default(%next_is_another_day%, false));
+
+%next_is_another_day% = leg.%is_last_in_duty%;
+
+export %checked_in% =
+  first(leg(chain), checkinout.%leg_checked_in%) where (%has_not_arrived%);
+
+/* Reduced Crew and Reason {{{2 */
+/* Note: No reason can be obtained (yet?) */
+export %number_of_cc% =
+  count(equal_legs where (crew.%is_cabin% and leg.%is_active_flight% and not void(crew.%id%)));
+
+  /* NOTE: Bugzilla 34945, cannot use some keyword when in published mode */
+  /*booked_crew_position_5 +*/
+  /*booked_crew_position_6 +*/
+  /*booked_crew_position_7 +*/
+  /*booked_crew_position_8;*/
+
+export %cc_need% =
+  crew_pos.%n_pos5% +
+  crew_pos.%n_pos6% +
+  crew_pos.%n_pos7% +
+  crew_pos.%n_pos8%;
+
+
+/* For publication *************************************************** {{{1 */
+%crew_home_station%(string crewid, abstime t) =
+  default(fundamental.%base2station%(model_crew.%base_at_date_by_id%(crewid, t)), "CPH");
+
+export %utc_to_hb%(string crewid, abstime utc_time) =
+  station_localtime(%crew_home_station%(crewid, utc_time), utc_time);
+
+export %hb_to_utc%(string crewid, abstime hb_time) =
+  station_utctime(%crew_home_station%(crewid, hb_time), hb_time);
+
+export %last_scheduled_time% =
+  /* Max value of pubend in published_roster with pubtype = 'SCHEDULED' */
+  /* Note: this value should never exceed pp_end! */
+  nmin(publish.%crew_rostering_published_end%, fundamental.%pp_end%);
+
+
+/* modeline ********************************************************** {{{1 */
+/* vim: set fdm=marker: */
+/* eof */

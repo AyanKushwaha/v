@@ -1,0 +1,277 @@
+/* -*- crc -*-
+ *
+ * Purpose:
+ *   The module describes the 'model' supporting freedays. It was created in order to have common code regarding freedays,
+ *   used in studio and manpower. A lot of existing code may be moved here when / if there is need.
+ *
+ * Sections:
+ *
+ * Created by:
+ *   Lars Westerlind 2016-02-22
+ *
+ */
+
+module model_freedays
+
+import base_utils;
+import system_accumulator_reader;
+import system_db_parameters;
+import model_crew;
+
+/****************************************************************
+ * Section 1: Basic stuff 
+ ***************************************************************/
+
+export %fdc_start_month%(String crew_id, Abstime d) =
+  if model_crew.%has_agmt_group_se%(crew_id, d) or model_crew.%has_agmt_group_skis_fd%(crew_id, d) then 6
+  else 1;  
+
+export %fdc_month_nr%(String crew_id, Abstime d) =
+  (12 + %month_nr%(d) - %fdc_start_month%(crew_id, d)) mod 12 +1;
+
+export %fdc15_months_remaining%(String crew_id, Abstime d) =
+  12 - %fdc_month_nr%(crew_id, d);
+
+export %fdc_start_year_date%(String crew_id, Abstime d) =
+  add_months(round_down_month(d), 1 - %fdc_month_nr%(crew_id, d));
+
+export %is_last_twin_month%(Abstime d) =
+  %month_nr%(d) mod 2 = 0;
+
+/****************************************************************
+** Section 2: fdc calculations 
+****************************************************************/
+
+/* fdc15 basic entitlement min value per month, depending on parttime percent */
+export %fdc15_month_entitled_basic_fd_qa%(Int parttime_percent, String crew_id, Abstime s) =
+let agmt_group_id = model_crew.%agmt_group_inv_enum_at_date%(crew_id, s);
+if model_crew.%has_corona_at_date%(crew_id, s) then
+    %_min_freedays_corona_from_table%(parttime_percent, agmt_group_id)
+else
+  (2500 - 14 * parttime_percent + 50) / 100;
+
+table min_freedays_corona (Int parttime_percent, Int agmt_group_id) =
+parttime_percent, agmt_group_id -> %_min_freedays_corona_from_table%;
+100, - -> 11;
+80, -  -> 15;
+75, -  -> 15;
+64, -  -> 18;
+60, -  -> 19;
+50, 3  -> 21; /*SKD_FD_AG*/
+50, 15 -> 21; /*SKID_FD_AG*/
+50, 5  -> 18; /*SKS_FD_AG*/
+50, 16 -> 18; /*SKIS_FD_AG*/
+50, 7  -> 18; /*SKN_FD_AG*/
+50, 17 -> 18; /*SKIN_FD_AG*/
+48, -  -> 21;
+45, -  -> 21;
+40, 3  -> 21; /*SKD_FD_AG*/
+40, 15 -> 21; /*SKID_FD_AG*/
+40, 5  -> 23; /*SKS_FD_AG*/
+40, 16 -> 23; /*SKIS_FD_AG*/
+40, 7  -> 23; /*SKN_FD_AG*/
+40, 17 -> 23; /*SKIN_FD_AG*/
+38, -  -> 23;
+32, -  -> 24;
+30, -  -> 25;
+29, -  -> 25;
+28, -  -> 25;
+25, -  -> 25;
+20, -  -> 26;
+19, -  -> 26;
+15, -  -> 27;
+10, -  -> 29;
+-,  -  -> 99 /*error code*/;
+end
+
+/* fdc15 basic entitlement per year, depending on parttime percent,
+** SE and NO crew have a one day lesser value than DK
+*/
+%fdc15_year_entitled_basic_fd%(Int parttime_percent, Bool is_seno_limit) =
+  nmin((36500 - 208 * parttime_percent + 50) / 100, if is_seno_limit and parttime_percent=100 then 156 else 999);
+
+/* fdc15 basic entitlement per year, depending on parttime percent. */
+%fdc15_twin_entitled_basic_qa%(Int parttime_percent) =
+  (6000 - 36 * parttime_percent + 50) / 100;
+
+export %fdc15_twin_entitled_basic_qa_by_crew%(String crew_id, Abstime d) =
+  %fdc15_twin_entitled_basic_qa%(model_crew.%crew_contract_part_time_factor_at_date%(crew_id, d));  
+
+/* fdc15 basic entitlement per year, depending on parttime percent. */
+%fdc15_year_entitled_basic_qa%(Int parttime_percent) =
+  365 - (216 * parttime_percent + 50) / 100;
+
+
+/* fdc15 basic entitlement min value per month, depending on parttime percent */
+%fdc15_month_entitled_basic_snk%(Int parttime_percent) =
+  (3100 - 20 * parttime_percent + 50) / 100;
+
+/* fdc15 basic entitlement per year, depending on parttime percent */
+%fdc15_year_entitled_basic_snk%(Int parttime_percent) =
+  364 - (218 * parttime_percent + 50) / 100;
+
+%contracts_not_in_fdc%(String crew_id, Abstime s) =  model_crew.%is_crew_admin_at_date%(crew_id, s) or model_crew.%is_crew_monthly_parttime_at_date%(crew_id, s);
+
+/* Wrapper for the below table to check s and then e, if s does not provide a result */
+%_crew_fdc15_rule%(String crew_id, Abstime s, Abstime e) =
+    if %__fdc_valid%(crew_id, s) then %__crew_fdc15_rule%(crew_id, s) else
+    if %__fdc_valid%(crew_id, e) then %__crew_fdc15_rule%(crew_id, e) else void_string;
+%_fdc_valid%(String crew_id, Abstime s, Abstime e) =
+    let s_valid = %__fdc_valid%(crew_id, s);
+    if not s_valid then %__fdc_valid%(crew_id, e) else s_valid;
+export %month_entitled_basic%(String crew_id, Abstime s, Abstime e) =
+    if %__fdc_valid%(crew_id, s) then %_month_entitled_basic%(crew_id, s) else
+    if %__fdc_valid%(crew_id, e) then %_month_entitled_basic%(crew_id, e) else 0;
+export %year_entitled_basic%(String crew_id, Abstime s, Abstime e) =
+    if %__fdc_valid%(crew_id, s) then %_year_entitled_basic%(crew_id, s) else
+    if %__fdc_valid%(crew_id, e) then %_year_entitled_basic%(crew_id, e) else 0;
+export %year_ft_entitled_basic%(String crew_id, Abstime s, Abstime e) =
+    if %__fdc_valid%(crew_id, s) then %_year_ft_entitled_basic%(crew_id, s) else
+    if %__fdc_valid%(crew_id, e) then %_year_ft_entitled_basic%(crew_id, e) else 0;
+/* main table to decide type of calculations due to agreement */
+table crew_entitled(String crew_id, Abstime s) =
+  alias pt_factor = model_crew.%crew_contract_part_time_factor_at_date%(crew_id, s);
+        model_crew.%group_at_date%(crew_id, s), 
+        model_crew.%has_agmt_qual_fd_crj_at_date%(crew_id, s),
+        model_crew.%agmt_group_inv_enum_at_date%(crew_id, s),
+        model_crew.%is_temporary_at_date%(crew_id, s),
+        %contracts_not_in_fdc%(crew_id, s)->
+          %__crew_fdc15_rule%,
+          %__fdc_valid%,
+          %_month_entitled_basic%,
+          %_year_entitled_basic%,
+          %_year_ft_entitled_basic%;
+        "V", False,   3,  -,  False  -> /* fd not flying cimber, SH DK */
+                                  "fd-sk-dk", system_db_parameters.%k15sk_jan16_valid%(s),
+                                  %fdc15_month_entitled_basic_fd_qa%(pt_factor, crew_id/*Corona*/, s/*Corona*/),
+                                  %fdc15_year_entitled_basic_fd%(pt_factor, false),
+                                  %fdc15_year_entitled_basic_fd%(100, false);
+        "V", False,  15,  -,  False -> /* fd not flying cimber, SH SE */
+                                  "fd-sk-dk", system_db_parameters.%k15sk_jan16_valid%(s),
+                                  %fdc15_month_entitled_basic_fd_qa%(pt_factor, crew_id/*Corona*/, s/*Corona*/),
+                                  %fdc15_year_entitled_basic_fd%(pt_factor, false),
+                                  %fdc15_year_entitled_basic_fd%(100, false);
+        "V", False,   5,  -,  False -> /* fd not flying cimber, SH SE */
+                                  "fd-se/no", system_db_parameters.%fdc15_sk_se_valid%(s),
+                                  %fdc15_month_entitled_basic_fd_qa%(pt_factor, crew_id/*Corona*/, s/*Corona*/),
+                                  %fdc15_year_entitled_basic_fd%(pt_factor, true),
+                                  %fdc15_year_entitled_basic_fd%(100, true);
+        "V", False,  16,  -,  False ->  /* fd not flying cimber, LH SE */
+                                  "fd-se/no" , system_db_parameters.%fdc15_sk_se_valid%(s),
+                                  %fdc15_month_entitled_basic_fd_qa%(pt_factor, crew_id/*Corona*/, s/*Corona*/),
+                                  %fdc15_year_entitled_basic_fd%(pt_factor, true),
+                                  %fdc15_year_entitled_basic_fd%(100, true);
+        "V", False,   7,  -,  False -> /* fd not flying cimber, SH NO */
+                                  "fd-se/no", system_db_parameters.%k15sk_jan16_valid%(s),
+                                  %fdc15_month_entitled_basic_fd_qa%(pt_factor, crew_id/*Corona*/, s/*Corona*/),
+                                  %fdc15_year_entitled_basic_fd%(pt_factor, true),
+                                  %fdc15_year_entitled_basic_fd%(100, true);
+        "V", False,  17,   -,  False -> /* fd not flying cimber, LH NO */
+                                  "fd-se/no", system_db_parameters.%k15sk_jan16_valid%(s),
+                                  %fdc15_month_entitled_basic_fd_qa%(pt_factor, crew_id/*Corona*/, s/*Corona*/),
+                                  %fdc15_year_entitled_basic_fd%(pt_factor, true),
+                                  %fdc15_year_entitled_basic_fd%(100, true);
+        "V", True,    -,  -,   False -> /* fd flying cimber */
+                                  "qa",  system_db_parameters.%k15qa_feb16_valid%(s),
+                                  %fdc15_month_entitled_basic_fd_qa%(pt_factor, crew_id/*Corona*/, s/*Corona*/),
+                                  %fdc15_year_entitled_basic_qa%(pt_factor),
+                                  %fdc15_year_entitled_basic_qa%(100);
+        "V", False,   2, False, False -> /* cc QA */
+                                  "qa",  system_db_parameters.%k15qa_feb16_valid%(s),
+                                  %fdc15_month_entitled_basic_fd_qa%(pt_factor, crew_id/*Corona*/, s/*Corona*/),
+                                  %fdc15_year_entitled_basic_qa%(pt_factor),
+                                  %fdc15_year_entitled_basic_qa%(100);
+        "V", False,  11, False, False -> /* cc SNK */
+                                  "cc-snk", system_db_parameters.%k15sk_jan16_valid%(s),
+                                  %fdc15_month_entitled_basic_snk%(pt_factor), 
+                                  %fdc15_year_entitled_basic_snk%(pt_factor),
+                                  %fdc15_year_entitled_basic_snk%(100);                                  
+        "V", False,  10, False, False -> /* cc NKF*/
+                                  "cc-nkf", system_db_parameters.%nkf_in_fdc_jan21_valid%(s),
+                                  %fdc15_month_entitled_basic_snk%(pt_factor), 
+                                  %fdc15_year_entitled_basic_snk%(pt_factor),
+                                  %fdc15_year_entitled_basic_snk%(100);                                                              
+        -,   -,      -,   -,      - -> void_string, False, 0, 0, 0;
+end
+
+export %year_pt_entitled_basic%(String crew_id, Abstime s, Abstime e) =
+  if model_crew.%crew_contract_part_time_factor_at_date%(crew_id, s) = 100 then 0
+  else %year_entitled_basic%(crew_id, s, e) - %year_ft_entitled_basic%(crew_id, s, e);
+
+%_crew_fdc15_valid_rule%(String crew_id, Abstime s, Abstime e) =
+  if %_fdc_valid%(crew_id, s, e) then
+    %_crew_fdc15_rule%( crew_id, s, e)
+  else void_string;
+
+%crew_vg_pre_fdc15_at_date%(String crew_id, Abstime d) =
+  (model_crew.%group_at_date%(crew_id, d) = "V") and 
+  not %_fdc_valid%(crew_id,d,d);
+
+/****************************************************************
+** Section 3: Exported values 
+***************************************************************/
+
+export %fdc_valid%(String crew_id, Abstime s, Abstime e) =
+  %_fdc_valid%(crew_id, s, e);
+
+export %crew_fdc15_rule%(String crew_id, Abstime s, Abstime e) =
+  if %_fdc_valid%(crew_id, s, e) then %_crew_fdc15_rule%(crew_id, s, e)
+  else void_string;
+
+export %crew_year_entitled_basic%(String crew_id, Abstime s, Abstime e) =
+  if %_fdc_valid%(crew_id, s, e) then %year_entitled_basic%(crew_id, s, e)
+  else 0;
+
+
+export %fdc15_read_scheduled_at_date%(String crew_id, Abstime s, Abstime e) =
+  system_accumulator_reader.%int_value_in%(system_accumulator_reader.%fdc15_scheduled_acc_name%, crew_id, s, e);
+
+export %fdc15_read_year_entitled_at_date%(String crew_id, Abstime s, Abstime e) =
+  system_accumulator_reader.%int_value_in%(system_accumulator_reader.%fdc15_year_entitled_acc_name%, crew_id, s, e);
+
+export %fdc15_read_twin_entitled_at_date%(String crew_id, Abstime s, Abstime e) =
+  system_accumulator_reader.%int_value_in%(system_accumulator_reader.%fdc15_twin_entitled_acc_name%, crew_id, s, e);
+
+export %fdc15_read_year_scheduled%(String crew_id, Abstime d) =
+  let e = round_up_month(d + 0:01);
+  %fdc15_read_scheduled_at_date%(crew_id, %fdc_start_year_date%(crew_id, d), e);
+
+export %fdc15_read_year_entitled%(String crew_id, Abstime d) =
+  let e = round_up_month(d + 0:01);
+  %fdc15_read_year_entitled_at_date%(crew_id, %fdc_start_year_date%(crew_id, d), e);
+   
+export %fdc15_read_twin_scheduled%(String crew_id, Abstime d) =
+  let e = round_up_month(d + 0:01),
+      s = if %is_last_twin_month%(d) then add_months(e, -2) else add_months(e, -1);
+  %fdc15_read_scheduled_at_date%(crew_id, s, e);           
+
+export %fdc15_read_twin_entitled%(String crew_id, Abstime d) =
+  let e = round_up_month(d + 0:01),
+      s = if %is_last_twin_month%(d) then add_months(e, -2) else add_months(e, -1);
+  %fdc15_read_twin_entitled_at_date%(crew_id, s, e);
+
+export %fdc15_period_rule_max%(String crew_id, Abstime s, Abstime e) =    
+  max(times(model_crew.%crew_chg_agreement_count%(crew_id, s, e)), %_crew_fdc15_valid_rule%(crew_id, 
+    model_crew.%crew_chg_agreement_from%(crew_id, base_utils.%ti0%, s, e),
+    model_crew.%crew_chg_agreement_to%(crew_id, base_utils.%ti0%, s, e)));
+
+export %fdc15_period_rule_min%(String crew_id, Abstime s, Abstime e) =
+  min(times(model_crew.%crew_chg_agreement_count%(crew_id, s, e)), %_crew_fdc15_valid_rule%(crew_id,
+    model_crew.%crew_chg_agreement_from%(crew_id, base_utils.%ti0%, s, e),
+    model_crew.%crew_chg_agreement_to%(crew_id, base_utils.%ti0%, s, e)));
+
+export %fdc15_in_month%(String crew_id, Abstime d) =
+  not void(%fdc15_period_rule_max%(crew_id, round_down_month(d), round_up_month(d+0:01)));
+
+export %crew_any_vg_pre_fdc15_in_period%(String crew_id, Abstime s, Abstime e)  =
+  any(times(model_crew.%crew_chg_agreement_count%(crew_id, s, e)), %crew_vg_pre_fdc15_at_date%(crew_id,
+    model_crew.%crew_chg_agreement_from% (crew_id, base_utils.%ti0%, s, e)));
+
+export %fdc15_rule_in_month%(String crew_id, Abstime d) =
+  let s = round_down_month(d),
+      e = round_up_month(d+0:01),
+      ret = %fdc15_period_rule_max%(crew_id, s, e);
+  if ret=%fdc15_period_rule_min%(crew_id, s, e) then ret
+  else "*";
+
+

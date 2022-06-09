@@ -1,0 +1,478 @@
+/* -*- crc -*-
+ *
+ * 
+ *
+ * Purpose:
+ *   This file containes per diem variables needed for reports.
+ *
+ * Created by:
+ *   Leo Wentzel; 16-Mar-2006
+ *
+ * Major changes:
+ *
+ */
+
+root module report_per_diem
+
+import base_calendar;
+import oma16;
+import trip;
+import duty_period;
+import duty;
+import crew;
+import leg;
+import task;
+import per_diem;
+import levels;
+import fundamental;
+import meal;
+import report_meal;
+import report_common;
+import salary;
+import rest;
+import calendar;
+import accumulators;
+import system_db_parameters;
+import keywords;
+import time_utils;
+
+%_leg_per_diem_country% =
+  if crew.%has_agmt_group_qa_at_date%(default(salary.%salary_month_start_p%,%pp_start%)) then
+     %country%
+  else
+     %_leg_per_diem_country_orig%;
+
+%_leg_per_diem_country_orig% =
+  if %trip_is_short% and not (fundamental.%cabin_crew% and crew.%is_sks%) then
+    default(station_country(trip.%homebase%), trip.%start_country%)
+  else if FALSE and leg.%per_diem_entitled% and not leg.%meal_stop% then /* Temporarily? turned off by SAS request */
+    /* i.e. meal during flight / on ground, SASCMS-1906 */ 
+    leg.%start_country%
+  else if %trip_is_short% and first(leg(duty), leg.%is_standby_at_airport%) and not %trip_has_meal_stop% then
+    first(leg(duty), leg.%stop_country%)
+    where(leg.%is_flight_duty%)
+  else if %trip_is_short% and leg.%is_standby_at_airport% and not leg.%meal_stop% then
+    next(leg(duty), leg.%stop_country%)
+  else
+    leg.%stop_country%;
+    
+%trip_has_meal_stop% = any(leg(trip), 
+  meal.%is_assigned_meal_stop% or meal.%is_assigned_meal_on_ground_in_ac% or meal.%is_assigned_meal_during_flight%);
+
+export %trip_is_short% = 
+  (not %trip_has_meal_stop%) and
+  (not %trip_has_layover%);
+
+/* Mappings to other modules */
+export %leg_start_station% = leg.%start_station%;
+export %leg_end_station% = leg.%end_station%;
+export %leg_flight_name% = 
+  if leg.%is_flight_duty% then
+    leg.%flight_id%
+  else
+    task.%code%;
+export %leg_per_diem_amount% = 
+  leg.%per_diem_amount%;
+export %leg_per_diem_meal_reduction% = leg.%per_diem_meal_reduction%;
+export %leg_has_per_diem_meal_reduction% = leg.%leg_has_meal_reduction%;
+export %leg_stop_country% = %_leg_per_diem_country%;
+
+export %leg_stop_start_day_lt% = leg.%end_date_lt%;
+%leg_stop_start_lt% = leg.%end_lt%;
+export %leg_stop_end_day_lt% = 
+  round_down(%leg_stop_end_lt%, 24:00);
+%leg_stop_end_lt% = next(leg(trip), leg.%start_lt%);
+export %first_day_stop_time_tax_sks% =
+  default(nmin(round_up(%leg_stop_start_lt%, 24:00), %leg_stop_end_lt%) 
+          - %leg_stop_start_lt%,
+          0:00);
+export %last_day_stop_time_tax_sks% =
+  default(%leg_stop_end_lt% 
+          - nmax(%leg_stop_end_day_lt% + 06:00, %leg_stop_start_lt%),
+          0:00);
+
+export %duty_per_diem_duty_amount% = duty.%per_diem_duty_amount%;
+export %duty_rest_time_per_diem% = duty.%per_diem_rest_time%;
+export %duty_rest_time_actual% = duty.%per_diem_rest_time_actual%;
+
+export %per_diem_price_unit% = per_diem.%per_diem_price_unit%;
+
+export %per_diem_compensation% =
+    %per_diem_compensation_at_date%(fundamental.%now%);
+
+
+export %per_diem_compensation_at_date%(Abstime date) =
+    if crew.%has_agmt_group_svs_at_date%(date) then
+      /**Pick rate from per_diem_tax table for Link */
+      default(per_diem.%per_diem_compensation_svs%("*", "DK", trip.%end_day%), 0)
+    else if trip.%code% = "A" and leg.%trip_homebase% = crew.%homebase% then
+      if crew.%is_cabin% then
+        if crew.%is_skn% then
+          0
+        else if crew.%is_skd% or crew.%is_sks% then
+          if report_per_diem.%trip_per_diem_end_UTC% - report_per_diem.%trip_per_diem_start_UTC% <= 04:00 then
+            0
+          else
+
+            default(per_diem.%per_diem_compensation%(%_leg_per_diem_country%, %country%, trip.%end_day%, trip.%flight_per_diem%), 0)
+        else
+          0
+      else
+        if report_per_diem.%trip_per_diem_end_UTC% - report_per_diem.%trip_per_diem_start_UTC% <= 04:00 then
+          0
+        else
+          default(per_diem.%per_diem_compensation%(%_leg_per_diem_country%, %country%, trip.%end_day%, trip.%flight_per_diem%), 0)
+    else
+      default(per_diem.%per_diem_compensation%(%_leg_per_diem_country%, %country%, trip.%end_day%, trip.%flight_per_diem%), 0);
+
+export %per_diem_compensation_in_country%(String country) =
+  default(per_diem.%per_diem_compensation%(country, %country%,
+    trip.%end_day%, trip.%flight_per_diem%),0);
+
+export %per_diem_exchange_rate% =
+  default(per_diem.%per_diem_exchange_rate%(%_leg_per_diem_country%, %country%, 
+    trip.%end_day%),0);
+
+export %per_diem_exchange_unit% = 
+  default(per_diem.%per_diem_exchange_unit%(%_leg_per_diem_country%, %country%, 
+    trip.%end_day%),1);
+
+export %per_diem_stop_currency% =
+  per_diem.%per_diem_stop_currency%(%_leg_per_diem_country%, %country%, 
+    trip.%end_day%);
+
+export %per_diem_home_currency% = per_diem.%currency_in_country%(%country%);
+
+export %per_diem_tax_deduct% =
+  if crew.%has_agmt_group_svs_at_date%(salary.%salary_month_start_p%) then
+    per_diem.%per_diem_tax_deduct%(%_leg_per_diem_country%, "DK", trip.%end_day%)    
+  else
+    per_diem.%per_diem_tax_deduct%(%_leg_per_diem_country%, %country%, trip.%end_day%);
+
+export %meal_reduction_amount% =
+  if crew.%is_SVS% then
+    per_diem.%meal_reduction_amount%("MSVS", %country%, trip.%end_day%)
+  else
+    per_diem.%meal_reduction_amount%("MEAL", %country%, trip.%end_day%);
+
+export %meal_reduction_exchange_rate% =
+  if crew.%is_SVS% then
+    per_diem.%meal_reduction_exchange_rate%("MSVS", %country%, trip.%end_day%)
+  else
+    per_diem.%meal_reduction_exchange_rate%("MEAL", %country%, trip.%end_day%);
+
+export %meal_reduction_exchange_unit% = 
+  if crew.%is_SVS% then
+    per_diem.%meal_reduction_exchange_unit%("MSVS", %country%, trip.%end_day%)
+  else
+    per_diem.%meal_reduction_exchange_unit%("MEAL", %country%, trip.%end_day%);
+
+export %trip_per_diem_start_UTC% = trip.%per_diem_start_UTC%;
+export %trip_per_diem_end_UTC% = trip.%per_diem_end_UTC%;
+export %trip_per_diem_start_UTC_tax% = trip.%per_diem_start_UTC_tax%;
+export %trip_per_diem_end_UTC_tax% = trip.%per_diem_end_UTC_tax%;
+export %trip_per_diem_end_local% = trip.%per_diem_end_local%;
+export %trip_course_per_diem% = trip.%course_per_diem%;
+export %trip_has_layover% = trip.%has_layover%;
+export %trip_num_layovers% = trip.%num_layovers%;
+
+/* Stops use ATA-ATD in tax rules. The duty level is thus useless to us.... */
+export %trip_has_international_stop_tax% = 
+   if trip.%per_diem_entitled% then
+	   any(leg(trip),leg.%end_country% <> first(leg(trip),leg.%start_country%)) 
+	   where (%_leg_actual_connection_time% > levels.%min_duty_connection_time_p%)
+   else trip.%is_international%;
+
+/* leg.%connection_time% does not work over duties, which cause problems with long delays */
+%_leg_actual_connection_time% = next(leg(trip), leg.%start_utc%) - leg.%end_utc%;
+   
+export %trip_is_international% = trip.%is_international%;
+export %trip_per_diem_entitled% = trip.%per_diem_entitled%;
+export %trip_per_diem_estimated% = trip.%per_diem_estimated%;
+export %trip_per_diem_layover_tax_deduct_no% = trip.%per_diem_layover_tax_deduct_no%;
+export %trip_per_diem_time% = trip.%per_diem_time%;
+/* Trip time as defined in tax rules */
+export %trip_per_diem_time_tax% = trip.%per_diem_time_tax%;
+export %trip_per_diem_total% = trip.%per_diem_total%;
+
+/* PerDiem Extra */
+%crew_valid_for_perdiem_ph% =
+  let date_start = default(salary.%salary_month_start_p%,%pp_start%);
+  (crew.%is_cabin% and (crew.%is_skd% or crew.%is_sks% or crew.%is_skn%)) or
+  (crew.%is_pilot% and
+    system_db_parameters.%dk_no_fd_dbl_pdiem_holidays_valid%(date_start) and
+    (crew.%is_skd% or crew.%is_skn% or crew.%has_agmt_group_skid_fd% or crew.%has_agmt_group_skin_fd%));
+
+export %trip_per_diem_extra% = cat(times(trip.%days%), format_int(%per_diem_extra_on_day%(%times_index_0%-1), "%i"), ",");
+export %trip_per_diem_extra_start_times% = cat(times(trip.%days%), format_time(%per_diem_extra_start_on_day%(%times_index_0%-1), "%d%b%Y %02H:%02M"), ",");
+export %trip_per_diem_extra_end_times% = cat(times(trip.%days%), format_time(%per_diem_extra_end_on_day%(%times_index_0%-1), "%d%b%Y %02H:%02M"), ",");
+export %trip_per_diem_extra_type% = cat(times(trip.%days%), %trip_per_diem_extra_type_on_day%(%times_index_0%-1), ",");
+export %trip_per_diem_extra_compensation% = cat(times(trip.%days%), format_int(default(%per_diem_extra_compensation_on_day%(%times_index_0%-1),0), "%i"), ",");
+export %trip_extra_compensation_skn_ph% = cat(times(trip.%days%), format_int(default(%per_diem_extra_compensation_ph_skn_on_day%(%times_index_0%-1),0), "%i"), ",");
+
+export %trip_per_diem_extra_currency% = cat(times(trip.%days%), %per_diem_extra_currency_on_day%(%times_index_0%-1), ",");
+
+export %trip_per_diem_extra_exchange_rate% = cat(times(trip.%days%), format_int(%per_diem_extra_exchange_rate_on_day%(%times_index_0%-1), "%i"), ",");
+export %trip_per_diem_extra_exchange_unit% = cat(times(trip.%days%), format_int(%per_diem_extra_exchange_unit_on_day%(%times_index_0%-1), "%i"), ",");
+
+%per_diem_extra_start_on_day%(int day) =
+  nmax(trip.%per_diem_start_local%, round_down(trip.%per_diem_start_local% + day*24:00, 24:00));
+%per_diem_extra_end_on_day%(int day) =
+  nmin(trip.%per_diem_end_local%, round_up(trip.%per_diem_start_local% + day*24:00, 24:00));
+
+%is_public_holiday%(AbsTime date) =
+  base_calendar.%is_holiday_cat%(date, crew.%country_at_date%(date), base_calendar.%hol_cat_per_diem%);
+
+%per_diem_extra_on_day%(int day) =
+    let date_start = %per_diem_extra_start_on_day%(day),
+      date_end = %per_diem_extra_end_on_day%(day);
+    if %crew_valid_for_perdiem_ph% and %is_public_holiday%(date_start) then
+     if (not (system_db_parameters.%k20_skn_cc_no_ph_perdiem_valid%(date_start))) then
+        per_diem.%per_diem_extra%(date_end - date_start, crew.%is_skn%, crew.%is_pilot%)
+     else
+       per_diem.%per_diem_extra_nh%(date_end - date_start, crew.%is_skn%, crew.%is_pilot%)
+  else
+    0;
+
+%trip_per_diem_extra_type_on_day%(int day) =
+
+  if crew.%has_agmt_group_qa_at_date%(default(salary.%salary_month_start_p%,%pp_start%)) then
+    " " /* SKCMS-730*/
+  else
+    if %crew_valid_for_perdiem_ph% and %is_public_holiday%(%per_diem_extra_start_on_day%(day)) then
+      "PH"
+    else
+      " ";
+
+%per_diem_extra_start_on_day_skn_ph%(int day) =
+  round_down(trip.%start_scheduled_lt_extra_pay% + day*24:00, 24:00);
+%per_diem_extra_end_on_day_skn_ph%(int day) =
+  round_up(trip.%end_scheduled_lt_extra_pay% + day*24:00, 24:00);
+      
+%crew_valid_for_extra_pay_ph% =
+  let date_start = default(%pp_start%, salary.%salary_month_start_p%);
+  (crew.%is_cabin% and crew.%is_skn% and system_db_parameters.%k20_skn_cc_no_ph_perdiem_valid%(date_start));
+  
+  
+%per_diem_extra_compensation_ph_skn_on_day%(int day) =
+  let date_start = %per_diem_extra_start_on_day_skn_ph%(day);
+  if %crew_valid_for_extra_pay_ph% and %is_public_holiday%(date_start) then
+      per_diem.%k20_skn_cc_no_ph_extra_pay%
+  else
+   0; 
+
+%per_diem_extra_compensation_on_day%(int day) =
+  if %crew_valid_for_perdiem_ph% then
+	  if trip.%is_long_haul% then
+      %per_diem_compensation_in_country%(%per_diem_extra_per_diem_country_on_day%(day))
+	  else
+		  if %per_diem_extra_compensation_night_stop_based%(day) > 0 then %per_diem_extra_compensation_night_stop_based%(day)
+		  else if %per_diem_extra_compensation_meal_allocation_based%(day) > 0 then %per_diem_extra_compensation_meal_allocation_based%(day)
+		  else %per_diem_compensation_in_country%(%per_diem_extra_per_diem_country_on_day%(day))
+  else 0;
+
+%per_diem_extra_per_diem_country_on_day%(int day) = default(%_per_diem_extra_per_diem_country_on_day%(day), station_country(leg.%trip_start_home_airport%));
+
+%per_diem_extra_compensation_meal_allocation_based_stop_country% =
+    if meal.%is_assigned_meal_during_flight% and
+       ((crew.%is_sks% and
+         crew.%is_cabin% and
+         %turnaround_flight_home%) or
+        (leg.%is_last_in_duty% and
+         trip.%days% = 1)) then
+      leg.%start_country%
+    else
+      leg.%stop_country%;
+
+%turnaround_flight_home% =
+    default(leg.%end_country% = leg.%trip_homecountry%
+    and prev(leg(trip), leg.%start_country% = leg.%trip_homecountry%) where (not deadhead), false);
+
+%_per_diem_extra_per_diem_country_on_day%(int day) =
+  if trip.%is_long_haul% then
+    default(last  (leg(trip), leg.%stop_country%)
+            where (leg.%per_diem_end_lt% <= %per_diem_extra_end_on_day%(day)),
+            last  (leg(trip), leg.%stop_country%)
+            where (leg.%per_diem_start_lt% <= %per_diem_extra_end_on_day%(day)))
+  else
+	if %per_diem_extra_compensation_night_stop_based%(day) > 0 then
+	  last  (leg(trip), if %leg_is_nightstop% then leg.%stop_country% else void_string)
+      where (leg.%per_diem_start_lt% < %per_diem_extra_start_on_day%(day))
+	else if %per_diem_extra_compensation_meal_allocation_based%(day) > 0 then
+	  first (leg(trip), %per_diem_extra_compensation_meal_allocation_based_stop_country%)
+      where ((meal.%is_assigned_meal_stop% or meal.%is_assigned_meal_on_ground_in_ac% or meal.%is_assigned_meal_during_flight%) and
+             leg.%per_diem_start_lt% >= %per_diem_extra_start_on_day%(day) and
+             leg.%per_diem_start_lt% < %per_diem_extra_end_on_day%(day))
+	else if %per_diem_extra_compensation_night_stop_based%(day+1) > 0 then
+	  last  (leg(trip), if %leg_is_nightstop% then leg.%stop_country% else void_string)
+      where (leg.%per_diem_start_lt% < %per_diem_extra_start_on_day%(day+1))
+    else if %trip_is_short% and crew.%is_cabin% and crew.%is_sks% then
+      first (leg(trip), leg.%stop_country%)
+	else if %trip_per_diem_extra_type_on_day%(day) = "PH" or
+            %trip_per_diem_extra_type_on_day%(day) = "EX" then /* Right currency even if PerDiem = 0 */
+      %trip_per_diem_extra_compensation_meal_allocation_based_stop_country%(day)
+    else
+      station_country(leg.%trip_start_home_airport%);
+
+%trip_per_diem_extra_compensation_meal_allocation_based_stop_country%(int day) =
+    default(first (leg(trip), %per_diem_extra_compensation_meal_allocation_based_stop_country%)
+            where ((meal.%is_assigned_meal_stop% or
+                    meal.%is_assigned_meal_on_ground_in_ac% or
+                    meal.%is_assigned_meal_during_flight%) and
+                   leg.%per_diem_start_lt% >= %per_diem_extra_start_on_day%(day) and
+                   leg.%per_diem_start_lt% < %per_diem_extra_end_on_day%(day)),
+            last  (leg(trip), %per_diem_extra_compensation_meal_allocation_based_stop_country%)
+            where ((meal.%is_assigned_meal_stop% or
+                    meal.%is_assigned_meal_on_ground_in_ac% or
+                    meal.%is_assigned_meal_during_flight%) and
+                   leg.%per_diem_start_lt% < %per_diem_extra_end_on_day%(day)));
+
+%per_diem_extra_currency_on_day%(int day) =
+  if %crew_valid_for_perdiem_ph% then
+    per_diem.%per_diem_stop_currency%(%per_diem_extra_per_diem_country_on_day%(day), %country%, trip.%end_day%)
+  else " ";
+
+%per_diem_extra_exchange_rate_on_day%(int day) =
+  if %crew_valid_for_perdiem_ph% then
+    default(per_diem.%per_diem_exchange_rate%(%per_diem_extra_per_diem_country_on_day%(day), %country%, trip.%end_day%),0)
+  else 0;
+
+%per_diem_extra_exchange_unit_on_day%(int day) =
+  if %crew_valid_for_perdiem_ph% then
+    default(per_diem.%per_diem_exchange_unit%(%per_diem_extra_per_diem_country_on_day%(day), %country%, trip.%end_day%),1)
+  else 0;
+
+%per_diem_extra_compensation_night_stop_based%(int day) =
+  default(last(leg(trip), if %leg_is_nightstop% then %per_diem_compensation_in_country%(leg.%stop_country%) else 0)
+				  where(leg.%per_diem_start_lt% < %per_diem_extra_start_on_day%(day)),0);
+
+
+/* Checks for any legs with assigned mealcodes X,V or VO on day */
+%per_diem_extra_compensation_meal_allocation_based%(int day) =
+  default(first(leg(trip), %per_diem_compensation_in_country%(
+    %per_diem_extra_compensation_meal_allocation_based_stop_country%))
+      where((meal.%is_assigned_meal_stop% or meal.%is_assigned_meal_on_ground_in_ac% or meal.%is_assigned_meal_during_flight%) and
+            leg.%per_diem_start_lt% >= %per_diem_extra_start_on_day%(day) and
+            leg.%per_diem_start_lt% < %per_diem_extra_end_on_day%(day)),0);
+
+/* Per Diem Extra for extended duties */
+%crew_valid_for_perdiem_extended% = crew.%is_cabin% and (crew.%is_skd% or crew.%is_sks% or crew.%is_skn%);
+%_max_number_extended_duties_in_month% = 2;
+%duty_per_diem_start_lt% = first(leg(duty), leg.%per_diem_start_lt%);
+%duty_per_diem_end_lt% = last(leg(duty), leg.%per_diem_end_lt%);
+
+%duty_per_diem_extended% =
+  if %crew_valid_for_perdiem_extended% and duty_period.%is_on_duty% and oma16.%is_extended_fdp% and 
+     duty.%is_short_haul% and %nr_prev_extended_duties_in_month% > %_max_number_extended_duties_in_month% then
+    per_diem.%per_diem_extended_duty%
+  else 0;
+
+%duty_per_diem_extended_code% = if %duty_per_diem_extended% > 0 then "EX" else "";
+%duty_per_diem_extended_country% =
+  if %duty_per_diem_extended% > 0 then
+    default(first(leg(duty), 
+        %per_diem_extra_compensation_meal_allocation_based_stop_country%)
+    where (meal.%is_assigned_meal_stop% or meal.%is_assigned_meal_on_ground_in_ac% or meal.%is_assigned_meal_during_flight%),
+            station_country(trip.%homebase%))
+  else "";
+
+%duty_per_diem_extended_compensation% =
+  if %duty_per_diem_extended% > 0 then
+    %per_diem_compensation_in_country%(%duty_per_diem_extended_country%)
+  else 0;
+%duty_per_diem_extended_currency% =
+  if %duty_per_diem_extended% > 0 then
+    per_diem.%per_diem_stop_currency%(%duty_per_diem_extended_country%, %country%, trip.%end_day%)
+  else "";
+%duty_per_diem_extended_exchange_rate% =
+  if %duty_per_diem_extended% > 0 then
+    default(per_diem.%per_diem_exchange_rate%(%duty_per_diem_extended_country%, %country%, trip.%end_day%),1)
+  else 0;
+%duty_per_diem_extended_exchange_unit% =
+  if %duty_per_diem_extended% > 0 then
+    default(per_diem.%per_diem_exchange_unit%(%duty_per_diem_extended_country%, %country%, trip.%end_day%),1)
+  else 0;
+
+%nr_prev_extended_duties_in_month% =
+  accumulators.%extended_shorthaul_duties_in_period%(salary.%salary_month_start%,%duty_per_diem_start_lt%);
+
+export %trip_actual_start_local% =
+  first(leg(trip), leg.%start_lt%)
+  where(leg.%flight_per_diem% or leg.%course_per_diem% or leg.%is_standby_at_airport%);
+export %trip_actual_end_local% = trip.%end_lt%;
+export %trip_start_day_tax_sks% = 
+  first(leg(trip), round_down(leg.%end_lt%,24:00))
+  where (leg.%flight_per_diem% or leg.%course_per_diem% or leg.%is_standby_at_airport%);
+export %trip_tax_deductable_sks% =
+  default(any(leg(trip), %night_rest_sks_tax% >= 5:00), false);
+  
+%night_rest_sks_tax% =
+  scale_time(leg.%duty_end_UTC%, next(leg(trip), leg.%duty_start_UTC%), 0,
+             rest.%leg_night_start_UTC%, rest.%leg_night_end_UTC%, 1);
+
+export %leg_is_per_diem% = leg.%is_per_diem%;
+export %leg_is_nightstop% = leg.%is_nightstop%;
+
+export %leg_on_duty% = leg.%is_on_duty%;
+
+/* The unit for domestic/intl part of trip is a duty. This
+   is used in SKN *tax* rules. Other compensations and regions
+   use the trip level */
+export %leg_is_last_in_intl_period_tax% = 
+  if salary.%is_skn% then is_last(leg(duty)) else is_last(leg(trip));
+export %intl_period_is_international_tax% = 
+  if salary.%is_skn% then duty.%is_international_layover% else trip.%is_international%;
+
+export %trip_start_day_tax_skn% =
+  let start_time_hb = default(%utc2hb%(%trip_per_diem_start_UTC_tax%), %station_localtime_compat%("OSL", %trip_per_diem_start_UTC_tax%));
+  if time_of_day(start_time_hb) < 22:00 then
+    round_down(start_time_hb, 24:00)
+  else
+    round_up(start_time_hb, 24:00);
+
+export %trip_end_day_tax_skn% =
+  let end_time_hb = default(%utc2hb%(%trip_per_diem_end_UTC_tax%), %station_localtime_compat%("OSL", %trip_per_diem_end_UTC_tax%));
+  if time_of_day(end_time_hb) >= 6:00 then
+    round_up(end_time_hb, 24:00)
+  else
+    round_down(end_time_hb, 24:00);
+
+
+/* Redefined in rostering (tracking). */
+export %region% = trip.%region%;
+
+/* Get country for table lookups from region. */
+export %country% = salary.%salary_system%(salary.%salary_month_start%);
+
+table department_table =
+  %region%, fundamental.%main_cat% ->
+    export string %contact_department%,
+    export string %contact%,
+    export string %contact_phone%,
+    export string %contact_email%;
+  external per_diem.%per_diem_department_table%;
+  region, maincat ->
+    department,
+    contact,
+    phone,
+    email;
+  -, - -> void_string, void_string, void_string, void_string;
+end
+
+export %crew_department% =
+	if crew.%is_cabin% then 
+		concat(report_common.%crew_homebase_salary%, "OK")
+	else 
+		concat(report_common.%crew_homebase_salary%, "OA");
+
+/* Domestic per diem amounts. The meaning of the 'low' amounts differ between regions,
+   now they are only used in SKN (which have different amounts depending on the length
+   of the stop etc.) */
+export %tax_deduct_domestic% = per_diem.%per_diem_tax_deduct_domestic%(%country%, trip.%end_day%);
+export %tax_deduct_domestic_low_1% = per_diem.%per_diem_tax_deduct_domestic_1%(%country%, trip.%end_day%);
+export %tax_deduct_domestic_low_2% = per_diem.%per_diem_tax_deduct_domestic_2%(%country%, trip.%end_day%);
+export %tax_deduct_domestic_low_3% = per_diem.%per_diem_tax_deduct_domestic_3%(%country%, trip.%end_day%);
+
+
+/* eof */
+

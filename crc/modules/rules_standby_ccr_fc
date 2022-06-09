@@ -1,0 +1,413 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   This module contains standby rules used for flight crew in Carmen Crew Rostering
+ *
+ * Sections:
+ *   Standby rules
+ *
+ * Created by:
+ *   Henrik Mouritsen, 24-Sep-2006
+ *
+ * Major changes:
+ *
+ */
+
+module rules_standby_ccr_fc inherits rules_standby_ccr
+import levels;
+import roster;
+import crew;
+import wop;
+import trip;
+import leg;
+import standby;
+import accumulators;
+import parameters;
+
+/****************************************************************
+ * Section 1: Standby rules
+ ***************************************************************/
+
+/*
+** Rule: 
+**    Minimum days between standby.
+**
+** Description:
+**    Check the minimum days between shorthaul standby blocks.
+**    The rule is only valid for non standbyline standby.
+**
+** Agreement:
+**    Functional rule
+*/
+export rule sby_min_days_btw_standby_block_FC =
+  valid roster.%check_rules% and
+        wop.%for_publish_in_pp% and
+        wop.%has_short_standby_block%;
+
+	%standby_days_prev% >= %min_days_btw_short_standby% - 
+			       rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+
+  startdate = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(int val, int limit) = 
+    concat("SBY: ", %int2str%(val),
+           " days between standby. ", %int2str%(limit),
+           " required.");
+  remark "SBY: Min days between standby blocks",
+  planner "The rule checks that the days between standby blocks"
+	        " doesnt exceed the minimum requirement.";
+end
+
+%standby_days_prev% =
+  (round_down(wop.%start_day%,24:00) - round_up(%prev_short_standby_date%, 24:00)) / 24:00;
+
+%prev_short_standby_date% =
+  default(accumulators.%prev_short_standby_block_date%(wop.%start_UTC% - 0:01), 01jan1986); 
+
+table minimum_days_btw_standby_limit =
+  crew.%region% -> 
+    export %min_days_btw_short_standby%;
+  "SKD" -> %min_days_btw_short_standby_blocks_SKD%;
+  "SKS" -> %min_days_btw_short_standby_blocks_SKS%;
+  "SKN" -> %min_days_btw_short_standby_blocks_SKN%;
+
+  - -> 0;
+end
+
+%min_days_btw_short_standby_blocks_SKD% =
+  parameter 7
+  remark "(CCR) SKD: Minimum days between standby blocks.";
+
+%min_days_btw_short_standby_blocks_SKS% =
+  parameter 14 
+  remark "(CCR) SKS: Minimum days between standby blocks.";
+
+%min_days_btw_short_standby_blocks_SKN% =
+  parameter 21 
+  remark "(CCR) SKN: Minimum days between standby blocks.";
+
+/*
+** Rule: 
+**    Minimum days between standby and long offduty period.
+**
+** Description:
+**    Check the minimum days requirement between standby and long
+**    non qualifying offduty period (vacation, illness, LA) is 
+**    fulfilled.
+**    The rule is only valid for non standbyline standby.
+**
+** Agreement:
+**    Functional rule
+*/
+rule sby_min_days_btw_standby_long_non_plannable_FC =
+  valid roster.%check_rules% and
+        wop.%in_pp_extended% and
+	%wop_is_long_non_plannable_period%;
+	
+	%days_until_nearest_standby% >= %min_days_btw_standby_long_non_plannable_period% - 
+					rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+
+  startdate  = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(int val, int limit) = 
+    concat("SBY: ", %int2str%(val),
+           " days between standby and long non plannable period. ", %int2str%(limit),
+           " required.");
+  remark "(CCR) SBY: Minimum days between standby blocks and long non plannable period.",
+  planner "The rule checks that the minimum days requirement between standby blocks and a"
+	  " long plannable period is fulfilled.";
+end
+
+%wop_is_long_non_plannable_period% =
+  wop.%is_non_plannable% and
+  wop.%days% >= %min_duration_of_long_non_plannable_period_p%;
+
+%min_duration_of_long_non_plannable_period_p% = 
+  parameter 18
+  remark "(CCR) SKD: Minimum duration of long non-plannable period.";
+
+%days_until_prev_standby% = 
+  (wop.%start_day% - 
+   default(accumulators.%prev_standby_date%(wop.%start_UTC% - 0:01), 01jan1986)) / 24:00; 
+%days_until_next_standby% = 
+  (default(accumulators.%next_standby_date%(wop.%end_UTC% + 0:01), 01jan1986) - 
+   wop.%end_day%) / 24:00;
+
+%days_until_nearest_standby% =
+    if wop.%starts_in_pp_extended% then
+        nmin(%days_until_prev_standby%, %days_until_next_standby%)
+    else
+        %days_until_next_standby%;
+  
+%min_days_btw_standby_long_non_plannable_period% = 
+  if crew.%is_long_haul_wop_start% then
+    8
+  else
+    9;
+
+/*
+** Rule:
+**    Max standby blocks in planning period
+**
+** Description:
+**    Maximum number of standby blocks per crew in one planning period
+**
+** Agreement:
+**    functional rule
+*/
+rule sby_max_standby_blocks_in_planning_period_FC =
+  valid roster.%check_rules% and
+        wop.%starts_in_pp% and
+        wop.%is_last_standby_in_month%;
+
+  %standby_blocks_in_pp% <= %max_standby_blocks_in_pp% + 
+			    rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+
+  startdate = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(int val, int limit) = 
+    concat("SBY: ", %int2str%(val), 
+           " SBY blocks in planning period. Only ", %int2str%(limit),
+           " allowed.");
+  remark "(CCR) SBY: Max standby blocks in planning period",
+  planner "Check that number of standby blocks in planning period doesnt exceed maximum.";
+end
+
+%max_standby_blocks_in_pp% = 
+  parameter 1 
+  remark "(CCR) Max standby blocks in planning period";
+
+%standby_blocks_in_pp% =  
+  let p_end = nmin(%pp_end%, round_up(wop.%end_hb%, 24:00)) + 0:01;
+  roster.%standby_blocks_in_period%(%pp_start%, p_end);
+
+
+/*
+** Rule: 
+**    Minimum days between Vacation and standbyline for longhaul crew.
+**
+** Description:
+**    Check the minimum days requirement between vacation and 
+**    standbyline for longhaul qualified crew is fulfilled.
+**
+** Agreement:
+**    Functional rule
+*/
+rule sby_min_days_btw_vacation_standbyline_FC =
+  valid roster.%check_rules% and
+        wop.%in_pp_extended% and
+        wop.%is_standby% and
+        wop.%has_standby_line% and
+        crew.%is_long_haul_wop_start%;
+	
+	%days_since%(wop.%start_UTC%, %prev_vac_end%(%min_vac_length_to_consider_p%)) >= %min_days_btw_vacation_standby_line_p%;
+
+  startdate = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(int val, int limit) = 
+    concat("SBY: ", %int2str%(val), 
+           " days between vacation and SBY line. " , %int2str%(limit),
+           " required.");
+  remark "SBY: Min days between vacation and standby lines",
+  planner "The rule checks that the days between vacation"
+	  " and standby lines fulfills the minimum requirement.";
+end
+
+%min_days_btw_vacation_standby_line_p% =
+  parameter 21 
+  remark "(CCR) Min days between vacation and standby line";
+
+%min_vac_length_to_consider_p% =
+  parameter 7
+  remark "(CCR) Min length of previous vacation for rule to apply";
+
+%prev_vac_end%(Int val) =
+  default(prev(wop(roster), wop.%end_UTC%) 
+          where (wop.%is_vacation% and (freedays.%vacation_length%) >= val), 01jan1986);
+
+/*
+** Rule: 
+**    Minimum days between standby and standbyline for longhaul crew.
+**
+** Description:
+**    Check the minimum days requirement between standby and 
+**    standbyline for longhaul qualified crew is fulfilled.
+**
+** Agreement:
+**    Functional rule
+*/
+rule sby_min_days_btw_standby_standbyline_FC =
+  valid roster.%check_rules% and
+        wop.%in_pp_extended% and
+        wop.%is_standby% and
+        crew.%is_long_haul_wop_start%; 
+	
+	%standby_days_prev_lh% >= %min_days_btw_standby_standby_line% - 
+				  rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+
+  startdate = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(int val, int limit) = 
+    concat("SBY: ", %int2str%(val), 
+           " days between SBY blocks and SBY line. " , %int2str%(limit),
+           " required.");
+  remark "SBY: Min days between standby blocks and standby lines",
+  planner "The rule checks that the days between standby blocks"
+	  " and standby lines fulfills the minimum requirement.";
+end
+
+%min_days_btw_standby_standby_line% =
+  parameter 14 
+  remark "(CCR) Min days between standby_line and standby block";
+
+
+%standby_days_prev_lh% =
+  (round_down(wop.%start_day%,24:00) - round_up(%prev_standby_date_lh%, 24:00)) / 24:00;
+
+%prev_standby_date_lh% =
+  if wop.%has_standby_line% then
+    default(accumulators.%prev_short_standby_block_date%(wop.%start_UTC% - 0:01), 01jan1986) 
+   else
+    default(accumulators.%prev_standby_line_date%(wop.%start_UTC% - 0:01), 01jan1986); 
+
+/*
+** Rule: 
+**    No standby to crew with specified restrictions
+**
+** Description:
+**    Crew with specific crew restrictions are not allowed
+**    to perform standby duty.
+**    Functionality can be supplemented through usage
+**    of special schedule.
+**
+** Agreement:
+**    Functional rule
+*/
+
+rule sby_illegal_standby_FC =
+  valid roster.%check_rules% and
+        wop.%in_pp_extended% and
+        wop.%has_standby% and
+	rule_exceptions.%rule_on%(wop.%start_UTC%);
+
+  not %crew_has_standby_restriction_wop_start%;
+	
+  startdate = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext "Illegal standby for restricted flight crew."; 
+  remark "(CCR): Illegal standby for restricted crew.",
+  planner "Check that standby restricted crew only performs legal standby.";
+end
+
+%crew_has_standby_restriction_wop_start% =
+  if not wop.%has_scattered_standby% then
+    any(times(crew.%restriction_max_iter%(wop.%start_UTC%)),
+      crew.%restriction_type_ix%(wop.%start_UTC%, %times_index_0%) in standby_all_restriction_set_p) or
+    crew.%part_time_factor_wop_start% = 50 /* 50% crew cannot have standbys" */
+     or %_has_AC_qual_restriction_type_NEW%
+  else if not wop.%is_standby_line% then
+    any(times(crew.%restriction_max_iter%(wop.%start_UTC%)),
+      crew.%restriction_type_ix%(wop.%start_UTC%, %times_index_0%) in standby_non_standby_line_restriction_set_p)
+      or %_has_AC_qual_restriction_type_NEW%
+  else if wop.%is_standby_line% and crew.%is_long_haul_wop_start% then
+    any(times(crew.%restriction_max_iter%(wop.%start_UTC%)),
+      crew.%restriction_type_ix%(wop.%start_UTC%, %times_index_0%) in standby_long_haul_line_restriction_set_p)
+      or %_has_AC_qual_restriction_type_NEW%
+  else
+    false;
+
+%_has_AC_qual_restriction_type_NEW% =
+    any(times(20), (crew.%qrestr_restr_type_ival%(%times_index_0%, wop.%start_UTC%, wop.%end_UTC%) = "NEW"));
+
+set standby_all_restriction_set_p =
+  parameter "NEW","DCT","CAPT"
+  remark "Crew positions restricted for all standbys except scattered.";
+
+set standby_non_standby_line_restriction_set_p =
+  parameter "NEW"
+  remark "Crew positions restricted for all standbys except standby lines.";
+
+set standby_long_haul_line_restriction_set_p =
+  parameter "CAPT","DCT"
+  remark "Crew positions restricted for all standbys except standby lines.";
+  
+/*
+** Rule: 
+**    Max 1 BL/SBY before production
+**
+** Description:
+**    Check that only 1 BL/SBY is assigned before flight production in the same wop.
+**    The rule is valid for intercont flight crew.
+**
+** Agreement:
+**    FC LH 6.2.10.2
+**    SASCMS-5995
+*/
+rule sby_max_1_bl_or_sby_before_production =
+  valid roster.%check_rules% and
+        parameters.%k4exng_fc_lh_1_bl_or_sby_before_production%(wop.%start_UTC%) and
+        wop.%in_pp_extended% and
+        crew.%is_long_haul_wop_start% and
+        not crew.%is_leased_wop_start% and
+        wop.%has_active_flight% and
+        (wop.%has_standby% or wop.%has_blank_day_BL%) and
+        rule_exceptions.%rule_on%(wop.%start_UTC%);
+	
+  wop.%standby_block_days% + wop.%blank_block_days_BL% <= 1;
+
+  startdate = wop.%start_UTC%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = wop.%failobject_start%;
+  failtext "SBY: Max 1 BL/SBY before production";
+  remark "(CCR) SBY: Max 1 BL/SBY is assigned before flight production in the same wop.",
+  planner "The rule checks that max 1 BL/SBY is assigned before fligth production"
+	        " in the same wop.";
+end
+
+/*
+** Rule:
+**    Max standby lines in calendar year
+**
+** Description:
+**    Maximum number of standby lines for MFF crew in one calendar year.
+**
+**
+*/
+
+rule stb_max_standby_lines_in_calendar_year_FC_ALL =
+  valid roster.%check_rules% and
+        wop.%in_pp% and
+        crew.%has_agmt_group_sk_fd_mff% and
+        wop.%is_last_standby_line_in_month%;
+
+  %standby_lines_in_calendar_year% <= %max_standby_lines_in_calendar_year% + 
+                      rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+  startdate  = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(int val, int limit) = 
+    concat("SBY: ", %int2str%(val), 
+           " SBY lines in calendar year. Only ", %int2str%(limit),
+           " allowed.");
+  remark "SBY: Maximum standby lines in calendar year",
+  planner "Check that number of standby lines in a calendar year is less than 2.";
+end
+
+%max_standby_lines_in_calendar_year% = 2;
+    
+
+%standby_lines_in_calendar_year% =  
+  let calendar_year_start = round_down_year(wop.%start_day%),
+      p_start = round_down_year(%pp_start%),
+      p_end = round_up(wop.%end_hb%, 24:00) + 0:01;
+  accumulators.%standby_lines_in_period%(nmax(calendar_year_start,p_start), p_end);
+ 
+
+
+/* end of file */

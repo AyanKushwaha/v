@@ -1,0 +1,380 @@
+root module report_sb_overview
+
+import report_common;
+import fundamental;
+import duty;
+import levels;
+import trip;
+import leg;
+import iterators;
+import crew_pos;
+import planning_area;
+import keywords;
+
+%report_source_string% = "Planning";
+%crew_has_upper_category% = crew_pos.%no_upper_assigned% > 0;
+%crew_has_lower_category% = crew_pos.%no_lower_assigned% > 0;
+
+
+%duty_planning_group% =
+  if trip.%has_area_planning_group% then
+    trip.%area_planning_group%
+  else 
+    default(duty.%planning_group_voidy%, trip.%planning_group%);
+
+%trip_is_only_deadhead% =
+    all(leg(trip),leg.%is_deadhead%);
+
+%duty_is_unassigned_flight_duty% =
+    not fundamental.%is_roster% and trip.%has_only_flight_duty% and not trip.%is_standby% and not %trip_is_only_deadhead%;
+    
+%duty_is_production_to_consider% =
+    fundamental.%is_roster% and trip.%has_only_flight_duty% and not trip.%is_standby%;
+    
+%duty_is_illness% = false;
+   
+%duty_is_standby_to_consider% = false;
+
+%in_planning_area% =
+    planning_area.%trip_is_in_planning_area%;
+
+%consider_duty_for_sb_overview_report% =
+    duty.%in_pp% and (%duty_days_in_pp% > 0) and %in_planning_area% and (not keywords.%hidden%) and (%duty_is_standby_to_consider% or %duty_is_illness% or (%duty_is_unassigned_flight_duty%  and duty.%is_operating%) or %duty_is_resorce_pool_to_consider%)/* or %duty_is_production_to_consider%*/;
+
+group sb_overview =
+    %sb_consider_multiple_qualifications%,
+    planning_areas_to_consider,
+    %days_until_fully_updated%,
+    %sla_table%;
+
+
+%sb_consider_multiple_qualifications% = parameter False
+    remark "Consider multiple qualifications";
+
+%duty_qualification_vector% = 
+    if duty.%is_standby% then
+        if duty.%is_standby_line% then
+            "LH"
+        else
+            "SH"
+    else if duty.%is_flight_duty% then
+        if duty.%is_long_haul% then
+            "LH"
+        else
+            "SH"
+     else
+        "SH";
+        
+%roster_multi_sb_qual% = "Qual";
+
+%_trip_sb_qual% =
+    let q2 = %trip_sb_qual2%;
+    if q2 <> "" then
+        concat(%trip_sb_qual1%,";",%trip_sb_qual2%)
+    else
+        %trip_sb_qual1%;
+        
+%trip_sb_qual% =
+    if %sb_consider_multiple_qualifications% then
+        %trip_multi_sb_qual%
+    else
+        "Qual";
+
+%trip_multi_sb_qual% =
+    let q3 = %trip_sb_qual3%;
+    if q3 <> "" then
+        concat(%_trip_sb_qual%,";",%trip_sb_qual3%)
+    else
+        %_trip_sb_qual%;
+        
+%trip_sb_qual1% =
+    trip.%qual%;
+
+%trip_sb_qual2% =
+    let q1 = %trip_sb_qual1%;
+    default(first(leg(trip), leg.%qual%)
+    where (not leg.%is_deadhead% and
+           not (leg.%qual% = "") and
+           not (leg.%qual% = q1)), "");
+
+%trip_sb_qual3% =
+    let q1 = %trip_sb_qual1%,
+    q2 = %trip_sb_qual2%;
+    if q2 <> "" then
+        default(
+                first(leg(trip), leg.%qual%)
+                where (not leg.%is_deadhead% and
+                       not (leg.%qual% = "") and
+                       not (leg.%qual% = q1) and
+                       not (leg.%qual% = q2)), "")
+    else
+        "";
+        
+%sb_rank% = "";
+
+%duty_rank_vector% = 
+    if fundamental.%is_roster% then
+        concat("\"",%sb_rank%, "\":1")
+    else
+        %trip_rank_vector%;
+
+%trip_rank_vector% = 
+    let len = length(%_trip_rank_vector%);
+    substr(%_trip_rank_vector%,1,len-1);
+    
+%_trip_rank_vector% =
+    concat(%sb_fc_need_str%,%sb_fp_need_str%,%sb_ap_need_str%,%sb_ah_need_str%);
+    
+%duty_is_freeto_use% =
+    duty.%is_freeday% and not duty.%is_locked%;
+
+%upper_sb% = %duty_is_standby_to_consider% and %crew_has_upper_category%;
+%lower_sb% = %duty_is_standby_to_consider% and %crew_has_lower_category%;
+
+%sb_overview_type% =
+    if %duty_is_illness% then
+        Sick
+    else if %duty_is_standby_to_consider% then
+        SBActivity
+    else if %duty_is_unassigned_flight_duty% then
+        Manko
+    else if %duty_is_resorce_pool_to_consider% then
+        ResourcePool
+    /*else if %duty_is_production_to_consider% then
+        Production*/
+    else
+        NoneSBO;
+        
+%duty_is_resorce_pool_to_consider% =
+    false;
+    
+%no_duties% =
+    count(duty_set);
+    
+export %duty_start_scheduled_day_in_pp% = 
+    nmax(duty.%start_scheduled_day%, %pp_start%);
+    
+export %leg_start_scheduled_day% = 
+    round_down(leg.%start_hb%, 24:00);
+    
+%duty_starts_in_pp% =
+    %duty_start_scheduled_hb_in_pp% >= %pp_start%;
+
+%duty_start_scheduled_hb_in_pp% =
+    nmax(duty.%start_scheduled_hb%, %pp_start%);
+    
+%duty_end_scheduled_hb_in_pp% = 
+    nmax(duty.%end_scheduled_hb%, %pp_start%);
+    
+/*%duty_days_in_pp% =
+    if %duty_start_scheduled_day_in_pp% = %pp_start% then
+        duty.%days% - (%pp_start% - duty.%start_scheduled_day%) / 24:00
+    else
+        duty.%days%;*/
+        
+
+export iterator duty_sb_overview_set =
+  partition(duty)
+  by(%consider_duty_for_sb_overview_report%, %duty_qualification_vector%, %duty_rank_vector%, %sb_overview_type%, %duty_start_scheduled_day_in_pp%, %duty_days_in_pp%, fundamental.%is_roster%, %duty_planning_group%);
+end
+
+export iterator leg_sb_overview_set =
+  partition(leg)
+  by(%consider_leg_for_sb_overview_report%, %leg_start_scheduled_day%, %leg_planning_group%);
+end
+
+%leg_planning_group% =
+    leg.%planning_group%;
+
+%num_assigned_fc% =
+    sum(leg_set, %leg_no_fc%);
+    
+%sla_fc% =
+    sum(leg_set, %leg_sla_fc%);
+    
+%num_assigned_fp% =
+    sum(leg_set, %leg_no_fp%);
+    
+%sla_fp% =
+    sum(leg_set, %leg_sla_fp%);
+    
+%num_assigned_ap% =
+    sum(leg_set, %leg_no_ap%);
+    
+%sla_ap% =
+    sum(leg_set, %leg_sla_ap%);
+    
+%num_assigned_ah% =
+    sum(leg_set, %leg_no_ah%);
+    
+%sla_ah% =
+    sum(leg_set, %leg_sla_ah%);
+
+%consider_leg_for_sb_overview_report% =
+    leg.%starts_in_pp% and %leg_in_planning_area% and (not keywords.%hidden%) and (leg.%is_flight_duty%  and not leg.%is_not_operating%);
+    
+set planning_areas_to_consider = parameter
+    "SKN", "SKS" , "SKD" , "QA", "SKI"
+	remark "Planning areas to consider for SB overview report";
+
+%leg_in_planning_area% = 
+    planning_area.%leg_is_in_planning_area% and %leg_planning_group% in planning_areas_to_consider;
+
+%duty_days_in_pp% =
+    if any(leg(duty),crew_pos.%any_need%) then
+        %_duty_days_in_pp%
+    else
+        0;
+    
+%_duty_days_in_pp% =
+    if %duty_start_scheduled_day_in_pp% = %pp_start% then
+        duty.%pp_days% - (%pp_start% - duty.%start_scheduled_day%) / 24:00
+    else
+        duty.%pp_days%;
+        
+%next_duty_is_sb% = 
+    let end_interval = duty.%end_lt% + 22:00;
+    default(next(duty(chain), duty.%is_standby%) where (duty.%start_lt% <= end_interval), false);
+    
+%overnighting_sb% =
+    duty.%is_standby% and %next_duty_is_sb%;
+    
+%current_date% = round_down(time, 24:00);
+
+%days_until_fully_updated% =
+    parameter 3
+    remark "How many days from DOP until schedule is fully updated";
+
+%secure_period_start% = %current_date% - %days_until_fully_updated% * 24:00;
+
+%_last_secure_weekday% =
+ time_of_week(%secure_period_start%);
+ 
+%last_secure_weekday% =
+    %_last_secure_weekday% / 24:00;
+    
+%first_secure_week_start% = round_down_week(%secure_period_start%);
+
+%secure_monday_date% =
+    %first_secure_week_start%;
+    
+/*%secure_tuesday_date% =
+    %secure_weekday_start%(2);
+        
+%secure_wednesday_date% =
+    %secure_weekday_start%(3);
+    
+%secure_thursday_date% =
+    %secure_weekday_start%(4);
+    
+%secure_friday_date% =
+    %secure_weekday_start%(5);
+    
+%secure_saturday_date% =
+    %secure_weekday_start%(6);
+    
+%secure_sunday_date% =
+    %secure_weekday_start%(7);*/
+    
+%_secure_weekday_start%(int weekday) =
+    %secure_weekday_start%(weekday, 0);
+        
+%secure_weekday_start%(int weekday, int weeksago) =
+/*weekday must be in range 1-7 or function risk to fail*/
+    let date = %secure_monday_date% + (weekday -1) * 24:00,
+    orgstart = %__secure_weekday_start%(date),
+    retval = orgstart - weeksago * 7 * 24:00;
+    if retval < fundamental.%loaded_data_period_start% then
+        orgstart
+    else
+        retval;
+    
+  
+%__secure_weekday_start%(abstime date) =
+    if date <= %secure_period_start% then
+        date
+    else
+        date - 7 * 24:00;
+        
+%leg_no_fc% = crew_pos.%leg_assigned_pos%(1);
+%leg_no_fp% = crew_pos.%leg_assigned_pos%(2) + crew_pos.%leg_assigned_pos%(3);
+%leg_no_ap% = crew_pos.%leg_assigned_pos%(5);
+%leg_no_ah% = crew_pos.%leg_assigned_pos%(6) + crew_pos.%leg_assigned_pos%(7);
+
+%leg_sla_fc% = %leg_no_fc% * %sla_multiplier_fc%;
+%leg_sla_fp% = %leg_no_fp% * %sla_multiplier_fp%;
+%leg_sla_ap% = %leg_no_ap% * %sla_multiplier_ap%;
+%leg_sla_ah% = %leg_no_ah% * %sla_multiplier_ah%;
+
+%sla_multiplier_fc% =  %sla_multiplier%(%leg_planning_group%, "FC", %leg_start_scheduled_day%);
+%sla_multiplier_fp% =  %sla_multiplier%(%leg_planning_group%, "FP", %leg_start_scheduled_day%);
+%sla_multiplier_ap% =  %sla_multiplier%(%leg_planning_group%, "AP", %leg_start_scheduled_day%);
+%sla_multiplier_ah% =  %sla_multiplier%(%leg_planning_group%, "AH", %leg_start_scheduled_day%);
+
+%sla_multiplier%(string planning_group, string rank, abstime date) =
+    default(%_sla_multiplier%(planning_group, rank, date), %_sla_multiplier%(planning_group, "*", date));
+    
+%_sla_multiplier%(string planning_group, string rank, abstime date) =
+    let wd = format_time(date,"%a");
+    default(%__sla_multiplier%(planning_group, rank, date, wd), %__sla_multiplier%(planning_group, rank, date, "*"));
+
+table sla_multiplier_table(string planning_group, string rank, abstime date, string week_day) =
+  planning_group, rank, date, week_day -> int %__sla_multiplier%;
+  external %sla_table%;
+  planning_group, rank, (start_date, end_date(, week_day -> sla; 
+  -, -, -, - -> void_int;
+end
+  
+%sla_table% = parameter "sla_table.etab"
+	remark "SLA e-table name";
+        
+%sb_no_fc% = first(leg(trip),%leg_no_fc%);
+%sb_no_fp% = first(leg(trip),%leg_no_fp%);
+%sb_no_ap% = first(leg(trip),%leg_no_ap%);
+%sb_no_ah% = first(leg(trip),%leg_no_ah%);
+
+%sb_fc_need_str% =
+    if %flight_crew% and %sb_no_fc% > 0 then
+        format_int(%sb_no_fc%, "\"FC\":%d,")
+    else
+        "";
+
+%sb_fp_need_str% =
+    if %flight_crew% and %sb_no_fp% > 0 then
+        format_int(%sb_no_fp%, "\"FP\":%d,")
+    else
+        "";
+        
+%sb_ap_need_str% =
+    if %cabin_crew% and %sb_no_ap% > 0 then
+        format_int(%sb_no_ap%, "\"AP\":%d,")
+    else
+        "";
+        
+%sb_ah_need_str% =
+    if %cabin_crew% and %sb_no_ah% > 0 then
+        format_int(%sb_no_ah%, "\"AH\":%d,")
+    else
+        "";
+        
+/*%SLA_percentage% =
+    parameter 50
+    remark "Which percentage of total number of SB:s to leave for OCC";
+    
+    
+
+table sb_dated_needs_for_category(String category, String base, AbsTime sb_date) =
+  category -> %_need_for_category_base_date%;
+  "FC" -> fundamental.%upper_need%(base, sb_date);
+  "FP" -> fundamental.%lower_need%(base, sb_date);
+  "AP" -> fundamental.%upper_need%(base, sb_date);
+  "AH" -> fundamental.%lower_need%(base, sb_date);
+  - -> void_int;
+end*/
+
+
+
+
+
+
+    

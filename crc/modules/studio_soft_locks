@@ -1,0 +1,169 @@
+/* -*- crc -*- */ 
+
+/*  */
+
+/*******************************************************************************
+ SoftLocks report definitions
+ ----------------------------
+ 
+ Created:   2003-05-22
+ By:        Henrik Enström
+
+--------------------------------------------------------------------------------
+ USE
+    This file contains definitions needed for softlocks reports.
+
+ *********************************************************************/
+
+module studio_soft_locks
+
+import soft_locks;
+import levels;
+
+%one_row_desc%(Int in_row_nr) =
+    let occ_type = soft_locks.%type%(in_row_nr);
+
+    if soft_locks.%active%(in_row_nr)
+	and soft_locks.%check_leg_id%(soft_locks.%carrier_1%(in_row_nr), 
+			      soft_locks.%flight_1%(in_row_nr), 
+			      soft_locks.%dep_arr_1%(in_row_nr))
+	and departure >= soft_locks.%date_from%(in_row_nr)
+	and departure <= soft_locks.%date_to%(in_row_nr)
+	and (soft_locks.%ac_type%(in_row_nr) = "" 
+	    or soft_locks.%ac_type%(in_row_nr) = aircraft_type)
+	and soft_locks.%check_traffic_day%(soft_locks.%traffic_day%(in_row_nr))
+	and soft_locks.%check_act_or_dh%(soft_locks.%active_or_dh_1%(in_row_nr))
+    then
+	if locate("BASE", occ_type) > 0 then
+	    concat(occ_type, ": ", soft_locks.%base%(in_row_nr))
+	else if locate("TRIP", occ_type) > 0 or locate("DUTY", occ_type) > 0 then
+	    concat(occ_type, ": ", soft_locks.%base%(in_row_nr))
+	else if locate("CXN", occ_type) > 0 then
+	    concat(occ_type, ":",
+		%cxn_string%(soft_locks.%carrier_2%(in_row_nr), 
+		soft_locks.%flight_2%(in_row_nr), 
+		soft_locks.%dep_arr_2%(in_row_nr), 
+		soft_locks.%active_or_dh_2%(in_row_nr)),
+		%str_only_if_ac_chg%(soft_locks.%only_if_ac_chg%(in_row_nr)),
+		%get_reltime_str%(soft_locks.%limit_min%(in_row_nr), 
+				  soft_locks.%limit_max%(in_row_nr)))
+	else if locate("REST", occ_type) > 0 then
+	    concat(occ_type, ":",
+		    %get_reltime_str%(soft_locks.%limit_min%(in_row_nr), 
+				   soft_locks.%limit_max%(in_row_nr)))
+	else
+	    "Non-existent type"
+    else
+	"Leg mismatch";
+
+%one_row_desc_result%(Int in_row_nr) =
+    if soft_locks.%one_row_penalty%(in_row_nr, false) = -1 then
+	" RuleFail"
+    else if soft_locks.%type%(in_row_nr) = "CXN_BUFFER" then
+	"      N/A"
+    else
+	format_int(soft_locks.%one_row_penalty%(in_row_nr, false), "%9d");
+
+%str_only_if_ac_chg%(Bool in_only_if_ac_chg) =
+    if in_only_if_ac_chg then " IF AC-CHG" else "";
+
+%cxn_string%(String in_carrier_2, 
+	    Int in_flight_2, 
+	    String in_dep_arr_2, 
+	    String in_act_or_dh_2) =
+    if in_flight_2 > 0 or in_dep_arr_2 <> "" then
+	concat(" ", in_carrier_2, %get_int_str%(in_flight_2), " ", 
+		in_dep_arr_2, " ", in_act_or_dh_2)
+    else "";
+
+%get_int_str%(Int in_int) =
+    if in_int = 0 then "" else format_int(in_int, " %d");
+
+%get_reltime_str%(Reltime in_min, Reltime in_max) =
+  if in_min = 0:00 then
+    if in_max = 0:00 or in_max >= 100:00 then
+      ""
+    else
+      concat(" MAX ", format_time(in_max, "%h:%02M"))
+  else
+    if in_max = 0:00 or in_max >= 100:00 then
+      concat(" MIN ", format_time(in_min, "%h:%02M"))
+    else
+      concat(format_time(in_min, " %h:%02M"), " - ", 
+	      format_time(in_max, "%h:%02M"));
+
+%trip_has_soft_lock% =
+    default(any(leg(trip), %leg_has_soft_lock%), false);
+
+export %leg_has_soft_lock% =
+  let leg_nr_of_occurrences =
+    default(soft_locks.%leg_nr_of_occurrences_penalty% +
+            soft_locks.%leg_nr_of_occurrences_rule%, 0);
+  if leg_nr_of_occurrences = 0 then false
+  else
+    any(times(soft_locks.%table_nr_of_rows%),
+      %one_row_has_soft_lock%(times_index(0))
+    );
+
+%one_row_has_soft_lock%(Int in_row_nr) =
+  soft_locks.%active%(in_row_nr) and
+  soft_locks.%check_leg_id%(soft_locks.%carrier_1%(in_row_nr), 
+			    soft_locks.%flight_1%(in_row_nr), 
+			    soft_locks.%dep_arr_1%(in_row_nr)) and
+  departure >= soft_locks.%date_from%(in_row_nr) and 
+  departure <= soft_locks.%date_to%(in_row_nr) and
+  (soft_locks.%ac_type%(in_row_nr) = "" 
+    or soft_locks.%ac_type%(in_row_nr) = aircraft_type) and
+  soft_locks.%check_traffic_day%(soft_locks.%traffic_day%(in_row_nr)) and
+  soft_locks.%check_act_or_dh%(soft_locks.%active_or_dh_1%(in_row_nr));
+
+%get_int_from_abstime%(Abstime in_abs) =
+  (in_abs - 01Jan1986) / 0:01;
+
+/*****************************************************************************
+ *
+ * Rudobs
+ *
+ *****************************************************************************/
+
+/* 
+ * Add the definitions below to the Rave file containing leg colour definitions in the
+ * $CARMUSR/crc/report/ directory.
+ * For example:
+ * %map_leg_color_bottom_middle_crr% = "studio_soft_locks.leg_color_bottom_middle";
+ * %map_leg_color_bottom_middle_leg% = "studio_soft_locks.leg_color_bottom_middle";
+*/
+
+export %leg_color_bottom_middle% =
+  if %rudob_show% and %leg_has_soft_lock% then
+    if soft_locks.%use_rules% and not soft_locks.%leg_rule_bool% then
+      %rudob_color_rule_violation%
+    else if soft_locks.%use_penalties% and soft_locks.%leg_penalty% > 0 then
+      %rudob_color_penalty%
+    else
+      %rudob_color_achieved%
+  else
+    %rudob_color_no_indication%;
+
+%rudob_show% = 
+  parameter true 
+  remark "(Soft Locks) Studio: Show markers for achieved and failed SoftLocks",
+  planner "Parameter that controls if Soft Lock markers on the bottom middle section of each leg within the Trip and Leg windows should be used. Different colors will appear for: \n* legs with soft lock penalty\n* legs that are illegal because of soft lock rule\n* legs that have achieved the soft lock" ;
+%rudob_color_penalty% = 
+  parameter 11 /*"BrightPurple"*/
+  remark "(Soft Locks) Studio: rudob colour for penalized legs",
+  planner "Colour that should appear when a leg are penalized because of soft locks. The numbers point at rule_color_1...32, these can be found under Options -> Colour Manager. Value -1 indicates that no colour should be used. Allowed value 1 - 32.";
+%rudob_color_rule_violation% = 
+  parameter 30 /*"Red"*/
+  remark "(Soft Locks) Studio: rudob colour for broken SoftLock rule",
+  planner "Colour that should appear when a leg are illegal because of soft locks. The numbers point at rule_color_1...32, these can be found under Options -> Colour Manager. Value -1 indicates that no colour should be used. Allowed value 1 - 32.";
+%rudob_color_achieved% = 
+  parameter 7 /*"Yellow"*/
+  remark "(Soft Locks) Studio: rudob colour for achieved SoftLock",
+  planner "Colour that should appear when a leg have achieved the soft locks. The numbers point at rule_color_1...32, these can be found under Options -> Colour Manager. Value -1 indicates that no colour should be used. Allowed value 1 - 32.";
+
+%rudob_color_no_indication% = -1;
+
+
+
+/* End of file */

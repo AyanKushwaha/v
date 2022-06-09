@@ -1,0 +1,608 @@
+/* -*- crc -*- */
+/* Module containing rave definitions used by the customization module for the Interbids
+ Optimization on demand server (Carmencita), $CARMUSR/lib/python/interbids/CustomMatadorServer.py */
+
+root module interbids 
+
+import wop;
+import trip;
+import duty;
+import leg;
+import levels;
+import fundamental;
+import pp;
+import crew;
+import crew_pos;
+import duty_time;
+import task;
+import keywords;
+import roster;
+import rest;
+import rules_indust_ccr;
+import calendar;
+import planning_area;
+import duty_period;
+
+%to_ymdt%(Abstime Abs1) = format_time(Abs1,"%02y%02m%02d%02H:%02M");
+
+/******************************************************* 
+  ROSTER dependant variables
+  -Corresponds to the values in the <ROSTER> section 
+*******************************************************/
+export %roster_id% = concat(default(%roster_crewid%, "UNDEFINED"),"#",format_int(index,"%05d"));
+export %roster_period_start% = %pp_start%;
+export %roster_period_end% = %pp_end%;
+export %roster_crewid% = crew.%id%;
+export %roster_dutytime% = roster.%duty_time_in_period%(%roster_period_start%,%roster_period_end%, true, duty.union);
+export %roster_blocktime% = roster.%block_time_in_period%(%roster_period_start%,%roster_period_end%);
+export %crew_station%(abstime t) = crew.%airport_at_date%(t);
+export %crew_region%(abstime t) = crew.%region_at_date%(t);
+export %crew_is_cabin% = crew.%is_cabin%;
+export %crew_local_to_utc%(abstime t) = crew.%utc_time%(t);
+export %crew_utc_to_local%(abstime t) = crew.%hb_time%(t);
+
+/******************************************************* 
+  TRIP dependant variables
+  -Corresponds to the values in the <CRR> section 
+*******************************************************/
+        
+export %trip_is_flight% = default(trip.%has_flight_duty%,false);
+export %trip_is_personal% = default(first(leg(trip), personal_activity),false);
+export %trip_is_ground% = default(trip.%is_ground_duty%,false);
+export %trip_is_training% = default(trip.%is_ground_training%, false);
+export %trip_type% =
+  if %trip_is_flight% then "flight"
+  else if %trip_is_training% then "training"
+  else if %trip_is_ground% then "ground"
+  else if %trip_is_personal% then "personal"
+  else "UNDEFINED";
+export %trip_code% =  trip.%code%;
+export %trip_name% = 
+    if trip.%is_pact% then
+        first(leg(trip), keywords.%activity_type%)
+    else
+        "";
+
+%time_since_month_start% = %now_hb% - round_down_month(%now%);
+%time_of_publish% = 16 * 24:00;
+%published_until_hb% =
+  if %time_since_month_start% < %time_of_publish% then
+    round_up_month(%now_hb%)
+  else
+    round_up_month(round_up_month(%now_hb%) + 0:01);
+
+export %trip_partly_published% =
+  (trip.%end_hb% > %published_until_hb%) and
+  (trip.%start_hb% < %published_until_hb%) and
+  any(leg(trip), not void(leg.%published_time%)) and
+  any(leg(trip), void(leg.%published_time%));
+export %trip_published_end_hb% = last(leg(trip), leg.%end_hb%) where (not void(leg.%published_time%));
+export %trip_unpublished_start_hb% = first(leg(trip), leg.%start_hb%) where (void(leg.%published_time%));
+export %trip_unpublished_end_hb% = last(leg(trip), leg.%start_hb%) where (void(leg.%published_time%));
+export %trip_unpublished_start_day_hb% =
+  nmax(round_up(%trip_published_end_hb%, 24:00),
+       round_down(%trip_unpublished_start_hb%, 24:00));
+export %trip_unpublished_end_day_hb% =
+  round_up(%trip_unpublished_end_hb%, 24:00);
+
+/*
+export %check_request_legality% = wop.%start_utc% >= %rbp_start%(%now% - 24:00);
+*/
+
+/*%rbw_end%(abstime x) =*/
+    /* Scheduled roster bid window close is the 6'th at 00:00 homebase time every month */
+/*    let month_offset = 5 * 24:00 + 00:00;
+    if x <= round_down_month(x) + month_offset then
+        round_down_month(x) + month_offset
+    else
+        round_up_month(x) + month_offset
+    remark "Close of roster bid window open at time x";
+*/
+/*
+%rbp_start%(abstime x) =
+    round_up_month(%rbw_end%(x))
+    remark "Start of roster bid period open at time x";
+
+%rbp_end%(abstime x) =
+    round_up_month(%rbp_start%(x) + 1:00)
+    remark "End of roster bid period open at time x";
+*/
+
+%date_format_str% = "%02d%b%Y";
+%hh_min_format_str% ="%02H:%02M";
+
+/* Crew portal approved datetime format  '\d{4}-\d{2}-\d{2}\s{1}\d{2}:\d{2}' for type 'DateTime'. */
+%full_time_format_str% = "%Y-%02m-%02d %02H:%02M";
+
+export %trip_startdatetime_utc%    = format_time(trip.%start_utc%,  %full_time_format_str%);
+export %trip_enddatetime_utc%    = format_time(trip.%end_utc%,  %full_time_format_str%);
+
+export %trip_startdatetime_local%    = format_time(trip.%start_lt%,  %full_time_format_str%);
+export %trip_enddatetime_local%    = format_time(trip.%end_lt%,  %full_time_format_str%);
+
+export %trip_startdate_utc%    = format_time(trip.%start_utc%,    %date_format_str%);
+export %trip_startdate_hb% = format_time(trip.%start_hb%, %date_format_str%);
+export %trip_startdate_local% = format_time(trip.%start_lt%, %date_format_str%);
+export %trip_enddate_utc%      = format_time(trip.%end_utc%,      %date_format_str%);
+export %trip_enddate_hb%   = format_time(trip.%end_hb%,   %date_format_str%);
+export %trip_enddate_local%   = format_time(trip.%end_lt%,   %date_format_str%);
+export %trip_starttime_utc%    = format_time(trip.%start_utc%,    %hh_min_format_str%);
+export %trip_starttime_hb% = format_time(trip.%start_hb%, %hh_min_format_str%);
+export %trip_starttime_local% = format_time(trip.%start_lt%, %hh_min_format_str%);
+export %trip_endtime_utc%      = format_time(trip.%end_utc%,      %hh_min_format_str%);
+export %trip_endtime_hb%   = format_time(trip.%end_hb%,   %hh_min_format_str%);
+export %trip_endtime_local%   = format_time(trip.%end_lt%,   %hh_min_format_str%);
+export %trip_dutytime% = trip.%duty_time%(duty.union,true);
+export %trip_blocktime% = trip.%block_time%;
+export %trip_unique_id% = concat(%trip_name%,%trip_startdate_utc%,%trip_starttime_utc%,format_time(%trip_dutytime%,"%02h:%02M"));
+  
+%any_leg_in_trip_touches%(string station) =
+  any(leg(trip), leg.%end_station% = station);
+
+  
+table trip_region(int ix) =
+  ix -> %trip_region_str%;
+  1  -> if trip.%is_skd% then "SKD," else "";
+  2  -> if trip.%is_skn% then "SKN," else "";
+  3  -> if trip.%is_sks% then "SKS," else "";
+  4  -> if trip.%is_ski% then "SKI," else "";
+end
+  
+export %trip_region% =
+  cat(times(4), %trip_region_str%(times_index(0)));
+  
+export %trip_is_longhaul% = trip.%is_long_haul%;
+export %trip_length% = trip.%days%;
+
+export %trip_layovers% =
+  cat(duty(trip), duty.%end_station%, ",")
+  where (not is_last(duty(trip)));
+  
+export %trip_cc% = 
+    concat(%format_trip_pos%(1)," ", %format_crew_rank%(1), " ,",
+           %format_trip_pos%(2), " ", %format_crew_rank%(2), " ,",
+           %format_trip_pos%(3), " ", %format_crew_rank%(3), " ,",
+           %format_trip_pos%(4), " ", %format_crew_rank%(4), " ,",
+           %format_trip_pos%(5), " ", %format_crew_rank%(5), " ,",
+           %format_trip_pos%(6), " ", %format_crew_rank%(6), " ,",
+           %format_trip_pos%(7), " ", %format_crew_rank%(7), " ,",
+           %format_trip_pos%(8), " ", %format_crew_rank%(8), " ,",
+           %format_trip_pos%(9), " ", %format_crew_rank%(9), " ,",
+           %format_trip_pos%(10), " ", %format_crew_rank%(10));
+%format_trip_pos%(int ix)=
+    %_print_int%(crew_pos.%trip_assigned_pos%(ix));
+%format_crew_rank%(int ix) = crew_pos.%pos2func%(ix);
+
+export %trip_homebase% = trip.%homebase%;
+
+export %trip_cc_acqual% =
+  first(leg(trip),leg.%qual_cc%) where (not leg.%is_deadhead%);
+  
+export %trip_fc_acqual% =
+  first(leg(trip),leg.%qual_fc%) where (not leg.%is_deadhead%);  
+
+
+export %trip_reststations% = cat(duty(trip), concat (duty.%end_station%," ")) 
+                                while( not is_last(duty(trip))); 
+/******************************************************* 
+  Duty dependant variables
+  -Corresponds to the definitions in the <RTD> section
+*******************************************************/
+export %duty_startdate_utc% = format_time(duty.%start_utc%,"%02d%b%Y");
+export %duty_starttime_utc% = format_time(duty.%start_utc%,"%02H:%02M");
+export %duty_enddate_utc% = format_time(duty.%end_utc%,"%02d%b%Y");
+export %duty_endtime_utc% = format_time(duty.%end_utc%,"%02H:%02M");
+
+export %duty_startdate_hb% = format_time(duty.%start_hb%,"%02d%b%Y");
+export %duty_starttime_hb% = format_time(duty.%start_hb%,"%02H:%02M");
+export %duty_enddate_hb% = format_time(duty.%end_hb%,"%02d%b%Y");
+export %duty_endtime_hb% = format_time(duty.%end_hb%,"%02H:%02M");
+
+export %duty_startdate_local% = format_time(duty.%start_lt%,"%02d%b%Y");
+export %duty_starttime_local% = format_time(duty.%start_lt%,"%02H:%02M");
+export %duty_enddate_local% = format_time(duty.%end_lt%,"%02d%b%Y");
+export %duty_endtime_local% = format_time(duty.%end_lt%,"%02H:%02M");
+
+export %duty_is_split% = 
+  duty_period.%is_split% and duty_period.%is_first_duty_in_duty_period%;
+export %duty_resttime% = duty.%rest_time%;
+export %duty_rest_required% = rest.%minimum_time%;
+export %duty_followed_by_nightstop% = 
+  scale_time(duty.%end_lt%, next(duty(trip), duty.%start_lt%), 0,
+             01:59, 02:01, 1) > 0:01 and
+  duty.%rest_time% > 5:00;
+
+/******************************************************* 
+  ACTIVITY (leg) dependant variables
+*******************************************************/
+export %activity_is_flight% = leg.%is_flight_duty%;
+export %activity_is_ground% = leg.%is_ground_duty%;
+export %activity_is_personal% = leg.%is_pact%;
+export %activity_is_deadhead% = leg.%is_deadhead%;
+
+export %activity_type% = 
+  if %activity_is_deadhead% then "deadhead"
+  else if %activity_is_flight% then "flight"
+  else if %activity_is_personal% then "personal"
+  else if %activity_is_ground% then "ground"
+  else "UNDEFINED";
+export %activity_carrier% = default(flight_carrier, "UNDEFINED");  
+export %activity_number% = format_int(default(flight_number, 0000),"%i");
+export %activity_suffix% =   
+  if %activity_is_flight%
+  then default(flight_suffix, "UNDEFINED")
+  else default(ground_duty_code_suffix, "UNDEFINED");
+export %activity_startstation% = departure_airport_name;
+export %activity_endstation% = arrival_airport_name;
+
+export %activity_startdate_utc% = format_time(leg.%start_utc%,"%02d%b%Y");
+export %activity_starttime_utc% = format_time(leg.%start_utc%,"%02H:%02M");
+export %activity_enddate_utc% = format_time(leg.%end_utc%,"%02d%b%Y");
+export %activity_endtime_utc% = format_time(leg.%end_utc%,"%02H:%02M");
+
+export %activity_startdate_hb% = format_time(leg.%start_hb%,"%02d%b%Y");
+export %activity_starttime_hb% = format_time(leg.%start_hb%,"%02H:%02M");
+export %activity_enddate_hb% = format_time(leg.%end_hb%,"%02d%b%Y");
+export %activity_endtime_hb% = format_time(leg.%end_hb%,"%02H:%02M");
+
+export %activity_startdate_local% = format_time(leg.%start_lt%,"%02d%b%Y");
+export %activity_starttime_local% = format_time(leg.%start_lt%,"%02H:%02M");
+export %activity_enddate_local% = format_time(leg.%end_lt%,"%02d%b%Y");
+export %activity_endtime_local% = format_time(leg.%end_lt%,"%02H:%02M");
+
+
+export %activity_code% =
+  if %activity_is_flight% 
+  then concat(%activity_carrier%, %activity_number%)
+  else leg.%code%;
+export %activity_subcode% = default(leg.%code%, "UNDEFINED");
+
+export %activity_cnx_time% = default(%_print_reltime%(leg.%connection_time%),"");
+
+export %activity_block_time% = %_print_reltime%(leg.%block_time%);
+
+export %activity_is_non_scand_charter% = 
+  leg.%is_charter% and not leg.%is_interscand%;
+
+/* Trip filters, used to filter requests */
+export %trip_is_valid_for_xml_export% = trip.%starts_in_pp%;
+
+/* used by get_roster-request */
+%trip_considered_published% =
+    task.%is_vacation%(trip.%code%) or
+    task.%is_blank_day%(trip.%code%) or
+    task.%is_meeting%(trip.%code%) or
+    task.%is_compensation_day%(trip.%code%) or
+    task.%is_illness%(trip.%code%) or
+    task.%is_freeday%(trip.%code%) or
+    task.%is_loa%(trip.%code%) or
+    task.%is_ppf%(trip.%code%) or
+    task.%is_partial_loa%(trip.%code%);
+
+%planning_month_start%(abstime time_stamp) = 
+  if time_stamp - round_down_month(time_stamp) <= 15 * 24:00 - 00:01 then
+    round_up_month(time_stamp)
+  else
+    add_months(round_up_month(time_stamp), 1);
+
+%planning_month_end%(abstime time_stamp) =
+  add_months(%planning_month_start%(time_stamp), 1);
+
+%in_planning_month%(abstime time_stamp, abstime x) =
+  x >= %planning_month_start%(time_stamp) and x < %planning_month_end%(time_stamp);
+
+%current_planning_month_start% = %planning_month_start%(now);
+%current_planning_month_end% = %planning_month_end%(now);
+%in_current_planning_month%(abstime x) = %in_planning_month%(now, x); 
+
+/* used by get_all_trips */
+export %trip_in_export% = 
+       %trip_is_valid_for_xml_export% and 
+       not fundamental.%is_roster% and
+       trip.%has_only_flight_duty% and
+       planning_area.%trip_is_in_planning_area% and
+       crew_pos.%trip_assigned% > 0 and
+       trip.%pp_days% > 0 and
+       trip.%num_legs% > 1;
+
+/* Print help functions */
+%_print_reltime%(Reltime RTime) = format_time(RTime, %_reltime_format_string%);
+%_reltime_format_string% = "%02H:%02M";
+    
+%_print_int%(Int Integer) = format_int(Integer, %_integer_format_string%);
+%_integer_format_string% = "%d";
+
+
+/*******************************************************************************
+* Request bidding
+*******************************************************************************/
+ 
+/* 
+ * Override request limit
+*/
+
+/* The first F7S day request in a month for crew in CC SKN VG is always
+   granted. This variable checks if the F7S limit check should be overridden
+   for a given crew at a given date. */
+export %override_request_f7s_limit_check%(Abstime date) =
+  %cabin_crew% and
+  crew.%is_SKN_at_date%(date) and
+  crew.%in_variable_group%(date) and
+  not %_exception_date%(date) and
+  %f7s_days_in_month%(date) = 1;
+  
+%f7s_days_in_month%(Abstime date) =
+  let month_start = round_down_month(date),
+      month_end = round_up_month(date);
+  sum(duty(chain), duty.%days_in_period%(month_start, month_end))
+  where (duty.%is_f7s% and duty.%end_hb% > month_start)
+  while (duty.%start_hb% < month_end);
+ 
+%_exception_date%(Abstime date) =
+  %_date_is_exception_date%(date) or
+  %_date_in_summer_holidays%(date) or
+  %date_in_easter_holiday_period%(date) or
+  %date_in_whitsun_holiday_period%(date);
+  
+/* Special dates where F7S limit check cannot be overridden. */
+set exception_dates = 
+  "01May", "17May", "24Dec", "25Dec", "26Dec", "31Dec", "01Jan";
+
+%_date_is_exception_date%(Abstime date) =
+  format_time(date, "%d%b") in exception_dates;
+
+/* F7S limit check cannot be overridden during summer holidays period
+   (last monday before 02Jun - first sunday after 15Sep). */
+%_date_in_summer_holidays%(Abstime datetime) =
+  let date = round_down(datetime, 24:00);
+  overlap(date,
+          date + 24:00,
+          %_summer_holidays_start%(date), 
+          %_summer_holidays_end%(date))
+  > 00:00;
+
+/* Last monday before 02Jun in given year */
+%_summer_holidays_start%(Abstime year) =
+  round_down_week(add_months(round_down_year(year), 5) + 24:00);
+
+/* First sunday after 15Sep in given year */
+%_summer_holidays_end%(Abstime year) =
+  round_up_week(add_months(round_down_year(year), 8) + 14 * 24:00);
+  
+
+%date_in_easter_holiday_period%(Abstime datetime) =
+    let date = round_down(datetime, 24:00);
+    overlap(date, 
+            date + 24:00,
+            calendar.%maundy_thursday_start%(date),
+            calendar.%easter_monday_end%(date)) 
+    > 00:00;
+
+%date_in_whitsun_holiday_period%(Abstime datetime) =
+    let date = round_down(datetime, 24:00);
+    overlap(date, 
+            date + 24:00,
+            calendar.%whit_saturday_start%(date),
+            calendar.%whit_monday_end%(date)) 
+    > 00:00;
+
+/* 
+ * Detailed error message for request bidding. Redefined for CC and FD 
+*/
+group request_rules_message;
+
+/*
+ * Request Reciept Report 
+*/ 
+
+%request_table_name% = "crew_roster_request";
+
+table requests_period(String id, String type, Int ix) =
+  ix, id, type -> 
+    export Abstime %request_start_ix%,
+    export Abstime %request_end_ix%;
+  external %request_table_name%;
+  match_number, crew, type -> st, et;
+   -, -, - -> void_abstime, void_abstime;
+end
+
+table number_of_requests(String id, String type) =
+  id, type -> 
+    export Int %crew_num_requests%;
+  external %request_table_name%;
+  crew, type -> count(row_number);
+end
+  
+export %crew_has_any_request%(String id) = %crew_has_fs_request%(id) or %crew_has_f7s_request%(id);
+
+%crew_has_fs_request%(String id) = %crew_num_requests%(id, "FS") > 0;
+%crew_has_fw_request%(String id) = %crew_num_requests%(id, "FW") > 0;
+%crew_has_f7s_request%(String id) = %crew_num_requests%(id, "F7S") > 0;
+
+%crew_num_fs_requests%(String id) =  %crew_num_requests%(id, "FS");
+%crew_num_fw_requests%(String id) =  %crew_num_requests%(id, "FW");
+%crew_num_f7s_requests%(String id) =  %crew_num_requests%(id, "F7S");
+
+export %request_days_ix%(String id, String type, Int ix) =  
+  (%request_end_ix%(id, type, ix) - %request_start_ix%(id, type, ix)) / 24:00;
+
+
+export %show_6_month_summary%(string id, string typ, Int ix) = 
+  /* get date to check crew properties for */
+  let t = %6_months_start_ix%(ix);
+  if typ =  "FS" then
+     (%crew_region%(t) = "SKN" or %crew_region%(t) = "SKD") and  %crew_is_cabin%
+  else
+     false;
+
+export %request_days_in_6_months_ix%(String id, String type, Int ix) =
+  %request_days_in_period%(id, type, %6_months_start_ix%(ix), %6_months_end_ix%(ix));
+
+%request_days_in_period%(String id, String type, Abstime start, Abstime stop) = 
+  /* roster request reciept are stored in crew local time, non inclusive end date */
+  sum(times(%crew_num_requests%(id, type)), 
+            overlap(%request_start_ix%(id, type, times_index(0)), 
+                    %request_end_ix%(id, type, times_index(0)),
+                    start, stop)/24:00);  
+  
+export %6_months_start_ix%(Int ix) =
+  if calendar.%month_number%(%now%) <= 6 then
+    add_months(round_down_year(%now%), 6*(ix-1))
+  else
+    add_months(round_down_year(%now%), 6*ix);
+    
+export %6_months_end_ix%(int ix) =        
+  if calendar.%month_number%(%now%) <= 6 then
+    add_months(round_down_year(%now%), 6*ix)
+  else
+    add_months(round_up_year(%now%), 6*(ix-1)); 
+    
+%request_period_start% = round_down_year(%now%);
+%request_period_end% = %6_months_end_ix%(3);
+    
+
+%check_days_off_bid_legality%(string days_off_bid) =
+    wop.%end_utc% >= %days_off_bid_period_start%(days_off_bid);
+
+/* days_off_bid = FS|F7S */
+%days_off_bid_period_start%(string days_off_bid) =
+    default(%bid_period_start%(%now%, 
+                %bid_group_spec%(%_min_days_off_ix%(days_off_bid), %now%), days_off_bid),
+       %bid_period_start%(%now%, "ALL", "standard"));
+
+%days_off_bid_period_end%(string days_off_bid) =
+    default(%bid_period_end%(%now%, 
+                %bid_group_spec%(%_min_days_off_ix%(days_off_bid), %now%), days_off_bid),
+       %bid_period_end%(%now%, "ALL", "standard"));
+
+
+/* First index where bid_group and period exists in bid_periods table */
+%_min_days_off_ix%(string days_off_bid) = min(times(4), times_index(0))
+    where (not void(%bid_group_spec%(times_index(0), %now%))
+        and not void(%bid_period_start%(%now%, %bid_group_spec%(times_index(0), %now%), days_off_bid))); 
+
+%bid_period_start%(abstime date, string bidgroup, string day_off_bid) = 
+    %_bid_period_start%(date, bidgroup, %days_off_bid2bid_type%(day_off_bid));
+
+%bid_period_end%(abstime date, string bidgroup, string day_off_bid) = 
+    %_bid_period_end%(date, bidgroup, %days_off_bid2bid_type%(day_off_bid));
+
+table bid_periods(abstime date, string bidgroup, string bidtype) =
+    date, date, bidgroup, bidtype -> abstime %_bid_period_start%, abstime %_bid_period_end%;
+    external "bid_periods";
+    >= window_open, <= window_close, bid_group, bid_type -> "period_start", "period_end";
+    -, -, -, - -> void_abstime, void_abstime;
+end
+
+table day_off_bid2bid_type(string days_off_bid) =
+    days_off_bid -> %days_off_bid2bid_type%;
+    "FS"  -> "A_FS";
+    "FW"  -> "C_FW";
+    "F7S" -> "B_F7S";
+    "F0"  -> "D_F0";
+    "FS1" -> "E_FS1";
+    -     -> "standard";
+end
+
+
+/*
+Bid group depending on specific level 
+spec = 1 -> more specific 
+spec = 4 -> more general
+*/
+table bid_group(int spec, abstime date) =
+    spec, %flight_crew%, crew.%is_long_haul%(date), crew.%in_fixed_group%(date) -> %bid_group_spec%;
+    1, Y, Y, - -> "FD LH";
+    1, Y, N, Y -> "FD SH FG";
+    1, Y, N, N -> "FD SH VG";
+    2, Y, N, - -> "FD SH";
+    3, Y, -, - -> "FD ALL";
+    1, N,-, Y -> concat("CC ", crew.%region_at_date%(date), " FG");
+    1, N, -, N -> concat("CC ", crew.%region_at_date%(date), " VG");
+    2, N, -, - -> concat("CC ", crew.%region_at_date%(date));
+    3, N, -, - -> "CC ALL";
+    4, -, -, - -> "ALL";
+    -,-,-,- -> void_string;    
+end
+
+    
+/* Report Interface */
+
+
+ /*    fs_days_expr = R.foreach(
+             R.times('interbids.%crew_num_requests%("FS")'),
+                    'interbids.%request_start_ix%("FS",fundamental.%py_index%)',
+                    'interbids.%request_end_ix%("FS",fundamental.%py_index%)',
+                    'interbids.%request_days_ix%("FS",fundamental.%py_index%)'
+            )
+        fs_summary_expr = R.foreach(
+             R.times('3'),
+                     'interbids.%6_months_start_ix%(fundamental.%py_index%)',
+                     'interbids.%6_months_end_ix%(fundamental.%py_index%)',
+                     'interbids.%request_days_in_6_months_ix%("FS",fundamental.%py_index%)'
+             )
+        fw_days_expr = R.foreach(
+             R.times('interbids.%%crew_num_requests%%("%s","FW")' %crew_id),
+                    'interbids.%%request_start_ix%%("%s","FW",fundamental.%%py_index%%)' %crew_id,
+                    'interbids.%%request_end_ix%%("%s","FW",fundamental.%%py_index%%)' %crew_id,
+                    'interbids.%%request_days_ix%%("%s","FW",fundamental.%%py_index%%)' %crew_id
+            )
+        fw_summary_expr = R.foreach(
+             R.times('3'),
+                     'interbids.%%show_6_month_summary%%("%s", "FW",fundamental.%%py_index%%)' %crew_id ,
+                     'interbids.%6_months_start_ix%(fundamental.%py_index%)',
+                     'interbids.%6_months_end_ix%(fundamental.%py_index%)',
+                     'interbids.%%request_days_in_6_months_ix%%("%s", "FW",fundamental.%%py_index%%)' %crew_id
+             )
+        f7s_days_expr = R.foreach(
+             R.times('interbids.%crew_num_requests%("F7S")'),
+                    'interbids.%request_start_ix%("F7S",fundamental.%py_index%)',
+                    'interbids.%request_end_ix%("F7S",fundamental.%py_index%)',
+                    'interbids.%request_days_ix%("F7S",fundamental.%py_index%)'
+            )   
+        roster_expr = R.foreach(
+            R.iter('iterators.roster_set', where = 'interbids.%crew_has_any_request%'),
+            'report_common.%crew_string%', */
+    
+table rule_additional_information_table(string rule_id) = 
+      rule_id  -> 
+      export string %crew_readable_failtext%,
+      export string %crew_rule_limit_type%,
+      export int %crew_rule_limit_scale_factor%;
+      "rules_indust_ccr.ind_max_fs_days_month" -> %_crew_readable_failtext_ind_max_fs_days_month%, "MAX", 1;
+      "rules_indust_ccr.ind_incorrect_separated_fs_days" -> "Incorrect separation of FS", "", 1;
+      "rules_indust_ccr.ind_max_fs_days_in_6_months" -> "Max FS days in six months", "MAX", 1;
+      "rules_indust_ccr.ind_max_fs_days_in_6_months_SKCMS_646" -> "Max FS days in six months", "MAX", 1;
+      "rules_indust_ccr.ind_fw_can_be_granted_SK_FD"->"rule violation", "MAX", 1;
+      "rules_indust_ccr.ind_max_fs_days_in_calendar_year" -> "Max FS days in calendar year", "MAX", 1;
+      "rules_indust_ccr.ind_fs_on_weekend" -> "FS may only affect 1 weekend in a month", "", 1;
+      "rules_indust_ccr.ind_max_fs_on_weekend_per_year_ski" -> "Max FS days on weekends per year", "MAX", 1;
+      "rules_indust_ccr.ind_min_days_between_fs" -> "Minimum days between two FS", "MIN", 1;
+      "rules_indust_ccr.ind_fs_day_scheduled_correct_all" -> "Your request is in conflict with other activities and/or rules", "", 1; 
+      "rules_indust_ccr.ind_max_consecutive_fs_days" -> "Max FS days in succession", "MAX", 1;
+      "rules_indust_ccr.ind_max_fs_days_in_calendar_year_skd_cc" -> "Max FS days in a year", "MAX", 1;
+      "rules_indust_ccr.ind_f7s_full_block_scheduled_with_freedays_ALL" -> "Minimum days between FS and full block of F7S", "MIN", 1; 
+      "rules_indust_ccr.ind_check_in_out_around_fs_day_fc" -> "Incorrect checkin around FS day", "", 1; 
+      "rules_indust_ccr.ind_max_f7s_in_7_days_sks" -> "Max F7S days in seven days", "MAX", 1;
+      "rules_indust_ccr.ind_fs_in_cnx_with_xmas_rot_fc" -> "Minimum days between FS and Christmas Rotation", "MIN", 1;
+      "rules_indust_ccr.ind_f7s_day_scheduled_correct_all" -> "Minimum days between F7S and other activity", "MIN", 1; 
+      "rules_indust_ccr.ind_max_fs_blocks_in_month" -> "Max blocks of FS in one month", "MAX", 1; 
+      "rules_indust_ccr.ind_max_working_days_btw_freedays_all" -> "Max working days between FS", "MAX", 1;
+      "rules_indust_ccr.ind_min_freedays_after_duty_all" -> "Min freedays after duty", "MIN", 1;
+      "rules_indust_ccr.ind_min_freedays_surrouding_summer_vacation" -> "Min freedays surrounding summer vacation", "MIN", 1;
+      "rules_indust_ccr.ind_min_freedays_in_1_month_all" -> "Min freedays in one month", "MIN", 1; 
+      "rules_indust_ccr.ind_min_freedays_before_LA_days_all" -> "Min freedays before LA activity", "MIN", 1;
+      "rules_indust_ccr.ind_comp_day_after_production_freedays_all" -> "Compensation days after production", "", 1;
+      "rules_indust_ccr.ind_max_f0_in_sequence," -> "Max F0 days in a sequence", "", 1;
+      "rules_indust_ccr.ind_max_f3s_in_sequence," -> "Max F3S days in a sequence", "", 1;
+      "rules_studio_ccr.sft_nr_comp_days_must_not_exceed_balance_all" -> concat("Insufficient balance for " ,trip.%code%, " days"), "MIN", 100;
+      "rules_indust_ccr.ind_no_fs1_with_single_f_unbid" -> "FS1 not allowed due to no single freeday bid", "", 1;
+      - -> "", "", 1;
+end
+
+%_crew_readable_failtext_ind_max_fs_days_month% =
+  if crew.%has_agmt_group_skn_fd%
+  then "Max FS blocks in one month"
+  else "Max FS days in one month";
+
+/* End of File */

@@ -1,0 +1,136 @@
+/* -*- crc -*-
+ *
+ * @(#) 
+ *
+ * APIS rules for Flight Crew Manifests and Master Crew List
+ *
+ * Generate tracking alerts if:
+ *  - Crew is not valid for APIS transmission.
+ *  - Generation of FCM was unsuccessful.
+ *
+ */
+
+module rules_apis
+
+import attributes;
+import crew;
+import fundamental;
+import leg;
+import levels;
+import roster;
+import rule_exceptions;
+import wop;
+
+
+/*
+** Rule:
+**    Crew must meet certain qualifications to be in MCL (Master Crew List).
+**
+** Description:
+**    Check that crew meets the minimum qualifications required in order to be
+**    in the MCL: LH qualified, valid passport, right nationality
+**    (BZ: 36889 ; WP: FAT-INT 325, 326)
+*/
+
+rule apis_qual_crew_is_mcl =
+  valid roster.%check_rules% and
+        wop.%is_on_duty% and
+        leg.%in_pp_extended% and
+        leg.%is_flight_duty% and
+        leg.%is_apis% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+        
+        %is_crew_qualified_for_apis%;
+  
+  startdate  = leg.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = leg.%failobject_departure%;
+  failtext %not_qual_for_apis_failtext%;
+  remark "APIS: Crew does not qualify for MCL/Crew Manifest",
+  planner "APIS: Crew cannot be included in MCL/Crew Manifest.";
+end
+
+%is_crew_qualified_for_apis% = 
+  crew.%is_valid_for_crew_manifest%(leg.%end_country%, leg.%end_UTC%);
+
+%not_qual_for_apis_failtext% = 
+  default(
+    crew.%apis_failtext%(leg.%end_country%, leg.%end_UTC%), 
+    "APIS: Crew does not qualify for MCL/Crew Manifest");
+
+
+/*
+** Rule:
+**    Creation of APIS/PAXLST message should generate Alert, so that Trackers
+**    can correct document errors and re-try transmission of manual Flight
+**    crew manifest.
+**
+** Description:
+**    See CR 436 and SASCMS-1454.
+*/
+
+/* NOTE: Should we really be able to turn this rule off? */
+rule apis_fcm_fault =
+  valid leg.%is_apis% 
+    and rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+
+  %fcm_ok%;
+
+  startdate = leg.%start_utc%;
+  severity = %severity_filter_int%(leg.%start_hb%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %apis_fcm_fault_failtext%;
+  remark "APIS: Failed creating Crew Manifest";
+end
+
+%_apis_fcm_fault_failtext% = concat("APIS: Could not create FCM for ", leg.%flight_id%);
+
+%apis_fcm_fault_failtext% = 
+  default(
+    concat(%_apis_fcm_fault_failtext%, format_time(attributes.%flight_leg_abs%("FCMERROR"), " (%H:%02M)")),
+    %_apis_fcm_fault_failtext%);
+
+%fcm_ok% = 
+  not attributes.%flight_leg_has_attr%("FCMERROR");
+
+
+/*
+** Rule:
+**    Validates crew data to avoid situations where invalid EDIFACT messages
+**    could be generated.
+**
+** Description:
+**    Checks e.g. string lengths.
+*/
+
+rule apis_crew_data_valid =
+  valid roster.%check_rules% and
+        wop.%is_on_duty% and
+        leg.%in_pp_extended% and
+        leg.%is_flight_duty% and
+        leg.%is_apis% and
+        not (crew.%is_skj% or crew.%is_skk%) and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+        
+        void(%apis_crew_data_problem%);
+  
+  startdate  = leg.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = leg.%failobject_departure%;
+  failtext %apis_crew_data_problem%;
+  remark "APIS: Crew data problem",
+  planner "APIS: Crew data problem, must be corrected before APIS can be sent";
+end
+
+%apis_crew_data_problem% = 
+  let date = leg.%activity_scheduled_start_time_UTC%;
+  if void(crew.%street%(date)) or length(crew.%street%(date)) = 0 then
+  	"Street address needed for APIS"
+  else if length(default(crew.%city%(date),"")) > 35 then
+  	"City name too long for APIS"
+  else if length(default(crew.%postal_code%(date),"")) > 17 then
+  	"Postal code too long for APIS"
+  else
+    void_string;
+
+/* eof */

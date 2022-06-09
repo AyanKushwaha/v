@@ -1,0 +1,274 @@
+/* -*- crc -*-
+ *
+ * Purpose:
+ *   This module contains all accumulators used in the ruleset.
+ *   They are gathered here to minimize the risk of multiple implementation 
+ *
+ * Sections:
+ *   1. Common definitions used by the accumulator job
+ *   2. Actual / Latest accumulator definitions
+ *   3. Publication accumulator definitions
+ *
+ * Created by:
+ *   David Lennartsson, Jeppesen 2006-10-24
+ *
+ * Major changes:
+ *   
+ */
+
+root module accumulators
+
+import fundamental;
+import levels;
+import crew_pos;
+import crew;
+import parameters;
+
+import wop;
+import trip;
+import duty;
+import leg;
+
+/****************************************************************
+ * Section 1: Common definitions used by the accumulator job
+ ***************************************************************/
+
+/*
+** The accumulating process accumulates values in this interval
+*/
+
+%tab_header% =
+  parameter "..."
+  remark "Accumulators#HEADER#";
+
+%accumulator_mode% =
+  parameter false
+  remark "[Script] %accumulator_mode%  False means that we are not using the accumulator script. Set to true by the accumulator script";
+
+%job_publication_p% =
+  parameter false
+  remark "[Script] %job_publication_p%  Accumulate only publication values. Set by the accumulator script";
+
+%is_publ_debug_p% =
+    parameter false
+    remark "[test/debug] %is_publ_debug_p%";
+
+
+/* These start and end dates shall be used by accumulators that allways contain
+   the latest information available. Accumulators using this interval will
+   be updated every night with the most actual information */
+%actual_acc_start% =
+  if %job_publication_p% then
+    1Jan1986
+  else
+    %acc_start_p%;
+
+%actual_acc_end% = 
+  if %job_publication_p% then
+    1Jan1986
+  else
+    %acc_end_p%;
+
+%acc_start_p% = 
+    parameter 01apr2006
+    remark "[Script] %acc_start_p%  Start date for accumulation. Set by the accumulator script";
+    
+%acc_end_p% = 
+    parameter 01jul2006
+    remark "[Script] %acc_end_p%  End date for accumulation. Set by the accumulator script";
+
+
+%is_publ_debug% =
+    %is_publ_debug_p%;
+
+
+/* These start and end dates shall be used by accumulators that only contains
+   values accumulated at publication. The idea is that it is items on the original
+   roster that shall be accumulated. These are only updated at publication. */
+%publ_acc_start% =
+  if %job_publication_p% then
+    if %is_publ_debug% then
+        %acc_start_p%
+    else
+        %pp_start%
+  else
+    1Jan1986;
+
+
+%publ_acc_end% = 
+    if %job_publication_p% then
+    /* + 0:01 to get a sampling on %publ_period_end% 
+       for monthly accumulators */
+        if %is_publ_debug% then
+            %acc_end_p%
+            /* %publ_period_end_debug% + 0:01 */
+        else
+            %publ_period_end% + 0:01
+    else
+        1Jan1986;
+
+
+/*
+** Crew id key definitions
+** The accumulator process will not save any data if the key is void
+*/
+%_crew_id%(Bool condition) = if condition then crew.%id% else void_string;
+
+/* Flight crew */
+%flight_crew_id% = %_crew_id%(%flight_crew%);
+%skd_flight_crew_id% = %_crew_id%(%flight_crew% and crew.%is_skd%);
+%skn_flight_crew_id% = %_crew_id%(%flight_crew% and crew.%is_skn%);
+%skd_skn_flight_crew_id% = %_crew_id%(%flight_crew% and (crew.%is_skd% or crew.%is_skn%));
+%LCP_lh_flight_crew_id% = %_crew_id%(%flight_crew% and
+                                     crew.%is_long_haul_pp_start% and
+                                     crew.%has_qln_lcp_pp_start%);
+%fci_lh_flight_crew_id% = %_crew_id%(%flight_crew% and
+                                     crew.%is_long_haul_pp_start% and
+                                     crew.%is_instructor%(%pp_start%));
+%fci_sim_flight_crew_id% = %_crew_id%(%flight_crew% and
+                                  (crew.%is_sim_instr%(%pp_start%) or
+                                   crew.%is_sim_instr%(%pp_end%)));
+
+%flight_crew_k11_fg_2_months_duty_id% =
+  if parameters.%k11_fc_sp10_7_valid%(%pp_start%) then
+    default(%skd_fg_flight_crew_id%,
+            default(%skn_fg_flight_crew_id%,%sks_fg_flight_crew_id%))
+  else %skd_skn_flight_crew_id%;
+
+%flight_crew_k11_vg_2_months_duty_id% =
+  if parameters.%k11_fc_sp10_7_valid%(%pp_start%) then
+    default(%skd_vg_flight_crew_id%,%skn_vg_flight_crew_id%)
+  else %skd_skn_flight_crew_id%;
+
+%skd_fg_flight_crew_id% =
+  %_crew_id%(%flight_crew% and
+             (crew.%is_skd_at_date%(%pp_start%) or
+              crew.%is_skd_at_date%(%pp_end%)) and 
+             (crew.%in_fixed_group_pp_start% or 
+              crew.%in_fixed_group_pp_end%));
+  
+%skn_fg_flight_crew_id% =
+  %_crew_id%(%flight_crew% and
+             (crew.%is_skn_at_date%(%pp_start%) or
+              crew.%is_skn_at_date%(%pp_end%)) and 
+             (crew.%in_fixed_group_pp_start% or 
+              crew.%in_fixed_group_pp_end%));
+  
+%sks_fg_flight_crew_id% =
+  %_crew_id%(%flight_crew% and
+             (crew.%is_sks_at_date%(%pp_start%) or
+              crew.%is_sks_at_date%(%pp_end%)) and 
+             (crew.%in_fixed_group_pp_start% or 
+              crew.%in_fixed_group_pp_end%));
+  
+%skn_vg_flight_crew_id% =
+  %_crew_id%(%flight_crew% and
+             (crew.%is_skn_at_date%(%pp_start%) or
+              crew.%is_skn_at_date%(%pp_end%)) and 
+             (crew.%in_variable_group_pp_start% or 
+              crew.%in_variable_group_pp_end%));
+  
+%skd_vg_flight_crew_id% =
+  %_crew_id%(%flight_crew% and
+             (crew.%is_skd_at_date%(%pp_start%) or
+              crew.%is_skd_at_date%(%pp_end%)) and
+             (crew.%in_variable_group_pp_start% or 
+              crew.%in_variable_group_pp_end%));
+
+/* Cabin crew */
+%cabin_crew_id% = %_crew_id%(%cabin_crew%);
+%skd_cabin_crew_id% = %_crew_id%(%cabin_crew% and crew.%is_skd%);
+%skn_cabin_crew_id% = %_crew_id%(%cabin_crew% and crew.%is_skn%); /* is void_string if not SKN CC */
+%sks_cabin_crew_id% = %_crew_id%(%cabin_crew% and crew.%is_sks%);
+%temp_cabin_crew_id% = %_crew_id%(%cabin_crew% and crew.%is_temporary%);
+
+%temp_or_new_new_cabin_crew_id% =
+  %_crew_id%(%cabin_crew% and
+             (crew.%is_temporary% or crew.%has_restr_new_new_in_pp%));
+
+/* Common region specific */
+%skd_crew_id% = %_crew_id%(crew.%is_skd%);
+%skn_crew_id% = %_crew_id%(crew.%is_skn%);
+%sks_crew_id% = %_crew_id%(crew.%is_sks%);
+
+/* Common special cases */
+%temp_cc_or_restr_fc_id% =
+  %_crew_id%((%cabin_crew% and crew.%is_temporary%) or
+             (%flight_crew% and (crew.%has_restr_new_in_pp% or
+                                 crew.%has_restr_training_capt_in_pp% or
+                                 crew.%has_restr_training_dct_foc_refr_in_pp%)));
+  
+%restr_fc_id% =
+  %_crew_id%(%flight_crew% and (crew.%has_restr_new_in_pp% or
+                                crew.%has_qual_restr_any_qual_in_pp% or
+                                crew.%has_restr_training_capt_in_pp% or
+                                crew.%has_restr_training_dct_foc_refr_in_pp%));
+  
+%temp_cc_or_restr_fc_lh_id% =
+  %_crew_id%((%cabin_crew% and crew.%is_temporary%) or
+             (%flight_crew% and
+              (crew.%has_restr_new_in_pp% or
+               crew.%has_restr_training_capt_in_pp% or
+               crew.%has_restr_training_dct_foc_refr_in_pp% or
+               (crew.%is_long_haul_pp_start% and not crew.%is_double_qualified%))));
+  
+%skn_fc_part_time_crew_id% =
+  %_crew_id%(crew.%is_pilot% and
+             (crew.%is_skn_at_date%(%pp_start%) or
+              crew.%is_skn_at_date%(%pp_end%)) and
+              crew.%is_part_time_start_or_end%);
+
+/****************************************************************
+ * Section 2: Actual / Latest accumulator definitions
+ ***************************************************************/
+
+/*
+** Accumulator for duty time with night upgrade, utc-day resolution
+*
+accumulator duty_time_acc(Abstime a1, Abstime a2) =
+  sum(wop(roster), wop.%duty_time_in_period%(a1, a2, true));
+  
+  plan_start = %pp_start%;
+  plan_end = %pp_end%;
+  
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime aaa) = aaa + 24:00;
+  key = crew.%id%;
+end
+
+accumulator duty_time_no_night_upg_acc(Abstime a1, Abstime a2) =
+  sum(wop(roster), wop.%duty_time_in_period%(a1, a2, false));
+  
+  plan_start = %pp_start%;
+  plan_end = %pp_end%;
+  
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime aaa) = aaa + 24:00;
+  key = crew.%id%;
+end
+
+/****************************************************************
+ * Section 3: Publication accumulator definitions
+ ***************************************************************/
+
+/* PUBLISHED RESERVES *
+accumulator published_reserves_acc(Abstime a1, Abstime a2) =
+  sum(trip(roster), trip.%days%)
+  where (trip.%is_standby% and
+         trip.%start_utc% >= a1 and
+         trip.%start_utc% < a2);
+  
+  plan_start = %pp_start%;
+  plan_end = %pp_end%;
+  
+  acc_start = %publ_acc_start%;
+  acc_end = %publ_acc_end%;
+  acc_next(Abstime aaa) = aaa + 24:00;
+  key = crew.%id%;
+end
+*/
+
+/* End of file */
+

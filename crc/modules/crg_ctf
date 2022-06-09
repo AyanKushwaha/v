@@ -1,0 +1,455 @@
+/* -*- crc -*- 
+* 
+/*******************************************************
+crg_ctf
+--------------------------------------------------------
+
+Use: Export subplan data (leg, crr and roster) in the 
+     Carmen Transfer Format (CTF) 
+
+File structure:
+   1. Parameters
+   2. Time format functions
+   3. Header section
+   4. Definitions for unique legs/trips
+   5. Crew - assigned activity (=PACT)
+   6. Crew section
+   7. Pairing section
+   8. Leg section
+   9. Ground duty leg section
+
+*******************************************************/
+root module crg_ctf
+import levels;
+
+import fundamental;
+import iterators;
+import trip;
+import duty;
+import leg;
+import crew_pos;
+
+
+/*
+** 1. Parameters
+*/
+%include_rosters% = false;
+
+%include_trips% =
+  parameter true
+  remark "CTF: Include Trip Section in CTF file";
+
+%include_legs% = 
+  parameter true
+  remark "CTF: Include leg section in CTF file";
+
+%include_all_trips% = 
+  parameter true
+  remark "CTF: true to include all trips, false to consider planning period";
+
+%include_nops% = 
+  parameter false
+  remark "CTF: true to include trips with NOPS";
+
+%include_gnd_legs% = 
+  parameter true
+  remark "CTF: Include ground duty leg section in CTF file";
+
+%include_sp_plan_etabs% = 
+  parameter true
+  remark "CTF: Include SP etabs in CTF file";  
+
+%include_lp_plan_etabs% = 
+  parameter true
+  remark "CTF: Include LP etabs in CTF file";  
+
+/*
+** 2. Time format functions
+*/
+
+/* Use at least four characters for a CTF length too */
+%ctf_time%(Reltime t) =  format_time(t,"%02h%02M");
+%ctf_time_of_day%(Abstime t) =  format_time(t,"%02H%02M");
+%ctf_date%(Abstime t) =  format_time(t,"%02d%b%Y");
+
+/*
+** 3. Header section
+*/
+
+
+%trip_has_nops% = any(leg(trip), not_operating);
+
+%trip_is_for_CTF% = 
+  not hidden
+  and (%include_nops% or not %trip_has_nops%)
+  and (%include_all_trips% 
+       or (trip.%starts_in_pp% and not %is_environment%));
+
+%min_departure% = 
+  let t_min_dep =   context(sp_crrs, 
+        round_down(min(iterators.trip_set,first(leg(trip),departure))
+                   where (%trip_is_for_CTF%), 24:00));
+  if (%any_roster%) then
+    nmin(context(sp_crew, 
+         round_down(min(iterators.trip_set,first(leg(trip),departure))
+                    where (%trip_is_for_CTF%), 24:00)),
+         t_min_dep)
+  else
+    t_min_dep;
+
+%ctf_period_start% =
+  default(%ctf_date%(%min_departure%),
+          %ctf_date%(%pp_start%));
+
+%standard_week_period_end% = add_weeks(%min_departure%, 1) - 0:01;
+
+%max_departure% = 
+  let t_max_dep = context(sp_crrs, (round_up(
+	          max(iterators.trip_set, last(leg(trip), arrival))
+	          where (%trip_is_for_CTF%), 24:00)-0:01));
+  if (%any_roster%) then
+    nmax(context(sp_crew, 
+         round_up(max(iterators.trip_set,first(leg(trip),arrival))
+                    where (%trip_is_for_CTF%), 24:00)),
+         t_max_dep)
+  else
+    t_max_dep;
+
+%ctf_period_end% =
+  if (is_dated_mode)  
+  then
+     default(%ctf_date%(%max_departure%), %ctf_date%(%pp_end%))
+  else
+     %ctf_date%(%standard_week_period_end%);
+
+%plan_type% =
+  if (is_dated_mode)
+  then "DATED"
+  else "STANDARD";
+
+/*
+** 4. Definitions for unique legs/trips 
+*/
+
+/* A unique trip is defined by the crr_name and start_date in UTC.
+   Consider running a 'set crr_name' script if crr_name:s cannot
+   be trusted!
+*/
+
+%leg_gap_time% = next(leg(trip), departure) - arrival;
+%trip_gap_time% = 
+  sum(leg(trip), %leg_gap_time%)
+  where(not is_last(leg(trip))) / 0:01;
+%trip_duty_legs% =
+  cat(duty(trip), format_int(duty.%num_legs%, "%d"));
+
+%trip_stations% = cat(leg(trip), substr(arrival_airport_name,1,1));
+%trip_numbers% = sum(leg(trip), default(flight_number, 0));
+
+/* Try to build a short reasonable unique key 
+   for a compressed pairing (=not start day dependent)
+   The studio CrrId is not used because it is not persistent
+   between sessions. The goal is that the same data should
+   give the same CTF file.
+*/
+%trip_id% = 
+  concat(first(leg(trip), crr_name), 
+         "-", format_int(first(leg(trip), default(flight_number, 0)), "%d"), 
+         "-", %trip_duty_legs%,
+         "-", format_int(trip.%num_legs%, "%d"),
+         "-", format_int(trip.%num_active_legs%, "%d"),
+         "-", format_int(%trip_gap_time%, "%d"),
+         "-", format_int(%trip_numbers%, "%d"),
+	 "-", %trip_stations%,
+	 "-", trip.%code%);
+
+/* Debug variable to find trips with problems */
+%non_unique_copies% = 
+  let t = %trip_id%,
+      d = trip.%start_day%;
+  context(sp_crew_chains, sum(unique_header_trip_set, count(unique_trip_set))
+                          where(t = %trip_id% and d = trip.%start_day%));
+
+/* This definition matches the definition
+   in the CTF header section */
+iterator unique_header_trip_set =
+  partition(trip)
+  by (%trip_id%, %trip_departure_date%, %trip_is_for_CTF%);
+end
+
+iterator unique_trip_set =
+  partition(trip)
+  by(hidden, %trip_id%, map(leg(trip),
+        deadhead, not_operating, environment_activity, 
+        departure,leg.%code%,flight_number, 
+        %leg_has_any_booked_positions%));
+end
+
+iterator unique_leg_set =
+    partition(leg)
+    by (deadhead, not_operating, environment_activity, 
+        departure,leg.%code%,flight_number, 
+        %leg_has_any_booked_positions%);
+end
+
+/*
+** 5. Crew - Assigned activity
+*/
+
+%any_roster% = 
+  /* Not possible in standard mode */
+  is_dated_mode 
+  /* any rosters in the plan? */
+  and default(context(sp_crew, any(chain_set, true)), false);
+
+%is_locked_in_studio% = first(leg(trip),preassigned_activity);
+%is_environment% = trip.%is_environment%;
+%studio_trip_lock_code% = if (%is_locked_in_studio%) then "L" else "*";
+%environment_code% = if (%is_environment%) then "1" else "0";
+%on_off_duty% = if off_duty then "F" else "N";
+
+%pact_code% = trip.%code%;
+%leg_pact_code% = leg.%code%;
+
+%pact_sub_code% = 
+  let sub_code = 
+    if (off_duty) then 
+      off_duty_sub_code
+    else
+      ground_duty_sub_code ;
+  if (sub_code = "") then "*" else sub_code;
+
+%activity_description% = 
+  if (ground_duty) then ground_duty_main_code
+  else if (ground_transport) then flight_carrier
+  else if personal_activity then %leg_pact_code%
+  /* In a pairing it does not seem to be possible to
+     have off duty legs (even though we often model that in rave!!) */
+  else flight_carrier;
+
+%activity_suffix_tmp% = 
+  default(if (flight_duty and not ground_transport)
+          then flight_suffix 
+          else ground_duty_code_suffix, "*");
+
+%activity_suffix% = 
+  if (%activity_suffix_tmp% = "")
+  then
+   "*"
+  else
+   %activity_suffix_tmp%;
+
+%leg_number% = 
+  default(nmax(flight_number, 1), 1);
+
+/*
+** 6. Crew section
+*/
+
+%is_pact% = first(leg(trip), personal_activity);
+
+%number_of_trips% = 
+  count(trip_set)
+  where(%trip_is_for_CTF%);
+
+%trip_departure_date% =
+  first(leg(trip), %departure_date%);
+
+%trip_departure_day_in_week% =
+  first(leg(trip), %day_in_week%);
+
+%departure_date% = 
+    if is_dated_mode 
+    then 
+	%ctf_date%(departure)
+    else
+	format_time(departure, "%w");
+
+/*
+** 7. Pairing section
+*/
+
+/* applicable for unassigned slices 
+
+   The CTF parser would ignore these pairings even
+   if they were included in the file.
+*/
+
+%trip_has_any_booked_positions% = 
+  sum(times(12), %trip_booked_crew_position%(%times_index_0%)) > 0;
+
+iterator booked_trip_set =
+  partition(trip)
+  by (%trip_has_any_booked_positions%);
+end
+
+
+/* Will not consider hidden trips... */
+%leg_has_any_booked_positions% = 
+  booked_crew_position_1
+  + booked_crew_position_2
+  + booked_crew_position_3
+  + booked_crew_position_4
+  + booked_crew_position_5
+  + booked_crew_position_6
+  + booked_crew_position_7
+  + booked_crew_position_8
+  + booked_crew_position_9
+  + booked_crew_position_10
+  + booked_crew_position_11
+  + booked_crew_position_12 > 0;
+
+
+/* Handle cases where several trips cover the same leg 
+   
+   The only thing that seem safe is to use assigned_pos for all 
+   legs within the same trip.
+
+*/
+
+%trip_booked_crew_position%(int pos) = 
+  default(first(leg(trip), %leg_booked_crew_position%(pos))
+          where(not ground_transport or personal_activity), 0);
+
+%leg_booked_crew_position%(int pos) = 
+  let this_name = %trip_id%;
+  sum(equal_legs, crew_pos.%leg_assigned_pos%(pos))
+  where(%trip_id% = this_name and not hidden);
+
+%number_of_activities% = count(leg(trip));
+
+%activity_code% = 
+  if oag then "O" 
+  else if ground_duty then "G" 
+  else if ground_transport then "T" 
+  else "F";
+
+%activity_sub_code% =
+  if %activity_code% = "F" then
+    (if extra_seat then "E" 
+     else if deadhead then "D"
+     else "L")
+  else
+    "*";
+
+%horisontal_lock_code% = 
+  if is_last(leg(trip)) then 
+    (if next_locked then "L" else "*")
+  else if is_first(leg(trip)) then
+    (if (previous_locked and next_locked) then
+       "X"       
+     else if (not previous_locked and next_locked) then
+       "N"
+     else if (previous_locked and not next_locked) then
+       "F"
+     else
+       "*")
+  else if next_locked then "N" 
+  else "*";
+
+%trip_start_date% = 
+  first(leg(trip), round_down(departure, 24:00));
+
+%departure_day_in_trip% = 
+  (round_down(departure, 24:00) - %trip_start_date%) / 24:00 + 1;
+
+%arrival_day_in_trip% = 
+  (round_down(arrival, 24:00) - %trip_start_date%) / 24:00 + 1;
+
+%arrival_date% =
+  if (is_dated_mode) then %ctf_date%(arrival)
+  else format_time(arrival, "%w");
+
+/*
+** 8. Leg section 
+*/
+
+%leg_is_for_CTF% = 
+  not not_operating
+  and flight_duty
+  and not ground_transport
+  and flight_carrier <> "";
+
+%times_leg_passes_midnight% = 
+ (round_down(arrival, 24:00) - round_down(departure, 24:00)) / 24:00; 
+
+/* Handle compressed leg sets!!! 
+
+   Find max/min departure and day in week
+   
+   multi leg flights (leg_no > 1 && : use first leg's period+diw,
+   but set the day offset (gdor) to days after first leg.
+   Note: rely on gdor and adjust own deprature+diw!!!
+
+*/
+
+%leg_gdor_offset% = ""; /* if  > 0 then " <days since departure>" */
+%leg_period_start% = %ctf_date%(departure);
+%leg_period_end% = %ctf_date%(departure);
+
+%day_in_week% = (time_of_week(departure) / 24:00) + 1;
+
+%seat_configuration% = 
+  if (number_of_first_class_seats <> 0
+      or number_of_business_class_seats <> 0
+      or number_of_economy_class_seats <> 0
+      or number_of_fourth_class_seats <> 0) then
+  concat(" ", 
+         format_int(number_of_first_class_seats, "F%d"),
+         format_int(number_of_business_class_seats, "C%d"),
+         format_int(number_of_economy_class_seats, "M%d"),
+         format_int(number_of_fourth_class_seats, "X%d"))
+  else
+    "";
+
+%onward_reference% = 
+  if (onward_ref_flight_carrier <> ""
+      and not void(onward_ref_flight_number)) then
+    concat(" ", onward_ref_flight_carrier,
+           " ", format_int(onward_ref_flight_number, "%d"),
+           " ", (if (default(onward_ref_flight_suffix <> "", false)) then
+                   onward_ref_flight_suffix
+                 else
+                   "*"),
+           " ", format_int(nmax(1, default(onward_ref_leg_number,1)), "%d"))
+  else
+    "";
+
+%employer_reference% = 
+  if (cockpit_crew_employer <> flight_carrier
+      or cabin_crew_employer <> flight_carrier
+      /* aircraft_owner will be set to carrier by the CTF parser
+         if this section is omitted */
+      or (aircraft_owner <> flight_carrier)) then
+    concat(" /", cockpit_crew_employer, 
+           "/", cabin_crew_employer,
+           "/", aircraft_owner)
+  else
+    "";
+
+/*
+** 9. Ground duty leg section
+*/
+
+%gnd_leg_service_type% = 
+  if (service_type = "" or service_type = "*") then
+    ""
+  else
+    service_type;
+
+%gnd_leg_attribute% = 
+  if (ground_duty_sub_code = "") then
+    ""
+  /* Add a dummy service type to tell parser there is an attribute */
+  else if (%gnd_leg_service_type% = "") then
+    concat("* \"", ground_duty_sub_code, "\"") 
+  else
+    concat("\"", ground_duty_sub_code, "\"");    
+
+%gnd_leg_is_for_CTF% = 
+  not not_operating
+  and ground_duty
+  and not personal_activity
+  and not ground_transport
+  and ground_duty_code <> "";
+

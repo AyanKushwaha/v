@@ -1,0 +1,76 @@
+/*  -*- crc -*- */
+
+module duty_period_cct inherits duty_period_ccr
+
+import standby;
+
+export %standby_callout_utc% =
+  if %is_first_duty_in_duty_period%
+  then first(leg(duty), standby.%callout_time%)  where (standby.%leg_is_standby_callout%)
+  else prev(duty(chain), first(leg(duty), standby.%callout_time%)  where (standby.%leg_is_standby_callout%));
+  
+export %airport_callout_utc% =
+  if %is_first_duty_in_duty_period%
+  then first(leg(duty), standby.%airport_callout_time%)  where (standby.%leg_is_airport_callout%)
+  else prev(duty(chain), first(leg(duty), standby.%airport_callout_time%)  where (standby.%leg_is_airport_callout%));
+
+redefine export %has_waiting_at_airport% =
+  if %is_first_duty_in_duty_period% then
+    duty.%has_waiting_at_airport% or (next(duty(wop), duty.%has_waiting_at_airport%) and duty_period.%is_split%)
+  else
+    duty.%has_waiting_at_airport% or prev(duty(wop), duty.%has_waiting_at_airport%);
+
+export %start_first_waiting_in_first_duty% =
+ if %is_first_duty_in_duty_period%
+ then duty.%start_first_waiting_at_airport%
+ else prev(duty(wop), duty.%start_first_waiting_at_airport%);
+
+export %duty_period_begins_with_airport_standby_code_A% =
+ if %is_first_duty_in_duty_period%
+ then duty.%first_airport_standby_in_duty_is_code_A%
+ else prev(duty(wop), duty.%first_airport_standby_in_duty_is_code_A%);
+
+
+export %start_first_waiting_in_last_duty% =
+ if %is_last_duty_in_duty_period%
+ then duty.%start_first_waiting_at_airport%
+ else next(duty(wop), duty.%start_first_waiting_at_airport%);
+
+export %start_first_waiting_in_duty_period% =
+  let first_duty_flight_start = default(%start_first_waiting_in_first_duty%, 31DEC2035),
+      last_duty_flight_start = default(%start_first_waiting_in_last_duty%, 31DEC2035);
+  nmin(first_duty_flight_start, last_duty_flight_start);
+
+export %has_waiting_at_airport_before_flight_duty% =                            /*< --- False*/
+  %start_first_waiting_in_duty_period% < %start_first_flight_in_duty_period%
+  and not void(%start_first_waiting_in_first_duty%)
+  and not void(%start_first_flight_in_duty_period%);
+
+export %has_waiting_at_airport_before_flight_duty_scheduled% =                  /*< --- False*/
+  %start_first_waiting_in_duty_period% < %ci_orig_default_start_utc_first_flight_in_duty_period%
+  and not void(%start_first_waiting_in_first_duty%)
+  and not void(%ci_orig_default_start_utc_first_flight_in_duty_period%);
+
+
+redefine export %has_standby_callout% = not void(%standby_callout_utc%);
+redefine export %has_airport_callout% = not void(%airport_callout_utc%);
+      
+
+/* Base break is when a crew arrives at/departs from a station other than homebase and arranges
+   their own private transport to/from homebase. Only exists in Tracking */
+%has_base_break_after% =
+  if %is_last_duty_in_duty_period% 
+  then duty.%has_base_break_after%
+  else next(duty(chain), duty.%has_base_break_after%);
+  
+%has_base_break_before% =
+  if %is_first_duty_in_duty_period%
+  then duty.%has_base_break_before%
+  else prev(duty(chain), duty.%has_base_break_before%);
+  
+/* Base break counts as arriving at/departing from homebase */
+redefine export %arrives_at_homebase% =
+  %_arrives_at_homebase% or %has_base_break_after%;
+
+redefine export %departs_from_homebase% =
+  %_departs_from_homebase% or %has_base_break_before%;

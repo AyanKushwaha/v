@@ -1,0 +1,131 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   This file contains the additional level definitions 
+ *   required for Carmen Crew Tracking. 
+ * Created by:
+ *   Markus Kollind, 21 mars 2006
+ * Major changes:
+ *
+ */
+module levels_cct inherits levels_ccr
+import duty;
+import leg;
+import task;
+import crew;
+import crew_pos;
+import base_break;
+import fundamental;
+import attributes;
+
+/*
+** Duty level redefinitions
+*/
+
+export %leg_ends_duty%(Bool withManualDutyBreak) =
+  if leg.%is_acrot% then
+    false
+  else
+    is_last(leg(chain)) or
+    (if withManualDutyBreak then %legs_separated_by_duty_rest_mdb%
+     else %legs_separated_by_duty_rest%) or
+    leg.%is_sby_manual_duty_break% or
+    %leg_is_long_duty_on_ground% or
+    next(leg(chain), %leg_is_long_duty_on_ground%) or
+    %leg_changes_on_duty_status% or
+    %leg_changes_rest_status%;
+
+redefine %levels_leg_is_last_in_duty% =
+  %leg_ends_duty%(True);
+
+%legs_separated_by_duty_rest_mdb% =
+  if attributes.%leg_has_duty_break_attribute% then true
+  else if attributes.%leg_has_duty_merge_attribute% then false
+  else %legs_separated_by_duty_rest%;
+
+redefine %legs_separated_by_duty_rest% =
+  %connection_time% >= %min_duty_connection_time_p%;
+
+/* 
+For level definition, use actual time for arrival and
+scheduled time for next leg departure (SASCMS-5411)
+*/
+%connection_time% = 
+    nmax(%next_activity_start_time_scheduled% - %leg_end_utc%, 0:00);
+
+%next_activity_start_time_scheduled% =
+  next(leg(chain), %leg_start%);
+
+%leg_end_utc% =
+  leg.%activity_end_time_UTC% +
+  (if leg.%is_simulator% then default(leg.%check_out_default_sim_gd%, 1:00) else 0:00);
+
+%leg_has_manual_duty_break_attr% =
+  leg.%is_standby% and attributes.%leg_has_duty_break_attribute%;
+
+%leg_changes_on_duty_status% = 
+  leg.%is_on_duty% <> next(leg(chain), leg.%is_on_duty%);
+  
+%leg_changes_rest_status% =
+  leg.%is_rest% <> next(leg(chain), leg.%is_rest%);
+
+/*
+** Trip level redefinitions
+*/
+
+/* The trip definition used by the rave code to define the standard level 'trip'. */
+redefine %levels_duty_is_last_in_trip% =
+  if void(%is_roster%) or leg.%is_acrot% then
+    false
+  else if is_crr then /* trips in trip window can never be two trips, it cause problems for Studio */
+    false
+  else
+    ((%duty_arrives_at_homebase% or
+      next(duty(chain), %duty_departs_from_homebase%)
+     )
+     and not base_break.%duty_break_continues_trip%
+     and %standby_duty_is_last_in_line%
+     and %ground_duty_not_PA%
+    )
+    or
+    base_break.%duty_break_ends_trip%
+    or
+    next(duty(chain), base_break.%duty_break_starts_trip%);
+
+/* Standby lines that are not yet published as pacts should be 
+** considered as trips both in planning and tracking studio (SASCMS-4178)
+*/
+%standby_duty_is_last_in_line% = 
+    if duty.%is_standby_line% 
+    then %duty_trip_id% <> next(duty(roster),%duty_trip_id%)
+    else true;
+
+%ground_duty_not_PA% =
+    if %duty_is_trip_at_hb% and not %personal_act%
+    then %duty_trip_id% <> next(duty(roster),%duty_trip_id%)
+    else true;
+    
+%personal_act% = all(leg(duty), leg.%is_pact%);
+
+/* Variables using the defined station for crew to calculate if a leg 
+ * departs from or arrives at the homebase. This makes the level definition
+ * non-dependent of the keyword 'homebase'. */
+%leg_departs_from_homebase% = 
+  leg.%departure_airport_base% = crew.%station_at_date%(leg.%start_utc%);
+
+/* We need default to handle non available period */
+%leg_arrives_at_homebase% = 
+  default(leg.%arrival_airport_base% = crew.%station_at_date%(leg.%end_utc%), false);
+
+%duty_arrives_at_homebase% = last(leg(duty), %leg_arrives_at_homebase%);
+
+%duty_departs_from_homebase% = first(leg(duty), %leg_departs_from_homebase%);
+
+/* Variable used to detect if a duty is built up of only ground duty legs. */
+%duty_is_trip_at_hb% = 
+  %all_leg_at_hb% and (duty.%is_standby% or all(leg(duty), leg.%is_ground_duty%));
+  
+%all_leg_at_hb% = 
+  all(leg(duty), %leg_departs_from_homebase% and %leg_arrives_at_homebase%);
+
+/* end of file */

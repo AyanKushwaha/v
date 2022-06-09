@@ -1,0 +1,96 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   Soft rules are rules not covered by industrial agreements. Instead they
+ *   cover quality, stability, plausibility or are process enhancing.
+ *   Soft rules often express common sense in a formal rule.
+ *
+ * Sections:
+ *   1. Plausible connections
+ *
+ * Created by:
+ *   Palak, 01-Feb-2022
+ *
+ */
+
+root module rules_svs_soft_cct
+
+import fundamental;
+import base_utils;
+import levels;
+import trip;
+import duty;
+import leg;
+import crew;
+import crew_pos;
+import checkinout;
+import crg_crew_pos;
+import alert_server;
+import base_break;
+import rule_exceptions;
+import publish;
+import standby;
+import roster;
+import compdays;
+import rules;
+import rest;
+import wop;
+import bought_days;
+import training;
+
+/****************************************************************
+ * Section 1: Plausible connections
+ ***************************************************************/
+
+
+/*
+** Rule:
+**    All trips should start and end at homebase
+**
+** Description:
+**    All trips in rosters that start from another stations than what is 
+**    defined as the crew homebase are illegal. This only applies to trips 
+**    assigned to crew. The rule ignores off duty trips, like vacation etc.
+**
+** Functional rule:
+**    System specification Tracking, 
+** 
+*/
+export rule sft_plaus_trip_start_and_end_at_homebase_all =
+  valid trip.%in_pp_extended% and 
+        fundamental.%is_roster% and 
+        trip.%is_on_duty% and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+        
+  (trip.%starts_at_homebase% or %trip_starts_with_base_break%) and
+  (trip.%ends_at_homebase% or %trip_ends_with_base_break%);
+  
+  startdate = trip.%start_UTC%;
+  failtext %sft_plaus_trip_start_and_end_at_homebase_all_failtext%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %sft_plaus_trip_start_and_end_at_homebase_all_failobject%;
+  remark "(CCT) Func: All trips must start and end at homebase",
+  planner "The rule checks that all trips start and end at homebase. "
+          "The rule only applies to trips assigned to crew.";
+end
+
+%sft_plaus_trip_start_and_end_at_homebase_all_failobject% =
+  if trip.%starts_at_homebase% or %trip_starts_with_base_break%
+  then trip.%failobject_end%
+  else trip.%failobject_start%;
+               
+%trip_starts_with_base_break% =
+  first(duty(trip), base_break.%duty_break_starts_trip%);
+
+%trip_ends_with_base_break% =
+  last(duty(trip), base_break.%duty_break_ends_trip%);
+
+%sft_plaus_trip_start_and_end_at_homebase_all_failtext% =
+  concat("Soft: Trip must ", 
+         (if trip.%starts_at_homebase% or %trip_starts_with_base_break%
+          then "end"           
+          else "start"),
+         " at hb [", trip.%crew_homestation%, "]");

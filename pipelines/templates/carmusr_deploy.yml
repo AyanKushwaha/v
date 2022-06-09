@@ -1,0 +1,283 @@
+# Pipeline to deploy latest Test CARMUSR
+#
+# Required variables in pipeline (these need to be set dynamically and therefore can't be passed as parameters):
+#   major: major version of release (normally branch name)
+#   minor: minor version of release (normally a counter per branch)
+
+
+parameters:
+- name: carmsystemname
+  type: string
+  default: 'SASDEV'
+- name: liveHistory
+  type: string
+  default: 'live'
+- name: sasenv
+  type: string
+  default: 'CMS_Development'
+  # Whether to attach Livefeed to the deployed CARMUSR
+- name: livefeed
+  type: boolean
+  default: false
+  # Whether to attach a summary of the deployment to the pipleine run
+- name: summary
+  type: boolean
+  default: false
+
+stages:
+- stage:
+  displayName: 'Deploy to ${{parameters.carmsystemname}}'
+  variables:
+    release_id: $(major)_$(minor)_${{ parameters.liveHistory }}
+    release_id_lower : $[lower(variables['release_id'])]
+  jobs:
+
+  - deployment: 'PrepareCarmusr'
+    displayName: 'Prepare new carmusr' 
+    environment: 
+      name: '${{parameters.sasenv}}'
+      resourceType: VirtualMachine
+      tags: studio
+    workspace:
+      clean: all
+    strategy: 
+      runOnce:     
+        deploy:         
+          steps:
+          - download: current
+            displayName: 'Download latest artifacts'         
+          - script: 'mkdir -m 775 -p $(release_id); tar -pxzvf $(Pipeline.Workspace)/carmusr/* -C $_'
+            workingDirectory: '/opt/Carmen/CARMUSR_Tracking/'
+            failOnStderr: true
+            displayName: 'Extract Tracking CARMUSR artifact'
+
+          - task: Bash@3
+            inputs:
+              targetType: 'inline'
+              script: |
+                  mkdir  -m 775 -p CCT_$(release_id); tar -pxzvf $(Pipeline.Workspace)/carmtmp_cct/* -C $_
+              workingDirectory: '/opt/Carmen/CARMTMP'
+            displayName: 'Extract Tracking CARMTMP artifact'
+
+          - task: Bash@3
+            inputs:
+              targetType: 'inline'
+              script: |
+                  ln -nfs /opt/Carmen/CARMTMP/CCT_$(release_id) current_carmtmp_cct;
+                  ln -nfs current_carmtmp_cct/carmtmp_behave carmtmp_behave
+                  ln -nfs /opt/Carmen/CARMUSR_Manpower/${{parameters.carmsystemname}} current_carmusr_jmp
+                  cd etc
+                  ln -nfs local_template_${{ parameters.carmsystemname }}.xml local.xml
+              workingDirectory: '/opt/Carmen/CARMUSR_Tracking/$(release_id)'
+            displayName: 'Rewrite CARMTMP symlinks'
+
+          - task: Bash@3
+            inputs:
+              targetType: 'inline'
+              script: git switch main; git pull
+              workingDirectory: '/opt/Carmen/cms_accounts'
+            displayName: 'Update cms_accounts'
+
+
+    # The Crew Portal Build process unfortunately writes the CARMUSR path into
+    # many configuration files, so it needs to be run as part of the deployment.
+  - deployment: 'BuildCrewPortal'
+    displayName: 'Build Crew Portal'
+    dependsOn:
+    - PrepareCarmusr
+    environment: 
+      name: '${{parameters.sasenv}}'
+      resourceType: VirtualMachine
+      tags: jboss
+    workspace:
+      clean: all
+    strategy: 
+      runOnce:     
+        deploy:         
+          steps:
+          - download: none
+          - task: Bash@3
+            inputs:
+              targetType: 'inline'
+              script: 'bin/cmsshell crewportal build'
+              workingDirectory: '/opt/Carmen/CARMUSR_Tracking/$(release_id)'
+            displayName: 'Build Crew Portal'
+
+
+  - deployment: 'ShutdownSysmond'
+    displayName: 'Shutdown sysmond from present carmusr' 
+    dependsOn: 
+    - PrepareCarmusr
+    condition: and(succeeded(), eq('${{ parameters.livefeed }}', 'true'))
+    environment: 
+      name: '${{parameters.sasenv}}'
+      resourceType: VirtualMachine
+      tags: sysmond
+    workspace:
+      clean: all
+    strategy: 
+      runOnce:     
+        deploy:
+          steps:
+          - download: none         
+          - task: Bash@3
+            inputs:
+              targetType: 'inline'
+              script: |
+                  bin/sysmond.sh shutdown
+              workingDirectory: '/opt/Carmen/CARMUSR_Tracking/${{ parameters.carmsystemname }}'
+
+
+  - deployment: 'DeployCrewPortal'
+    displayName: 'Deploy Crew Portal' 
+    dependsOn: 
+    - PrepareCarmusr
+    - BuildCrewPortal
+    condition: and(succeeded(), eq('${{ parameters.livefeed }}', 'true'))
+    environment: 
+      name: '${{parameters.sasenv}}'
+      resourceType: VirtualMachine
+      tags: jboss
+    workspace:
+      clean: all
+    strategy: 
+      runOnce:     
+        preDeploy:         
+          steps:
+          - task: Bash@3
+            inputs:
+              targetType: 'inline'
+              script: |
+                  sudo systemctl stop jboss;
+            displayName: 'Stop Jboss'
+        deploy:
+          steps:
+          - download: none
+          - task: Bash@3
+            inputs:
+              targetType: 'inline'
+              script: |
+                sudo cp -a $(release_id)/current_carmtmp_cct/crewportal/deploy/* /usr/java/jboss-eap/standalone/deployments; sudo cp -a $(release_id)/current_carmtmp_cct/crewportal/conf/* /usr/java/jboss-eap/standalone/crewportal;
+              workingDirectory: '/opt/Carmen/CARMUSR_Tracking/'
+            displayName: 'Deploy CrewPortal'
+
+          - task: Bash@3
+            inputs:
+              targetType: 'inline'
+              script: |
+                  sudo systemctl start jboss;
+            displayName: 'Start Jboss after deployment'
+
+          - task: Bash@3
+            inputs:
+              targetType: 'inline'
+              script: |
+                sudo bin/admin/log4j_remove.sh
+              workingDirectory: '/opt/Carmen/CARMUSR_Tracking/$(release_id)'
+              failOnStderr: true
+            displayName: 'Cleanup vulnerable JndiLookup class after deployment'
+
+
+  - deployment: 'DeployCarmusr'
+    displayName: 'Run Data Migration & Deploy Carmusr'
+    dependsOn:
+    - PrepareCarmusr
+    - ${{ if eq(parameters['livefeed'], true) }}: 
+      - ShutdownSysmond
+    condition: succeeded()
+    environment: 
+      name: '${{parameters.sasenv}}'
+      resourceType: VirtualMachine
+      tags: studio
+    workspace:
+      clean: all
+    strategy: 
+      runOnce:     
+        deploy:
+          steps:    
+          - download: none
+
+          - ${{ if eq(parameters['livefeed'], true) }}:     
+            - task: Bash@3
+              inputs:
+                targetType: 'inline'
+                script: |
+                    prefix='sas';release_no=$(echo $(release_id_lower) |cut -d '_' -f1)'_'$prefix$(echo $(release_id_lower) |cut -d '_' -f2);migration_script=$(release_id)/data/migration/$release_no/run_data.sh;if [ -f "$migration_script" ]; then $migration_script;fi;
+                workingDirectory: '/opt/Carmen/CARMUSR_Tracking/'
+              displayName: 'Run data migrations'
+          
+          - ${{ if eq(parameters['livefeed'], true) }}:
+            - task: Bash@3
+              inputs:
+                targetType: 'inline'
+                script: |
+                    ln -nfs $(release_id)  ${{ parameters.carmsystemname }} ;
+                    ln -nfs $(release_id) LIVEFEED
+                workingDirectory: '/opt/Carmen/CARMUSR_Tracking'
+              displayName: 'Create  ${{ parameters.carmsystemname }} symlink to point to carmusr'
+
+          - task: Bash@3
+            inputs:
+              targetType: 'inline'
+              ${{ if eq(parameters['livefeed'], true) }}:
+                script: bin/cmsshell bin/admin/session_server_configurator_pipeline.py -m $(major) -n $(minor) -e ${{ parameters.carmsystemname }} -l -v -p '/opt/Carmen/CARMUSR_Tracking/$(release_id)'
+              ${{ if eq(parameters['livefeed'], false) }}:
+                script: bin/cmsshell bin/admin/session_server_configurator_pipeline.py -m $(major) -n $(minor) -e ${{ parameters.carmsystemname }} -v -p '/opt/Carmen/CARMUSR_Tracking/$(release_id)'
+              workingDirectory: '/opt/Carmen/CARMUSR_Tracking/$(release_id)'
+            displayName: 'Update Session Server configuration'
+
+
+  - deployment: 'StartSysmond'
+    displayName: 'Start sysmond from new carmusr' 
+    dependsOn: 
+    - DeployCarmusr
+    condition: and(succeeded(), eq('${{ parameters.livefeed }}', 'true'))
+    environment: 
+      name: '${{parameters.sasenv}}'
+      resourceType: VirtualMachine
+      tags: sysmond
+    workspace:
+      clean: all
+    strategy: 
+      runOnce:     
+        deploy: 
+          steps:
+          - download: none        
+          - task: Bash@3
+            inputs:
+              targetType: 'inline'
+              script: |
+                  bin/sysmond.sh start;bin/sysmond.sh status;
+              workingDirectory: '/opt/Carmen/CARMUSR_Tracking/${{ parameters.carmsystemname }}'
+
+        on:
+          success:    
+            pool: server              
+            steps:
+            - ${{ if in(parameters['carmsystemname'], 'SASDEV') }}:
+              - task: UpdateServiceNowChangeRequest@2 
+                inputs:
+                  ServiceNowConnection: 'ServiceNowDev'
+                  NewStatus: 'Review'
+                  WorkNotes: 'Deployment Completed'
+                displayName: 'Update Service Now Change  Request'
+
+  - deployment: 'DeploymentSummary'
+    displayName: 'Create deployment summary' 
+    dependsOn: 
+    - DeployCarmusr
+    condition: and(succeeded(), eq('${{ parameters.summary }}', 'true'))
+    environment: 
+      name: '${{parameters.sasenv}}'
+      resourceType: VirtualMachine
+      tags: studio
+    strategy: 
+      runOnce:     
+        deploy: 
+          steps:
+          - download: none        
+          - bash: |
+              echo "Name in Session Server: `grep -oPh \"(?<=\\")[^\\"]*$(major)[^\\"]*(?=\\")\" /opt/Carmen/SessionServer/user/etc/systems.xml`<br />" > $(Pipeline.Workspace)/summary.txt
+              echo "DB schema: `grep -oP "(?<=<schema_live>).*(?=</schema_live>)" /opt/Carmen/CARMUSR_Tracking/$(release_id)/etc/db/${{ parameters.carmsystemname }}.xml`<br />" >> $(Pipeline.Workspace)/summary.txt
+              echo "##vso[task.addattachment type=summary;name=summary;]$(Pipeline.Workspace)/summary.txt"
+            displayName: Attach deployment summary to pipeline run

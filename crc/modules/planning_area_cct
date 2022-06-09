@@ -1,0 +1,266 @@
+/* -*- crc -*- 
+ * 
+ */
+/*
+planning_area_cct
+------------------------------------------------------------------------
+    Purpose:
+        1.  Severity in rule failure objects is used to filter in Alert 
+            Monitor. The follwing way of determine planning_group for rulefailure is
+            used:
+            a.  If area is set in trip-table, crr_area is used (trip.%area_planning_group%)
+            b.  Rostered activity and all legs are Short haul 
+                -> crew planning_group at rule failure date
+            c.  Rostered activty with at least one long haul in duty
+                ->  1.  departure planning_group of LH flight 
+                    2.  arrival planning_group of LH flight
+            d.  Open time trip with only short haul
+                ->  flight_owner table for first flight in duty
+            e.  Open time trip with at least one LH flight
+                ->  1.  planning_group at trips start
+                    2.  planning_group at trip end
+                    3.  planning_group at LH flight start
+                    4.  planning_group at LH flight end
+        2.  Trip selection for tracking, used to filter trip window based on 
+            planning_group parameter set in %filter_company_p%
+------------------------------------------------------------------------ 
+
+    Created by:
+        Per Gr�nberg 22Feb2008
+ 
+    Major changes:
+        Per Gnberg 18Jun2008, Added so crew maincat is coded into filter int
+ 
+ */
+module planning_area_cct inherits planning_area
+import trip;
+import leg;
+import duty;
+/*import fundamental;*/
+import crew;
+import crew_pos;
+
+/********************************************************************
+* serverity int for alert monitor filtering 
+*
+*
+********************************************************************/
+
+export %severity_filter_int_t_s%(AbsTime start_t, String duty_lh_pg_s) =
+  %_severity_int_planning_group_rank%(%_alert_planning_group%(start_t, duty_lh_pg_s),
+                              %_rank_trip%(start_t));
+ 
+export %severity_filter_int_t%(AbsTime start_t)=
+    %_severity_int_planning_group_rank%(%_planning_group_crew%(start_t), %_rank_crew%(start_t));
+    
+table severity_filter_int_table(String pg, String rank)=
+    pg, rank -> 
+        export int %_severity_int_planning_group_rank%;
+    "SKS", "F"  -> 11;
+    "SKN", "F"  -> 12;
+    "SKD", "F"  -> 13;
+    "QA",  "F"  -> 15;
+    "SKI", "F"  -> 14;
+    "SKK", "F"  -> 14;
+    "SKJ", "F"  -> 14;
+    "SVS", "F"  -> 16;
+    "SKS", "C"  -> 21;
+    "SKN", "C"  -> 22;
+    "SKD", "C"  -> 23;
+    "QA",  "C"  -> 25;
+    "SKI", "C"  -> 24;
+    "SKK", "C"  -> 24;
+    "SKJ", "C"  -> 24;
+    "SVS", "C"  -> 26;
+    "SKS", "?"  -> 31;
+    "SKN", "?"  -> 32;
+    "SKD", "?"  -> 33;
+    "QA",  "?"  -> 35;
+    "SKI", "?"  -> 34;
+    "SKK", "?"  -> 34;
+    "SKJ", "?"  -> 34;
+	"SVS", "?"  -> 36;
+    "SKS",  ""  -> 31;
+    "SKN",  ""  -> 32;
+    "SKD",  ""  -> 33;
+    "QA",   ""  -> 35;
+    "SKI",  ""  -> 34;
+	"SVS",  ""  -> 36;
+    -  ,    -  -> 0;
+end
+
+%_planning_group_crew%(Abstime t)  = default(crew.%planning_group_at_date%(t),"");
+%_rank_crew%(Abstime t) = default(crew.%maincat_for_rank%(crew.%rank_at_date%(t)),"");
+
+%_rank_trip%(Abstime t) = 
+  if %is_roster% then %_rank_crew%(t)
+  else if %fc_trip% and 
+     not %cc_trip% then "F"
+  else if %cc_trip% and
+     not %fc_trip% then "C"
+  else "";
+
+%_alert_planning_group%(AbsTime start_t, String duty_lh_pg_s)=
+    default(if %is_roster% and duty_lh_pg_s = "" then 
+              default(crew.%planning_group_at_date%(start_t), crew.%planning_group_at_date%(%pp_start%))
+            else if %is_roster% and duty_lh_pg_s <> "" then
+              duty_lh_pg_s
+            else if trip.%is_short_haul% then
+              /*Open Time Trip*/
+              %_sh_trip_planning_group%
+            else
+              %_lh_trip_planning_group%
+            , ""); 
+            
+
+export %_duty_lh_planning_group%="";
+
+%_duty_lh_departure_planning_group% =
+    first(leg(duty), %country_planning_group%(leg.%start_country%)) 
+    where (leg.%is_long_haul%);
+    
+%_duty_lh_arrival_planning_group%=
+    first(leg(duty), %country_planning_group%(leg.%end_country%))
+    where (leg.%is_long_haul%);
+
+/*********************************************************************
+ *  Open time handling definitions
+ *     The variable %is_dynamic_open_time% is used by a map variable
+ *     in report/studio_mappings_cct
+ *********************************************************************/
+
+%debug_use_dynamic_open_time% =
+  parameter true
+  remark "Dynamic Open Time: Should it be used or not. Can also be controlled by a resource";
+
+/* True if the activity start within the period. */
+%_is_dynamic_open_time% = 
+    leg.%start_hb% > %pp_start% 
+    and leg.%start_hb% < %pp_end%
+    and %trip_is_in_planning_area%
+    and %leg_with_need%;
+
+/* 
+  This parameter answers the sys map variable if it should check the leg for
+  dynamic open time. The following logic appy for the moment...
+  1. If turned off by parameter, return false
+  2. Check if we are within the open time interval
+
+  Note1: This variable is only executed for the legs in the cores candidate set.
+  Note2: DO NOT CHANGE NAME WITHOUT MODIFYING THE MAP VARIABLE
+*/
+
+export %is_dynamic_open_time% =
+  if %debug_use_dynamic_open_time% then 
+    %_is_dynamic_open_time%
+  else 
+    false;
+    
+%leg_with_need% =
+  crew_pos.%n_pos1% < 99 and
+  crew_pos.%n_pos2% < 99 and
+  crew_pos.%n_pos3% < 99 and
+  crew_pos.%n_pos4% < 99 and
+  crew_pos.%n_pos5% < 99 and
+  crew_pos.%n_pos6% < 99 and
+  crew_pos.%n_pos7% < 99 and
+  crew_pos.%n_pos8% < 99 and
+  crew_pos.%n_pos9% < 99 and
+  crew_pos.%n_pos10% < 99;
+
+
+/* Main variable, used by base constraint filter in cct trip window */
+redefine export %trip_is_in_planning_area% = 
+    if %filter_company_p% = "ALL" or not %use_trip_filter_p% 
+    then True
+    else %_trip_is_in_planning_area% ;
+    
+set planning_areas_ALL_SK = parameter
+    "SKN", "SKS" , "SKD" , "SKI"
+    remark "Planning areas to consider for ALL_SK";
+    
+%_trip_is_in_planning_area% = 
+  if trip.%is_short_haul%
+  then %_sh_trip_is_in_planning_area%
+  else %_lh_trip_is_in_planning_area%;
+/* Short hauls flights uses normal trip planning_group definition */
+%_sh_trip_is_in_planning_area% = 
+    if %filter_company_p% = "ALL_SK" and %_sh_trip_planning_group% in planning_areas_ALL_SK then
+    true
+    else
+    default(%_sh_trip_planning_group% = %filter_company_p%, True);
+
+%_sh_trip_planning_group% = trip.%planning_group%; /*first(leg(trip), leg.%planning_group%);*/
+
+%_lh_trip_is_in_planning_area% = 
+    if %filter_company_p% = "ALL_SK" and %_lh_trip_planning_group% in planning_areas_ALL_SK then
+    true
+    else
+    default(%_lh_trip_planning_group% = %filter_company_p%, True);
+
+/* Check for long haul that 
+1. planning_group for first departure which isn't long haul
+2. planning_group for last arrival
+3. planning_group for long haul depature
+4. planning_group for long haul arrival
+*/
+
+%_lh_trip_planning_group% = 
+    if not void(trip.%crr_area%) then trip.%area_planning_group% 
+    else trip.%planning_group%;
+
+%_lh_trip_planning_group_OLD% = 
+    let dep_c = %_first_departure_country% ,
+        arr_c = %_last_arrival_country%,
+        lh_dep_c = %_lh_leg_departure_country%,
+        lh_arr_c = %_lh_leg_arrival_country%;
+    if not void(trip.%crr_area%) then trip.%area_planning_group% 
+    else if  dep_c in planning_group_countries_set
+    then %country_planning_group%(dep_c) 
+    else if  arr_c in planning_group_countries_set
+         then %country_planning_group%(arr_c) 
+         else if lh_dep_c in planning_group_countries_set
+              then %country_planning_group%(lh_dep_c) 
+              else if  lh_arr_c in planning_group_countries_set
+                   then %country_planning_group%(lh_arr_c) 
+                   else void_string;
+
+%_first_departure_country% =
+    default(if first(leg(trip), leg.%is_long_haul%)
+            then ""
+            else first(leg(trip),leg.%start_country%),"");
+
+%_last_arrival_country% = 
+    default(if last(leg(trip),leg.%is_long_haul%)
+            then ""
+            else last(leg(trip),leg.%stop_country%),"");
+
+%_lh_leg_departure_country% =
+    default(first(leg(trip),leg.%start_country%) where (leg.%is_long_haul%),"");
+
+%_lh_leg_arrival_country% =
+    default(first(leg(trip),leg.%stop_country%) where (leg.%is_long_haul%),"");
+
+table country_planning_group_table(String country_s) = 
+    country_s -> String %country_planning_group%;
+    "SE" -> "SKS";
+    "DK" -> "SKD";
+    "NO" -> "SKN";
+    -    -> void_string;
+end  
+
+set planning_group_countries_set = "NO", "SE", "DK";
+export %use_trip_filter_p% = 
+    parameter true
+    remark "Use filter for trips in trip window (on/off)";
+    
+export %filter_company_p% =
+  parameter "ALL"
+  remark "Trip planning_group for tracking, set to user planning area on studio start up";
+  
+/* To make seniority behave */
+export %crew_planning_group% = "SAS";
+ 
+
+/* end of file */
+

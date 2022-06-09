@@ -1,0 +1,131 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains cabin crew specific meal rules used in 
+ *   Carmen Crew Pairing and as studio only in Carmen Crew Rostering and 
+ *   Carmen Crew Tracking respectively.
+ *
+ * Sections:
+ *   1: Mealstop rules 
+ *
+ * Created by:
+ *   Hasse Eliasson, 2009May6
+ *
+ * Major changes:
+ *   Hasse Eliasson, 2009May6:
+ *     Rules were moved here from rules_indust_ccp_cc, so that they
+ *     could be redefined for Tracking, in a sub module using inheritance.
+ *
+ */
+
+root module rules_meal_ccp_cc
+import fundamental;
+import levels;
+import leg;
+import duty;
+import duty_time;
+import trip;
+import rule_exceptions;
+import rules;
+import meal;
+import parameters;
+import fdp;
+import system_db_parameters;
+
+
+
+
+/****************************************************************
+ * Section 1: Mealstop rules
+ ***************************************************************/
+/*
+** Rule:
+**    Meal stop required for long duty periods
+**
+** Description:
+**    Checks that there is at least 1 meal stop if the flight duty period is longer than 10:30
+**    and has more than 3 active legs. The rule is only valid for CC SKN and SKS.
+**
+** Agreement:
+**    CPG 1.10.1
+**    NKF/SBK 10.5
+**    4ExNG - no longer applies
+*/
+rule ind_meal_stop_required_if_long_duty_period_SKN_SKS =
+  valid trip.%check_rules% and
+        duty.%start_hb% >= %pp_start% and
+        duty.%start_hb% >= 01May2015 and
+        not ((system_db_parameters.%K20_sks_cc_meal_stop%(duty.%start_day%)and duty.%is_ac_employer_sks%) or (system_db_parameters.%K20_skn_cc_meal_stop%(duty.%start_day%)and duty.%is_ac_employer_skn%) or (system_db_parameters.%K20_skd_cc_meal_stop%(duty.%start_day%)and duty.%is_ac_employer_skd%)) and
+        (duty.%is_SKN% or duty.%is_sks%) and
+        fdp.%time% > %_fdp_time_meal_stop_required% and
+        duty.%num_active_legs% > 3 and
+	    rule_exceptions.%rule_on%(duty.%start_UTC%)
+        and not meal.%has_meal_rules_off_QA_CC_FD%;
+  any(leg(duty), meal.%stop%);
+  startdate  = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_end%;
+  failtext "Coll: Long duty must have meal stop (X)";
+  remark "Coll: Long flight duty period must contain a meal stop",
+  planner "The rule checks that there is at least 1 meal stop if the flight duty period is longer than 10:30 "
+          "and has more than 3 active legs. The rule is only valid for CC SKN and SKS." ;
+end
+
+%_fdp_time_meal_stop_required% =
+  if system_db_parameters.%skn_cc_oct2016_valid%(duty.%start_hb%) and duty.%is_SKN% then
+    9:45
+  else
+    10:30;
+
+/*
+** Rule:
+**    Min time between two meal breaks in duty
+**
+** Description:
+**    The rule checks for CC that the time between the start of the first meal
+**    break and the end of the second meal break is at least the minimum
+**    required.
+**
+** Agreement:
+**    4ExNG CC
+*/
+rule ind_min_time_btw_meal_breaks_CC =
+  valid trip.%check_rules% and
+    trip.%in_pp_extended% and
+    not ((system_db_parameters.%K20_sks_cc_meal_stop%(duty.%start_day%)and duty.%is_ac_employer_sks%) or (system_db_parameters.%K20_skd_cc_meal_stop%(duty.%start_day%)and duty.%is_ac_employer_skd%) or (system_db_parameters.%K20_skn_cc_meal_stop%(duty.%start_day%)and duty.%is_ac_employer_skn%)) and
+    duty.%start_hb% >= %pp_start% and
+    meal.%valid_meal_not_too_close_cc% and
+    /* Avoid illegal subchains */
+    duty.%is_closed% and
+    meal.%is_required% and
+    meal.%duty_requires_two_meal_breaks% and
+    meal.%nr_meal_breaks% >= 2 and
+    meal.%second_best_meal_break% and
+    duty.%is_short_haul% and
+     /* Layout: show parameters under rule in parameter form */
+     (true or meal.%min_time_btw_meal_breaks_cc% >= 0:00
+     or meal.%in_flight_meal_delay% >= 0:00
+     or meal.%meal_landing_limitation% >= 0:00
+     or meal.%ground_meal_walktime_start% >= 0:00
+     or meal.%ground_meal_walktime_end% >= 0:00)
+     and not meal.%has_meal_rules_off_QA_CC_FD%;
+
+    meal.%time_between_first_and_second_best_meal_breaks% >=
+      meal.%min_time_btw_meal_breaks_cc% -
+      rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%);
+
+    startdate = leg.%activity_scheduled_start_time_utc%;
+    severity = %severity_filter_int%(leg.%start_utc%, %duty_lh_region%);
+    failobject = leg.%failobject_departure%;
+    failtext(Reltime value, Reltime limit) = 
+      rules.%failtext_rel%("Coll: Meal break", value, limit);
+    remark "(CCP) Coll: Min time between meal breaks (CC)",
+    planner "The rule checks that the min time to the first meal break and between"
+        " meal breaks is satisfied. A meal break can be any of a meal stop,"
+        " meal on ground in ac or meal during flight.";
+end
+
+
+/* end of file */

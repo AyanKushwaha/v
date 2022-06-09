@@ -1,0 +1,376 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains definitions used in the info window reports.
+ *   It is important to remember that att variables used in an info window
+ *   report should wrapped in an default statement to avoid any void values.
+ *
+ * Created by:
+ *   Joakim Oskarsson, 21-Dec-2005
+ * 
+ * Sections:
+ *   1. show_status report
+ *   2. show_info_flight report
+ *
+ * Major changes:
+ * 10-May-2007: 
+ * Created variables for everything to be used in dynamic report. 
+ * Rebuilt reports according to spec. /Erik Gustafsson
+ *
+ */
+
+root module crg_info
+
+import leg;
+import duty;
+import duty_code;
+import duty_time;
+import trip;
+import crew_pos;
+import fundamental;
+import crg_crew_pos;
+import task;
+import planning_area;
+import parameters;
+import oma16;
+import duty_period;
+import levels;
+import keywords;
+
+/* To control a unified look of time points and time spans. */
+%format_time_span% = "%hh%02M";
+%format_time_point% = "%02H:%02M";
+%format_time_blank% = "     ";
+%format_date% = "%02d%b%Y";
+%format_date_no_year% = "%02d%b";
+%no_time% = 1Jan1986;
+
+/* Function to control a unified look of departure and arrival times. */
+%time_str%(Abstime start, Abstime stop) =
+  concat(
+         format_time(start, %format_time_point%),
+         "-", 
+         format_time(stop, %format_time_point%));
+%time_or_blank_str%(Abstime start, Abstime stop) =
+  concat(
+    if start <= %no_time% then %format_time_blank%
+                         else format_time(start, %format_time_point%),
+    if start <= %no_time% and stop <= %no_time% then " " else  "-", 
+    if  stop <= %no_time% then %format_time_blank%
+                          else format_time(stop, %format_time_point%));
+                
+%date_str%(Abstime start, Abstime stop) = 
+    fundamental.%time_span_str%(start, stop);
+
+/*********************************************************************
+ * 1. show_status
+ *    - Definitions used in the report file crg/hidden/show_status.output
+ *********************************************************************/
+%period% = default(%_period%, "Not defined");
+%_period% =
+  if fundamental.%start_para% = fundamental.%end_para% then
+    void_string
+  else
+    %date_str%(%pp_start%, %pp_end%-0:01);
+    
+%plan_name% = default(%_plan_name%, "Not found");
+%_plan_name% = 
+  max(sp_crew_chains, %_plan_name_chain%);
+%_plan_name_chain% =
+  concat(fp_name,"/",fp_version,"/",lp_name,"/",sp_name);
+
+%rule_set% = default(rule_set_name, "No rule set loaded");
+
+%plan_storage% = 
+    default(%_plan_storage%, "");
+%_plan_storage% = 
+    if fundamental.%is_database% then "Database" else "File";
+
+%planning_area_trip% =
+  default(planning_area.%string_repr_trip%, "Not defined");
+%planning_area_crew% =
+  default(planning_area.%string_repr_crew%, "Not defined");
+
+         
+/*********************************************************************
+ * 2. show_info_flight
+ *    - Definitions used in the report file crg/hidden/show_info_flight.output
+ *********************************************************************/
+
+/* Left column */
+export %flight_name% = default(if leg.%is_flight_duty%
+                               then %flight_name_flight%
+                               else %flight_name_transport%, "?");
+%flight_name_flight% =
+  concat(leg.%flight_carrier%, format_int(leg.%flight_nr%, "%03d"));
+%flight_name_transport% = leg.%flight_carrier%;
+export %airports% =
+  default(concat(leg.%start_station%, "  -  ", leg.%end_station%), "?");
+export %airport% = default(leg.%start_station%, "?");
+export %leg_code% = default(leg.%code%, "?");
+export %task_descr% = default(task.%description%, "");
+
+%sb_info% = concat(%_sb_info%, " ");
+%_sb_info% =
+    if void(leg.%sb_qual_attr%) then
+        fundamental.%_sb_extra_info_no_qual%(leg.%homeairport%, leg.%code%, leg.%start_utc%, leg.%end_utc%, leg.%sb_int_attr%)
+    else
+        fundamental.%_sb_extra_info%(leg.%homeairport%, leg.%code%, leg.%start_utc%, leg.%end_utc%, leg.%sb_qual_attr%, leg.%sb_int_attr%);
+
+/*concat(fundamental.%_sb_extra_info%(leg.%homeairport%, leg.%code%, leg.%start_utc%, leg.%end_utc%, leg.%sb_qual_attr%, leg.%sb_int_attr%), " ");*/
+
+export %task_descr1% =
+    if not void(%sb_info%) then
+        %sb_info%
+    else
+        %task_descr%;
+
+export %trip_group_code% = default(trip.%group_code%, "");
+export %pact_ground_name% = 
+  default(%_pact_ground_name%, "?");
+  
+%_pact_ground_name% =
+  if leg.%code% = leg.%group_code% then
+    leg.%code%
+  else 
+    concat(%leg_code%," (",task.%group%(%leg_code%),")");
+    
+export %pact_ground_descr% = default(leg.%group_code_description%, "");
+
+/* These will be redefined in crg_info_cct. */
+export %time_h1% = %utc_header%;
+export %time_h2% = %local_header%;
+export %time_1% = %utc_time%;
+export %time_2% = %local_time%;
+
+export %base_header% = "Base:";
+export %base_time% = default(%time_str%(leg.%start_hb%, leg.%end_hb%), "");
+export %local_header% = "Local:";
+export %local_time% = default(%time_str%(leg.%start_lt%, leg.%end_lt%), "");
+export %utc_header% = "UTC:";
+export %utc_time% = default(%time_str%(leg.%start_utc%, leg.%end_utc%), "");
+
+/* Middle column */
+/* Row 1 */
+%_leg_block_time% =
+    leg.%block_time%;
+export %leg_time% = default(format_time(%_leg_block_time%, %format_time_span%), "N/A");
+export %leg_duration% = default(format_time(leg.%air_time%, %format_time_span%), "N/A");
+export %leg_cnx% = default(format_time(leg.%connection_time%, %format_time_span%), "N/A");
+
+/* Rudob: Show duty time with or without night upgrade */
+%rudob_info_window_duty_time_night_upgrade% = 
+  parameter True
+  remark "Show duty time in info window with night upgrade"; 
+  
+/* Row 2 */
+export %duty_block_time% = default(format_time(duty.%block_time%, %format_time_span%), "N/A");
+export %duty_time% = 
+  if not is_acrot then
+    default(format_time(%_duty_time%, %format_time_span%), "N/A")
+  else
+    "N/A";
+
+%_duty_time% =
+  oma16.%duty_time_in_interval%(duty_period.%start_utc%, duty_period.%end_utc%);
+    
+export %duty_cnx% = 
+  if not is_acrot then
+    default(format_time(duty.%connection_time%, %format_time_span%), "N/A")
+  else
+    "N/A";
+
+%_rest_time% =
+  let r = default(duty.%rest_time%, %top_level_rest_time%);
+  if r<0:00 or r>= 100:00 then void_reltime else r;
+
+export %duty_rest% = 
+  if not is_acrot then
+    default(format_time(%_rest_time%, %format_time_span%), "N/A")
+  else
+    "N/A";
+/* Redefined in crg_info_crr to default to wop.%rest_time% */
+%top_level_rest_time% = trip.%rest_time%;
+
+/* Row 3 */
+export %trip_time% = 
+  if not is_acrot then
+    default(format_time(%_trip_time%, %format_time_span%), "N/A")
+  else
+    "N/A";
+
+%_trip_time% =
+  last(duty(trip), oma16.%duty_time_in_interval%(trip.%start_utc%, trip.%end_utc%));
+
+/*%trip_time_diff% =
+  %_trip_time% <> %_trip_time_3%;*/
+
+export %trip_block_time% = default(format_time(trip.%block_time%, %format_time_span%), "N/A");
+export %trip_days% = default(format_int(trip.%days%, "%i"), "N/A");
+export %trip_ci% = 
+  if not is_acrot then
+    default(format_time(time_of_day(trip.%start_hb%), %format_time_point%), "N/A")
+  else
+    "N/A";
+export %trip_co% = 
+  if not is_acrot then	
+    default(format_time(time_of_day(trip.%end_hb%), %format_time_point%), "N/A")
+  else
+    "N/A";
+
+/* Row 4 */
+/* Redefined in crg_info_crr to use actual duty time in wop. */
+export %wop_time% = "N/A";
+
+/* Right column */
+/* Row 1 */
+export %ac_type% = default(leg.%ac_type_custom%, "");
+
+export %service_type% =
+  if leg.%is_flight_duty%
+  then default(service_type, "")
+  else "";
+  
+/*export %region% = 
+  / * WP CCP 33 Janne C 2008-04-25 Removed 'if not is_acrot' * /
+  default(leg.%ac_region%, "");*/
+export %planning_group% =
+  default(leg.%ac_planning_group%,"");
+  
+export %pos% = 
+  if is_acrot then
+    "N/A"
+  else if leg.%is_ground_transport% or leg.%is_deadhead% or leg.%is_oag% then
+    ""
+  else
+    default(crg_crew_pos.%crew_func_leg_assigned%, "");
+    
+
+export %duty_code% =
+	default(
+	  if not is_acrot then
+	    default(default(%sb_info%,%_duty_code%), "N/A")
+	  else
+	    %sb_info%,
+  "");
+
+%_duty_code% =
+    duty_code.%leg_code%;
+
+/* These will be redefined in crg_info_cct. */
+export %rc_line2% = concat("Assigned: ",%crew_vector_str%(1));
+export %rc_line3% = concat("  Booked: ",%crew_vector_str%(2));
+export %rc_line4% = concat("    Need: ",%crew_vector_str%(3));
+
+%crew_vector_str%(int element) =
+  cat(times(10), %crew_vector_str_item%(element, %times_index_0%));
+  
+%crew_vector_str_item%(int element, int pos) =
+  let char = format_int(%crew_vector%(element, pos), "%d"),
+      num = if char = "99" then "-" else char;
+  if (pos=4 or pos=8) then
+    concat(num, "//")
+  else if (pos=10) then
+    num
+  else
+    concat(num, "/");
+
+table crew_vector_table(int element, int pos) =
+  element -> %crew_vector%;
+  1 -> %assigned%(pos);
+  2 -> %booked%(pos);
+  3 -> %need%(pos);
+  - -> 0;
+end    
+
+%assigned%(Int pos) = default(crg_crew_pos.%leg_nr_assigned_crew%(pos), 0);
+%booked%(Int pos) = default(crew_pos.%leg_booked_pos%(pos), 0);
+%need%(Int pos) = default(crew_pos.%need_in_pos%(pos), 0);
+
+/* Compute and format flight change codes */
+%info_flight_change_num% = if flight_num_change then "N" else "";
+%info_flight_change_ac_own% = if ac_owner_change then "A0" else "";
+%info_flight_change_ac_custom% = if custom_ac_type_change then "AT" else "";
+%info_flight_change_carrier% = if carrier_change then "C" else "";
+%info_flight_change_emp_coc% = if emp_cockpit_change then "EA" else "";
+%info_flight_change_emp_cab% = if emp_cabin_change then "EB" else "";
+%info_flight_change_leg_no% = if leg_no_change then "L" else "";
+%info_flight_change_onward% = if onward_change then "ON" else "";
+%info_flight_change_suffix% = if suffix_change then "SU" else "";
+%info_flight_change_cc_0% = if cc_main_0_change then "C0" else "";
+%info_flight_change_cc_1% = if cc_main_1_change then "C1" else "";
+
+/* Left column, row 4 */
+%_changes% = 
+  concat(
+    %info_flight_change_num%, 
+    %info_flight_change_ac_own%,
+    %info_flight_change_ac_custom%, 
+    %info_flight_change_carrier%,
+    %info_flight_change_emp_coc%, 
+    %info_flight_change_emp_cab%,
+    %info_flight_change_leg_no%, 
+    %info_flight_change_onward%,
+    %info_flight_change_suffix%,
+    %info_flight_change_cc_0%, 
+    %info_flight_change_cc_1%);
+
+export %changes_h% = "Changes:";
+export %changes% = 
+  if not is_acrot then
+    if %_changes% = "" then "None"
+    else %_changes%
+  else
+    "N/A";
+  
+/* These variables are defined here to avoid voiding the crew info report when a 
+ pairing rule set is loaded. */
+export %ac_quals% = "";
+export %annotations% = "";
+export %crew_id% = "";
+export %empno% = "";
+export %fdays_phone% = "";
+export %group% = "";
+export %homebase% = "";
+export %last_flown% = "";
+export %last_weekend% = "";
+export %last_standby_line_str% = "";
+export %crew_name% = "";
+export %crew_surname% = "";
+export %agmt_group% = "";
+export %part_time_factor% = "";
+export %rank% = "";
+export %seniority% = "";
+export %training_row1% = "";
+export %training_row2% = "";
+export %training_row3% = "";
+export %training_row4% = "";
+export %crew_is_new% = false;
+export %duty_is_privately_traded% = false;
+export %privately_traded_leg_text% = "";
+export %is_pilot% = false;
+export %block_hours_since_last_check_now% = "";
+export %block_hours_since_last_check_leg_end% = "";
+
+export %long_or_short_haul% =
+  default(if leg.%is_long_haul% then
+            "LH"
+          else
+            "SH", "  ");
+export %last_performed_sim% = "";
+/*export %crew_region% = "";*/
+export %crew_planning_group% = "";
+
+export %layover_info% =
+  if trip.%has_only_flight_duty% then
+    (if is_last(duty(trip)) then ""
+     else last(leg(duty),keywords.%arrival_airport_name%))
+  else
+    (if default(last(leg(duty),keywords.%arrival_airport_base% = trip.%homebase%),false)
+     then "" else last(leg(duty),keywords.%arrival_airport_name%));
+
+
+  /* end of file */
+

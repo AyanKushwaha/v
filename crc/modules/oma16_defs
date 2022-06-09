@@ -1,0 +1,310 @@
+/*  -*- crc -*-
+ *
+ *
+ * Purpose:
+ *   Basic defintions and routines for OMA16 with minimum dependence on other models.
+ *
+ * Created by:
+ *  Lars Westerlind 2015-07-06
+ *
+ * Agreement:
+ *   EU-OPS Flight Time limitiations replacing Subpart Q definitions.
+ *
+ * Description:
+ *   The module and it's content may freely be referenced from leg/duty/.../ crew and others, but should not
+ *   call back. Hopefully there is little or no need to have environment or rule set differences.
+ *   Definitoins valid in subpart-q and still valid in OMA16 could be copied here, with the purpose of making it
+ *   possible to remove subpart_q module completely in future
+ *
+ *
+ */
+
+module oma16_defs
+
+import base_utils;
+import fundamental;
+
+/* these subq defnitions are constants, here during transition, but should be made obsolete */
+export %subq_local_transport_min_rest_not_home_base% = 1:00; 
+export %subq_sby_duty_start_after_min_rest% = 4:00;
+export %subq_sby_night_end% = 06:00;          
+export %subq_sby_night_start% = 22:00;       
+export %subq_min_sby_break_to_check_in_no_duty% = 5:00;
+export %subq_wocl_change_time_zone_diff% = 3:00;
+export %subq_wocl_change_departure_diff% = 48:00;
+
+export %min_rest_before_duty_starting_at_homebase% = 12:00;
+export %min_rest_before_duty_starting_at_outstation% = 10:00;
+export %min_rest_after_lh_duty% = 14:00;
+
+export %min_inflight_rest_for_landing_crew% = 02:00;
+export %min_inflight_rest_for_non_landing_crew% = 1:30;
+export %min_inflight_rest_cc% = 1:30;
+export %min_inflight_rest_fc% = 2:00;
+export %inflight_rest_start_fc% = 0:45;
+export %inflight_rest_end_fc% = 0:45;
+export %time_reserved_for_start_and_landing% = 
+  %inflight_rest_start_fc% + %inflight_rest_end_fc%;
+
+/* -- Basic maximum daily flight duty period (ORO.FTL.205) ----------------------- */
+export %basic_max_daily_fdp%(RelTime start_lt, int sectors) =
+  let reductions = nmax( 0, (sectors - %_basic_max_daily_fdp_sectors_without_reduction%) );
+  nmax( %_basic_max_daily_fdp_base%(start_lt) - (reductions * %_basic_max_daily_fdp_sector_reduction%), 
+        %_basic_max_daily_fdp_min_value% );
+
+export %basic_max_daily_fdp_uc%(RelTime start_lt, int sectors) = %basic_max_daily_fdp%(start_lt, sectors) + 2:00;
+
+table max_daily_fdp_acclimatized(RelTime start_lt) =
+  start_lt -> RelTime %_basic_max_daily_fdp_base%;
+  (00:00, 05:00( -> 11:00;
+  (05:00, 05:15( -> 12:00;
+  (05:15, 05:30( -> 12:15;
+  (05:30, 05:45( -> 12:30;
+  (05:45, 06:00( -> 12:45;
+  (06:00, 13:30( -> 13:00;
+  (13:30, 14:00( -> 12:45;
+  (14:00, 14:30( -> 12:30;
+  (14:30, 15:00( -> 12:15;
+  (15:00, 15:30( -> 12:00;
+  (15:30, 16:00( -> 11:45;
+  (16:00, 16:30( -> 11:30;
+  (16:30, 17:00( -> 11:15;
+  (17:00, 24:00) -> 11:00;
+ 	- -> void_reltime;
+end
+
+
+%_basic_max_daily_fdp_sectors_without_reduction% = 2;
+%_basic_max_daily_fdp_sector_reduction% = 0:30;
+%_basic_max_daily_fdp_min_value% = 9:00;
+
+/* -- Maximum daily flight duty period with extension (ORO.FTL.205) ----------------------- */
+table max_daily_fdp_with_ext(RelTime start_lt, int sectors) =
+  start_lt, sectors -> export RelTime %max_daily_fdp_with_extension%, export RelTime %max_daily_fdp_with_extension_uc%;
+  (06:15, 19:00(, <=2 -> %_max_daily_fdp_with_extension_base%(start_lt), %_max_daily_fdp_with_extension_uc%(start_lt);
+  (06:15, 15:30(, 3 -> %_max_daily_fdp_with_extension_base%(start_lt) - 0:30, %_max_daily_fdp_with_extension_uc%(start_lt) - 0:30;
+  (06:15, 15:30(, 4 -> %_max_daily_fdp_with_extension_base%(start_lt) - 1:00, %_max_daily_fdp_with_extension_uc%(start_lt) - 1:00;
+  (06:15, 13:30(, 5 -> %_max_daily_fdp_with_extension_base%(start_lt) - 1:30, %_max_daily_fdp_with_extension_uc%(start_lt) - 1:30;
+	-, - -> void_reltime, void_reltime;
+end
+
+
+table max_daily_fdp_with_ext_base(RelTime start_lt) =
+  start_lt -> RelTime %_max_daily_fdp_with_extension_base%, RelTime %_max_daily_fdp_with_extension_uc%;
+  (06:15, 06:30( -> 13:15, 15:00;
+  (06:30, 06:45( -> 13:30, 15:00;
+  (06:45, 07:00( -> 13:45, 15:00;
+  (07:00, 13:30( -> 14:00, 15:00;
+  (13:30, 14:00( -> 13:45, 14:45;
+  (14:00, 14:30( -> 13:30, 14:30;
+  (14:30, 15:00( -> 13:15, 14:15;
+  (15:00, 15:30( -> 13:00, 14:00;
+  (15:30, 16:00( -> 12:45, 13:45;
+  (16:00, 16:30( -> 12:30, 13:30;
+  (16:30, 17:00( -> 12:15, 13:15;
+  (17:00, 17:30( -> 12:00, 13:00;
+  (17:30, 18:00( -> 11:45, 13:00;
+  (18:00, 18:30( -> 11:30, 13:00;
+  (18:30, 19:00( -> 11:15, 13:00;
+  (19:00, 24:00) -> void_reltime, void_reltime;
+  (00:00, 06:15( -> void_reltime, void_reltime;
+ 	- -> void_reltime, void_reltime;
+end
+
+export %max_extended_fdps_in_7_days% = 2;
+
+
+/* Max extended FDP with inflight rest */
+table max_fdp_cabin_crew_with_sleeping_arrangements(RelTime rest_time_per_crew, Int rest_class) =
+	rest_time_per_crew, rest_class -> export RelTime %max_fdp_cabin_crew_with_sleeping_arrangements%;
+	(1:30,1:45(, 1 -> 14:30;
+	(1:45,2:00(, 1 -> 15:00;
+	(2:00,2:15(, 1 -> 15:30;
+	(2:15,2:35(, 1 -> 16:00;
+	(2:35,3:00(, 1 -> 16:30;
+	(3:00,3:25(, 1 -> 17:00;
+	(3:25,3:50(, 1 -> 17:30;
+  >= 3:50    , 1 -> 18:00;
+
+	(1:30,2:00(, 2 -> 14:30;
+	(2:00,2:20(, 2 -> 15:00;
+	(2:20,2:40(, 2 -> 15:30;
+	(2:40,3:00(, 2 -> 16:00;
+	(3:00,3:25(, 2 -> 16:30;
+	>= 3:25    , 2 -> 17:00;
+
+	(1:30,2:20(, 3 -> 14:30;
+	(2:20,2:40(, 3 -> 15:00;
+	(2:40,3:00(, 3 -> 15:30;
+	>= 3:00    , 3 -> 16:00;
+	   	-, - -> void_reltime;
+end
+
+table max_fdp_flightdeck_with_sleeping_arrangements(Int no_flightdeck_crew, Int rest_class) =
+no_flightdeck_crew, rest_class -> export Reltime %max_fdp_flightdeck_with_sleeping_arrangements%;
+ 3, 1 -> 16:00;
+ 3, 2 -> 15:00;
+ 3, 3 -> 14:00;
+ 4, 1 -> 17:00;
+ 4, 2 -> 16:00;
+ 4, 3 -> 15:00;
+ 	   	-, - -> void_reltime;
+end
+ 
+ 
+	
+	
+/* -- Maximum daily flight duty period in an unknown state of acclimatisation (ORO.FTL.205) ----------------------- */
+export %max_daily_fdp_unknown_acclim%(int sectors, bool frm) =
+  let base = if frm then 12:00 else 11:00,
+      reductions = nmax( 0, (sectors - %_basic_max_daily_fdp_sectors_without_reduction%) );
+  nmax(base - (reductions * %_basic_max_daily_fdp_sector_reduction%), %_basic_max_daily_fdp_min_value% );
+
+
+/* -- Maximum number of sectors per duty for consecutive night duties (CS FTL.1.205) ----------------------- */
+
+export %max_sectors_per_duty_in_consecutive_night_duties% = 4;
+
+/* -- Basic definitions about rest ----------------------------------------- */
+/* GM1 ORO.FTL.105(3) */
+
+export %early_start_ll% = 05:00; /* lower limit, inclusive */
+export %early_start_hl% = 06:00; /* higher limit, exclusive */
+export %late_finish_ll% = 23:00; /* lower limit, inclusive */
+export %late_finish_hl% = 02:00; /* higher limit, exclusive */
+%night_duty_ll%  = 02:00; /* night duthy if ends at or after */
+%night_duty_hl%  = 05:00; /* night duty if starts before */
+export %wocl_start% = 02:00; /* start of window of circadian low */
+export %wocl_end% = 06:00; /* end of window of circadian low */
+
+export %max_time_between_weekly_rest% = 168:00; /* 24*7 */
+export %min_duration_weekly_rest% = 36:00;
+export %min_duration_weekly_rest_after_disruptive% = 60:00;
+export %min_duration_prolonged_weekly_rest% = 48:00;
+
+export %local_night_start% = 22:00;
+export %local_night_end% = 08:00;
+export %min_local_night_rest% = 08:00;
+export %min_rest_after_fdp_uc% = 10:00;
+
+export %disruptive_dps_limit% = 4;
+export %min_prolonged_weekly_rests_per_month% = 2;
+
+
+/* a night duty overlaps whole or partly 02:00-04:59 */ 
+export %is_night_duty%(Abstime duty_start, Abstime duty_finish) =
+  let midnight = round_down(duty_start,24:00) + (if time_of_day(duty_start)>=%night_duty_hl% then 24:00 else 0:00);
+  overlap(duty_start, duty_finish, midnight + %night_duty_ll%, midnight + %night_duty_hl%)>0:00;
+
+/* a disruptive element duty overlaps whole or partly 23:00-05:59 */ 
+export %is_disruptive_duty%(Abstime duty_start, Abstime duty_finish) =
+  let midnight = round_down(duty_start,24:00) + (if time_of_day(duty_start)>=%early_start_hl% then 24:00 else 0:00);
+  overlap(duty_start, duty_finish, midnight + %late_finish_ll% - 24:00, midnight + %early_start_hl%)>0:00;
+
+/* check if a point in time is within late finish interval */   
+export %is_late_finish%(Abstime duty_time) =
+  time_of_day(duty_time) >= %late_finish_ll% or time_of_day(duty_time) < %late_finish_hl%;
+  
+/* check if a point in time is within early start interval */   
+export %is_early_start%(Abstime duty_time) =
+  time_of_day(duty_time) >= %early_start_ll% and time_of_day(duty_time) < %early_start_hl%;
+
+/* least timezone diff to require a lh rest arriving at homebase */
+export %tz_diff_lh_rest% = 4:00;  
+  
+table reqd_lnr_after_lh_table(Reltime max_tz_diff, Reltime sub_trip_duration) =
+  max_tz_diff, sub_trip_duration -> export %reqd_lnr_after_lh%;
+  (0:00, 4:00(, - -> void_int;
+  (4:00, 6:00), ( 0:00,72:00( -> 2;
+  (4:00, 6:00), >=72:00       -> 3;
+  )6:00, 9:00), ( 0:00,48:00( -> 2;
+  )6:00, 9:00), (48:00,96:00( -> 3;
+  )6:00, 9:00), >=96:00       -> 4;
+  )9:00,12:00), ( 0:00,48:00( -> 2;
+  )9:00,12:00), (48:00,72:00( -> 3;
+  )9:00,12:00), (72:00,96:00( -> 4;
+  )9:00,12:00), >=96:00       -> 5;
+end
+  
+export %reqd_minimum_duration_weekly_rest% (abstime weekly_rest_start) =
+  nmax(%min_duration_weekly_rest%,
+       (round_up(weekly_rest_start,24:00) - weekly_rest_start) +
+       %local_night_start% + %min_local_night_rest%);
+
+export %reqd_minimum_duration_prolonged_weekly_rest%(abstime weekly_rest_start) =
+  %min_duration_prolonged_weekly_rest% + (round_up(weekly_rest_start,24:00)-weekly_rest_start);
+
+export %counted_as_weekly_prolonged_rests%(reltime t, abstime weekly_rest_start) =
+  (t - (round_up(weekly_rest_start,24:00) - weekly_rest_start)) / %min_duration_prolonged_weekly_rest%;
+
+export %counted_local_nights%(Reltime t, abstime rest_start) =
+  if t<8:00 then 0
+  else (t + time_of_day(rest_start-0:01)+ 0:01 - 6:00) / 24:00;
+
+/* string representation */
+
+export %wrs_rec_len% = 6;
+
+export %wrs_count%(String wrs) = 
+  length(wrs) / %wrs_rec_len%;
+
+/* create string repr */
+export %wrs_create%(Abstime ref, Abstime tim, String stat) =
+  let minutes = (tim-ref + 900:00)/0:01;
+  concat(stat,format_int(minutes,"%-5d"));
+
+export %wrs_pick_stat%(String wrs, int ix) =
+  substr(wrs,(ix-1) * %wrs_rec_len% + 1, 1);
+
+
+export %wrs_pick_tim%(Abstime ref,String wrs, Int ix) =
+  let minutes = base_utils.%int_parse%(substr(wrs,(ix-1) * %wrs_rec_len% + 2, 5));
+  ref + 0:01 * minutes - 900:00;
+
+export %wrs_pick_tim_str%(Abstime ref, String wrs, Int ix) =
+  let minutes = base_utils.%int_parse%(substr(wrs,(ix-1) * %wrs_rec_len% + 2, 5));
+  if minutes=0 then "-       "
+  else format_time(ref + 0:01 * minutes - 900:00,"%02d-%02H:%02M"); 
+
+export %wrs_pick_duration_str%(Abstime ref, String wrs, Int ix) =
+  let minutes = base_utils.%int_parse%(substr(wrs,(ix) * %wrs_rec_len% + 2, 5)) -
+                base_utils.%int_parse%(substr(wrs,(ix-1) * %wrs_rec_len% + 2, 5));
+  format_time(ref + 0:01 * minutes,"%02d-%02H:%02M"); 
+
+
+/* -- Flight times and duty periods (ORO.FTL.210) -----------------------
+   -- NOTE: If these values updates, _buffer_list in rosterserver/parameters.py should too! */
+
+export %max_duty_time_in_7_days% = 60:00;
+export %max_duty_time_in_14_days% = 110:00;
+export %max_duty_time_in_28_days% = 190:00;
+export %max_duty_time_in_calendar_year% = 2000:00;
+export %max_block_time_in_28_days% = 100:00;
+export %max_block_time_in_calendar_year% =  900:00;
+export %max_block_time_in_12_calendar_months% = 1000:00;
+
+
+/* -- Split duty (CS.FTL.1.220) ----------------------- */
+
+/* Minimum duration of split duty ground break, excluding post- and pre-flight duties and travelling */
+export %min_split_duty_ground_break_duration% = 3:00;
+
+/* Minimum duration of post- and pre-flight duties and travelling for split duty ground break */
+export %min_split_duty_post_pre_flight_duration% = 0:30;
+
+
+/* -- Standby (CS.FTL.1.225) ----------------------- */
+export %max_airport_standby_and_fdp_duration% = 16:00;
+export %max_standby_with_rest_and_fdp_duration% = 18:00;
+export %max_standby_not_at_airport% = 16:00;
+
+/* -- Adjustment of duty time for unused standby ---- */
+export %standby_duty_time_reduction%(Reltime duty_time, Bool is_standby_w_rest) =
+  if is_standby_w_rest then
+    duty_time - duty_time / 4
+  else
+    0:00;
+
+/* eof */
+
+

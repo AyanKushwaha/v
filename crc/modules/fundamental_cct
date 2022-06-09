@@ -1,0 +1,102 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   Definitions of fundamentals for CCT, 
+ *   different from CCP, CCR & PRE.
+ *
+ * Created by:
+ *   Leo
+ *
+ * Major changes:
+ *
+ */
+
+module fundamental_cct inherits fundamental_pre_cct
+
+import crew;
+import planning_area;
+import trip;
+import leg;
+
+/* Determines whether Tracking_CC or Tracking_FC is to be used.
+ * Tracking_CC is to be used for cabin crew rosters and trips with any open
+ * cabin position. In all other cases, Tracking_FC will be used.
+ */
+export %use_cabin_crew_ruleset% =
+  default(if %is_roster%
+          then crew.%main_func% = "C"
+          else %is_open_cabin_trip%,
+          false);
+
+/* 
+* Determines whether Mainline Tracking or SAS Link Tracking is to be used.
+*/
+export %use_link_tracking_ruleset% =
+
+
+  default(if %is_roster% then crew.%has_agmt_group_svs%
+          else %is_link_trip%,
+          false);
+
+
+
+/* When not a roster, check chain for active SVS employer leg */
+%is_link_trip% = any(leg(chain), leg.%employer% in leg.svs_employer_set) where (not leg.%is_deadhead%);
+
+
+/* Redefined as true/false in fundamental_cct_cc/fc */
+redefine global export %flight_crew% = void_bool;
+redefine global export %cabin_crew% = void_bool;
+
+redefine export %plan_start% = %loaded_data_period_start%;
+redefine export %plan_end% = %loaded_data_period_end%;
+
+global export %active_application% =
+  parameter "undefined"
+  remark "Name of the currently started application. Do not change."; 
+
+/*****************
+** CURRENT TIME **
+*****************/
+
+/* This is the current date. */
+redefine global export %now_date% =
+  round_down(%now%, 24:00);
+
+redefine global export %now_hb% =
+  station_localtime(%base2station%(crew.%station_at_date%(%now%)), %now%);
+  
+redefine global export %now_date_hb% =
+  round_down(%now_hb%, 24:00);
+
+redefine export %start_para% = void_abstime;
+redefine export %end_para% = void_abstime;
+                 
+/*
+** planning_area exports to get severity for tracking alerts to work!
+*/
+redefine global export %severity_filter_int%(AbsTime start_t, String duty_lh_pg_s)=
+    planning_area.%severity_filter_int_t_s%(start_t,duty_lh_pg_s);
+redefine global export %severity_filter_int_chain%(AbsTime start_t)=
+    planning_area.%severity_filter_int_t%(start_t);
+redefine global export %duty_lh_region%=
+    planning_area.%_duty_lh_planning_group%;
+
+/* Time to be used in 'info' window/reports */
+redefine export %info_time% = %now%;
+
+/* In Report Servers, rave evaluation may be performed in a context pointing
+** out a specific roster revision according to the data in the published_roster
+** table (SCHEDULED/PUBLISHED/INFORMED). When evaluating certain rave values,
+** such as standby_cct.%leg_is_standby_callout%, it is essential to know for
+** which revision the evaluaton occures, since only core tables take the
+** publish_roster revision info into account.
+**
+** This parameter is set at Studio start-up:
+**   see carmusr.tracking.FileHandlingExt::openPlanPostProc.
+*/
+export %rave_evaluation_publish_type% =
+  parameter "LATEST"
+  remark "Set by Studio at start-up.";
+ 
+/* end of file */

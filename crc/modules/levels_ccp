@@ -1,0 +1,72 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   This file contains all level definitions required for pairing.
+ * Created by:
+ *   Extracted from the Carmen Standard User, 07-Dec-2005
+ * Major changes:
+ *
+ */
+module levels_ccp inherits levels
+import leg;
+
+%levels_trip_is_last_in_wop% = false;
+%levels_wop_is_last_in_month% = false;
+
+/*
+** Duty level
+**
+** Minimum duty connection time is set to 5:00 because a short-stop
+**  that qualifies for a hotel is 5:00 and c/i, c/o is based on
+**  5:00 (short-stops). In tracking, the scheduled
+**  connection time is used. 
+*/
+
+export %min_duty_connection_time_p% = 5:00;
+
+%levels_leg_is_last_in_duty% =
+  %legs_separated_by_duty_rest% or
+  (next(leg(chain),trip_id <> -1) and next(leg(chain),trip_id) <> trip_id) and
+  /* Do not break pacts that are on the same day */
+   not (%leg_is_short_duty_on_ground% and 
+        next(leg(chain), %leg_is_short_duty_on_ground%));
+
+%legs_separated_by_duty_rest% =
+  %scheduled_connection_time% >= %min_duty_connection_time_p%;
+  
+%scheduled_connection_time% =
+  %next_activity_scheduled_start_time_UTC% - %leg_end%;
+  
+%next_activity_scheduled_start_time_UTC% =
+  next(leg(chain), %leg_start%);
+
+/* We need to handle simulator briefings which are dynamic objects. 
+   The leg.%check_in%-definition can't be used since check in exceptions 
+   introduces circularity. */
+%leg_start% =
+  leg.%activity_scheduled_start_time_UTC% -
+  (if leg.%is_simulator% then default(leg.%check_in_default_sim_gd%, 2:00) else 0:00);
+
+%leg_end% =
+  leg.%activity_scheduled_end_time_UTC% +
+  (if leg.%is_simulator% then default(leg.%check_out_default_sim_gd%, 1:00) else 0:00);
+
+%leg_is_long_duty_on_ground% = 
+  (leg.%is_ground_duty% or leg.%is_pact%) and leg.%time% >= 16:00;
+  
+%leg_is_short_duty_on_ground% =
+  (leg.%is_pact%) and leg.%time% < 16:00;
+  
+global export level duty =
+  is_last(leg)
+  when(%levels_leg_is_last_in_duty%);
+end 
+
+/*
+** Trip level
+*/
+
+global export level trip = levels.chain;
+global export level wop = levels.trip;
+
+/* end of file */

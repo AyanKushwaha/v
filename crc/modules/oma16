@@ -1,0 +1,913 @@
+/*  -*- crc -*- */
+
+root module oma16
+
+import base_utils;
+import fundamental;
+import task;
+import trip;
+import duty;
+import fdp;
+import levels;
+import oma16_defs;
+import leg;
+import hotel;
+import duty_period;
+import system_db_parameters;
+import calendar;
+
+/* -- basic definitions -------------*/
+export %is_oma16_duty_no_rest% =
+  duty.%is_on_duty% and
+  not duty.%is_rest%; 
+
+%crew_homebase% =
+  "?";  /* defined in ccr */
+  
+/* Basic maximum daily flight duty period (ORO.FTL.205 b) */
+export %basic_max_daily_fdp% = oma16_defs.%basic_max_daily_fdp%(time_of_day(fdp.%start_scheduled_acclim%), fdp.%num_sectors%);
+  
+/* Maximum daily extended flight duty period (ORO.FTL.205 d) */
+export %max_daily_fdp_with_extension% = oma16_defs.%max_daily_fdp_with_extension%(time_of_day(fdp.%start_scheduled_acclim%), fdp.%num_sectors%);
+
+/* Maximum daily flight duty period in unknown state of acclimatisation (ORO.FTL.205 b) */
+%max_daily_fdp_unknown_acclim% = oma16_defs.%max_daily_fdp_unknown_acclim%(fdp.%num_sectors%, system_db_parameters.%frm_valid%(%pp_start%));
+
+/* Basic maximum daily flight duty period under unforeseen circumstances (ORO.FTL.205 b) */
+export %basic_max_daily_fdp_uc% = oma16_defs.%basic_max_daily_fdp_uc%(time_of_day(fdp.%start_scheduled_acclim%), fdp.%num_sectors%);
+  
+%extra_time_for_augmented_crew% = if (%rest_on_board_allowed_fd% and %number_of_extra_flight_deck_crew% > 0) then 1:00 else 0:00;
+
+/* Maximum daily extended flight duty period under unforeseen circumstances (ORO.FTL.205 d) */
+export %max_daily_fdp_with_extension_uc% = oma16_defs.%max_daily_fdp_with_extension_uc%(time_of_day(fdp.%start_scheduled_acclim%), fdp.%num_sectors%);
+
+/* Maximum daily flight duty period, potentially including extension */  
+export %max_daily_fdp% =
+	(if %rest_on_board_allowed% 
+       then %max_fdp_with_rest_on_board%
+       else if not duty_period.%is_acclim%
+            then %max_daily_fdp_unknown_acclim%
+            else (if %is_extended_fdp%
+                  then %max_daily_fdp_with_extension%
+                  else  %basic_max_daily_fdp%)
+  )
+  + %cc_ci_extension%
+  + %split_duty_addition%
+  - %airport_standby_reduction%
+  - %standby_reduction%;
+  
+  
+  
+/* 
+ ** FTL 2016, ORO.FTL.205, Inflight rest.
+ ** Check if there is extra crew on the flight. If there are extra crew which gives the 
+ ** opportunity to rest or sleep (according to the rest facilities on the plane), the FDP
+ ** can be extended.
+ ** To be able to sleep, the aircraft must also provide rest facilities. 
+*/
+
+%class_of_flight_rest_facilities% = max(leg(duty), leg.%rest_class_fc%);
+%rest_facilities_exists_fd% = not void(%class_of_flight_rest_facilities%);
+%specified_rest_removed% = false;									
+
+/* Check length of leg, is it enough for everyone in cockpit/cabin to sleep */
+%rest_on_board_allowed_fd% = 
+	    (%number_of_extra_flight_deck_crew% > 0) 
+	    and (duty.%num_active_legs% <= 3) 
+            and any(leg(duty), %rest_time_sufficient_on_leg_fd%) where(leg.%is_active_flight%) 
+            and %rest_facilities_exists_fd%;
+                              
+                             
+
+%possible_sleep_at_flight_cc% = leg.%time% - %rob_possible_sleep_start% - %rob_possible_sleep_stop%;
+%possible_sleep_per_cc% = default( %rest_on_board_cc_lookup%, 0:00);
+
+                            
+%rest_time_sufficient_on_leg_cc% = if leg.%is_short_haul%
+	then false
+	else %possible_sleep_per_cc% >= %rest_on_board_per_cabin_crew%;
+	
+%rest_on_board_allowed_cc% = 
+		any(leg(duty), (%rest_on_board_per_cabin_crew% >= 1:30)) 
+		and any(leg(duty), %rest_time_sufficient_on_leg_cc%); 
+							
+%is_cabin% = fundamental.%cabin_crew%;
+
+export %rest_on_board_allowed% = if %is_cabin%
+            then %rest_on_board_allowed_cc%
+            else %rest_on_board_allowed_fd%;
+
+/* -- Rest on board (ORO.FTL.205) ----------------------- */
+
+/*
+** Possible time for rest on-board for cabin crew. This time is set up in the table "rest_on_board_cc".
+** Before resting, the
+*/
+export %rob_possible_sleep_start% = default(default(%_rob_duty_possible_sleep_start%(leg.%ac_family_and_subtype%), %_rob_duty_possible_sleep_start%(leg.%ac_family%)),0:00);
+
+export %rob_possible_sleep_stop% = default(default(%_rob_duty_possible_sleep_stop%(leg.%ac_family_and_subtype%), %_rob_duty_possible_sleep_stop%(leg.%ac_family%)),0:00);
+export %rob_possible_sleep% = default(default(%_rest_on_board_per_crew%(leg.%ac_family_and_subtype%), %_rest_on_board_per_crew%(leg.%ac_family%)),0:00);
+export %sched_rob% = default(%rob_possible_sleep%, 0:00);
+
+%rob_table_cc% = %etab_path%(%rob_table_para_cc%);
+%rob_table_para_cc% =
+  parameter "rest_on_board_cc"
+  remark "ETAB: OMA16 - Rest on board table, CC";
+
+table rest_on_board_cc(String ac_type) =
+  leg.%flight_carrier%, leg.%flight_nr%, leg.%start_UTC%,
+  leg.%start_station%, leg.%end_station%,  ac_type
+    ->  reltime %_rob_duty_possible_sleep_start%, reltime %_rob_duty_possible_sleep_stop%, reltime %_rest_on_board_per_crew%;
+
+  external %rob_table_cc%;
+
+  carrier, flightno,
+  (periodstartdate, periodenddate),
+  depairportname, arrairportname,
+  acfam
+    -> dutydep, dutyarr, rest;
+  -, -, -, -, -, -
+    ->  void_reltime, void_reltime, void_reltime;
+end
+
+%rob_table_fc% = %etab_path%(%rob_table_para_fc%);
+%rob_table_para_fc% =
+  parameter "rest_on_board_fc"
+  remark "ETAB: OMA16 - Rest on board table, FC";
+
+table rest_on_board_fc =
+  leg.%flight_carrier%, leg.%flight_nr%, leg.%start_UTC%,
+  leg.%start_station%, leg.%end_station%
+    ->  Int %_fc%, Int %_fp%, Int %_fr%;
+
+  external %rob_table_fc%;
+
+  carrier, flight_no,
+  (period_start_date, period_end_date),
+  dep_airport_name, arr_airport_name
+    -> fc , fp , fr;
+  -, -, -, -, -
+    ->  1, 1, 0;
+end
+
+%number_of_crew_fc% = %_fc% + %_fp% + %_fr%;
+
+%rest_on_board_cc_lookup% = default(%_rest_on_board_per_crew%(leg.%ac_family_and_subtype%), %_rest_on_board_per_crew%(leg.%ac_family%));
+
+export %rest_on_board_per_cabin_crew% =	default( %rest_on_board_cc_lookup%, 0:00);
+export %rest_on_board_per_flight_crew% =	if %rest_on_board_allowed_fd% then oma16_defs.%min_inflight_rest_fc% else 0:00;
+
+/*
+ * The leg is checked for its length. To add time for inflight rest, it 
+ * has to be long enough for the landing crew to sleep 2 hours, and the
+ * non-landing crew to sleep 1:30. And the start and landing, when no-one
+ * can sleep is 1 hour.
+ */
+%rest_time_sufficient_on_leg_fd% = 
+	if leg.%is_short_haul%
+	then false
+	else %possible_rest_on_board_fd%(%number_of_extra_flight_deck_crew%);
+	
+%possible_rest_on_board_fd%(Int no_of_crew) =
+		leg.%block_time_scheduled% > 
+			(oma16_defs.%min_inflight_rest_for_landing_crew%*2 
+			+ oma16_defs.%min_inflight_rest_for_non_landing_crew%*no_of_crew
+			+ oma16_defs.%time_reserved_for_start_and_landing%);
+				
+%rest_time_sufficient_on_leg% = 
+			if %is_cabin%
+			then %rest_time_sufficient_on_leg_cc%
+			else %rest_time_sufficient_on_leg_fd%;
+        
+%rest_class_cc% = leg.%rest_class_cc%;
+
+%cabin_max_daily_fdp_with_rest_on_board% = 
+    let max_fdp_with_rest = %cabin_max_daily_fdp_rest_on_board%(max(leg(duty),%rest_on_board_per_cabin_crew%) where (%rest_time_sufficient_on_leg%));
+	if  max_fdp_with_rest = 0:00
+    then %basic_max_daily_fdp%
+    else max_fdp_with_rest;
+
+%cabin_max_daily_fdp_rest_on_board%(RelTime rest_on_board_one_crew) =
+	default((max(leg(duty),oma16_defs.%max_fdp_cabin_crew_with_sleeping_arrangements%(rest_on_board_one_crew, %rest_class_cc%)) where (%rest_time_sufficient_on_leg%)), 
+		%basic_max_daily_fdp%);
+
+%leg_number_of_booked_flight_deck_crew% = %number_of_crew_fc%;
+        
+%number_of_flight_deck_crew% = default(max(leg(duty), %leg_number_of_booked_flight_deck_crew%)
+			where (leg.%is_active_flight% and leg.%is_long_haul% and %possible_rest_on_board_fd%(1)), 2);
+
+%number_of_extra_flight_deck_crew% = %number_of_flight_deck_crew% -2;
+
+%flightdeck_max_daily_fdp_with_rest_on_board% =
+	if (%number_of_extra_flight_deck_crew% > 0) and %rest_facilities_exists_fd%
+	then default(oma16_defs.%max_fdp_flightdeck_with_sleeping_arrangements%(%number_of_flight_deck_crew%, %class_of_flight_rest_facilities%), 
+												%basic_max_daily_fdp%) + %extra_rest_for_long_legs%
+	else %basic_max_daily_fdp%;
+
+export %max_fdp_with_rest_on_board% = 
+  		if %is_cabin% 
+	then %cabin_max_daily_fdp_with_rest_on_board% 
+	else %flightdeck_max_daily_fdp_with_rest_on_board%;
+			
+export %rest_on_board_addition% = 
+  if %rest_on_board_allowed% 
+  then %real_rest_on_board_addition%
+  else 0:00;
+  
+%basic_max_daily_fdp_acclim% = 
+    if not duty_period.%is_acclim% 
+    then  %max_daily_fdp_unknown_acclim%
+    else %basic_max_daily_fdp%;
+
+%real_rest_on_board_addition% = %max_fdp_with_rest_on_board% - %basic_max_daily_fdp_acclim%;
+
+%extra_rest_for_long_legs% = if (fdp.%num_sectors% <= 2) and (max(leg(duty), leg.%time%) > 9:00)
+					then 1:00
+					else 0:00;
+
+/*
+** Start of rest-on-board period for FC
+*/
+export %rob_start_fd% =
+  leg.%start_utc% + oma16_defs.%inflight_rest_start_fc%;
+
+/*
+** End of rest-on-board period for FC
+*/
+export %rob_end_fd% =
+  leg.%end_utc% - oma16_defs.%inflight_rest_end_fc%;
+
+/*
+** Start of rest-on-board period for CC
+*/
+export %rob_start_ca% =
+  leg.%start_utc% + %rob_possible_sleep_start%;
+
+/*
+** End of rest-on-board period for CC
+*/
+export %rob_end_ca% =
+  leg.%end_utc% - %rob_possible_sleep_stop%;
+
+
+/* Basic maximum daily flight duty period under unforeseen circumstances for cew with unknow state of acclimitization (ORO.FTL.205 b) */
+export %max_daily_fdp_with_inflight_rest_uc% = %max_fdp_with_rest_on_board% + 2:00;
+ 
+/* Basic maximum daily flight duty period under unforeseen circumstances for flights with inflight rest (ORO.FTL.205 b) */
+export %max_daily_fdp_unknown_acclim_uc% = %max_daily_fdp_unknown_acclim% + 2:00;
+
+/* Maximum flight duty period under unforeseen circumstances */  
+export %max_daily_fdp_uc% =
+	(if %rest_on_board_allowed% 
+     then %max_daily_fdp_with_inflight_rest_uc% 
+     else if not duty_period.%is_acclim%
+	      then %max_daily_fdp_unknown_acclim_uc%
+	      else (if %is_extended_fdp%
+	            then %max_daily_fdp_with_extension_uc%
+                else %basic_max_daily_fdp_uc%)
+  )
+  + %cc_ci_extension%
+  + %split_duty_addition%
+  + %extra_time_for_augmented_crew%
+  - %airport_standby_reduction%
+  - %standby_reduction%;
+    
+export %max_duty_fdp_uc% = %max_daily_fdp_uc%;
+
+export %is_extended_fdp% =
+  /*not %subq_fdp_has_split_duty_after% and*/
+  fdp.%scheduled_time% > %basic_max_daily_fdp% and
+  %fdp_extension_allowed%;
+  
+/* FDP extension not allowed during WOCL or on split duty */
+%fdp_extension_allowed% =
+  not void(%max_daily_fdp_with_extension%) and
+  not duty_period.%is_split%;
+ 
+export %is_last_fdp_extension_duty_in_month% =
+  %is_extended_fdp% and
+  default(next(duty(chain), round_down_month(duty.%start_utc%))
+          where (%is_extended_fdp%)
+          > round_down_month(duty.%start_utc%),
+  true);
+
+/* This variables checks if the preceding duty was extended, also when current duty.
+   In tracking this means that on a callout it can be called also on a callout
+   preceded by a standby duty (separate), ignoring that duty. For split duty, use this
+   function on the first part*/
+export %preceded_by_extended_fdp% =
+  %_preceded_by_extended_fdp%;
+
+%_preceded_by_extended_fdp% = /* this is used in redefine in tracking */
+   default(prev(duty(chain),  duty_period.%is_fdp% and %is_extended_fdp%),
+   false);
+
+export %cc_ci_extension% = 0:00;
+
+%disruptive_period_start% =
+  if duty_period.%has_standby_with_rest%
+  then fdp.%start_acclim%
+  else duty_period.%start_acclim%;
+  
+%disruptive_period_end% =
+  if duty_period.%has_standby_with_rest%
+  then fdp.%end_acclim%
+  else duty_period.%end_acclim%; 
+
+%is_standby_with_rest_without_callout% =
+  duty_period.%has_standby_with_rest%;
+
+/* is early start on homebase */
+export %is_early_start_homebase% =
+  duty_period.%departs_from_homebase% and 
+  not %is_standby_with_rest_without_callout% and 
+  oma16_defs.%is_early_start%(%disruptive_period_start%); 
+
+/* is late finish on homebase */
+export %is_late_finish_homebase% =
+  duty_period.%arrives_at_homebase% and 
+  not %is_standby_with_rest_without_callout% and 
+  oma16_defs.%is_late_finish%(%disruptive_period_end%);
+
+export %latest_late_finish_or_night_duty_end_hb% =
+  prev(duty(chain),duty_period.%end_hb%) 
+  where((duty_period.%is_fdp% or duty_period.%has_fdp_training%) and
+        (oma16.%is_late_finish_homebase% or oma16.%is_night_duty%))
+  while(not duty_period.%has_weekly_rest_after%);
+  
+export %lnrs_since%(AbsTime start_hb) =
+  sum(duty(chain), %lnrs_before_duty%)
+  from(current) backwards
+  while(duty_period.%end_hb% > start_hb)
+  where(duty_period.%is_first_duty_in_duty_period% and duty_period.%is_on_duty%);
+
+/* Maximum number of sectors per duty for consecutive night duties (CS FTL.1.205) */
+export %max_sectors_per_duty_in_consecutive_night_duties% =
+	oma16_defs.%max_sectors_per_duty_in_consecutive_night_duties%;
+
+export %is_night_duty% =
+  duty_period.%is_on_duty% and 
+  not %is_standby_with_rest_without_callout% and 
+  oma16_defs.%is_night_duty%(%disruptive_period_start%, %disruptive_period_end%);
+  
+/* Amount of time by which FDP may be extended on split duty (CS FTL.1.220)
+** If break time is more than 3 hours, FDP may be extended by half of the break time */
+export %split_duty_addition% =
+  let break_time = default(duty_period.%split_duty_break_end_utc% - duty_period.%split_duty_break_start_utc%, 0:00);
+  if duty_period.%is_split% and
+     ((duty_period.%is_first_duty_in_duty_period% and next(duty(chain), duty.%has_active_flight%)) or
+      (duty_period.%is_last_duty_in_duty_period% and duty.%has_active_flight%)) and
+     break_time >= oma16_defs.%min_split_duty_ground_break_duration%
+  then break_time/2
+  else 0:00;
+
+
+/**************************************
+** -- rest ----------------------
+**************************************/
+export %min_rest_after_dp% =
+  %min_rest_after_dp_without_extension% + %extra_rest_for_extended_fdp%;
+
+%min_rest_after_dp_without_extension% =
+  if %fdp_requires_lh_rest_after%
+  then %min_rest_after_lh_fdp%
+       + (if duty_period.%arrives_at_homebase% then 0:00 else %extra_local_transport_time_at_outstation%) 
+  else %min_rest_after_sh_or_ground_duty%;
+
+%min_rest_after_sh_or_ground_duty% =
+  if default(next(duty(chain), duty_period.%is_fdp% or 
+                               duty_period.%has_fdp_training% or 
+                               duty_period.%has_standby% /* SB needs to have FDP rest before so it can be converted to FDP in Tracking */
+                 ) where(duty_period.%is_first_duty_in_duty_period% and duty_period.%is_on_duty%)
+             or next(duty(chain), duty.%is_blank_day%) where(duty_period.%is_first_duty_in_duty_period%) /* Same goes for blank days */
+            , true)
+  then %min_rest_after_sh_dp_followed_by_fdp%
+  else %min_rest_after_sh_dp_followed_by_non_fdp%;
+
+%duty_time_affecting_rest% =
+  duty_period.%time_reducing_sb_w_rest%;
+
+/* This is a hybrid; present for historical reasons. It calculates the duty time affecting rest just as ftl/oma16,
+   but uses scheduled times, not actual times. In FTL actual times are considered */
+export %scheduled_duty_time_affecting_rest% =
+  if duty_period.%has_standby_callout% then
+    duty_period.%scheduled_time_after_ci_after_sb_w_rest%
+  else
+    duty_period.%scheduled_time%; 
+ 
+export %min_rest_after_sh_dp_followed_by_fdp% =
+  if duty_period.%arrives_at_homebase%
+  then nmax(%duty_time_affecting_rest%, oma16_defs.%min_rest_before_duty_starting_at_homebase%)
+  else nmax(%duty_time_affecting_rest%, oma16_defs.%min_rest_before_duty_starting_at_outstation%) 
+       + %extra_local_transport_time_at_outstation%;
+
+export %min_rest_after_sh_dp_followed_by_non_fdp% =
+  if duty_period.%arrives_at_homebase%
+  then oma16_defs.%min_rest_before_duty_starting_at_homebase%
+  else oma16_defs.%min_rest_before_duty_starting_at_outstation% 
+       + %extra_local_transport_time_at_outstation%;
+
+%extra_local_transport_time_at_outstation% =
+  if duty.%end_station% = default(next(duty(chain), duty.%start_station%), "")
+  then nmax(last(leg(duty), hotel.%leg_local_transport_apt_to_hotel% - 0:30), 0:00) 
+        + nmax(default(next(duty(chain), first(leg(duty), hotel.%leg_local_transport_hotel_to_apt% - 0:30)), 0:00), 0:00)
+  else 0:00;
+
+%min_rest_after_lh_fdp% =
+  nmax(%duty_time_affecting_rest%, oma16_defs.%min_rest_after_lh_duty%);
+    
+%fdp_requires_lh_rest_after% =
+  (duty_period.%abs_tz_diff% >= 4:00);
+
+/* Extra minimum rest after an extended FDP.
+**
+** There are 6 possible cases:
+** FDP< + 2:00 (pos_16) >FDPE< + 2:00 (pos_09) >FDP
+** FDP<        (pos_15) >FDPE< + 4:00 (pos_10) >FDP
+** FDP< + 2:00 (pos_14) >FDPE< + 4:00 (pos_02) >FDPE< + 2:00 (pos_05) >FDP
+** FDP< + 2:00 (pos_12) >FDPE< + 2:00 (pos_01) >FDPE< + 4:00 (pos_06) >FDP
+** FDP<        (pos_13) >FDPE< + 6:00 (pos_04) >FDPE< + 2:00 (pos_07) >FDP
+** FDP<        (pos_11) >FDPE< + 4:00 (pos_03) >FDPE< + 4:00 (pos_08) >FDP
+*/
+%extra_rest_for_extended_fdp% =
+  if (%is_extended_fdp% and not %rest_on_board_allowed%)
+  then /* current is FDPE */
+       if default(next(duty(chain), %is_extended_fdp%) where (duty_period.%is_first_duty_in_duty_period% and duty_period.%is_on_duty%), false)
+       then /* next is FDPE */
+            if default(prev(duty(chain), duty_period.%rest_time_after% >= %min_rest_after_sh_dp_followed_by_fdp% + 2:00) where (duty_period.%is_last_duty_in_duty_period% and duty_period.%is_on_duty%), true) /* SKCMS-886: if prev(duty(chain)... is void then 2 extra hrs was spend before the duty and then default(... , TRUE) */
+            then /* prev has rest space for extra 2h (or no prev exists: SKCMS-886) */
+                 if default(next(duty(chain), duty_period.%rest_time_after% >= %min_rest_after_sh_dp_followed_by_fdp% + 4:00) where (duty_period.%is_first_duty_in_duty_period% and duty_period.%is_on_duty%), false)
+                 then /* next has rest space for extra 4h */
+                      2:00 /* pos_01 */
+                 else /* next has no rest space for extra 4h */
+                      4:00 /* pos_02 */
+            else /* prev has no rest space for extra 2h */
+                 if default(next(duty(chain), duty_period.%rest_time_after% >= %min_rest_after_sh_dp_followed_by_fdp% + 4:00) where (duty_period.%is_first_duty_in_duty_period% and duty_period.%is_on_duty%), false)
+                 then /* next has rest space for extra 4h */
+                      4:00 /* pos_03 */
+                 else /* next has no rest space for extra 4h */
+                      6:00 /* pos_04 */
+       else /* next no FDPE */
+            if default(prev(duty(chain), %is_extended_fdp%) where(duty_period.%is_first_duty_in_duty_period% and duty_period.%is_on_duty%), false)
+            then /* prev is FDPE */
+                 if default(prev(duty(chain), prev(duty(chain), duty_period.%rest_time_after% >= %min_rest_after_sh_dp_followed_by_fdp% + 2:00) where(duty_period.%is_last_duty_in_duty_period% and duty_period.%is_on_duty%)) where(duty_period.%is_first_duty_in_duty_period% and duty_period.%is_on_duty%), true) /* SKCMS-886: if prev(duty(chain)... is void then 2 extra hrs was spend before the duty and then default(... , TRUE) */
+                 then /* prev of prev has rest space for extra 2h (or no prev of prev exists: SKCMS-886) */
+                      if default(prev(duty(chain), duty_period.%rest_time_after% >= %min_rest_after_sh_dp_followed_by_fdp% + 4:00) where(duty_period.%is_last_duty_in_duty_period% and duty_period.%is_on_duty%), false)
+                      then /* prev has rest space for extra 4h */
+                           2:00 /* pos_05 */
+                      else /* prev has no rest space for extra 4h */
+                           4:00 /* pos_06 */
+                 else /* prev of prev has no rest space for extra 2h */
+                      if default(prev(duty(chain), duty_period.%rest_time_after% >= %min_rest_after_sh_dp_followed_by_fdp% + 6:00) where(duty_period.%is_last_duty_in_duty_period% and duty_period.%is_on_duty%), false)
+                      then /* prev has rest space for extra 6h */
+                           2:00 /* pos_07 */
+                      else /* prev has no rest space for extra 6h */
+                           4:00 /* pos_08 */
+            else /* prev no FDPE */
+                 if default(prev(duty(chain), duty_period.%rest_time_after% >= %min_rest_after_sh_dp_followed_by_fdp% + 2:00) where(duty_period.%is_last_duty_in_duty_period% and duty_period.%is_on_duty%), true) /* SKCMS-886: if prev(duty(chain)... is void then 2 extra hrs was spend before the duty and then default(... , TRUE) */
+                 then /* prev has rest space for extra 2h (or no prev exists: SKCMS-886) */
+                      2:00 /* pos_09 */
+                 else /* prev has no rest space for extra 6h */
+                      4:00 /* pos_10 */
+  else /* current no FDPE */
+       if default(next(duty(chain), %is_extended_fdp%) where (duty_period.%is_first_duty_in_duty_period% and duty_period.%is_on_duty%), false)
+       then /* next is FDPE */
+            if default(next(duty(chain), next(duty(chain), %is_extended_fdp%)  where(duty_period.%is_first_duty_in_duty_period% and duty_period.%is_on_duty%)) where(duty_period.%is_first_duty_in_duty_period% and duty_period.%is_on_duty%), false)
+            then /* next of next is FDPE */
+                 if default(next(duty(chain), next(duty(chain), duty_period.%rest_time_after% >= %min_rest_after_sh_dp_followed_by_fdp% + 4:00)  where(duty_period.%is_first_duty_in_duty_period% and duty_period.%is_on_duty%)) where(duty_period.%is_first_duty_in_duty_period% and duty_period.%is_on_duty%), false)
+                 then /* next of next has rest space for extra 4h */
+                      if default(next(duty(chain), duty_period.%rest_time_after% >= %min_rest_after_sh_dp_followed_by_fdp% + 4:00) where (duty_period.%is_first_duty_in_duty_period% and duty_period.%is_on_duty%), false)
+                      then /* next has rest space for extra 4h */
+                           0:00 /* pos_11 */
+                      else /* next has no rest space for extra 4h */
+                           2:00 /* pos_12 */
+                 else /* next of next has no rest space for extra 4h */
+                      if default(next(duty(chain), duty_period.%rest_time_after% >= %min_rest_after_sh_dp_followed_by_fdp% + 6:00) where (duty_period.%is_first_duty_in_duty_period% and duty_period.%is_on_duty%), false)
+                      then /* next has rest space for extra 6h */
+                           0:00 /* pos_13 */
+                      else /* next has no rest space for extra 6h */
+                           2:00 /* pos_14 */
+            else  /* next of next no FDPE */
+                 if default(next(duty(chain), duty_period.%rest_time_after% >= %min_rest_after_sh_dp_followed_by_fdp% + 4:00) where (duty_period.%is_first_duty_in_duty_period% and duty_period.%is_on_duty%), false)
+                 then /* next has rest space for extra 4h */
+                      0:00 /* pos_15 */
+                 else /* next has no rest space for extra 4h */
+                      2:00 /* pos_16 */
+       else /* next no FDPE */
+            0:00;
+
+
+/*
+** Duty following the previous weekly rest period until current duty includes
+** active flight leg. NOT USED (yet) IN OMA16. 
+** However, some rules differ between FDP and DP, so it may be revised and used. 
+* /
+export %has_active_flight_since_last_oma16_weekly_rest% =
+  let last_weekly_rest_end = duty.%end_utc% - oma16_defs.%min_duration_weekly_rest%;
+  any(duty(chain),duty.%has_active_flight%)
+  from (current)
+  backwards
+  while (duty.%end_UTC% >= last_weekly_rest_end); */
+
+/*
+ ** Start of duty following the previous weekly rest period. Intended to be used on duty that is not rest; 
+ **if used on rest, and there is no prior non rest duty, a future date may be returned.
+* /
+%end_prev_weekly_rest% =
+  default(
+    prev(duty(chain), duty.%rest_end_UTC%)
+      where (%has_weekly_rest_after%)
+  ,
+    first(duty(chain), duty.%start_utc%) 
+      where (not duty.%is_rest%)
+  );
+
+/ *
+** Check if duty is immediately follow by a weekly rest, prolonged, or fit after disruptive duty
+** Testing on smaller rest is true also for longer rests.
+** Note: lt is used for defintions of local nights/days as this was the way in old code. However, it might be wrong
+** as crew is not normally acclimatisated to foreign stations.
+* /
+export %has_weekly_rest_after% =
+  duty.%rest_time% >= oma16_defs.%reqd_minimum_duration_weekly_rest%(duty.%end_lt%);
+
+export %has_prolonged_weekly_rest_after% =
+  duty.%rest_time% >= oma16_defs.%reqd_minimum_duration_prolonged_weekly_rest%(duty.%end_lt%); */
+
+%count_prolonged_rests_after_duty% =
+  let 
+      t = overlap(duty.%rest_start%,
+                  default(duty.%rest_end%, duty.%start_month_start%),
+                  duty.%start_month_start%,
+                  duty.%start_month_end%);
+  oma16_defs.%counted_as_weekly_prolonged_rests%(t,duty.%rest_start%);
+
+%rest_first_in_calendar_month% =
+  if duty.%start_hb% > duty.%start_month_start% then duty.%start_hb% - duty.%start_month_start%
+  else 0:00;
+  
+export %prolonged_weekly_rests_in_calendar_month% =
+  let month_start = duty.%start_month_start%,
+      month_end = duty.%start_month_end%;
+  sum(duty(chain), %count_prolonged_rests_after_duty%)
+    where (overlap(duty.%start_hb%, duty.%end_hb%, month_start, month_end) > 0:00 and not duty.%is_rest%)
+  + 
+  first(duty(chain), oma16_defs.%counted_as_weekly_prolonged_rests%(%rest_first_in_calendar_month%, month_start))
+    where (overlap(duty.%start_hb%, duty.%end_hb%, month_start, month_end) > 0:00 and not duty.%is_rest%); 
+
+export %weekly_rest_time_before% =
+   duty.%rest_time_before_duty%; 
+  
+export %disruptive_dps_since_previous_weekly_rest% =
+  0; /* real definition in ccr */
+
+/* time since start of first lh duty in trip. Redefined in ccr */
+%lh_tzd_duration_to_duty% =
+  duty.%end_utc% - duty_period.%start_duty_period_in_trip_abs_tzd_exceed%(oma16_defs.%tz_diff_lh_rest%);
+
+%reqd_homebase_lnr_after_lh_duty% =oma16_defs.%reqd_lnr_after_lh%(duty.%sub_trip_max_abs_tzd_ref_bwd%, %lh_tzd_duration_to_duty%);    
+
+/* check if duty ends a rest period, following a lh sub trip */
+export %duty_ends_rest_after_lh_sub_trip% =
+  if duty.%is_rest% then False /* rest continues */
+  else if system_db_parameters.%oma16_b2b_valid%(duty.%start_utc%) 
+      and (duty.%is_second_in_b2b_subtrip% and not (%preceding_b2b_since_weekly_rest%>1)) then False
+  else if duty_period.%is_first_duty_in_duty_period% and duty_period.%departs_from_homebase% then
+      not void(%reqd_homebase_lnr_after_previous_lh_duty%)
+  else False;
+
+/* nr of b2b from last weekly rest unto and including current duty */
+%preceding_b2b_since_weekly_rest% =
+  sum(duty(chain), if duty.%is_second_in_b2b_subtrip% then 1 else 0)
+  from(current) backwards
+  while (not duty_period.%has_weekly_rest_before%); /* the sum includes own b2b duty */
+  
+
+export %duty_ends_rest_after_lh_duty% =
+  if duty.%is_rest% then False /* rest continues */
+  else if duty_period.%is_first_duty_in_duty_period% then
+      %fdp_requires_lh_rest_after% 
+  else False;
+  
+/* count number of local nights rests before current duty */
+export %lnrs_before_duty% =
+  let end_rest = duty.%start_utc%;
+  prev(duty(chain), oma16_defs.%counted_local_nights%(end_rest - duty.%end_utc%, duty.%end_lt%))
+    where (not duty.%is_rest%); 
+ 
+/* calculate local nights rests required, preceding current duty, based on previous LH sub trip (rotation) */
+export %reqd_homebase_lnr_after_previous_lh_duty% =
+  prev(duty(chain), %reqd_homebase_lnr_after_lh_duty%)
+    where (not duty.%is_rest%);
+
+%is_lnr%(Abstime midnight) =
+  if duty_period.%end_lt% <= midnight then duty_period.%arrives_at_homebase% /* if arrives at homebase / has base break before midnight then true, if arrives elsewhere before midnight false */
+  else if duty_period.%start_lt% < midnight + 06:00 then False 
+  else duty_period.%departs_from_homebase%; /* if departs after 6 from homebase / has base break it's lnr, else not */
+
+export %is_lnr_at_date%(Abstime midnight) =
+  /* cases
+     duty ending 22:00 - 24:00, True, local night as rest must be 10 hrs or more
+     duty ending 24:01 - 06:00, False.
+     duty ending 06:01 - and starting < 06:00: False
+     rest True */ 
+  default(first(duty(chain), %is_lnr%(midnight))
+  	where (duty_period.%is_on_duty% and duty_period.%is_last_duty_in_duty_period% and duty_period.%end_lt% >= midnight - 2:00)
+  ,
+    True
+  );
+
+  
+/********************************** 
+** east/west transition
+** 
+** defintion: a rest at homebase enclosed by two rotations, one with at least 6 hours tzd, and the other with at least 4 hrs in opposite direction. 
+** such rest should contain at least 3 local nights.
+*/
+  
+export %east_west_transition_ended% =
+  false; /* redefined */
+  
+export %east_west_transition_valid% =
+  duty_period.%is_on_duty% and duty_period.%departs_from_homebase% and
+  	%east_west_transition_ended%;  
+
+/* string representation, for testing and debugging */
+%dsp_weekly_rest_duty% =
+   if duty.%is_rest% or duty.%end_hb% < duty.%start_month_start% then ""
+   else if duty.%start_hb% < duty.%start_month_start% then "0 "
+   else format_time(duty.%start_hb%,"%02d ");
+
+%dsp_weekly_rest_rest% =
+  let t = duty.%rest_time%,
+      c = oma16_defs.%counted_as_weekly_prolonged_rests%(t, duty.%rest_start%);
+  if duty.%is_rest% and duty.%end_hb% >= duty.%start_month_start% then ""
+  else if c>1 then "pp "
+  else if c>0 then 
+    if t>= oma16_defs.%reqd_minimum_duration_prolonged_weekly_rest%(duty.%rest_start%) then "p+ "
+    else "p "
+  else if t>= oma16_defs.%reqd_minimum_duration_weekly_rest%(duty.%rest_start%) then 
+    if t>= oma16_defs.%reqd_minimum_duration_prolonged_weekly_rest%(duty.%rest_start%) then "w+ "
+    else "w "
+  else "";
+
+export %dsp_weekly_rest_string% =
+  cat(duty(chain), concat(%dsp_weekly_rest_duty%, %dsp_weekly_rest_rest%))
+  where (duty.%start_hb% < duty.%start_month_end% and duty.%rest_end% >= duty.%start_month_start%);
+  
+
+/* -- Flight times and duty periods (ORO.FTL.210) ----------------------- */
+/*
+** Function: duty_time_in_interval
+** Arg: abstime: start of calculation period,
+** Arg: abstime: end of calculation period,
+**
+** Accumulated duty time in a specified period backwards from end of period.
+*/
+
+/* duty time caa style for current duty period */
+export %duty_period_duty_time_caa% = 
+  if duty_period.%is_last_duty_in_duty_period% then
+    %duty_time_in_interval_calc%(caa,duty_period.%start_utc%, duty_period.%end_utc%)
+  else
+    next(duty(trip), %duty_time_in_interval_calc%(caa,duty_period.%start_utc%, duty_period.%end_utc%));
+
+/* duty time union style for current duty period */
+export %duty_period_duty_time_union% =
+  if duty_period.%is_last_duty_in_duty_period% then
+    %duty_time_in_interval_calc%(union ,duty_period.%start_utc%, duty_period.%end_utc%)
+  else
+    next(duty(trip), %duty_time_in_interval_calc%(union, duty_period.%start_utc%, duty_period.%end_utc%));
+
+/* duty time different styles, for current duty period, limited by time interval (like month) */
+export %duty_period_duty_time_calc%(DutyCalculation dutycalc, Abstime start_utc, Abstime end_utc) =
+  let duty_period_end = if dutycalc = union_scheduled then duty_period.%end_scheduled_utc% else duty_period.%end_utc%;
+  if duty_period.%is_last_duty_in_duty_period% then
+    %duty_time_in_interval_calc%(
+        dutycalc,
+        nmax(start_utc, duty_period.%start_utc%),
+        nmin(end_utc, duty_period_end)
+    ) else
+    next(duty(trip),
+        %duty_time_in_interval_calc%(
+             dutycalc,
+             nmax(start_utc, duty_period.%start_utc%), 
+             nmin(end_utc, duty_period_end)
+        )
+    );
+
+/* duty time different styles for current trip, limited by time interval (like month) */
+export %trip_duty_time_calc%(DutyCalculation dutycalc, Abstime start_utc, Abstime end_utc) =
+  sum(duty(trip), 
+     %duty_time_in_interval_calc%(
+        dutycalc,
+        nmax(start_utc, duty_period.%start_utc%),
+        nmin(
+            end_utc,
+            if dutycalc = union_scheduled then duty_period.%end_scheduled_utc% else duty_period.%end_utc%
+        )
+     )
+  )
+  where (duty_period.%is_last_duty_in_duty_period%);
+
+/* duty time different styles for current trip, limited by time interval (like month) */
+export %wop_duty_time_calc%(DutyCalculation dutycalc, Abstime start_utc, Abstime end_utc) =
+  sum(duty(wop), 
+     %duty_time_in_interval_calc%(
+        dutycalc,
+        nmax(start_utc, duty_period.%start_utc%),
+        nmin(
+            end_utc,
+            if dutycalc = union_scheduled then duty_period.%end_scheduled_utc% else duty_period.%end_utc%
+        )
+     )
+  )
+  where (duty_period.%is_last_duty_in_duty_period%);
+
+/* doing this on chains: use ...indep instead */
+
+export %duty_time_in_interval%(Abstime start_utc, Abstime end_utc) =
+  %duty_time_in_interval_calc%(caa, start_utc, end_utc);
+
+export %duty_time_in_interval_indep%(Abstime start_utc, Abstime end_utc) =
+  %duty_time_in_interval_calc_indep%(caa, start_utc, end_utc);
+
+export %duty_time_in_interval_indust%(Abstime start_utc, Abstime end_utc) =
+  %duty_time_in_interval_calc%(union, start_utc, end_utc);
+
+export %duty_time_in_interval_indust_indep%(Abstime start_utc, Abstime end_utc) =
+  %duty_time_in_interval_calc_indep%(union, start_utc, end_utc);
+
+
+export %duty_time_in_interval_calc%(DutyCalculation dutycalc, Abstime start_utc, Abstime end_utc) =
+  let current_start = duty.%start_utc%;
+  sum(duty(chain), %duty_time_calc%(dutycalc, start_utc, end_utc))
+  from (current) backwards
+  while(duty.%end_utc% > start_utc)
+  where((duty.%start_utc% = current_start
+          or (duty.%start_utc% < end_utc and duty_period.%is_last_duty_in_duty_period%)
+        ) and
+        not duty.%is_single_leg_standby_callout%
+       );
+
+export %duty_time_in_interval_calc_indep%(DutyCalculation dutycalc, Abstime start_utc, Abstime end_utc) =
+  sum(duty(chain), %duty_time_calc%(dutycalc, start_utc, end_utc))
+  where(duty_period.%start_utc% < end_utc and
+        duty.%end_utc% > start_utc and
+        duty_period.%is_last_duty_in_duty_period% and
+        not duty.%is_single_leg_standby_callout%
+       );
+
+%duty_time_calc%(DutyCalculation dutycalc, Abstime start_utc, Abstime end_utc) =
+   if not duty_period.%is_on_duty% then 0:00
+   else if duty.%is_salary%(dutycalc) and duty.%duty_is_not_valid_overtime% then 0:00
+   else if duty.%is_net_skj%(dutycalc) then
+       %duty_time_in_interval_per_duty_period%(start_utc, end_utc, duty_period.%end_utc%) - duty.%net_reduction_skj_oma16%(start_utc, end_utc)
+   else if dutycalc = union_scheduled then
+       %duty_time_in_interval_per_duty_period%(start_utc, end_utc, duty_period.%end_scheduled_utc%)
+   else %duty_time_in_interval_per_duty_period%(start_utc, end_utc, duty_period.%end_utc%);
+
+/* Same as above, but
+   1. Spans whole roster (_indep)
+   2. Counts scheduled time (scheduled c/o)
+   3. Ignores bought and privately traded
+*/
+export %scheduled_duty_time_in_interval_indust_indep%(Abstime start_utc, Abstime end_utc) =
+  %duty_time_in_interval_calc_indep%(union_scheduled, start_utc, end_utc);
+
+export %duty_time_fast_single_duty_union%(Abstime start_utc, Abstime end_utc) =
+  if duty_period.%is_last_duty_in_duty_period% and duty.%is_on_duty% then
+     %duty_time_in_interval_per_duty_period%(start_utc, end_utc, duty.%end_utc%)
+  else 
+     0:00;
+
+/* Duty time as used in duty time per interval calculations, for current duty period only.
+** Uses SB handling duty time parameter. */
+%duty_time_in_interval_per_duty_period%(Abstime start_utc, Abstime end_utc, Abstime duty_period_end) =
+  let actual_time = overlap(duty_period.%start_utc%, duty_period_end, start_utc, end_utc);
+  if duty.%has_sb_duty_time_override%
+     then default(duty.%sb_duty%, actual_time)
+  else  
+     actual_time - oma16_defs.%standby_duty_time_reduction%(actual_time, duty.%has_standby_with_rest%);
+
+/* Number of extended FDPs the 7 days ending on the day on which the duty starts.*/
+export %num_extended_fdps_in_last_7_days% =
+  let start = duty_period.%last_7_days_start_day_start%;
+  count(duty(chain))
+    from (current)
+    backwards
+    while (fdp.%start_utc% >= start)
+    where (duty_period.%is_on_duty% and
+           %is_extended_fdp%);
+
+/* Duty time in 7 days backwards from and including start day of duty period */
+export %duty_time_in_last_7_days_start_day% =
+  %duty_time_in_interval%(duty_period.%last_7_days_start_day_start%, duty_period.%last_7_days_start_day_end%);
+
+/* Duty time in 7 days backwards from and including one day after start day of duty period */
+export %duty_time_in_last_7_days_end_day% =
+  %duty_time_in_interval%(duty_period.%last_7_days_end_day_start%, duty_period.%last_7_days_end_day_end%);
+
+/* Duty time in 14 days backwards from and including start day of duty period */
+export %duty_time_in_last_14_days_start_day% =
+  %duty_time_in_interval_indep%(duty_period.%last_14_days_start_day_start%, duty_period.%last_14_days_start_day_end%);
+
+/* Duty time in 14 days backwards from and including one day after start day of duty period */
+export %duty_time_in_last_14_days_end_day% =
+  %duty_time_in_interval_indep%(duty_period.%last_14_days_end_day_start%, duty_period.%last_14_days_end_day_end%);
+
+/* Duty time in 28 days backwards from and including start day of duty period */
+export %duty_time_in_last_28_days_start_day% =
+  %duty_time_in_interval_indep%(duty_period.%last_28_days_start_day_start%, duty_period.%last_28_days_start_day_end%);
+
+/* Duty time in 28 days backwards from and including one day after start day of duty period */
+export %duty_time_in_last_28_days_end_day% =
+  %duty_time_in_interval_indep%(duty_period.%last_28_days_end_day_start%, duty_period.%last_28_days_end_day_end%);
+
+/* Redefined in oma16_ccr*/
+%duty_time_in_calendar_year% = 0:00;
+
+
+/* -- Standby (ORO.FTL.225) ----------------------- */
+
+export %standby_reduction_all% = nmax(%airport_standby_reduction%, %standby_reduction%);
+
+/* Airport standby time in excess of 4 hours */
+%airport_standby_reduction% = 0:00;
+
+/* Standby time other than at airport in excess of 6 hours or 8 hours for in-flight rest/split duty */  
+%standby_reduction% = 0:00;
+	
+export %standby_duration% = 
+  duty_period.%time%;
+
+
+export %duty_time_in_28_days_buffer%(Abstime date) = system_db_parameters.%oma16_duty_time_in_28_days_buffer%(date);
+export %duty_time_in_14_days_buffer%(Abstime date) = system_db_parameters.%oma16_duty_time_in_14_days_buffer%(date);
+export %duty_time_in_calendar_year_buffer%(Abstime date) = system_db_parameters.%oma16_duty_time_in_calendar_year_buffer%(date);
+
+export %block_time_in_12_calendar_months_buffer%(Abstime date) = system_db_parameters.%oma16_block_time_in_12_calendar_months_buffer%(date);
+export %block_time_in_calendar_year_buffer%(Abstime date)  = system_db_parameters.%oma16_block_time_in_calendar_year_buffer%(date);
+export %block_time_in_28_days_buffer%(Abstime date) = system_db_parameters.%oma16_block_time_in_28_days_buffer%(date);
+
+
+/*Will be redefined for CCR and CCT*/
+%rest_between_standby% = false;
+  
+/* Cost function for buffers */
+         
+export %minutes_used_oma16_rest_buffer% =
+    default(if %duty_applies_for_rest_buffer% and %oma16_rest_buffer_action% = "Cost" then
+              if (not %rest_between_standby%) then
+                 if (duty_period.%rest_time_after% -
+                    (%min_rest_after_dp% + %oma16_rest_after_duty_buffer%)) >= 0:00 then 0:00
+                 else 
+                   abs(duty_period.%rest_time_after% -
+                      (%min_rest_after_dp% + %oma16_rest_after_duty_buffer%))
+              else
+               if (duty_period.%rest_time_after% - %min_rest_after_dp%) >= 0:00 then 0:00
+               else 
+                   abs(duty_period.%rest_time_after% - %min_rest_after_dp%)
+            else 0:00, 0:00);
+
+%duty_applies_for_rest_buffer% =
+        (duty.%in_pp% or duty.%rest_ends_in_pp%) and
+        duty_period.%is_on_duty% and
+        duty_period.%is_last_duty_in_duty_period% and
+        not duty.%is_single_leg_standby_callout%;
+
+export %rest_after_duty_buffer% =
+  default(if %oma16_rest_buffer_action% = "Rule" then %oma16_rest_after_duty_buffer% else 0:00, 0:00);
+
+table oma16_rest_buffer_lookup(RestBufferOption option_enum) =
+  option_enum -> String %enum_rest_buffer_use_string%;
+  NONE -> "None";
+  RULE_APPLICATION -> "Rule";
+  COST_FUNCTION -> "Cost";
+  - -> "";
+end
+
+
+export enum RestBufferOption =
+  NONE remark "None";
+  RULE_APPLICATION remark "Rule";
+  COST_FUNCTION remark "Cost";
+  remark "Rest Buffer Option";
+end
+
+export %oma16_rest_buffer_action% =
+  %enum_rest_buffer_use_string%(%stability_oma16_rest_buffer_cost_use_p%);
+export %stability_oma16_rest_buffer_cost_use_p% =
+  parameter NONE
+  remark "3.25.1    Use OMA16 rest after duty buffer";
+  
+export %oma16_rest_after_duty_buffer% =
+  parameter 0:00
+  remark "3.25.2    Buffer for OMA16 rest after duty (minutes).";
+  
+export %stability_penalty_for_minute_used_oma16_rest_buffer% = 
+  parameter 0
+  remark "3.25.3    Penalty for every minute of used OMA16 rest buffer.";
+  
+/* end of file */
+

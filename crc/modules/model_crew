@@ -1,0 +1,1149 @@
+/* -*- crc -*-
+ *
+ * Purpose:
+ *   Crew associated defintions, with no dependencies.
+ *
+ * Dependencies
+ *   The module may not be dependent on environment, but only import basic modules like utils,
+ *   and certainly not to fundamental, calendar, leg, duty, crew or keywords.
+ *
+ *   The reason for creating was that defintions for crew needed in all sub systems, were not
+ *  available in manpower modules.
+ *
+ * Created by:
+ *   Lars Westerlind, 30-nov-2015
+ *
+ * Major changes:
+ *
+ */
+
+module model_crew
+
+import base_utils;
+
+/* database lookups */
+
+/* these table names are really deprecated, could be hard coded instead */
+
+export %crew_table% =
+  parameter "crew"
+  remark "ETAB: Basic crew table (id and name)";
+
+export %crew_contract_table% =
+  parameter "crew_contract"
+  remark "ETAB: Crew contract table";
+
+export %crew_contract_set_table% =
+  parameter "crew_contract_set"
+  remark "ETAB: Crew contract set table";
+
+export %crew_employment_table% =
+  parameter "crew_employment"
+  remark "ETAB: Crew employment data table (company, base, rank)";
+
+%crew_document_set_table% =
+  parameter "crew_document_set"
+  remark "ETAB: Crew document set table";
+
+export %crew_document_table% =
+  parameter "crew_document"
+  remark "ETAB: Crew document table";
+
+export %country_required_docs_table% =
+  parameter "country_req_docs"
+  remark "ETAB: Country required documents table";
+
+
+
+
+/*
+ * Crew table general
+ */
+table crew_table(String id) =
+  id ->
+    export String %id_by_id%,
+    export String %empno_by_id%,
+    export String %_firstname_by_id%,
+    export String %_surname_by_id%,
+    export String %sex_by_id%,
+    export Abstime %birthday_by_id%,
+    export String %title_by_id%,
+    export String %_login_name_by_id%,
+    export String %supplementary_info_by_id%,
+    export Abstime %employment_date_by_id%,
+    export Abstime %retirement_date_by_id%,
+    export String %city_of_birth_by_id%,
+    export String %state_of_birth_by_id%,
+    export String %country_of_birth_by_id%;
+  external %crew_table%;
+  id -> id, empno, forenames, name,sex, birthday, title, logname, si,
+        employmentdate, retirementdate, bcity, bstate, bcountry;
+  -  -> void_string, void_string, void_string, void_string, void_string, void_abstime, void_string,
+        void_string, void_string, void_abstime, void_abstime, void_string,
+        void_string, void_string;
+end
+
+
+export %is_temporary_at_date%(String crew_id, Abstime date) =
+  default(locate("Temp",%contract_desc_long%(crew_id, date)) > 0, false);
+
+export %is_crew_admin_at_date%(String crew_id, Abstime date) =
+		default(locate("Admin",%contract_desc_long%(crew_id, date)) > 0, false);
+
+export %is_crew_monthly_parttime_at_date%(String crew_id, Abstime date) =
+		default(
+		  locate("MonthlyParttime",%contract_desc_long%(crew_id, date)) > 0 or
+		  locate("MPT",%contract_desc_long%(crew_id, date)) > 0,
+		false);
+
+/* MFF crew */
+export %is_mff_at_date%(String crew_id, Abstime date) =
+  default(locate("MFF",%contract_desc_long%(crew_id, date)) > 0, false);
+
+/*Corona contract identification*/
+export %has_corona_at_date%(String crew_id, Abstime date) =
+  default(locate("CV19",%contract_desc_long%(crew_id, date)) > 0, false); 
+
+/* Changed the default row to return 2035 as default validto instead of 1986.
+   It should create "saner" behavior". /EKG 090209 */
+table crew_agreement_table(String id, Abstime lookuptime) =
+  id, lookuptime ->
+    export String %agreement_at_date%,
+    export Abstime %agreement_at_date_valid_from%,
+    export Abstime %agreement_at_date_valid_to%,
+    export Int %cycle_start_at_day%;
+  external %crew_contract_table%;
+  crew, (validfrom, validto( -> contract, validfrom, validto, cyclestart;
+   -  ,        -             -> "N/A", 1Jan1986, 31Dec2035, 0;
+end
+
+table crew_agreement_set_table(String crew_id, Abstime lookuptime) =
+  %agreement_at_date%(crew_id, lookuptime) ->
+    export Int %crew_contract_part_time_factor_at_date%,
+    export String %group_at_date%,
+    export Int %pattern_at_date%,
+    export String %contract_parttime_code%,
+    export String %contract_desc_short%,
+    export String %contract_desc_long%,
+    export int %no_of_VA_days%,
+    export String %agreement_group_at_date%;
+  external %crew_contract_set_table%;
+   id -> dutypercent, grouptype, pattern, parttimecode, descshort, desclong, noofvadays, agmtgroup;
+   -  -> 100, void_string, void_int, void_string, void_string, void_string, void_int, void_string;
+end
+
+/* Way to access table for details about a specific agreement ID unrelated to any specific crew */
+table crew_agreement_set_table_direct(String id) =
+  id ->
+    export Int %crew_contract_part_time_factor_direct%,
+    export String %group_direct%,
+    export Int %pattern_direct%,
+    export String %contract_parttime_code_direct%,
+    export String %contract_desc_short_direct%,
+    export String %contract_desc_long_direct%,
+    export int %no_of_VA_days_direct%,
+    export String %agreement_group_direct%;
+  external %crew_contract_set_table%;
+   id -> dutypercent, grouptype, pattern, parttimecode, descshort, desclong, noofvadays, agmtgroup;
+   -  -> 100, void_string, void_int, void_string, void_string, void_string, void_int, void_string;
+end
+
+table agreement_group_ext_table(Abstime lookuptime, Int seq) =
+  seq, lookuptime
+  -> export String %ag_id_by_date_seq%, export String %ag_desc_by_date_seq%;
+  external "agreement_group_set";
+  row_number, (validfrom, validto( -> id, si;
+  -,          -                   -> void_string, void_string;
+end
+
+table crew_agreement_table_change(String crew_id, Int ix, Abstime s, Abstime e) =
+    crew_id, s,     e,            ix           -> export String %crew_chg_agreement%, export Abstime %crew_chg_agm_from%, export Abstime %crew_chg_agm_to%;
+  external %crew_contract_table%;
+    crew, <validto, > validfrom, match_number -> contract,                    validfrom,             validto;
+    -,    -,        -,            -            -> void_string,                 void_abstime,          void_abstime;
+end
+
+/* maximum number of crew contract changes in a month */
+export %crew_chg_agm_max_index% = 10;
+
+export %crew_chg_agreement_from%(String crew_id, Int ix, Abstime s, Abstime e) =
+  nmax(s,%crew_chg_agm_from%(crew_id, ix, s, e));
+
+export %crew_chg_agreement_to%(String crew_id, Int ix, Abstime s, Abstime e) =
+  nmin(e,%crew_chg_agm_to%(crew_id, ix, s, e));
+
+export %crew_chg_agreement_count%(String crew_id, Abstime s, Abstime e) =
+  max(times(%crew_chg_agm_max_index%), base_utils.%ti0%) where (not void(%crew_chg_agreement_from%(crew_id, base_utils.%ti0%, s, e)));
+
+
+export %AGMT_SEL_VG% = 1;
+export %AGMT_SEL_FG% = 2;
+export %AGMT_SEL_FG_PLAIN% = 3;
+export %AGMT_SEL_RETG% = 4; /* retired group */
+export %AGMT_SEL_TEMP% = 5;
+
+set fixed_group_strings = "F", "X", "FV";
+set fixed_group_plain_strings = "F";
+set variable_group_strings = "V";
+set retired_group_strings = "R";
+
+export %in_fixed_group_strings%(String str) =
+  str in fixed_group_strings;
+
+table crew_agreement_table_select(Int agmt_sel, String crew_id, Abstime d) =
+  agmt_sel      -> export %agreement_selected_at_date%;
+  1             -> default(%group_at_date%(crew_id, d) in variable_group_strings, False);
+  2             -> default(%group_at_date%(crew_id, d) in fixed_group_strings, False);
+  3             -> default(%group_at_date%(crew_id, d) in fixed_group_plain_strings, False);
+  4             -> default(%group_at_date%(crew_id, d) in retired_group_strings, False);
+  5             -> %is_temporary_at_date%(crew_id, d);
+end
+
+export %crew_chg_agreement_selected%(Int agmt_sel, String crew_id, Int ix, Abstime s, Abstime e) =
+  %agreement_selected_at_date%(agmt_sel, crew_id, %crew_chg_agreement_from%(crew_id, ix, s, e));
+
+%crew_chg_agmt_emp_qual_date%(String crew_id, Int ix, Abstime s, Abstime e) =
+  if void(%crew_chg_agreement%(crew_id, ix, s, e)) then ""
+  else  %crew_chg_emp_qual_dates%(crew_id, %crew_chg_agreement_from%(crew_id, ix, s, e), %crew_chg_agreement_to%(crew_id, ix, s, e));
+
+export %crew_chg_agmt_emp_qual_dates%(String crew_id, Abstime s, Abstime e) =
+  concat(%crew_chg_agmt_emp_qual_date%(crew_id, 1, s, e),
+         %crew_chg_agmt_emp_qual_date%(crew_id, 2, s, e),
+         %crew_chg_agmt_emp_qual_date%(crew_id, 3, s, e),
+         %crew_chg_agmt_emp_qual_date%(crew_id, 4, s, e),
+         %crew_chg_agmt_emp_qual_date%(crew_id, 5, s, e),
+         %crew_chg_agmt_emp_qual_date%(crew_id, 6, s, e),
+         %crew_chg_agmt_emp_qual_date%(crew_id, 7, s, e),
+         %crew_chg_agmt_emp_qual_date%(crew_id, 8, s, e),
+         %crew_chg_agmt_emp_qual_date%(crew_id, 9, s, e),
+         %crew_chg_agmt_emp_qual_date%(crew_id, 10, s, e));
+
+/*
+ * Standard lookup table
+ */
+table crew_employment_table(String id, Abstime lookuptime) =
+  id, lookuptime
+  -> export String %carrier_at_date_by_id%,
+     export String %company_at_date_by_id%,
+     export String %base_at_date_by_id%,
+     export String %crewrank_at_date_by_id%,
+     export String %titlerank_at_date_by_id%,
+     export String %basic_region_at_date_by_id%,
+     export String %civicstation_at_date_by_id%,
+     export String %station_at_date_by_id%,
+     export String %country_at_date_by_id%,
+     export String %extperkey_at_date_by_id%,
+     export Abstime %employment_start_by_id%,
+     export Abstime %employment_end_by_id%,
+     export String %planning_group_at_date_by_id%;
+  external %crew_employment_table%;
+  crew, (validfrom, validto( -> carrier, company, base, crewrank,
+                                titlerank, region, civicstation, station,
+                                country, extperkey, validfrom, validto, planning_group;
+  -, - -> void_string, void_string, void_string, void_string,
+          void_string, void_string, void_string, void_string,
+          void_string, void_string, void_abstime, void_abstime, void_string;
+end
+
+table last_crew_employment_table(String id) =
+  id ->
+  export Abstime %last_employment_end_by_id%;
+  external %crew_employment_table%;
+  crew -> max(validto);
+end
+
+table crew_per_extperkey_table(String extperkey, Abstime lookupdate) =
+  extperkey, lookupdate -> export String %crew_id_from_extperkey%;
+  external %crew_employment_table%;
+  extperkey, (validfrom, validto( -> crew;
+  -, - -> void_string;
+end
+
+table crew_per_base_and_period_table(String id, String base, Abstime st, Abstime et) =
+  id, st, et, base -> export String %crew_id_from_base_period%;
+  external %crew_employment_table%;
+  crew, <=validto, >=validfrom, base -> extperkey;
+  -, -, -, - -> void_string;
+end
+
+/* Employment start/end considering partial coverage of pp.*/
+table crew_employment_limits_table(String id, AbsTime st, AbsTime et) =
+  id, st, et
+  -> export Abstime %employment_first_start_in_period%,
+     export Abstime %employment_last_end_in_period%;
+  external %crew_employment_table%;
+  crew, <validto, >=validfrom
+  -> min(validfrom),
+     max(validto);
+end
+
+table crew_employment_table_change(String crew_id, Int ix, Abstime s, Abstime e) =
+    crew_id, s,     e,            ix           ->
+      export String %crew_chg_rank%, export Abstime %crew_chg_emp_from%, export Abstime %crew_chg_emp_to%,
+      export String %crew_chg_planning_group%, export String %crew_chg_base%, export String %crew_chg_country%;
+  external %crew_employment_table%;
+    crew, <validto, > validfrom, match_number ->  crewrank, validfrom, validto, planning_group, base, country ;
+    -,    -,        -,            -            -> void_string, void_abstime, void_abstime, void_string, void_string, void_string;
+end
+
+/* maximum number of crew contract changes in a month */
+export %crew_chg_emp_max_index% = 3;
+
+export %crew_chg_employment_from%(String crew_id, Int ix, Abstime s, Abstime e) =
+  nmax(s,%crew_chg_emp_from%(crew_id, ix, s, e));
+
+export %crew_chg_employment_to%(String crew_id, Int ix, Abstime s, Abstime e) =
+  nmin(e,%crew_chg_emp_to%(crew_id, ix, s, e));
+
+export %crew_chg_employment_count%(String crew_id, Abstime s, Abstime e) =
+  max(times(%crew_chg_emp_max_index%), base_utils.%ti0%) where (not void(%crew_chg_employment_from%(crew_id, base_utils.%ti0%, s, e)));
+
+%crew_chg_emp_qual_date%(String crew_id, Int ix, Abstime s, Abstime e) =
+  if void(%crew_chg_rank%(crew_id, ix, s, e)) then ""
+  else  %crew_chg_qualification_dates%(crew_id, %crew_chg_employment_from%(crew_id, ix, s, e), %crew_chg_employment_to%(crew_id, ix, s, e));
+
+export %crew_chg_emp_qual_dates%(String crew_id, Abstime s, Abstime e) =
+  concat(%crew_chg_emp_qual_date%(crew_id, 1, s, e),
+         %crew_chg_emp_qual_date%(crew_id, 2, s, e),
+         %crew_chg_emp_qual_date%(crew_id, 3, s, e));
+
+
+/* crew qualifications, in a general form usable also in manpower */
+table crew_qualification_table(String crew_id, String qual_typ, Abstime d, Int seq) =
+  crew_id, qual_typ, d, seq ->
+      export String %qln%, Abstime %qln_valid_from%, Abstime %qln_valid_to%;
+  external "crew_qualification";
+  crew, qual_typ, (validfrom, validto(, match_number ->
+    qual_subtype, validfrom, validto;
+  -, -, -, - -> void_string, void_abstime, void_abstime;
+end
+
+table crew_qualification_table_unf(String crew_id, Abstime d, Int seq) =
+  crew_id, d, seq ->
+      String %qln_typ_unf%, String %qln_subtype_unf%, Abstime %qln_valid_from_unf%, Abstime %qln_valid_to_unf%;
+  external "crew_qualification";
+  crew, (validfrom, validto(, match_number ->
+    qual_typ, qual_subtype, validfrom, validto;
+  -, -, - -> void_string, void_string, void_abstime, void_abstime;
+end
+
+export %qln_unf%(String crew_id, Abstime d, Int seq) =
+  concat(%qln_typ_unf%(crew_id, d, seq), "+", %qln_subtype_unf%(crew_id, d, seq));
+
+export %crew_qual_limit% = 100;
+%ac_qual_literal% = "ACQUAL";
+
+export %has_qual_at_date%(String crew_id, String qual_typ, String qual, Abstime d) =
+  count(times(%crew_qual_limit%))
+  where (%qln%(crew_id, qual_typ, d, base_utils.%ti0%) = qual)
+  while (not void(%qln%(crew_id, qual_typ, d, base_utils.%ti0%))) >0;
+
+export %has_ac_qual_at_date%(String crew_id, String ac_qual, Abstime d) =
+  %has_qual_at_date%(crew_id, %ac_qual_literal%, ac_qual, d);
+
+table crew_qualification_table_change(String crew_id, Int ix, Abstime s, Abstime e) =
+    crew_id, s,     e,            ix           ->
+        export String %crew_chg_qual_typ%, export String %crew_chg_qual_subtype%, export Abstime %crew_chg_qual_from%, export Abstime %crew_chg_qual_to%;
+  external "crew_qualification";
+    crew, <validto, > validfrom, match_number  -> qual_typ,    qual_subtype, validfrom,    validto;
+    -,    -,        -,            -            -> void_string, void_string,  void_abstime, void_abstime;
+end
+
+/* maximum number of crew contract changes in a month */
+export %crew_chg_qual_max_index% = 3;
+
+export %crew_chg_qualification_from%(String crew_id, Int ix, Abstime s, Abstime e) =
+  nmax(s,%crew_chg_qual_from%(crew_id, ix, s, e));
+
+export %crew_chg_qualification_to%(String crew_id, Int ix, Abstime s, Abstime e) =
+  nmin(e,%crew_chg_qual_to%(crew_id, ix, s, e));
+
+export %crew_chg_qualification_count%(String crew_id, Abstime s, Abstime e) =
+  max(times(%crew_chg_qual_max_index%), base_utils.%ti0%) where (not void(%crew_chg_qualification_from%(crew_id, base_utils.%ti0%, s, e)));
+
+%crew_chg_qualification_date%(String before, String crew_id, Int ix, Abstime s, Abstime e) =
+  if void(%crew_chg_qual_typ%(crew_id, ix, s, e)) then before
+  else base_utils.%append_nodup_date%(before, %crew_chg_qualification_from%(crew_id, ix, s, e));
+
+export %crew_chg_qualification_dates%(String crew_id, Abstime s, Abstime e) =
+  %crew_chg_qualification_date%(
+    %crew_chg_qualification_date%(
+       %crew_chg_qualification_date%("",crew_id, 3, s, e)
+    , crew_id, 2, s, e)
+  , crew_id, 3, s, e);
+
+
+
+/* basic agreement groups (present in crew contract table) */
+export %AGMT_GROUP_QA_FD% = "QA_FD_AG";
+export %AGMT_GROUP_QA_CC% = "QA_CC_AG";
+
+export %AGMT_GROUP_SVS_FD% = "SVS_FD_AG";
+export %AGMT_GROUP_SVS_CC% = "SVS_CC_AG";
+export %AGMT_GROUP_SKD_FD% = "SKD_FD_AG";
+export %AGMT_GROUP_SKD_CC% = "SKD_CC_AG";
+export %AGMT_GROUP_SKS_FD% = "SKS_FD_AG";
+export %AGMT_GROUP_SKS_CC% = "SKS_CC_AG";
+export %AGMT_GROUP_SKN_FD% = "SKN_FD_AG";
+export %AGMT_GROUP_NKF_CC% = "NKF_CC_AG";
+export %AGMT_GROUP_SNK_CC% = "SNK_CC_AG";
+/*export %AGMT_GROUP_SKI_FD% = "SKI_FD_AG"; */
+export %AGMT_GROUP_SKK_CC% = "SKK_CC_AG";
+export %AGMT_GROUP_SKJ_CC% = "SKJ_CC_AG";
+export %AGMT_GROUP_RETIRED%= "RETIRED_AG";
+export %AGMT_GROUP_SKID_FD% ="SKID_FD_AG";
+export %AGMT_GROUP_SKIS_FD% ="SKIS_FD_AG";
+export %AGMT_GROUP_SKIN_FD% ="SKIN_FD_AG";
+
+/* derived agreement groups (combinations of groups) */
+export %AGMT_GROUP_QA%       = "QA_AG"; /* Cimber */
+
+
+export %AGMT_GROUP_SVS%      = "SVS_AG"; /* SAS LINK */
+
+export %AGMT_GROUP_SKD%      = "SKD_AG"; /* SAS DK */
+export %AGMT_GROUP_SKS%      = "SKS_AG"; /* SAS SE */
+export %AGMT_GROUP_SKN%      = "SKN_AG"; /* SAS NO */
+export %AGMT_GROUP_SKN_CC%   = "SKN_CC_AG"; /* SAS CC NO */
+export %AGMT_GROUP_SK%       = "SK_AG" ; /* "pure" SAS */
+export %AGMT_GROUP_SCAND%    = "SK_SCAND_AG" ; /* Scandinavian SAS*/
+export %AGMT_GROUP_DK%       = "DK_AG" ; /* Danish */
+export %AGMT_GROUP_SE%       = "SE_AG" ; /* Swedish */
+export %AGMT_GROUP_NO%       = "NO_AG" ; /* Norway */
+export %AGMT_GROUP_SK_FD_SH% = "SK_FD_SH_AG"; /* SAS Flightdeck Shorthaul */
+export %AGMT_GROUP_SK_FD%    = "SK_FD_AG";    /* SAS Flightdeck */
+export %AGMT_GROUP_SK_CC%    = "SK_CC_AG";    /* SAS Cabin Crew */
+export %AGMT_GROUP_SKI_FD%   = "SKI_FD_AG"; /* SAS SKI FD */
+
+/* differentiated agreement groups in speical cases with qualification (currently CRJ for FD only) */
+export %AG_QUAL_SKD_FD_CRJ% = "SKD_FD_CRJ_ACQ"; /* SKD FD, flying for Cimber */
+export %AG_QUAL_SKD_FD_OTH% = "SKD_FD_OTH_ACQ"; /* SKD FD, not flying for Cimber */
+export %AG_QUAL_SKS_FD_CRJ% = "SKS_FD_CRJ_ACQ"; /* SKS FD, flying for Cimber */
+export %AG_QUAL_SKS_FD_OTH% = "SKS_FD_OTH_ACQ"; /* SKS FD, not flying for Cimber */
+
+
+/*
+** basic group: the agreement group for the crew
+** %agmt_group_id% INVARIANT key that can be used in table defintions. New numbers may be added, but old should not be changed
+** %agmt_group_desc%
+** %agmt_group_match_str% derived agreement groups matching the basic group
+*/
+table agmt_group_tbl(String basic_group) =
+  basic_group -> export %agmt_group_inv_enum%, export %agmt_group_desc%, export %agmt_group_match_str%;
+  "QA_FD_AG"  -> 1, "Flightdeck Cimber",       "QA_AG,DK_AG";
+  "QA_CC_AG"  -> 2, "Cabin Crew Cimber",       "QA_AG,DK_AG";
+  "SKD_FD_AG" -> 3, "Flightdeck SH SAS DK",    "SK_SCAND_AG,SKD_AG,DK_AG,SK_FD_AG,SK_FD_SH_AG,SK_AG";
+  "SKD_CC_AG" -> 4, "Cabin Crew SAS DK",       "SK_SCAND_AG,SKD_AG,DK_AG,SK_CC_AG,SK_AG";
+  "SKS_FD_AG" -> 5, "Flightdeck SH SAS SE",    "SK_SCAND_AG,SKS_AG,SE_AG,SK_FD_AG,SK_FD_SH_AG,SK_AG";
+  "SKS_CC_AG" -> 6, "Cabin Crew SAS SE",       "SK_SCAND_AG,SKS_AG,SE_AG,SK_CC_AG,SK_AG";
+  "SKN_FD_AG" -> 7, "Flightdeck SH SAS NO",    "SK_SCAND_AG,SKN_AG,NO_AG,,SK_FD_AG,SK_FD_SH_AG,SK_AG";
+  "SKN_CC_AG" -> 8, "Cabin Crew SAS NO",       "SK_SCAND_AG,SKN_AG,NO_AG,SK_CC_AG,SK_AG";
+/*  "SKI_FD_AG" -> 9, "Flightdeck LH SAS",       "SK_SCAND_AG,SK_AG"; not basic group any longer */
+  "NKF_CC_AG" -> 10,"Cabin Crew SAS-NKF NO",   "SK_SCAND_AG,SKN_AG,SKN_CC_AG,NO_AG,SK_CC_AG,SK_AG";
+  "SNK_CC_AG" -> 11,"Cabin Crew SAS-SNK NO",   "SK_SCAND_AG,SKN_AG,SKN_CC_AG,NO_AG,SK_CC_AG,SK_AG";
+  "SKK_CC_AG" -> 12,"Cabin Crew SAS CN",       "SK_AG";
+  "SKJ_CC_AG" -> 13,"Cabin Crew SAS JP",       "SK_AG";
+  "RETIRED_AG"-> 14,"Retired",                 "";
+  "SKID_FD_AG"-> 15,"Flightdeck LH SAS DK",    "SK_SCAND_AG,SKI_FD_AG,SK_FD_AG,SK_AG";
+  "SKIS_FD_AG"-> 16,"Flightdeck LH SAS SE",    "SK_SCAND_AG,SKI_FD_AG,SK_FD_AG,SK_AG";
+  "SKIN_FD_AG"-> 17,"Flightdeck LH SAS NO",    "SK_SCAND_AG,SKI_FD_AG,SK_FD_AG,SK_AG";
+
+
+
+
+  "SVS_FD_AG" -> 18, "Flightdeck SAS LINK",    "SVS_AG";
+  "SVS_CC_AG" -> 19, "Cabin Crew SAS LINK",    "SVS_AG";
+
+  -           -> 0, "Unknown",                 "";
+end
+
+
+table agmt_group_set_table(String id) =
+  id ->
+     String  %ext_agmt_group_id%,
+     Abstime %ext_agmt_grp_validfrom%,
+     Abstime %ext_agmt_grp_validto%,
+     String  %ext_agmt_grp_desc%,
+     String  %ext_agmt_group_ac_type_restr%;
+  external "agmt_group_set";
+
+  id -> id, validfrom, validto, si, ac_type_restr;
+  -  -> void_string, void_abstime, void_abstime, void_string, void_string;
+end
+
+export %agmt_group_inv_enum_at_date%(String crew_id, Abstime date) =
+  %agmt_group_inv_enum%(%agreement_group_at_date%(crew_id, date));
+
+%agmt_group_has_ac_type_restr%(String ac_type, String agmt_group) =
+ base_utils.%semicol_sep_exact_match%(ac_type,
+                                    %ext_agmt_group_ac_type_restr%(agmt_group));
+
+export %agmt_group_has_ac_type_restr_at_date%(String crew_id,
+                                              Abstime lookupdate,
+                                              String ac_type) =
+     %agmt_group_has_ac_type_restr%(ac_type,
+                              %agreement_group_at_date%(crew_id, lookupdate));
+
+
+
+
+
+export %agmt_group_matching%(String crew_group, String rule_group) =
+  if crew_group=rule_group then
+    true
+  else
+    locate(rule_group, %agmt_group_match_str%(crew_group)) >0;
+
+export %has_agmt_group_qa_fd%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_QA_FD%);
+export %has_agmt_group_qa_cc%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_QA_CC%);
+
+export %has_agmt_group_svs_fd%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SVS_FD%);
+export %has_agmt_group_svs_cc%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SVS_CC%);
+export %has_agmt_group_skd_fd%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SKD_FD%);
+export %has_agmt_group_skd_cc%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SKD_CC%);
+export %has_agmt_group_sks_fd%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SKS_FD%);
+export %has_agmt_group_sks_cc%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SKS_CC%);
+export %has_agmt_group_skn_fd%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SKN_FD%);
+export %has_agmt_group_nkf_cc%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_NKF_CC%);
+export %has_agmt_group_snk_cc%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SNK_CC%);
+export %has_agmt_group_skk_cc%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SKK_CC%);
+export %has_agmt_group_skj_cc%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SKJ_CC%);
+export %has_agmt_group_skid_fd%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SKID_FD%);
+export %has_agmt_group_skis_fd%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SKIS_FD%);
+export %has_agmt_group_skin_fd%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SKIN_FD%);
+
+/* derived agreement groups (combinations of groups) */
+export %has_agmt_group_qa%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_QA%);
+
+export %has_agmt_group_svs%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SVS%);
+export %has_agmt_group_skd%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SKD%);
+export %has_agmt_group_sks%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SKS%);
+export %has_agmt_group_skn%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SKN%);
+export %has_agmt_group_skn_cc%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SKN_CC%);
+export %has_agmt_group_ski_fd%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SKI_FD%);
+export %has_agmt_group_sk%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SK%);
+export %has_agmt_group_sk_scand%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SCAND%);
+export %has_agmt_group_dk%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_DK%);
+export %has_agmt_group_se%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SE%);
+export %has_agmt_group_no%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_NO%);
+export %has_agmt_group_sk_cc%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SK_CC%);
+export %has_agmt_group_sk_fd%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SK_FD%);
+export %has_agmt_group_sk_sh_fd%(String crew_id, Abstime lookupdate) =
+  %agmt_group_matching%(%agreement_group_at_date%(crew_id, lookupdate), model_crew.%AGMT_GROUP_SK_FD_SH%);
+
+export %agmt_qual_basic_group_at_date%(String crew_id, Abstime d) =
+  let ag = %agreement_group_at_date%(crew_id, d);
+  if ag=%AGMT_GROUP_SKD_FD% then
+    if %has_ac_qual_at_date%(crew_id, "CJ", d) then %AG_QUAL_SKD_FD_CRJ% else %AG_QUAL_SKD_FD_OTH%
+  else if ag=%AGMT_GROUP_SKS_FD% then
+    if %has_ac_qual_at_date%(crew_id, "CJ", d) then %AG_QUAL_SKS_FD_CRJ% else %AG_QUAL_SKS_FD_OTH%
+  else ag;
+
+export %has_agmt_qual_skd_fd_crj_at_date%(String crew_id, Abstime d) =
+  %agmt_qual_basic_group_at_date%(crew_id, d) = %AG_QUAL_SKD_FD_CRJ%;
+
+export %has_agmt_qual_skd_fd_oth_at_date%(String crew_id, Abstime d) =
+  %agmt_qual_basic_group_at_date%(crew_id, d) = %AG_QUAL_SKD_FD_OTH%;
+
+  export %has_agmt_qual_sks_fd_crj_at_date%(String crew_id, Abstime d) =
+  %agmt_qual_basic_group_at_date%(crew_id, d) = %AG_QUAL_SKS_FD_CRJ%;
+
+export %has_agmt_qual_sks_fd_oth_at_date%(String crew_id, Abstime d) =
+  %agmt_qual_basic_group_at_date%(crew_id, d) = %AG_QUAL_SKS_FD_OTH%;
+
+export %has_agmt_qual_fd_crj_at_date%(String crew_id, Abstime d) =
+  %has_agmt_qual_skd_fd_crj_at_date%(crew_id, d) or %has_agmt_qual_sks_fd_crj_at_date%(crew_id, d) or %has_agmt_group_qa_fd%(crew_id, d);
+
+
+/***********************************************
+**
+** Crew documents
+**
+**************************************************/
+
+/****** Basic database lookup *******/
+/* lookup by keys */
+table crew_document_table(String crew_id, String typ, String subtype, Abstime date) =
+  crew_id, typ, subtype, date ->
+    export String %doc_subtype%, String %doc_no%, String %main_doc_no%, String %doc_issuer%;
+  external %crew_document_table%;
+  crew, doc_typ, doc_subtype, (validfrom, validto( ->
+    doc_subtype, docno, maindocno, issuer;
+   -, -, -, - -> void_string, void_string, void_string, void_string;
+end
+
+table crew_document_table_ac_qual(String crew_id, String typ, String subtype, Abstime date, String ac_qual) =
+  crew_id, typ, subtype, ac_qual, date ->
+    export String %doc_subtype_acq%, String %doc_no_acq%, String %main_doc_no_acq%, String %doc_issuer_acq%;
+  external %crew_document_table%;
+  crew, doc_typ, doc_subtype, ac_qual, (validfrom, validto( ->
+    doc_subtype, docno, maindocno, issuer;
+   -, -, -, -, - -> void_string, void_string, void_string, void_string;
+end
+
+/* lookup for iteration */
+table crew_document_type_ix_tbl(String crew_id, String typ, Abstime date, Int ix) =
+  crew_id, typ, date, ix ->
+    export String %crew_doc_subtype_ix%, Abstime %crew_doc_validfrom_ix%, Abstime %crew_doc_validto_ix%,
+      String %crew_doc_no_ix%, String %crew_main_doc_no_ix%, String %crew_doc_issuer_ix%,
+      String %crew_doc_si_ix%, String %crew_doc_ac_qual_ix%;
+  external %crew_document_table%;
+  crew, doc_typ, (validfrom,validto(, match_number ->
+       doc_subtype, validfrom,    validto,      docno,       maindocno,   issuer,      si,          ac_qual;
+  -, -, -, - -> "", void_abstime, void_abstime, void_string, void_string, void_string, void_string, void_string;
+end
+
+/* limit for iteration */
+table crew_document_type_max_ix_tbl(String crew_id, String typ, Abstime date) =
+  crew_id, typ, date ->
+    export Int %max_ix_crew_doc%;
+  external %crew_document_table%;
+  crew, doc_typ, (validfrom, validto( ->  count(row_number);
+end
+
+table crew_document_count_in_interval_tbl(String crew_id, Abstime i_start, Abstime i_end) =
+  crew_id, i_start, i_end ->
+    export Int %number_of_doc%;
+  external %crew_document_table%;
+  crew, < validto, > validfrom -> count(row_number);
+end
+
+/* iterate all documents for a crew on a day */
+table crew_all_document_tbl(String crew_id, Abstime date, Int ix) =
+  ix, crew_id, date ->
+    export String %all_doc_type%, export String %all_doc_subtype%,
+    export String %all_doc_nr%, export Abstime %all_doc_exp_date%,
+    export String %all_doc_issuer%;
+  external %crew_document_table%;
+  match_number, crew, (validfrom, validto( ->
+    doc_typ, doc_subtype, docno, validto, issuer;
+  -, -, - -> void_string, void_string, void_string, void_abstime, void_string;
+end
+
+/* Iterate all documents for a crew in airside */
+table crew_all_document_as_tbl(String crew_id, Abstime date, Int ix) =
+  ix, crew_id, date ->
+    export String %all_doc_type_as%, export String %all_doc_subtype_as%,
+    export String %all_doc_nr_as%, export Abstime %all_doc_start_date_as%, export Abstime %all_doc_exp_date_as%, 
+    export String %all_doc_main_doc_no_as%, export String %all_doc_issuer_as%;
+  external %crew_document_table%;
+  match_number, crew, (validfrom, validto( ->
+    doc_typ, doc_subtype, docno, validfrom, validto, maindocno, issuer;
+  -, -, - -> void_string, void_string, void_string, void_abstime, void_abstime, void_string, void_string;
+end
+
+/* lookup by document number, i.e. passport number */
+table crew_document_by_docno_tbl(String crew_id, String typ, Abstime date, String docno) =
+  crew_id, typ, docno, date ->
+    String %_docno_subtype%, Abstime %_docno_validfrom%, Abstime %_docno_validto%, String %_docno_issuer%;
+  external %crew_document_table%;
+  crew, doc_typ, docno, (validfrom, validto( ->
+    doc_subtype, validfrom, validto, issuer;
+  -,    -,       -,     -                    ->
+    void_string, void_abstime, void_abstime, void_string;
+end
+
+/* lookup document of a type with latest expiry date */
+table doc_max_validto_date(String crew_id, String doc_type, Abstime date) =
+  crew_id, doc_type, date ->
+    Abstime %_doc_type_max_validto_date%;
+  external %crew_document_table%;
+  crew, doc_typ, >= validfrom -> max(validto);
+end
+
+/* lookup document and ac_qual of a type with latest expiry date */
+table doc_acqual_max_validto_date(String crew_id, String doc_type, String doc_subtype, String ac_qual, Abstime date) =
+  crew_id, doc_type, doc_subtype, date, ac_qual ->
+    export Abstime %_doc_acqual_type_max_validto_date%;
+  external %crew_document_table%;
+  crew, doc_typ, doc_subtype, >= validfrom, ac_qual -> max(validto);
+end
+
+/* lookup document of a subtype with latest expiry date */
+table doc_subtype_max_validto_date(String crew_id, String doc_type, String doc_subtype, Abstime date) =
+  crew_id, doc_type, doc_subtype, date ->
+    Abstime %_doc_subtype_max_validto_date%;
+  external %crew_document_table%;
+  crew, doc_typ, doc_subtype, >= validfrom -> max(validto);
+end
+
+/* lookup document of a subtype and ac qual with latest expiry date */
+table doc_subtype_ac_qual_max_validto_date(String crew_id, String doc_type, String doc_subtype, String ac_qual, Abstime date) =
+  crew_id, doc_type, doc_subtype, ac_qual, date ->
+    Abstime %_doc_subtype_ac_qual_max_validto_date%;
+  external %crew_document_table%;
+  crew, doc_typ, doc_subtype, ac_qual, >= validfrom -> max(validto);
+end
+
+/* lookup document of a subtype and ac qual with earliest expiry date */
+table doc_subtype_ac_qual_validto_date(String crew_id, String doc_type, String doc_subtype, String ac_qual) =
+  crew_id, doc_type, doc_subtype, ac_qual ->
+    export Abstime %doc_subtype_ac_qual_validto_date%;
+  external %crew_document_table%;
+  crew, doc_typ, doc_subtype, ac_qual -> min(validto);
+end
+
+/* lookup data for latest of a subtype */
+table document_expiry_date_subtype(String crew_id, String doc_type, String doc_subtype, Abstime validto) =
+  crew_id, doc_type, doc_subtype, validto ->
+    Abstime %_docsubtypexp_validfrom%,
+    String %_docsubtypexp_docno%,
+    String %_docsubtypexp_main_docno%,
+    String %_docsubtypexp_issuer%,
+    String %_docsubtypexp_si%,
+    String %_docsubtypexp_acq%; /* Used for ac-qual for LC and PC/OPC */
+  external %crew_document_table%;
+  crew, doc_typ, doc_subtype, validto -> validfrom, docno, maindocno, issuer, si, ac_qual;
+  -,    -,       -,           -       -> void_abstime, "", "",        "",     "", "";
+end
+
+/* lookup data for latest of a type */
+table document_expiry_date_type(String crew_id, String doc_type, Abstime validto) =
+  crew_id, doc_type, validto ->
+    String %_doctypexp_subtype%,
+    Abstime %_doctypexp_validfrom%,
+    String %_doctypexp_docno%,
+    String %_doctypexp_main_docno%,
+    String %_doctypexp_issuer%,
+    String %_doctypexp_si%,
+    String %_doctypexp_acq%;
+  external %crew_document_table%;
+  crew, doc_typ, validto -> doc_subtype, validfrom, docno, maindocno, issuer, si, ac_qual;
+    -,  -,       -       -> void_string, void_abstime, "", "",        "",     "", "";
+end
+
+table document_subtyp_by_country_max_tbl(String crew_id, String doc_type, String country, Abstime d) =
+    crew_id, doc_type, concat(country,","), concat(country,",z"),d -> Abstime %_doc_subtyp_per_country_max_validto%;
+  external %crew_document_table%;
+    crew, doc_typ, <= doc_subtype, >= doc_subtype, >=validfrom -> max(validto);
+end
+
+table document_subtyp_by_country_tbl(String crew_id, String doc_type, String country, Abstime valid_to) =
+    crew_id, doc_type, concat(country,","), concat(country,",z"), valid_to ->
+        String %_doc_subtyp_per_country_subtyp%,
+        Abstime %_doc_subtyp_per_country_validfrom%,
+        String %_doc_subtyp_per_country_docno%,
+        String %_doc_subtyp_per_country_maindocno%,
+        String %_doc_subtyp_per_country_issuer%,
+        String %_doc_subtyp_per_country_si%,
+        String %_doc_subtyp_per_country_acq%;
+  external %crew_document_table%;
+    crew, doc_typ, <= doc_subtype, >= doc_subtype, validto -> doc_subtype, validfrom, docno, maindocno, issuer, si, ac_qual;
+    -,    -,       -,              -,              -       -> void_string, void_abstime, "", "",        "",     "", "";
+end
+
+/* note that this table keeps one set of names per holder and date, which in special cases is insufficient */
+table passport_name_table(String crew_id, Abstime d) =
+  crew_id,
+  d ->
+    String %passport_lastname%,
+    String %passport_firstname%;
+  external "crew_passport";
+  crew, (validfrom, validto(
+  ->
+  lastname, firstname;
+  -, - -> void_string, void_string;
+end
+
+/* constants for document tupe; add when required */
+export %doctyp_passport%    = "PASSPORT";
+export %doctyp_visa%        = "VISA";
+export %doctyp_vaccination% = "VACCINATION";
+export %doctyp_medical%     = "MEDICAL";
+export %doctyp_license%     = "LICENCE";
+export %doctyp_recurrent%   = "REC";
+
+/* docitem is a key to decide how a document should be presented, i.e. what item or similar should be shown */
+export %docitem_subtype%     = 1;
+export %docitem_docno%       = 2;
+export %docitem_maindocno%   = 3;
+export %docitem_issuer%      = 4;
+export %docitem_nationality% = 5;
+export %docitem_acqual%      = 6;
+export %docitem_si%          = 7;
+export %docitem_validfrom%   = 8; /* NB: string form is here used */
+export %docitem_validto%     = 9; /* NB: string form used */
+
+/* presentation of lookup by keys */
+table crew_document_item_tbl(Int item_ix, String crew_id, String typ, String subtyp, Abstime date) =
+  item_ix -> %doc_item%;
+  1       -> %doc_subtype%(crew_id, typ, subtyp, date);
+  2       -> %doc_no%(crew_id, typ, subtyp, date);
+  3       -> %main_doc_no%(crew_id, typ, subtyp, date);
+  4       -> %doc_issuer%(crew_id, typ, subtyp, date);
+  5       -> base_utils.%string_extract%(%doc_subtype%(crew_id, typ, subtyp, date),1); /* nationality of passport and visa (at least) */
+  -       -> void_string;
+end
+
+/* presentation of lookup by document number. 2 and 3 have no relevance */
+table crew_document_no_item_tbl(Int item_ix, String crew_id, String typ, String docno, Abstime date ) =
+  item_ix -> %crew_doc_item_no%;
+  1       -> %_docno_subtype%(crew_id, typ, date, docno);
+  4       -> %_docno_issuer%(crew_id, typ, date, docno);
+  5       -> base_utils.%string_extract%(%_docno_subtype%(crew_id, typ, date, docno),1);
+  -       -> void_string;
+end
+
+/* presentation of lookup in iteration */
+table crew_document_type_item_ix_tbl(Int item_ix, String crew_id, String typ, Abstime date, Int ix) =
+  item_ix -> %crew_doc_item_ix%;
+  1       -> %crew_doc_subtype_ix%(crew_id, typ, date, ix);
+  2       -> %crew_doc_no_ix%(crew_id, typ, date, ix);
+  3       -> %crew_main_doc_no_ix%(crew_id, typ, date, ix);
+  4       -> %crew_doc_issuer_ix%(crew_id, typ, date, ix);
+  5       -> base_utils.%string_extract%(%crew_doc_subtype_ix%(crew_id, typ, date, ix),1); /* nationality of passport and visa (at least) */
+  6       -> %crew_doc_ac_qual_ix%(crew_id, typ, date, ix);
+  7       -> %crew_doc_si_ix%(crew_id, typ, date, ix);
+  8       -> base_utils.%abstime2str_raw%(%crew_doc_validfrom_ix%(crew_id, typ, date, ix));
+  9       -> base_utils.%abstime2str_raw%( %crew_doc_validto_ix%(crew_id, typ, date, ix));
+  -       -> void_string;
+end
+
+/* get data per latest expiry of subtype */
+table crew_document_subtype_exp_tbl(Int item_ix, String crew_id, String typ, String subtype, Abstime date) =
+  item_ix -> %crew_document_subtype_exp%;
+  1       -> subtype;
+  2       -> %_docsubtypexp_docno%(crew_id, typ, subtype, %_doc_subtype_max_validto_date%(crew_id, typ, subtype, date));
+  3       -> %_docsubtypexp_main_docno%(crew_id, typ, subtype, %_doc_subtype_max_validto_date%(crew_id, typ, subtype, date));
+  4       -> %_docsubtypexp_issuer%(crew_id, typ, subtype, %_doc_subtype_max_validto_date%(crew_id, typ, subtype, date));
+  5       -> base_utils.%string_extract%(subtype,1);
+  6       -> %_docsubtypexp_acq%(crew_id, typ, subtype, %_doc_subtype_max_validto_date%(crew_id, typ, subtype, date));
+  7       -> %_docsubtypexp_si%(crew_id, typ, subtype, %_doc_subtype_max_validto_date%(crew_id, typ, subtype, date));
+  8       -> base_utils.%abstime2str_raw%(%_docsubtypexp_validfrom%(crew_id, typ, subtype, %_doc_subtype_max_validto_date%(crew_id, typ, subtype, date)));
+  9       -> base_utils.%abstime2str_raw%(%_doc_subtype_max_validto_date%(crew_id, typ, subtype, date));
+  -       -> void_string;
+end
+
+/* get data per latest expiry of type */
+table crew_document_type_exp_tbl(Int item_ix, String crew_id, String typ, Abstime date) =
+  item_ix -> export %crew_document_type_exp%;
+  1       -> %_doctypexp_subtype%(crew_id, typ, %_doc_type_max_validto_date%(crew_id, typ, date));
+  2       -> %_doctypexp_docno%(crew_id, typ, %_doc_type_max_validto_date%(crew_id, typ, date));
+  3       -> %_doctypexp_main_docno%(crew_id, typ, %_doc_type_max_validto_date%(crew_id, typ, date));
+  4       -> %_doctypexp_issuer%(crew_id, typ, %_doc_type_max_validto_date%(crew_id, typ, date));
+  5       -> base_utils.%string_extract%(%_doctypexp_subtype%(crew_id, typ, %_doc_type_max_validto_date%(crew_id, typ, date)),1);
+  6       -> %_doctypexp_acq%(crew_id, typ, %_doc_type_max_validto_date%(crew_id, typ, date));
+  7       -> %_doctypexp_si%(crew_id, typ, %_doc_type_max_validto_date%(crew_id, typ, date));
+  8       -> base_utils.%abstime2str_raw%(%_doctypexp_validfrom%(crew_id, typ, %_doc_type_max_validto_date%(crew_id, typ, date)));
+  9       -> base_utils.%abstime2str_raw%(%_doc_type_max_validto_date%(crew_id, typ, date));
+  -       -> void_string;
+end
+
+/* lookup per country, in case country is part of subtype */
+table crew_document_per_country_tbl(Int item_ix, String crew_id, String doctyp, String country, Abstime d) =
+  item_ix -> %crew_document_per_country%;
+  1       -> %_doc_subtyp_per_country_subtyp%(crew_id, doctyp, country, %_doc_subtyp_per_country_max_validto%(crew_id, doctyp, country, d) );
+  2       -> %_doc_subtyp_per_country_docno%(crew_id, doctyp, country, %_doc_subtyp_per_country_max_validto%(crew_id, doctyp, country, d) );
+  3       -> %_doc_subtyp_per_country_maindocno%(crew_id, doctyp, country, %_doc_subtyp_per_country_max_validto%(crew_id, doctyp, country, d) );
+  4       -> %_doc_subtyp_per_country_issuer%(crew_id, doctyp, country, %_doc_subtyp_per_country_max_validto%(crew_id, doctyp, country, d));
+  5       -> base_utils.%string_extract%(%_doc_subtyp_per_country_subtyp%(crew_id, doctyp, country, %_doc_subtyp_per_country_max_validto%(crew_id, doctyp, country, d) ), 1);
+  6       -> %_doc_subtyp_per_country_acq%(crew_id, doctyp, country, %_doc_subtyp_per_country_max_validto%(crew_id, doctyp, country, d));
+  7       -> %_doc_subtyp_per_country_si%(crew_id, doctyp, country, %_doc_subtyp_per_country_max_validto%(crew_id, doctyp, country, d));
+  8       -> base_utils.%abstime2str_raw%(%_doc_subtyp_per_country_validfrom%(crew_id, doctyp, country, %_doc_subtyp_per_country_max_validto%(crew_id, doctyp, country, d)));
+  9       -> base_utils.%abstime2str_raw%(%_doc_subtyp_per_country_max_validto%(crew_id, doctyp, country, d));
+  -       -> void_string;
+
+end
+
+%match_key%(Int item_ix, Int ix, String crew_id, String doc_typ, Abstime d, String m_docno) =
+  let docno =  default(%crew_doc_no_ix%(crew_id, doc_typ, d, ix),"");
+  concat(
+    base_utils.%abstime2isotimestr%(%crew_doc_validto_ix%(crew_id, doc_typ, d, ix)),
+    ",",
+    if docno = m_docno then "1" else "0", /* two passports with same validto givest matching number*/
+    ",",
+    docno,
+    ",",
+    %crew_doc_item_ix%(item_ix, crew_id, doc_typ, d, ix)
+  );
+
+%match_key_2%(String result, Int ix, String crew_id, String doc_typ, Abstime d, String m_docno) =
+  let docno =  default(%crew_doc_no_ix%(crew_id, doc_typ, d, ix),"");
+  concat(
+    base_utils.%abstime2isotimestr%(%crew_doc_validto_ix%(crew_id, doc_typ, d, ix)),
+    ",",
+    if docno = m_docno then "1" else "0", /* two passports with same validto givest matching number*/
+    ",",
+    docno,
+    ",",
+    result
+  );
+
+%best_match_str%(Int item_ix, String crew_id, String doc_typ, Abstime d) =
+   let best_key = max(times(%max_ix_crew_doc%(crew_id, doc_typ, d)), %match_key%(item_ix, base_utils.%ti0%, crew_id, doc_typ, d, "-"));
+   base_utils.%string_extract%(best_key,4);
+
+
+/* get match nr for best match of document. Longest validity is the preference */
+export %best_match_doc%(Int item_ix, String crew_id, String doc_typ, Abstime d) =
+   %best_match_str%(item_ix, crew_id, doc_typ, d);
+
+%best_match_str_nationality%(Int item_ix, String crew_id, String nationality, Abstime d)  =
+   let best_key = max(times(%max_ix_crew_doc%(crew_id, %doctyp_passport%, d)),
+                  %match_key%(item_ix, base_utils.%ti0%, crew_id, %doctyp_passport%, d, "-"))
+                  where (%crew_doc_item_ix%(%docitem_nationality%, crew_id, %doctyp_passport%, d, base_utils.%ti0%)=nationality);
+   base_utils.%string_extract%(best_key,4);
+
+%best_match_key_doc_subtyp%(Int item_ix, String crew_id, String typ, String subtyp, Abstime d)  =
+   max(times(%max_ix_crew_doc%(crew_id, typ, d)),
+   %match_key%(item_ix, base_utils.%ti0%, crew_id, typ, d, "-"))
+   where (%crew_doc_item_ix%(%docitem_subtype%, crew_id, typ, d, base_utils.%ti0%)=subtyp);
+
+%best_match_nr_doc_subtyp_str%(Int item_ix, String crew_id, String typ, String subtyp, Abstime d) =
+   base_utils.%string_extract%(%best_match_key_doc_subtyp%(item_ix, crew_id, typ, subtyp, d) ,4);
+
+/* general function which returns best (longest validity) match for any document type/subtype, item_ix defines the request */
+export %best_match_subtyp_doc%(Int item_ix, String crew_id, String typ, String subtyp, Abstime d) =
+   %best_match_nr_doc_subtyp_str%(item_ix, crew_id, typ, subtyp, d);
+
+/* look up of passport info given a certaing passport number; in case a newer exist with same issuer that is used.
+   Returns a comma separated sortable string with the requested info as 4th element */
+%best_match_key_passport_no%(Int item_ix, String crew_id, String passport_no, Abstime d)  =
+   max(times(%max_ix_crew_doc%(crew_id, %doctyp_passport%, d)),
+   %match_key%(item_ix, base_utils.%ti0%, crew_id, %doctyp_passport%, d, passport_no))
+   where (%crew_doc_item_ix%(%docitem_docno%, crew_id, %doctyp_passport%, d, base_utils.%ti0%)=passport_no);
+
+
+/* look up of a passport using passport number for a visa. res= returned value in comma separated string if candidate is best, typically visa info.
+   Note: there may exist newer passports from same issuer, in which case that date is used. */
+%best_match_key_passport_no_2%(String res, String crew_id, String passport_no, Abstime d)  =
+   max(times(%max_ix_crew_doc%(crew_id, %doctyp_passport%, d)),
+   %match_key_2%(res, base_utils.%ti0%, crew_id, %doctyp_passport%, d, passport_no))
+   where (%crew_doc_item_ix%(%docitem_docno%, crew_id, %doctyp_passport%, d, base_utils.%ti0%)=passport_no);
+
+/* get best passport, given passport nationality and possibly passport number (from visa).
+   Preferred is the one with longets validity, and then, match for passport number */
+export %best_match_nationality%(Int item_ix, String crew_id, String nationality, Abstime d) =
+  %best_match_str_nationality%(item_ix, crew_id, nationality, d);
+
+/* returns a comma separted string for sorting the passport matches, mainly by expiry date. Last element= returned value for candidate */
+%_best_match_req_doc_passport_key%(Int item_ix, String crew_id, String country, String doctyp, String docsubtyp, Abstime d) =
+  if doctyp=%doctyp_passport% then
+     %best_match_key_doc_subtyp%(item_ix, crew_id, doctyp, docsubtyp, d)
+  else
+     %best_match_key_passport_no%(
+        item_ix,
+        crew_id,
+        %best_match_subtyp_doc%(%docitem_maindocno%, crew_id, doctyp, docsubtyp, d),
+        d);
+
+/* look up passport info for the passport which is rquired for the travel to the country. May be pointed out by visa or by a associatated country (like CA for US) */
+%best_req_passport_doc%(Int item_ix, String crew_id, String country, Abstime d) =
+  let best_key = max(times(%_max_ix_country_req_doc%(country, d)),
+                 %_best_match_req_doc_passport_key%(
+                                       item_ix, crew_id, country,
+                                       %country_req_typ_ix%(country, d, base_utils.%ti0%),
+                                       %_country_req_subtyp_ix%(country, d, base_utils.%ti0%),
+                                       d
+                 ));
+   base_utils.%string_extract%(best_key,4);
+
+
+/* gives a string for sorting matches by expiry date mainly, last part of comma separated string contains the request visa info */
+%_best_match_req_doc_visa_key%(Int item_ix, String crew_id, String country, String doctyp, String docsubtyp, Abstime d) =
+  if doctyp = %doctyp_passport% then
+     %best_match_key_doc_subtyp%(-1, crew_id, doctyp, docsubtyp, d)
+  else
+     %best_match_key_passport_no_2%(
+        %best_match_subtyp_doc%(item_ix, crew_id, doctyp, docsubtyp, d),
+        crew_id,
+        %best_match_subtyp_doc%(%docitem_maindocno%, crew_id, doctyp, docsubtyp, d),
+        d);
+
+/* same lookup as for passport, but returns the visa info if visa is required */
+%best_req_visa_doc%(Int item_ix, String crew_id, String country, Abstime d) =
+  let best_key = max(times(%_max_ix_country_req_doc%(country, d)),
+                 %_best_match_req_doc_visa_key%(
+                                       item_ix, crew_id, country,
+                                       %country_req_typ_ix%(country, d, base_utils.%ti0%),
+                                       %_country_req_subtyp_ix%(country, d, base_utils.%ti0%),
+                                       d
+                 ));
+  base_utils.%string_extract%(best_key,4);
+
+/* nationality of any valid passport for the crew; acutally, from last valid passport */
+export %any_passport_country%(String crew_id, Abstime date) =
+  %best_match_doc%(%docitem_nationality%, crew_id, %doctyp_passport%, date);
+
+export %has_valid_doc_item%(String crew_id, String typ, Abstime date) =
+  not void(%crew_doc_item_ix%(%docitem_subtype%, crew_id, typ, date, 1));
+
+
+/* Returns the passed-in nationality, if valid passport found,
+** else nationality of passport by required visa,
+** else falls back to returning nationality of first found passport, if any.
+** This is specifically so US nationality/passport will be found if any, for flying to US.
+*/
+export %nationality_prefer%(String crew_id, Abstime date, String country) =
+  if %has_passport%(crew_id, date, country) then country
+  else default(
+       %country_passport_info%(%docitem_nationality%, crew_id, country, date),
+       %any_passport_country%(crew_id, date));
+
+/* some functions giving last valid document of a kind */
+export %doc_max_validto_date%(String crew_id, String doc_type, String doc_subtype, Abstime date) =
+    if doc_subtype <> "" then
+      %_doc_subtype_max_validto_date%(crew_id, doc_type, doc_subtype, date)
+    else
+      %_doc_type_max_validto_date%(crew_id, doc_type,date);
+
+export %doc_max_validto_date_for_ac_qual%(String crew_id, String doc_type, String doc_subtype, String ac_qual, Abstime date) =
+    %_doc_subtype_ac_qual_max_validto_date%(crew_id, doc_type, doc_subtype, ac_qual, date);
+
+/* last valid license expiry date */
+export %license_current_expiry_str%(String crew_id, Abstime d) =
+  %best_match_doc%( %docitem_validto%, crew_id, %doctyp_license%, d);
+
+/* last valid license number */
+export %license_current_docno%(String crew_id, Abstime d) =
+  %crew_document_type_exp%(%docitem_docno%, crew_id, %doctyp_license%, d);
+
+/* last valid license issuer */
+export %license_current_issuer%(String crew_id, Abstime d) =
+  %best_match_doc%(%docitem_issuer%, crew_id, %doctyp_license%, d);
+
+/* last valid passport by country, expiry date */
+export %passport_current_per_country_expiry_str%(String crew_id, String country, Abstime d) =
+  %best_match_nationality%(%docitem_validto%, crew_id, country, d);
+
+/* last valid passport by coutry, passport number */
+export %passport_current_per_country_docno%(String crew_id, String country, Abstime d) =
+  %best_match_nationality%(%docitem_docno%, crew_id, country, d);
+
+/* true if crew has passport from a certain country */
+export %has_passport%(String crew_id, Abstime d, String country) =
+  not void(%best_match_nationality%(%docitem_docno%, crew_id, country, d));
+
+/* handling of document requirements per country, i. e. if VISUM is required  */
+table max_ix_country_req_doc_tbl(String country, Abstime date) =
+  country, date ->
+    Int %_max_ix_country_req_doc%;
+  external %country_required_docs_table%;
+  country, (validfrom, validto( -> count(row_number);
+end
+
+table country_req_doc_subtype_tbl(String country, Abstime date, Int ix) =
+  country, date, ix ->
+    String %country_req_typ_ix%, String %_country_req_subtyp_ix%;
+  external %country_required_docs_table%;
+  country, (validfrom,validto(, match_number ->
+    doc_typ, doc_subtype;
+  -,       -,                   -            ->
+    void_string, void_string;
+end
+
+/*
+**  this functions scans country_req table for a country, all subtyp qualififying as visa returned.
+**  this may incude passport of certain countries. If doc_type is wrong, string ??? is returned, which should not
+**  match crews document in any case
+*/
+%_country_req_expiry%(String crew_id, Int ti0, String country, Abstime d) =
+  %_doc_subtype_max_validto_date%(crew_id, %country_req_typ_ix%(country, d, ti0), %_country_req_subtyp_ix%(country, d, ti0), d);
+
+%country_req_best_expiry%(String crew_id, String country, Abstime d) =
+   max(times(%_max_ix_country_req_doc%(country, d)), %_country_req_expiry%(crew_id, base_utils.%ti0%, country, d));
+
+%country_req_best_typ%(String crew_id, String country, Abstime exp, Abstime d) =
+   first(times(%_max_ix_country_req_doc%(country, d)), %country_req_typ_ix%(country, d, base_utils.%ti0%))
+   where (exp =  %_country_req_expiry%(crew_id, base_utils.%ti0%, country, d));
+
+%country_req_best_subtyp%(String crew_id, String country, Abstime exp, Abstime d) =
+   first(times(%_max_ix_country_req_doc%(country, d)), %_country_req_subtyp_ix%(country, d, base_utils.%ti0%))
+   where (exp =  %_country_req_expiry%(crew_id, base_utils.%ti0%, country, d));
+
+%country_req_passport_by_visa%(Int item_ix, String crew_id, String doctyp, String docsubtyp, String country, Abstime expiry, Abstime d) =
+   let maindoc = %crew_document_subtype_exp%(%docitem_maindocno%, crew_id, doctyp, docsubtyp, expiry),
+       nationality = %crew_doc_item_no%(%docitem_nationality%, crew_id, %doctyp_passport%, maindoc, d);
+  %crew_document_per_country%(item_ix, crew_id, %doctyp_passport%, nationality, d);
+
+/* passport info for a certain destination, taking visa requirments into account. If known that Visa is not required, ** can
+   be passed as destination country code */
+export %country_passport_info%(Int item_ix, String crew_id, String country, Abstime d) =
+   if not %country_req_visa%(country, d) then /* no entries in req table -> no visa requirment. Takes best passport */
+        %best_match_doc%(item_ix, crew_id, %doctyp_passport%, d)
+   else default(
+        %best_match_nationality%(item_ix, crew_id, country, d), /* try passport of destination nationality */
+        %best_req_passport_doc%(item_ix, crew_id, country, d)  /* use visa, OR valid passport (like CA is valid in US). */
+   );
+
+/* Visa info for a certain destination, for the visa required. Synchronized with country_passport_info, and gives "" whenever visa is not required */
+export %country_visa_info%(Int item_ix, String crew_id, String country, Abstime d) =
+   if not %country_req_visa%(country, d) or %has_passport%(crew_id, d, country) then ""
+   else %best_req_visa_doc%(item_ix, crew_id, country, d);
+
+%country_req_visa_subtyp%(String country, Abstime date, Int ix) =
+  let dt = %country_req_typ_ix%(country, date, ix);
+  if dt = %doctyp_passport% or dt=%doctyp_visa% then
+    %_country_req_subtyp_ix%(country, date, ix)
+  else
+    "???"; /* should not match anything */
+
+%country_req_typ_count%(String typ,String country, Abstime date) =
+  default(count(times( %_max_ix_country_req_doc%(country, date)))
+     where ( %country_req_typ_ix%(country, date, base_utils.%ti0%) = typ)
+  ,
+     0
+  );
+
+/* check if there are visa requirements for country */
+export %country_req_visa%(String country, Abstime date) =
+  %country_req_typ_count%(%doctyp_visa%, country, date) >0;
+
+/* check if there are medical requirements for country */
+export %country_req_medical%(String country, Abstime date) =
+  %country_req_typ_count%(%doctyp_medical%, country, date)>0;
+
+/* check if there are vaccination requirements for country */
+export %country_req_vaccination%(String country, Abstime date) =
+  %country_req_typ_count%(%doctyp_vaccination%, country, date)>0;
+
+/* Table country_req_docs specifies for each country code how many visa or passport
+** entries are qualifying as visa for that country. Not all visas count, and some passport of
+** certain nationalites count.  Typical subtypes for VISAS are
+**  "US,C1", "US,C1/D", "US,D"
+** Look-up table crew_document, using the full subtype, to see if crew
+ * has any one of the required subtypes valid on the given date
+ */
+export %passport_nationality_by_required_visa%(String crew_id, Abstime date, String country) =
+  %country_passport_info%(%docitem_nationality%, crew_id, country, date);
+
+
+export %required_docno_by_type_and_country%(String doctyp, String crew_id, Abstime date, String country) =
+  first(times(%_max_ix_country_req_doc%(country, date)),
+    %doc_no%(crew_id, doctyp, %_country_req_subtyp_ix%(country, date, base_utils.%ti0%), date))
+  where ( (%country_req_typ_ix%(country, date, base_utils.%ti0%) = doctyp)
+          and not void(%doc_no%(crew_id, doctyp, %_country_req_subtyp_ix%(country, date, base_utils.%ti0%), date)));
+
+
+
+

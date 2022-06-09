@@ -1,0 +1,881 @@
+/* -*- crc -*-
+ *
+ * Functions for export of salary items to external systems.
+ *
+ * [acosta:06/068@16:15] First version.
+ * [acosta:06/087@10:52] Restructured, changes names of etab parameters
+ * [acosta:06/256@13:09] Removed %selector% since it gave problems with 
+ *                       Rostering (sp_name, lp_name, etc).
+ * [acosta:07/221@12:29] Introduced database sequences, no use any longer for next_run_id
+ */
+
+module salary
+
+import attributes;
+import crew;
+import crew_pos;
+import iterators;
+import levels;
+import calendar;
+import leg;
+import trip;
+import wop;
+import duty;
+import compdays;
+import training;
+import fundamental;
+import system_db_parameters;
+import system_accumulator_reader;
+import base_utils;
+import parameters;
+import accumulators;
+import roster;
+
+
+/* Parameters ***********************************************************/
+group inst_allowance_group = inst_crm_codes, inst_classroom_codes, inst_cc_codes;
+group month_group = %salary_month_start_p%, %salary_month_end_p%;
+
+export %salary_month_start_p% = parameter 1Jan1986 0:00
+  remark "Salary: Start of salary period";
+
+export %salary_month_end_p% = parameter 1Jan1986 0:00
+  remark "Salary: End of salary period";
+
+group param_group = %salary_system_name_default%;
+
+export %salary_system_name_default% =
+  parameter "DK"
+  remark "Salary: Default salary system";
+
+/* From this number of SIM passes in a vacation year double compensation will be paid */
+%sim_pass_in_va_year_double_limit% =
+  parameter 50
+  remark "Salary: Double compensation after this many SIM passes in VA year";
+
+export %salary_admin_code_table% = "salary_admin_code";
+export %salary_region_table% = "salary_region";
+export %salary_article_table% = "salary_article";
+export %salary_run_id_table% = "salary_run_id";
+export %leave_entitlements_table% = "leave_entitlements";
+
+/* Crew salary region, used in salary_overtime and salary_loss_of_rest modules */
+export %is_SKD% = 
+  default(salary.%salary_system%(%salary_month_start%) = "DK", false);
+
+export %is_SKN% = 
+  default(salary.%salary_system%(%salary_month_start%) = "NO", false);
+
+export %is_SKS% = 
+  default(salary.%salary_system%(%salary_month_start%) = "SE", false);
+
+export %is_QA% =
+  crew.%has_agmt_group_qa_at_date%(%salary_month_start%);
+
+export %is_QA_CC% =
+  crew.%has_agmt_group_qa_cc_at_date%(%salary_month_start%);
+
+export %is_QA_FD% =
+  crew.%has_agmt_group_qa_fd_at_date%(%salary_month_start%);
+
+export %is_NKF_CC% =
+  crew.%has_agmt_group_nkf_cc_at_date%(%salary_month_start%);
+
+export %is_SNK_CC% =
+  crew.%has_agmt_group_snk_cc_at_date%(%salary_month_start%);
+
+/*SKCMS-2807*/
+export %is_SVS% =
+  crew.%has_agmt_group_svs_at_date%(%salary_month_start%);
+
+export %is_SVS_CC% =
+  crew.%has_agmt_group_svs_cc_at_date%(%salary_month_start%);
+
+export %is_SVS_FD% =
+  crew.%has_agmt_group_svs_fd_at_date%(%salary_month_start%);
+
+/* Crew rank at salary month end */
+export %rank_salary_month_end% = 
+  default(crew.%rank_at_date%(%salary_month_end%), crew.%rank_at_date%(crew.%available_end%));
+
+export %homebase% = 
+  default(crew.%base_at_date%(%salary_month_start%), crew.%base_at_date%(%salary_month_end%));
+
+%va_year_start_date% = crew.%va_year_start_date%(%salary_month_start%);
+
+/* Iterators ************************************************************/
+iterator salary_office_set =
+  partition(roster)
+  by(%salary_system%(%salary_run_date%));
+end
+
+iterator salary_per_diem_set =
+  partition(roster)
+  by(crew.%maincat_for_rank%(crew.%rank%), salary.%homebase%, %crew_alphabet_group%, %salary_system%(%salary_run_date%));
+end
+
+
+/* Variables ************************************************************/
+%salary_run_date% = time;
+
+/* Table definitions ****************************************************/
+
+/* salary_run_selector_used is reserved for information like 'fleet/plan' */
+table salary_run_id_table(int runid) =
+  runid ->
+      export abstime %salary_run_date_used%,
+      export string %salary_run_type_used%,
+      export string %salary_admin_code_used%,
+      export string %salary_run_selector_used%,
+      export string %salary_system_used%,
+      export abstime %salary_run_start_of_period_used%,
+      export abstime %salary_run_end_of_period_used%,
+      export string %salary_run_comment_used%;
+  external %salary_run_id_table%;
+  runid -> rundate, runtype, admcode, selector, extsys, 
+          firstdate, lastdate, note;
+  - -> void_abstime, void_string, void_string, void_string, void_string, 
+          void_abstime, void_abstime, void_string;
+end
+
+table salary_admin_code_table(string admcode) =
+  admcode -> export string %salary_admin_code_description%;
+  external %salary_admin_code_table%;
+  admcode -> description;
+  - -> void_string;
+end
+
+export %crew_base%(AbsTime rundate) = %_crew_base_safe%(rundate);
+
+%_crew_base_safe%(abstime rundate) =
+  let base = crew.%base_at_date%(%salary_month_end% - 1:00);
+  if base = "-" then
+    if crew.%base_at_date%(rundate) = "-" then
+      crew.%base_at_date%(crew.%employment_last_end_in_period%(%salary_month_start%, %salary_month_end%) - 1:00)
+    else
+      crew.%base_at_date%(rundate)
+  else base;
+
+%extperkey% =
+  crew.%extperkey_at_base_in_period%(%_crew_base_safe%(%salary_month_start%), %salary_month_start%, %salary_month_end%);
+
+table salary_region_table(abstime rundate) =
+  %_crew_base_safe%(rundate), rundate -> export string  %salary_system%;
+  external %salary_region_table%;
+  region, (validfrom, validto) -> extsys;
+  -, - -> %salary_system_name_default%;
+end
+
+table external_to_internal_article(string extartid, abstime rundate) =
+  %salary_system%(rundate), extartid, rundate -> 
+      export string %internal_article_id%,
+      export string %salary_system_article_comment%;
+  external %salary_article_table%;
+  extsys, extartid, (validfrom, validto) -> intartid, note;
+  -, -, - -> void_string, void_string;
+end
+
+table external_to_internal_article_for_system(string extartid, string system,
+    abstime rundate) =
+  system, extartid, rundate ->
+      export string %internal_article_id_for_system%,
+      export string %article_comment_for_system%;
+  external %salary_article_table%;
+  extsys, extartid, (validfrom, validto) -> intartid, note;
+  -, -, - -> void_string, void_string;
+end
+
+table internal_to_external_article(string intartid, abstime rundate) =
+  %salary_system%(rundate), intartid, rundate ->
+      export string %salary_system_article_id%,
+      export string %salary_system_article_comment_for_internal_id%;
+  external %salary_article_table%;
+  extsys, intartid, (validfrom, validto) -> extartid, note;
+  -, -, - -> void_string, void_string;
+end
+
+table internal_to_external_article_for_system(string intartid, 
+    string system, abstime rundate) =
+  system, intartid, rundate ->
+      export string %salary_system_article_id_for_system%,
+      export string %salary_system_article_comment_for_system%;
+  external %salary_article_table%;
+  extsys, intartid, (validfrom, validto) -> extartid, note;
+  -, -, - -> void_string, void_string;
+end
+
+
+/* Test if activity is in salary period *********************************/
+export %salary_month_start% =
+  if %salary_month_start_p% = 1Jan1986 0:00 then calendar.%month_start%
+  else %salary_month_start_p%;
+
+export %salary_month_end% =
+  if %salary_month_end_p% = 1Jan1986 0:00 then calendar.%month_end%
+  else %salary_month_end_p%;
+
+export %wop_in_period% =
+  %salary_month_start% <= wop.%end_utc% and wop.%end_utc% < %salary_month_end%;
+
+export %trip_in_period% =
+  %salary_month_start% <= trip.%end_UTC% and trip.%end_UTC% < %salary_month_end%;
+  
+export %duty_in_period% =
+  %salary_month_start% <= duty.%end_utc% and duty.%end_utc% < %salary_month_end%;
+  
+export %leg_in_period% =
+  %salary_month_start% <= leg.%end_utc% and leg.%end_utc% < %salary_month_end%;
+
+export %leg_in_period_hb% =
+  %salary_month_start% <= leg.%end_hb% and leg.%end_hb% < %salary_month_end%;
+
+/* Could be used to show subplan, ruleset, and so on */
+export %selector% = "";
+
+
+/* Vacation reports *****************************************************/
+export %va_remaining%(abstime date) =
+  compdays.%balance_at_date%("VA", date) +
+  compdays.%balance_at_date%("VA1", date);
+
+export %va_performed%(abstime s, abstime e) =
+  sum(leg(chain) where ((leg.%code% = "VA" or leg.%code% = "VA1")
+      and leg.%end_hb% > s and leg.%start_hb% < e),
+    %leg_overlap%(s, e)) / 24:00;
+
+export %va_remaining_yr%(abstime date) =
+  compdays.%balance_at_date%("VA", %va_year_start%("VA", date)) +
+  compdays.%balance_at_date%("VA1", %va_year_start%("VA1", date));
+
+%leg_overlap%(abstime s, abstime e) =
+  overlap(leg.%start_hb%, leg.%end_hb%, s, e);
+
+%va_year_start%(string activity, abstime date) =
+  let vt = %_va_transactiondate%(activity, date);
+  vt - round_down_year(vt) + round_down_year(date);
+
+table vac_yr_table(string activity, abstime date) =
+  crew.%main_func_at_date%(date),
+  crew.%base_at_date%(date), 
+  crew.%company_at_date%(date), 
+  activity
+    -> abstime %_va_entstartdate%,
+       abstime %_va_transactiondate%,
+       int %_va_amount%,
+       bool %_va_monthly%,
+       bool %_va_inadvance%;
+  external %leave_entitlements_table%;
+  "cat", base, company, activity
+    -> entstartdate, transactiondate, amount, monthly, inadvance;
+  -, -, -, - -> void_abstime, void_abstime, void_int, void_bool, void_bool;
+end
+
+
+/* Instructor's allowance ***********************************************/
+
+/* These PACT codes gives CRM allowance for Supervisor and Instructor SASCMS-3278.*/
+set inst_crm_codes = 
+  parameter "OL4", "OL5", "OL6", "OLCRM4", "OLCRM5", "OLCRM6"
+  remark "Salary: Class room codes for CRM allowance for Supervisor.";
+
+/* These PACT codes gives CLASSROOM allowance. New with SASCMS-3278. */
+set inst_classroom_codes = 
+  parameter "OXI"
+  remark "Salary: Class room codes for Class room allowance.";
+
+/* These PACT codes gives allowance for CC Instructor SASCMS-3990.*/
+set inst_cc_codes = 
+  parameter "OL1", "OL2", "OL3"
+  remark "Salary: Class room codes for CC Instructor allowance.";
+
+/* Line-Check and Initial Line-Check */
+set inst_lc_codes = "LC", "ILC", "ETOPS LIFUS/LC";
+
+/* Line Flying Under Supervision, Zero Flight Time Training and T-flights */
+set inst_lifus_codes = "LIFUS", "X LIFUS", "ZFTT LIFUS", "T-FLIGHT";
+
+set inst_new_hire_follow_up_codes = "NZ";
+
+enum inst_allowance =
+  inst_allowance00 remark "No out payment";
+  inst_allowance01 remark "A/C training or LIFUS";
+  inst_allowance02 remark "PC/OPC";
+  inst_allowance03 remark "Type rating";
+  inst_allowance04 remark "CLASSROOM";
+  inst_allowance05 remark "LCI SH";
+  inst_allowance06 remark "CRM";
+  inst_allowance07 remark "CC";
+  inst_allowance08 remark "SKILL-TEST";
+  inst_allowance09 remark "SIM";
+  inst_allowance10 remark "LCI LH";
+  inst_allowance11 remark "New Hire Follow Up";
+  inst_allowance12 remark "Supernum, Release";
+  remark "Instructor's allowances";
+end
+
+export iterator instructor_start_day_set =
+  partition(leg)
+  by(%inst_allowance%, %inst_end_date%(%inst_allowance%));
+end
+
+%inst_end_date%(inst_allowance allowance) =
+  leg.%end_date%;
+ /* Skip this since I think this is old stuff, however keep it if I was wrong
+    20160212 Karin Mattsson HiQ SKCMS-666
+  if allowance = inst_allowance01 then
+    round_down(leg.%end_utc% - time_of_day(trip.%start_utc%) - 0:01, 24:00)
+  else
+    leg.%end_date%;
+*/
+
+export %inst_allowance% = default(%_inst_allowance%, inst_allowance00);
+%_inst_allowance% =
+  if %inst_acting_as_instructor% then
+    if (%inst_act_any_lifus_or_tflt% or %inst_act_fam_flt% or %inst_act_zftt_x% or %inst_act_lr_refresh% or %inst_act_school_flight% or attributes.%is_leg_training_code_FLT_INSTR_OL%) then
+      inst_allowance01
+    else if %inst_act_pc_opc% then
+        if %agreement_valid%("4exng_fc_instructor_allowance", leg.%end_utc%) then
+            inst_allowance09
+        else 
+            inst_allowance02
+    else if %inst_act_type_rating% then
+        if %agreement_valid%("4exng_fc_instructor_allowance", leg.%end_utc%) then
+            inst_allowance09
+        else
+            inst_allowance03
+    else if %inst_act_classroom% then
+      inst_allowance04
+    else if %inst_act_lci% then
+        if trip.%is_short_haul% then
+            inst_allowance05
+        else
+            inst_allowance10
+    else if %inst_act_etops_lifus_lc% then
+        inst_allowance10
+    else if %inst_act_crm% then
+      inst_allowance06
+    else if %inst_act_skill_test% then
+      inst_allowance08
+    else if %inst_for_new_hire_follow_up% then
+      inst_allowance11
+     else
+      inst_allowance00
+  else if %cc_acting_as_instructor% then
+    if %inst_act_cc% then
+    	inst_allowance07
+    else if %is_instructor_for_xsupernum_or_release_leg% then
+      inst_allowance12
+    else
+     inst_allowance00
+  else if %is_sim_instr_supervisor% then
+    if %inst_act_pc_opc% then
+        if %agreement_valid%("4exng_fc_instructor_allowance", leg.%start_utc%) then
+            inst_allowance09
+        else
+          inst_allowance02
+    else if %inst_act_type_rating% then
+        if %agreement_valid%("4exng_fc_instructor_allowance", leg.%start_utc%) then
+            inst_allowance09
+        else
+          inst_allowance03
+    else
+      inst_allowance00
+  else
+    inst_allowance00;
+
+/* Definitions of the characteristics for an instructor */
+/* Is acting as pilot instructor on a specific leg. */
+%inst_acting_as_instructor% = 
+  crew.%is_pilot% and %inst_is_leg_instructor%;
+
+%cc_acting_as_instructor% = 
+  crew.%is_cabin% and %inst_is_leg_instructor%;
+
+/* Supervisor on simulator instructors */
+%is_sim_instr_supervisor% =
+  leg.%is_sim_instr_ol% or leg.%is_sim_instr_supol%;
+
+/* for CRM, the activity object decides if crew is instructor, instructor has
+ * one type of object (a PACT) the students are on a ground task. */
+export %inst_is_leg_instructor% =
+  %inst_on_school_flight% 
+  or training.%inst_on_simulator%
+  or %inst_on_flight%
+  or %inst_act_crm%
+  or %inst_act_classroom%
+  or %inst_act_cc%
+  or attributes.%is_leg_training_code_FLT_INSTR_OL%;
+
+%inst_on_school_flight% = 
+  leg.%is_school_flight% 
+  and crew.%is_instructor_leg_start%
+  and not (crew.%has_restr_training_capt_leg_start% 
+    or crew.%has_restr_training_dct_foc_refr_leg_start%);
+
+
+%inst_on_flight% =
+  leg.%is_flight_duty% 
+  and training.%has_leg_instructor_duty_code%;
+
+
+/* Different types of activities that distinguish the particular type of
+ * allowance */
+%inst_act_any_lifus_or_tflt% =
+  leg.%instructor_code_safe% in inst_lifus_codes;
+
+%inst_act_zftt_x% =
+    leg.%instructor_code_safe% = "ZFTT X";
+
+%inst_act_fam_flt% =
+  leg.%instructor_code_safe% = "FAM FLT";
+
+%inst_act_etops_lifus_lc% = 
+  leg.%instructor_code_safe% = "ETOPS LIFUS/LC";
+
+%inst_act_lr_refresh% =
+  leg.%instructor_code_safe% = "LR REFRESH";
+
+%inst_act_school_flight% =
+  leg.%is_school_flight%;
+
+%inst_act_pc_opc% =
+  /* This means Y* and S* but not Z* */
+  leg.%is_pc_or_opc% and not %inst_act_skill_test%;
+
+%inst_act_type_rating% =
+  leg.%is_simulator% and not leg.%is_pc_or_opc%;
+
+%inst_act_sim% =
+    %inst_act_pc_opc% or %inst_act_type_rating%;
+
+%inst_act_crm% =
+  leg.%code% in inst_crm_codes; 
+
+%inst_act_classroom% =
+  if system_db_parameters.%new_training_codes_17_CC_valid%(leg.%start_utc%)
+  then %inst_act_classroom_old% or leg.%is_fd_inst_activity_ntc17%
+  else %inst_act_classroom_old%;
+
+%inst_act_classroom_old% =
+  leg.%code% in inst_classroom_codes;
+
+%inst_act_cc% =
+  if system_db_parameters.%new_training_codes_17_CC_valid%(leg.%start_utc%)
+  then %inst_act_cc_old% or %inst_act_cc_ntc17%
+  else %inst_act_cc_old%;
+
+%inst_act_cc_ntc17% =
+   leg.%is_cc_inst_activity_ntc17% and not leg.%is_cc_instr_ausc%;
+
+
+%inst_act_cc_old% =
+   substr(leg.%code%,1,3) in inst_cc_codes;
+
+
+%inst_act_lci% =
+  crew.%is_line_check_pilot%(leg.%start_utc%) 
+  and leg.%instructor_code_safe% in inst_lc_codes;
+
+ %inst_for_new_hire_follow_up% =
+   training.%duty_code% in inst_new_hire_follow_up_codes;
+
+%leg_code% = default(training.%leg_code_redefined%, leg.%code%);
+
+%inst_act_skill_test% = default(substr(%leg_code%,1,1) = "Z", false);
+
+%prev_is_inst_act_skill_test% = default(prev(leg(duty), %inst_act_skill_test%), false);
+
+/* Count number of briefings.
+ * It should not matter if the large simulator pass is split into two:
+ * B + S + D vs B + S + B + S + D
+ * These two cases should both count as one B/D.
+ * To be able to get cases where only the second object has brief/debrief we
+ * need to check if the sim object is "multi".
+ */
+
+%inst_has_brief_or_debrief% =
+  leg.%check_in% > 0:00 or leg.%check_out% > 0:00;
+
+%inst_count_as_brief_or_debrief% =
+  if default(prev(leg(duty), %inst_act_pc_opc%), false) then
+    false
+  else if leg.%is_first_sim% then
+    %inst_has_brief_or_debrief% 
+    or any(leg(roster) from (current) forwards 
+      while (leg.%sim_type_is_multi%), %inst_has_brief_or_debrief%)
+  else
+    false;
+
+%inst_count_pc_opc_brief_debrief% = 
+  %inst_count_as_brief_or_debrief%
+  and %inst_allowance% = inst_allowance02;
+
+%inst_count_type_rating_brief_debrief% = 
+  %inst_count_as_brief_or_debrief%
+  and %inst_allowance% = inst_allowance03;
+
+
+
+%inst_hours_with_allowance%(abstime s, abstime e, inst_allowance allowance) =
+  sum(leg(chain), leg.%time% * %leg_time_factor%(allowance)) where (%inst_allowance% = allowance
+    and leg.%end_utc% >= s and leg.%end_utc% < e);
+
+
+/* Double compensation for "PC/OPC" and "Type Rating" if the number of
+   simulation duties in a vacation year is greater than 50 */
+%leg_time_factor%(inst_allowance allowance) =
+  if (allowance = inst_allowance02 or allowance = inst_allowance03) 
+    and %nr_actual_instr_sim_duties_in_va_year_duty_end% > %sim_pass_in_va_year_double_limit% then
+    2
+  else
+    1;
+
+%nr_actual_instr_sim_duties_in_va_year_duty_end% =
+  accumulators.%nr_actual_instr_sim_duty%(%va_year_start_date%, duty.%end_hb%);
+
+%inst_days_with_allowance%(abstime s, abstime e, inst_allowance allowance) =
+  let sd = round_down(s, 24:00), ed = round_down(e, 24:00);
+  count(instructor_start_day_set where (%inst_end_date%(allowance) >= sd
+    and %inst_end_date%(allowance) < ed and %inst_allowance% = allowance));
+
+%inst_legs_with_allowance%(abstime s, abstime e, inst_allowance allowance) = 
+  let sd = round_down(s, 24:00), ed = round_down(e, 24:00);
+  count(leg_set) where (leg.%end_date% >= sd
+    and leg.%end_date% < ed and %inst_allowance% = allowance);
+
+/* These are used by the salary job */
+export %inst_has_any_allowance% =
+  any(leg(roster) where (%leg_in_period%), %inst_allowance% <> inst_allowance00);
+
+/* Python: INST_LIFUS_ACT */
+export %inst_lifus_act% =
+    %inst_lifus_or_ac_training_in_period%(%salary_month_start%, %salary_month_end%) +
+    (if %is_SKN% then
+       0
+    else
+      %inst_lifus_act_days_for_overnight_lh_legs%(%salary_month_start%,%salary_month_end%));
+
+
+/* SKCMS-666 */
+%inst_lifus_act_days_for_overnight_lh_legs%(Abstime st,Abstime et) =
+  count( leg(roster) where(     leg.%end_utc% >= st
+                        and leg.%end_utc% < et
+                        and leg.%is_long_haul%
+                        and (%inst_act_any_lifus_or_tflt% or
+                             %inst_act_fam_flt% or
+                             %inst_act_school_flight% or
+                             %inst_act_zftt_x% or
+                             %inst_act_lr_refresh% or
+                             attributes.%is_leg_training_code_FLT_INSTR_OL%)
+                        and round_down(leg.%start_hb%,24:00)<>round_down(leg.%end_hb%,24:00)
+));
+
+%inst_lifus_or_ac_training_in_period%(abstime s, abstime e) =
+  /* %inst_hours_with_allowance%(s, e, inst_allowance01);*/
+  %inst_days_with_allowance%(s, e, inst_allowance01);
+
+/* Python:: INST_NEW_HIRE */
+export %inst_new_hire_follow_up_act% =
+    %inst_new_hire_follow_up_in_period%(%salary_month_start%, 
+                                        %salary_month_end%) +
+     %inst_new_hire_follow_up_days_for_overnight_lh_legs%(%salary_month_start%,%salary_month_end%);
+
+/* SKCMS-666 */
+%inst_new_hire_follow_up_days_for_overnight_lh_legs%(Abstime st,Abstime et) =
+  count( leg(roster) where(     leg.%end_utc% >= st
+                        and leg.%end_utc% < et
+                        and leg.%is_long_haul%
+                        and %inst_for_new_hire_follow_up% 
+                        and round_down(leg.%start_hb%,24:00)<>round_down(leg.%end_hb%,24:00)
+));
+
+
+%inst_new_hire_follow_up_in_period%(abstime s, abstime e) =
+    /*%inst_hours_with_allowance%(s, e, inst_allowance11 );*/
+  %inst_days_with_allowance%(s, e, inst_allowance11);
+
+
+/* Python: INST_SIM */
+export %inst_sim% =
+    %inst_sim_in_period%(%salary_month_start%, %salary_month_end%);
+
+%inst_sim_in_period%(abstime s, abstime e) =
+    %inst_hours_with_allowance%(s, e, inst_allowance09);
+
+/* Python: INST_SIM_BR */
+export %inst_sim_skill_brief_debrief% =
+    %inst_brief_debrief_hours_with_allowance%(%salary_month_start%, %salary_month_end%, inst_allowance09)  /* SIM */
+    + %inst_brief_debrief_hours_with_allowance%(%salary_month_start%, %salary_month_end%, inst_allowance08); /* SKILL-TEST */
+
+%inst_brief_debrief_hours_with_allowance%(abstime s, abstime e, inst_allowance allowance) =
+    sum(leg(chain), %inst_bd_time%(allowance))
+    where (leg.%end_utc% >= %salary_month_start% 
+        and leg.%end_utc% < %salary_month_end%);
+  
+%inst_bd_time%(inst_allowance allowance) =
+    %inst_briefing_debriefing_time%(allowance, true)
+    + %inst_briefing_debriefing_time%(allowance, false);
+
+%inst_sim_skill_briefing_time% = %inst_briefing_debriefing_time%(inst_allowance09, true) /* SIM */
+                            + %inst_briefing_debriefing_time%(inst_allowance08, true); /* SKILL-TEST */
+
+%inst_sim_skill_debriefing_time% = %inst_briefing_debriefing_time%(inst_allowance09, false) /* SIM */
+                            + %inst_briefing_debriefing_time%(inst_allowance08, false); /* SKILL-TEST */
+
+%inst_briefing_debriefing_time%(inst_allowance allowance, bool briefing) =
+    if %inst_allowance% <> allowance then
+            0:00
+    else if briefing then
+        leg.%check_in%
+    else leg.%check_out%;
+
+
+%inst_sim_skill_bd_time% =
+    if not leg.%sim_type_is_multi% then 
+        %inst_sim_skill_briefing_time%
+        + %inst_sim_skill_debriefing_time%
+    else
+        if default(next(leg(duty), not %inst_act_sim%), true) then
+            sum(leg(duty),
+                %inst_sim_skill_briefing_time%
+                + %inst_sim_skill_debriefing_time%) from (current) backwards
+            while (leg.%sim_type_is_multi%)
+    else
+        0:00;
+
+/* Python: INST_PC_OPC */
+export %inst_pc_opc% =
+  round_up(%inst_pc_opc_in_period%(%salary_month_start%, %salary_month_end%), 0:15);
+
+%inst_pc_opc_in_period%(abstime s, abstime e) =
+  %inst_hours_with_allowance%(s, e, inst_allowance02);
+
+/* Python: INST_PC_OPC_BD */
+export %inst_pc_opc_bd% =
+  %inst_pc_opc_brief_debrief_nr%(%salary_month_start%, %salary_month_end%);
+
+%inst_pc_opc_brief_debrief_nr%(abstime s, abstime e) =
+  count(leg_set where (%inst_count_pc_opc_brief_debrief%
+    and leg.%end_utc% > s and leg.%end_utc% <= e));
+
+/* Python: INST_TYPE_RATING */
+export %inst_type_rating% =
+  round_up(%inst_type_rating_in_period%(%salary_month_start%, %salary_month_end%), 0:15);
+
+%inst_type_rating_in_period%(abstime s, abstime e) =
+  %inst_hours_with_allowance%(s, e, inst_allowance03);
+
+/* Python: INST_TYPE_RATING_BD */
+export %inst_type_rating_bd% =
+  %inst_type_rating_brief_debrief_nr%(%salary_month_start%, %salary_month_end%);
+
+%inst_type_rating_brief_debrief_nr%(abstime s, abstime e) =
+  count(leg_set where (%inst_count_type_rating_brief_debrief%
+    and leg.%end_utc% > s and leg.%end_utc% <= e));
+
+/* Python: INST_CLASS - changed with SASCMS-3278 */
+export %inst_class% =
+  round_up(%inst_class_in_period%(%salary_month_start%, %salary_month_end%), 0:15);
+
+%inst_class_in_period%(abstime s, abstime e) =
+  %inst_hours_with_allowance%(s, e, inst_allowance04);
+
+/* Python: INST_CRM (SASCMS-3278)*/
+export %inst_crm% =
+  round_up(%inst_crm_in_period%(%salary_month_start%, %salary_month_end%), 0:15);
+
+%inst_crm_in_period%(abstime s, abstime e) =
+  %inst_hours_with_allowance%(s, e, inst_allowance06);
+
+/* Python: INST_CC (SASCMS-3990)*/
+export %inst_cc% =
+  if crew.%has_agmt_group_qa_cc_at_date%(%salary_month_start_p%) then 0:00
+  else round_up(%inst_cc_in_period%(%salary_month_start%, %salary_month_end%), 0:15);
+
+%inst_cc_in_period%(abstime s, abstime e) =
+  %inst_hours_with_allowance%(s, e, inst_allowance07);
+
+/* Python: INST_LCI */
+export %inst_lci_lh% =
+  %inst_lci_in_period%(%salary_month_start%, %salary_month_end%, true);
+export %inst_lci_sh% =
+  %inst_lci_in_period%(%salary_month_start%, %salary_month_end%, false);
+
+%inst_lci_in_period%(abstime s, abstime e, bool long_haul) =
+    if long_haul then
+        if crew.%has_agmt_group_skis_fd% or crew.%has_agmt_group_skid_fd% or crew.%has_agmt_group_sks_fd% or crew.%has_agmt_group_skd_fd% then
+          %inst_legs_with_allowance%(s, e, inst_allowance10) / 2
+        else
+          %inst_days_with_allowance%(s, e, inst_allowance10)
+    else
+        %inst_legs_with_allowance%(s, e, inst_allowance05) / 2;
+
+/* Python: INST_SKILL_TEST */
+export %inst_skill_test% =
+    default(
+        sum(leg_set, leg.%time%)
+         where (%inst_act_skill_test% and
+            %inst_allowance% = inst_allowance08 and
+            leg.%end_utc% > %salary_month_start% and
+            leg.%end_utc% <= %salary_month_end%)
+        ,0:00);
+
+
+%inst_skill_test_in_period%(abstime s, abstime e) =
+  %inst_hours_with_allowance%(s, e, inst_allowance08);
+
+/* Convertible crew *****************************************************/
+export %crew_is_convertible%(Abstime date) = 
+  attributes.%crew_is_convertible%(date);
+  
+
+/* Per Diem report alphabet groups **************************************/
+/* this is due to the per diem pdf report running out of memory. BZ33195*/
+
+export %crew_alphabet_group% = 
+  if crew.%surname% <= "F" then "A-F"
+  else if crew.%surname% <= "L" then "F-L"
+  else if crew.%surname% <= "S" then "L-S"
+  else "S-Z";
+
+export %main_rank% = if %cabin_crew% then "CC" else "FD";
+  
+%crew_salary_filter_override_p% =
+  parameter false
+  remark "Salary: Only include specified crew ids";
+
+set crew_salary_filter_set_p =
+  parameter ""
+  remark "Salary: Crew IDs to include";
+
+/* If crew is excluded from salary files at the given date */
+export %crew_excluded_at_date%(Abstime date) =
+  if %crew_salary_filter_override_p% then
+    crew.%id% in crew_salary_filter_set_p
+  else
+    %param_table%("salary_exclude_crew", crew.%id%, date);
+  
+/* If crew is excluded from salary files the entire salary month */
+export %crew_excluded% =
+  %crew_excluded_at_date%(%salary_month_start%) and
+  %crew_excluded_at_date%(%salary_month_end%-00:01);
+
+
+export %ec_rank_excluded_at_date%(Abstime date) =
+        crew.%rank_at_date%(date) in ec_salay_excluded_rank_set;
+
+set ec_salay_excluded_rank_set = "FS";
+
+export %ec_rank_excluded% = 
+  %ec_rank_excluded_at_date%(%salary_month_start%) and
+  %ec_rank_excluded_at_date%(%salary_month_end%-00:01);
+
+
+
+%first_sunday_after_date%(Abstime start_date) = 
+let no_of_days_to_sunday = 7-calendar.%wd_from_abs%(start_date);
+start_date + 24:00*no_of_days_to_sunday;
+
+%nth_sunday_after_date%(Abstime start_date, Int sunday_number) =
+  %first_sunday_after_date%(start_date + (sunday_number-1)*7*24:00);
+
+%both_days_within_month%(Abstime dateA,Abstime dateB) =
+  if calendar.%month_number%(dateA) = calendar.%month_number%(dateB) then
+     true
+  else
+     false;
+ 
+%is_instructor_for_xsupernum_or_release_leg% =
+  (%inst_is_leg_instructor%
+    and (
+      default(leg.%instructor_code%="X SUPERNUM",false) or
+      default(leg.%instructor_code%="RELEASE",false))
+  )
+  or
+    leg.%is_pm_mentor%;
+  
+%is_instructor_for_xsupernum_or_release_in_week%(Abstime week_end_start) =
+  any(leg(roster),%is_instructor_for_xsupernum_or_release_leg%)
+     where (leg.%start_utc% < (week_end_start + 23:59) and
+            leg.%start_utc% >= week_end_start - 6*24:00);
+
+%ix_ir_allowance_this_week%(Abstime start_date) =
+  if %is_instructor_for_xsupernum_or_release_in_week%(start_date) then
+    1
+  else
+   0;
+
+%no_of_ir_ix_allowance_month%(Abstime start_date) =
+  
+  if %both_days_within_month%(start_date,%nth_sunday_after_date%(start_date,5)) then
+ 
+    %ix_ir_allowance_this_week%(%nth_sunday_after_date%(start_date,1)) +
+    %ix_ir_allowance_this_week%(%nth_sunday_after_date%(start_date,2)) +
+    %ix_ir_allowance_this_week%(%nth_sunday_after_date%(start_date,3)) +
+    %ix_ir_allowance_this_week%(%nth_sunday_after_date%(start_date,4)) +
+    %ix_ir_allowance_this_week%(%nth_sunday_after_date%(start_date,5))
+  else   
+    %ix_ir_allowance_this_week%(%nth_sunday_after_date%(start_date,1)) +
+    %ix_ir_allowance_this_week%(%nth_sunday_after_date%(start_date,2)) +
+    %ix_ir_allowance_this_week%(%nth_sunday_after_date%(start_date,3)) +
+    %ix_ir_allowance_this_week%(%nth_sunday_after_date%(start_date,4));
+
+export %inst_supernum_release% =
+  if crew.%has_agmt_group_qa_cc_at_date%(%salary_month_start_p%) then
+     %no_of_ir_ix_allowance_month%(%salary_month_start_p%)
+  else
+    0;
+
+/* calculates number of accumulated (planned) far single slipping in year with s, unto d */
+%_single_slipping_accum%(Abstime s, Abstime d) =
+  system_accumulator_reader.%int_value_in%(system_accumulator_reader.%nr_far_single_slipping_acc_name%, crew.%id%, round_down_year(s),d);
+
+/* Extra salary should be paid for increment to 7 or 8 in the period.
+   This is done by comparing interval of accumulated previous month +1 unto end of current month, with interval 7,8.
+   Example: previous month had 5 singled slips accumulated. End of current has 7. Interval [5+1:7] is compared with interval [7:8], 7 is the only
+   overlapping digitt -> one pay is exported. Possible results are 0,1,2 */
+export %extra_salary_for_single_slipping_longhaul% =
+  base_utils.%int_overlap%(7, 
+                           8, 
+                           %_single_slipping_accum%(%salary_month_start%, %salary_month_start%) +1, 
+                           %_single_slipping_accum%(%salary_month_start%, %salary_month_end%));
+
+/* SKCMS-1566 / SKAM-707 - fixed 1000 kr per sim supervision */
+export %sim_instr_fixed% =
+  %sim_instr_tagged_supervis_supol_ol% +
+  %skill_test_2h% +
+  %skill_test_not_2h%;
+
+/* SIM_INSTR_SUPERVIS or SIM_INSTR_SUPOL or SIM_INSTR_OL, no matter if there is
+* a SKILL TEST */
+%sim_instr_tagged_supervis_supol_ol% = count(duty_set)
+  where (%_last_duty_leg_within_month% and %_duty_is_sim_instr_supervis_ol_supol%);
+
+/* 2h SKILL TEST legs, when there is no SIM_INSTR_SUPERVIS or SIM_INSTR_SUPOL or
+* SIM_INSTR_OL. These are always run in pairs, hence divided by 2. */
+%skill_test_2h% = (count(leg_set)
+  where (leg.%end_date% >= %salary_month_start% and leg.%end_date% < %salary_month_end%
+    and not %_duty_is_sim_instr_supervis_ol_supol%
+    and crew.%is_instructor_leg_start%
+    and leg.%time% = 2:00
+    and any(equal_legs, leg.%is_skill_test%))) / 2;
+
+/* SKILL TEST legs not 2h in length, when there is no SIM_INSTR_SUPERVIS or SIM_INSTR_SUPOL or
+* SIM_INSTR_OL */
+%skill_test_not_2h% = count(leg_set)
+  where (leg.%end_date% >= %salary_month_start% and leg.%end_date% < %salary_month_end%
+    and not %_duty_is_sim_instr_supervis_ol_supol%
+    and crew.%is_instructor_leg_start%
+    and not (leg.%time% = 2:00)
+    and any(equal_legs, leg.%is_skill_test%));
+
+%_last_duty_leg_within_month% = (last(leg(duty), leg.%end_date%) >= %salary_month_start%
+    and last(leg(duty), leg.%end_date%) < %salary_month_end%);
+
+%_duty_is_sim_instr_supervis_ol_supol% =
+    (duty.%is_sim_instr_supervis%
+    or duty.%is_sim_instr_supol%
+    or duty.%is_sim_instr_ol%);
+
+/* vi: set fdm=marker: */
+/* eof */

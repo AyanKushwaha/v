@@ -1,0 +1,165 @@
+/* -*- crc -*- 
+ */
+
+root module kpi
+
+import keywords;
+import levels;
+import trip;
+import duty;
+import leg;
+import iterators;
+import crew_pos;
+import hotel;
+import rest;
+import fundamental;
+import oma16;
+
+export %kpi_hdr% = 
+    parameter "..."
+    remark "KPI#HEADER#";
+
+export %specification% =
+    parameter "kpi.kpi"
+    remark "Name of KPI specification Python module";
+
+/* Redefined for kpi_ccr */
+%include_trip% = true;
+
+%leg_to_consider% =
+    leg.%in_pp% and %leg_employser_is_sas%;
+
+%leg_to_consider_dh% =
+    leg.%in_pp%;
+    
+%leg_employser_is_sas% =
+    leg.%fd_employer_is_sas% or leg.%cc_employer_is_sas%;
+
+    
+%trip_crew_block% =
+    trip.%pp_block_time% * crew_pos.%trip_assigned%;
+    
+%trip_crew_duty% =
+    trip.%duty_time_in_pp%  * crew_pos.%trip_assigned%;
+    
+%avg_block_per_day% =
+    /* fundamental.%average% voids on 0 divide */
+    %average_reltime_0%( sum(trip_set, %trip_crew_block%) , sum(trip_set, %trip_pp_crew_days%)) ;
+   
+%trip_avg_duty_per_day% =
+    if %trip_pp_crew_days% = 0 then
+        0:00
+    else
+        %trip_crew_duty%/%trip_pp_crew_days%;
+        
+%avg_duty_per_day% =
+    %average_reltime_0% ( sum(trip_set, %trip_crew_duty%) , sum(trip_set, %trip_pp_crew_days%));
+    
+%sum_deadhead_time% =
+    sum(trip_set, %trip_crew_deadhead_time%);
+    
+%trip_pp_deadhead_time% = 
+    sum(leg(trip), leg.%time%) where (%leg_to_consider_dh% and leg.%is_deadhead%); 
+ 
+%trip_crew_deadhead_time% =
+    %trip_pp_deadhead_time%  * crew_pos.%trip_assigned%;
+
+%ac_block_time% =    
+    sum(iterators.unique_leg_set, leg.%block_time%) where (%leg_to_consider%);
+
+%sum_crew_block% =
+    sum(trip_set, %trip_crew_block%);
+    
+%duty_has_airport_hotel% =
+    last(leg(duty), hotel.%use_airport_hotel%);
+
+export %trip_pp_crew_days% =
+  trip.%pp_days%  * crew_pos.%trip_assigned%;
+    
+%trip_airport_hotels% =
+    count(duty(trip))
+      where (%duty_has_airport_hotel% 
+        and not is_last(duty(trip)) and duty.%in_pp%)  
+    * crew_pos.%trip_assigned%;
+    
+%trip_city_hotels% =
+    count(duty(trip)) 
+      where (not %duty_has_airport_hotel% 
+        and not is_last(duty(trip)) 
+        and duty.%in_pp%) 
+      * crew_pos.%trip_assigned%;
+
+%sum_airport_hotels% =
+    sum(trip_set, %trip_airport_hotels%);
+
+%sum_city_hotels% =
+    sum(trip_set, %trip_city_hotels%);
+    
+%trip_crew_short_stops% = 
+  crew_pos.%trip_assigned% * count(duty(trip) where(rest.%is_short_last_in_duty% and duty.%in_pp%));
+
+%sum_short_stops% =
+    sum(trip_set, %trip_crew_short_stops%);
+    
+%duty_is_extended% =
+  default(oma16.%is_extended_fdp%, false);
+
+%sum_extensions% =
+    sum(trip_set, %trip_crew_extended_duties%);
+
+%trip_crew_extended_duties% =
+   crew_pos.%trip_assigned% * count(duty(trip))
+       where(%duty_is_extended% and duty.%in_pp%);   
+
+%no_cat_with_x_day_trips%(string category, int x) =
+    sum(trip_set, crew_pos.%trip_assigned_func%(category))
+        where (trip.%days% = x and trip.%starts_in_pp% and not trip.%is_blank_day% and %include_trip%);
+
+%no_trips_for%(string category) =
+    sum(trip_set, trip.%days% * crew_pos.%trip_assigned_func%(category))
+        where (trip.%starts_in_pp% and not trip.%is_blank_day% and %include_trip%);
+
+%no_sb_trips_for%(string category) =
+    sum(trip_set, trip.%days% * crew_pos.%trip_assigned_func%(category))
+        where (trip.%starts_in_pp% and trip.%is_standby% and %include_trip%);
+
+%no_sb_line_trips_for%(string category) =
+    sum(trip_set, trip.%days% * crew_pos.%trip_assigned_func%(category))
+        where (trip.%starts_in_pp% and trip.%is_standby_line% and %include_trip%);
+
+%no_bl_trips_for%(string category) =
+    sum(trip_set, trip.%days% * crew_pos.%trip_assigned_func%(category))
+        where (trip.%starts_in_pp% and trip.%is_blank_day% and %include_trip%);
+
+%pp_date_ix%(int ix) =
+   fundamental.%pp_start_day% + ix * 24:00;
+
+%show_compensation_free% = parameter false
+    remark "ScAn: Show compensation days";
+
+%show_simplified_fairness% = parameter true
+    remark "ScAn: Show simplified fairness KPI";
+
+%no_crew_1_day_trips% =
+    sum(trip_set, crew_pos.%trip_assigned%)
+        where (trip.%days% = 1 and trip.%starts_in_pp% and %include_trip%);
+
+%no_crew_2_day_trips% =
+    sum(trip_set, crew_pos.%trip_assigned%)
+        where (trip.%days% = 2 and trip.%starts_in_pp% and %include_trip%);
+
+%no_crew_3_day_trips% =
+    sum(trip_set, crew_pos.%trip_assigned%)
+        where (trip.%days% = 3 and trip.%starts_in_pp% and %include_trip%);
+
+%no_crew_4_day_trips% =
+    sum(trip_set, crew_pos.%trip_assigned%)
+        where (trip.%days% = 4 and trip.%starts_in_pp% and %include_trip%);
+
+%no_crew_5_day_trips% =
+    sum(trip_set, crew_pos.%trip_assigned%)
+        where (trip.%days% = 5 and trip.%starts_in_pp% and %include_trip%);
+
+%no_crew_days% =
+    sum(trip_set, crew_pos.%trip_assigned% * trip.%days%)
+        where (trip.%has_only_flight_duty% and trip.%starts_in_pp% and %include_trip%);

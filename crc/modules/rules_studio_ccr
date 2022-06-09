@@ -1,0 +1,610 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains studio rules used in assignment.
+ *
+ * Sections:
+ *   1. Compensation day rules
+ *   2. Composition checks
+ *
+ * Created by:
+ *   Peter Jonsson, 26-May-2006
+ *
+ * Major changes:
+ *
+ */
+
+root module rules_studio_ccr
+import fundamental;
+import base_product;
+import crew_pos;
+import crew;
+import leg;
+import levels;
+import trip;
+import roster;
+import compdays;
+import training;
+import recency;
+import rule_exceptions;
+import rules;
+import wop;
+import duty;
+
+
+/****************************************************************
+ * Section 1: Compensation day rules
+ ***************************************************************/
+/*
+** Rule:
+**    Compensation day scheduled must not exceed balance
+**    This rule is changed so that a trip can never make the
+**    balance below zero.
+**    Changed the rule again by multiplying -1 to avoid problem with rule exception
+**    Split F36 out into seperate rule
+**
+** Description:
+**    Check that crew is entitled to the compensation day scheduled
+**    The compensation days are defined in entity comp_days_set, i.e.
+**    a new compensation day should be entered there.
+**
+** Agreement:
+**    Functional rule
+*/
+export rule sft_nr_comp_days_must_not_exceed_balance_ALL =
+  valid roster.%check_rules% and
+        %is_last_comp_day_in_pp_extended%;
+        
+  (0 - %trip_compensation_day_balance%) <= + %trip_account_extension% + 
+				     rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = trip.%failobject_start%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int_div_100%("Func: Compdays balance ",-value,limit);
+  remark "Func: Scheduled comp days must not exceed balance";
+end
+
+%is_last_comp_day_in_pp_extended% =
+    let code = trip.%code%;
+    if trip.%is_compensation_day% then
+        is_last(trip(roster))
+        where(trip.%in_pp_extended% and
+              trip.%code% = code and
+              not crew.%is_leased_trip_start%)
+    else
+        false;
+
+/*
+** Rule:
+**    Split F36 out into seperate rule
+**
+** Description:
+**    Check that crew is entitled to the compensation day scheduled
+**    The compensation days are defined in entity comp_days_set, i.e.
+**    a new compensation day should be entered there.
+**
+** Agreement:
+**    Functional rule
+*/
+export rule sft_nr_f36_days_must_not_exceed_balance_ALL =
+  valid roster.%check_rules% and
+        %is_last_f36_day_in_pp_extended%;
+        
+  (0 - %trip_compensation_day_balance%) <= + %trip_account_extension% + 
+				     rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%, %duty_lh_region%));
+  failobject = trip.%failobject_start%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int_div_100%("Func: F36 balance ",-value,limit);
+  remark "Func: Scheduled comp days must not exceed balance";
+end
+
+%is_last_f36_day_in_pp_extended% =
+    let code = trip.%code%;
+    if trip.%is_f36% then
+        is_last(trip(roster))
+        where(trip.%in_pp_extended% and
+              trip.%code% = code and
+              not crew.%is_leased_trip_start%)
+    else
+        false;
+
+
+
+export rule sft_nr_f9_days_must_not_exceed_balance_ALL =
+  valid roster.%check_rules% and
+        %is_last_f9_day_in_pp_extended%;
+
+  (0 - %trip_compensation_day_balance%) <= + %trip_account_extension% +
+				     rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = trip.%failobject_start%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int_div_100%("Func: F9 balance ", -value, limit);
+  remark "Func: Scheduled comp days must not exceed balance";
+end
+
+
+%is_last_f9_day_in_pp_extended% =
+    let code = trip.%code%;
+    if trip.%is_f9% then
+        is_last(trip(roster))
+        where(trip.%in_pp_extended% and
+              trip.%code% = code and
+              not crew.%is_leased_trip_start%)
+    else
+        false;
+
+
+
+/*       Outstanding Stuff (old):
+**
+**       A complement to the rule above must be made that makes a warning for 
+**       future account activities to make the balance go below zero.
+**       Such a rule must be checked for all valid crew accounts
+**
+**       This functional rule should probably only be true for not published activities 
+**       A PRE-assigned compday shall not trigger an illegality
+**
+**       This rule needs to be moved to a planner-only module, since the bids are 
+**       not available in tracking. Right now it is an ugly fix adding in_pp to
+**       the rule evaluation.
+*/
+rule (off) sft_comp_days_must_be_bidded_for_ALL =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        trip.%is_compensation_day% and
+        not(%cabin_crew% and (trip.%code% ="F7S" or trip.%is_f89%)) and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+        
+  compdays.%day_is_bidded_for% and trip.%in_pp%;
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = trip.%failobject_start%;
+  failtext "Func: Only bid compdays allowed";
+  remark "(CCR) Func: Only bidded for comp days should be assigned";
+end
+
+/*
+** Rule:
+**    No unknown group codes on trips
+**
+** Description:
+**    Functional rule assisting in detecting unknown task codes.
+*/
+
+rule sft_trip_code_is_unknown_ALL =
+  valid roster.%check_rules% and
+        trip.%is_complete% and
+        trip.%in_pp_extended% and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+        
+  trip.%group_code% <> "";
+  startdate = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = trip.%failobject_start%;
+  failtext concat("Soft: Unknown task code in trip: ", trip.%code%);
+  remark "Soft: Unknown task code in trip";
+end
+
+/* Maybe should be only for trips in month, due to monthly acc */
+/* This code shall be moved to the balance calculation where all rates and factors shall be modelled 
+%nr_compensation_days% =
+  %_nr_compensation_days% *
+  (if crew.%is_SKD% and crew.%in_fixed_group_trip_start% then
+    10 * crew.%length_pattern_wop_start% / crew.%nr_p_days_in_pattern_wop_start%
+  else
+    10);
+
+%_nr_compensation_days% =
+  let this = trip.%code%;
+  count(trip(roster))
+  from (current) backwards
+  while (trip.%start_utc% >= %pp_start%)
+  where (trip.%code% = this); */
+
+/* Balance is for a trip, good to cache here */
+%trip_compensation_day_balance% = 
+    default(compdays.%balance_at_date%(trip.%code%, trip.%start_day% + 00:01), 0);
+
+
+/* Flight crew can be scheduled one more F3 or F31 day than current balance */
+%trip_account_extension% =
+    compdays.%account_extension%(trip.%code%, trip.%start_day%);
+  
+/****************************************************************
+ * Section 2: Composition checks
+ ***************************************************************/
+
+/*
+** Rule:
+**    No cancecelled flights on roster.
+**
+** Description:
+**    Any roster containing a cancelled flight is considered 
+**    illegal.
+**
+** Functional rule: 
+**    System specification Tracking, chapter 4
+**
+*/
+
+/* Moved here from rules_soft_cct */
+export rule sft_comp_no_not_operating_leg_in_roster =
+  valid %is_roster% and 
+	    leg.%in_pp_extended% and
+      not crew.%is_leased_duty_start% and
+      rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+  
+  not leg.%is_nop%;
+    
+  startdate = leg.%activity_scheduled_start_time_UTC%;
+  failtext "Soft: Cancelled flight";
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  remark "(CCT) Func: No cancelled flights in roster",
+  planner "The rule checks that no flight in a trip is cancelled. "
+	        "A trip that consists cancelled flights is considered illegal.";
+end
+  
+
+/*
+** Rule:
+**    No crew that are prohibited from flying together should
+**    be assigned to the same flight
+**
+** Description:
+**    Any leg that are assigned to two or more crew-members
+**    that are prohibited from flying together is considered
+**    illegal.
+**
+** Functional rule:
+**   System specification Tracking, chapter 4
+*/
+export rule sft_comp_crew_not_fly_with =
+  valid leg.%is_active_flight% and 
+        not crew.%is_leased_duty_start% and
+        crew.%id_in_not_fly_table%;
+  
+  %number_of_prohibited_crew_in_active_flight% <=
+      0 + rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%);
+  
+  startdate = leg.%activity_scheduled_start_time_UTC%;
+  failtext "Soft: Assigned with prohibited crew";
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  remark "(CCT) Func: Prohibit crew from flying together.",
+  planner "The rule checks that no crew prohibited from flying "
+	        "together are assigned to the same flight. The information "
+          "of which crew that are prohibited from flying together "
+          "is saved in the database.";
+end
+
+%number_of_prohibited_crew_in_active_flight% =
+  let this_id = crew.%id%,
+      this_extperkey = crew.%extperkey_at_date%(leg.%start_hb%);
+
+  count(equal_legs) where ((crew.%not_fly_together%(this_id,crew.%extperkey_at_date%(leg.%start_hb%)) or
+                           crew.%not_fly_together%(crew.%id%,this_extperkey)) and not leg.%is_deadhead%);
+
+
+/*
+** Rule: 
+**    Wrong seniority order on lower ranked flight
+**
+** Description:
+**    Check that lower rank trips are assigned in accordance
+**    with seniority. Lowest seniority order number (highest seniority)
+**    must be in most significant position (exception exist for FD_SKS and 
+**    FD_SKD_CJ).
+**    The rule is only evaluated on crew flying lower.
+**    Rules is turned off in CCT by parameter files.
+**
+** Agreement:
+**    Functional rule
+*/
+
+export rule func_assign_order_ALL =
+  valid roster.%check_rules% and
+        trip.%starts_in_pp% and
+        %r_leg_valid_lower_rank% and
+        not crew.%is_leased_duty_start% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+  %leg_lower_rank_is_scheduled_correct_ALL%;
+  startdate = leg.%activity_scheduled_start_time_utc%;
+  enddate = leg.%end_UTC%;
+  severity = %severity_filter_int%(leg.%start_UTC%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %func_assign_order_ALL_failtext%;
+  remark "(CCR) Soft: Lower rank must be scheduled in correct order.",
+  planner "The rule checks that lower rank assignment is carried out"
+	  " in correct order for crew flying lower."; 
+end
+
+%func_assign_order_ALL_failtext% =
+  concat("Soft: Wrong order on lower flt ",
+          if %date_based_fbr% then
+            "(prev lower rank date)"
+          else
+            "(seniority)");
+
+set fbr_ranks = "AP", "FC";
+
+%r_leg_valid_lower_rank% =
+  crew_pos.%current_function% in fbr_ranks and
+  crew_pos.%lower_rank% and
+  %leg_valid_for_lower_check%;
+  
+%leg_valid_for_lower_check% =
+  %is_roster% and leg.%is_flight_duty% /*leg.%is_active_flight% */ and
+  void(crew.%spec_sched_limit_str%("ForbiddenAct", "LOWER", leg.%start_hb%)) and
+  not (leg.%is_supernum% or training.%leg_is_training% or training.%has_duty_code%);
+
+%leg_lower_rank_is_scheduled_correct_ALL% =
+  if %date_based_fbr% then
+    %date_based_fbr_scheduled_correct%
+  else
+    %seniority_based_fbr_scheduled_correct%;
+
+%seniority_based_fbr_scheduled_correct% =
+  not any(equal_legs, %seniority_based_fbr_illegaly_assigned%);
+  
+/* Will be redefined for some FD areas that base FBR on last lower date */
+%date_based_fbr_scheduled_correct% = false;
+%date_based_fbr% = false;
+
+/* Region is included to handle the CC long haul case, where a region is given
+   the AP position, and it shouldn't matter if another region has a more senior 
+   AP assigned as AH */
+%seniority_based_fbr_illegaly_assigned% =
+  let seniority = crew.%seniority%,
+      current_function = crew_pos.%current_function%,
+      region = crew.%region%;
+  if crew_pos.%lower_rank% then
+    any(equal_legs, crew.%seniority% > seniority)
+    where (crew_pos.%current_function% = current_function 
+           and crew.%region% = region
+           and not crew_pos.%lower_rank% 
+           and %leg_valid_for_lower_check%)
+  else
+    false;
+
+/* %crew_seniority_index% = %crew_seniority_order% + %crew_id_order% + 1;
+**
+**%crew_seniority_order% =
+**  let seniority = crew.%seniority%,
+**      current_function = crew_pos.%current_function%;
+**  count(equal_legs) 
+**  where (crew.%seniority% < seniority
+**         and crew_pos.%current_function% = current_function);
+
+**%crew_id_order% =
+**  let seniority_order = %crew_seniority_order%,
+**      id = crew.%id%,
+**      current_function = crew_pos.%current_function%;
+**  count(equal_legs)
+**  where (%crew_seniority_order% = seniority_order
+**         and crew.%id% < id
+**         and crew_pos.%current_function% = current_function);
+
+**%leg_number_of_assigned_ap% =
+**  count(equal_legs)
+**  where (not void(crew.%id%)
+**         and crew_pos.%assigned_function% = "AP");
+
+**%leg_number_of_assigned_fc% =
+**  count(equal_legs)
+**  where (not void(crew.%id%)
+**         and crew_pos.%assigned_function% = "FC");
+
+**%ap_to_ah% =
+**  crew_pos.%assigned_function% = "AP"
+**  and %crew_seniority_index% > %leg_number_of_assigned_ap%
+**  and %leg_valid_for_lower_check%
+**  or leg.%is_deadhead%;
+
+**%ah_to_ap% = 
+**  crew_pos.%assigned_function% = "AH"
+**  and crew_pos.%current_function% = "AP"
+**  and %crew_seniority_index% <= %leg_number_of_assigned_ap%
+**  and %leg_valid_for_lower_check%
+**  or leg.%is_deadhead%;
+
+**%fc_to_fp% =
+**  crew_pos.%assigned_function% = "FC"
+**  and %crew_seniority_index% > %leg_number_of_assigned_fc%
+**  and %leg_valid_for_lower_check%
+**  or leg.%is_deadhead%;
+
+**%fp_to_fc% = 
+**  crew_pos.%assigned_function% = "FP"
+**  and crew_pos.%current_function% = "FC"
+**  and %crew_seniority_index% <= %leg_number_of_assigned_fc%
+**  and %leg_valid_for_lower_check%
+**  or leg.%is_deadhead%; 
+
+**%new_pos% =
+**  if all(leg(trip), %ap_to_ah%) then "AH"
+**  else if all(leg(trip), %ah_to_ap%) then "AP"
+**  else if all(leg(trip), %fp_to_fc%) then "FC"
+**  else if all(leg(trip), %fc_to_fp%) then "FP"
+**  else void_string;
+
+**%trip_to_be_reassigned_x% =
+**  trip.%starts_in_pp% and
+**  not trip.%is_locked% and
+**  not void(%new_pos%);
+
+*/
+
+%leg_valid_for_fbr_check% =
+  %is_roster%
+  and not leg.%is_locked%
+  and (leg.%is_active_flight% or leg.%is_deadhead%)
+  and void(crew.%spec_sched_limit_str%("ForbiddenAct", "LOWER", leg.%start_hb%))
+  and not (leg.%is_supernum% or training.%leg_is_training% or training.%has_duty_code%);
+
+/* return >0 of compared leg is lower in rank (higher value) and seniority (higher value) then params,
+   <0 if opposite, and 0 if equal */
+%compare_seniority%(Int cur_pos, Int sen) = 
+  if crew_pos.%current_pos% = cur_pos then
+    if crew.%seniority%=sen then 0
+    else crew.%seniority% - sen 
+  else crew_pos.%current_pos% - cur_pos;  
+
+%dead_head_flag% =
+  if leg.%is_deadhead% then "P"
+  else "";
+
+%fbr_match_legs% =
+  cat(leg(trip),concat(leg.%flight_id%,%dead_head_flag%),"/");
+
+/* compares iterated leg with parameters, return new rank if parameter rank should be raised because
+   of iterated leg, 0 if other crew comes before to be raised */
+%iter_moves_higher%(String mf, Int cur_pos, Int ass_pos, String dflt, Int seniority, String match_str) =
+  if not %trip_valid_for_fbr_check% or mf<>crew.%main_func% then
+    dflt /* cannot be changed, so should not compare for swap */
+  else if match_str<>%fbr_match_legs% then
+    dflt /* trip is not matching */
+  else if crew_pos.%assigned_pos% < ass_pos and crew_pos.%assigned_pos% in positions_for_lower then /* the other has higher assigned position then own */
+    if %compare_seniority%(cur_pos, seniority) > 0 then 
+      concat(format_int(crew_pos.%assigned_pos%,"%02d"),",",crew_pos.%assigned_function%,",",crew.%id%) /* ... but lower rank */
+    else dflt /* ... and also higher rank */
+  else if crew_pos.%assigned_pos% in positions_for_higher then
+    if %compare_seniority%(cur_pos,seniority) < 0 then "00,--,00000" /* the other comes first to fill any hole */
+    else dflt
+  else dflt; 
+
+/* compares iterated leg with parameters, return new rank if parameter rank should be lowered because
+   of iterated leg, 99 if other crew comes before */
+%iter_moves_lower%(String mf,Int cur_pos, Int ass_pos, String dflt, Int seniority, String match_str) =
+  if not %trip_valid_for_fbr_check% or mf<>crew.%main_func% then
+    dflt /* cannot be changed, so should not compare for swap */
+  else if match_str<>%fbr_match_legs% then
+    dflt
+  else if crew_pos.%assigned_pos% > ass_pos and crew_pos.%assigned_pos% in positions_for_higher then /* the other has lower assigned position */
+    if %compare_seniority%(cur_pos, seniority) < 0 then
+      concat(format_int(crew_pos.%assigned_pos%,"%02d"),",",crew_pos.%assigned_function%,",",crew.%id%) /* ... but lower rank */
+    else dflt /* ... and also lower rank */
+  else if crew_pos.%assigned_pos% in positions_for_lower then
+    if %compare_seniority%(cur_pos, seniority) > 0 then "99,--,00000" /* the other should be move down first */
+    else dflt
+  else dflt; 
+  
+%check_moves_higher%(Int cur_pos, Int ass_pos) =
+  let sen = crew.%seniority%,
+        mf = crew.%main_func%,
+        fml = %fbr_match_legs%,
+        ass_pos_str = concat(format_int(ass_pos,"%02d"),",--,00000"),
+        ret = first(leg(trip),min(equal_legs,%iter_moves_higher%(mf, cur_pos, ass_pos, ass_pos_str, sen, fml)));
+  if ret>="01" and ret < ass_pos_str then
+    ret
+  else
+    void_string;
+
+%check_moves_lower%(Int cur_pos, Int ass_pos) =
+  let sen = crew.%seniority%,
+        mf = crew.%main_func%,
+        fml = %fbr_match_legs%,
+        ass_pos_str = concat(format_int(ass_pos,"%02d"),",ZZ,9999"),
+        ret = first(leg(trip),max(equal_legs, %iter_moves_lower%(mf, cur_pos, ass_pos, ass_pos_str, sen, fml)));
+  if ret<"99" and ret>ass_pos_str then
+    ret
+  else
+    void_string;
+
+/* Currently we compare FC->FP->FR and AP->AH. AS is not included as AP is not serving as AS */
+set positions_for_higher = 2,3,7;
+set positions_for_lower = 1,2,5;
+
+%should_be_higher% = /* check if any comparable crew could be moved down in position (higher value) */
+  let	cp = crew_pos.%current_pos%,
+	ap = crew_pos.%assigned_pos%;
+  if ap=cp or not (ap in positions_for_higher) then
+    void_string 
+  else
+    %check_moves_higher%(cp,ap); 
+
+%should_be_lower% = /* check if any comparable crew could be moved up in position (lower value)*/
+  let	cp = crew_pos.%current_pos%,
+	ap = crew_pos.%assigned_pos%;
+  if not (ap in positions_for_lower) then
+    void_string
+  else
+    %check_moves_lower%(cp,ap);
+
+%trip_valid_for_fbr_check% =
+  trip.%starts_in_pp%
+  and all(leg(trip), %leg_valid_for_fbr_check%);
+
+export %trip_to_be_reassigned% = 
+  %trip_valid_for_fbr_check%
+  and (not void(%should_be_higher%) or not void(%should_be_lower%));
+
+/* General export of a string tuble describing a possible change.
+** '02,FP,12345' says position 2 (FP) may be changed to, with crew 12345, enhancing FBR relation
+*/
+export %pos_change% =
+  default(%should_be_higher%,%should_be_lower%);
+
+/*%has_equal_trips% =
+**  count(equal_trips) where (%trip_valid_for_fbr_check% and %is_fbr%) > 1;
+**
+**%is_fbr% =
+**  crew_pos.%assigned_pos%>crew_pos.%current_pos%;
+*/
+
+/*
+** Rule:
+**    FG, short haul are to follow the FG cycle 
+**
+** Description:
+**    Check that FG crew, short haul follow the production cycle.
+**
+** Agreement:
+**    FC 13:46 8
+**    SCCA N.3a
+**    CAU P
+**    NKF 3
+*/
+/* This rule has been turned OFF in Tracking by request from SAS.
+** crc/parameters/tracking/studio
+**                        /alertgenerator
+** jastrom 2008-03-05 
+*/
+export rule ind_production_must_follow_fixed_group_cycle_ALL =
+  valid roster.%check_rules% and
+        wop.%in_pp_extended% and
+        wop.%is_on_duty% and
+        crew.%in_fixed_group_wop_start% and
+        not crew.%in_fixed_variable_group_wop_start% and
+        duty.%is_on_duty% and
+        rule_exceptions.%rule_on%(duty.%start_day%) and
+        not duty.%is_bought% and
+        not crew.%is_leased_wop_start%;
+        
+  crew.%pattern_daytype_at_date%(duty.%start_hb%) in allowed_types_for_on_duty;
+  startdate  = duty.%start_day%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext
+    concat("Coll: ",duty.%code%," must follow FG-pattern");
+  remark "Coll: Crew in fixed group must follow pattern",
+  planner "Checks that the production cycle for crew in fixed group (FG) is "
+          "correct. The rule is valid for FG crew flying short haul.";
+end
+
+/* On-duty activity must be assigned on a P- or X-day (5/4 flex) 
+ * according to pattern. */
+set allowed_types_for_on_duty = "P", "X";
+  
+  
+/* end of file */
+

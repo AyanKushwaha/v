@@ -1,0 +1,138 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   This module contains meal rules used in Carmen Crew Pairing and as studio
+ *   only in Carmen Crew Rostering and Carmen Crew Tracking respectively.
+ *
+ * Sections:
+ *   1. Mealstop rules
+ *
+ * Created by:
+ *   Hasse Eliasson, 2009May6
+ *
+ * Major changes:
+ *   Hasse Eliasson, 2009May6:
+ *     Rules were moved here from rules_indust_ccp, so that they
+ *     could be redefined for Tracking, in a sub module using inheritance.
+ */
+
+root module rules_meal_ccp
+import fundamental;
+import levels;
+import leg;
+import duty;
+import trip;
+import meal;
+import rule_exceptions;
+import rules;
+import parameters;
+import system_db_parameters;
+
+
+/****************************************************************
+ * Section 1: Mealstop rules
+ ***************************************************************/
+/*
+** Rule:
+**    Max time between meal breaks must not be exceeded
+**
+** Description:
+**    Check that the time to the first meal break and between
+**    meal breaks is not exceeded. A meal break can be any of a
+**    meal stop (X), meal on ground in ac (V) or meal during flight (VO).
+**
+** Note: this rule is implemented for cct in rules_indust_cct
+**       When changing the rule condition remember to do the corresponding changes in trip_cost
+** Agreement:
+**    FC 13:25 1,2,6,9
+**    CAU K.1, K.2.1
+**    NKF/SBK 10.1, F5 2.6
+**    SCCA K06 6
+*/
+export rule ind_max_time_btw_meal_breaks_ALL =
+  valid trip.%check_rules% and
+        trip.%in_pp_extended% and
+        duty.%start_hb% >= %pp_start% and
+        /* Avoid illegal subchains */
+        duty.%is_closed% and
+        meal.%is_required% and
+		(meal.%break% or (is_last(leg(duty)) where (not meal.%is_standby%))) and
+		duty.%is_short_haul% and 
+		not meal.%is_standby%
+        and not meal.%has_meal_rules_off_QA_CC_FD%;
+
+  meal.%time_to_next_meal_break% <=         /*remember to do changes in trip_cost if this condition is changed*/
+    meal.%max_time_to_meal_break% +
+    rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%);
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext(Reltime value, Reltime limit) =
+    rules.%failtext_rel%("Coll: Meal break", value, limit);
+  remark "(CCP) Coll: Max time between meal breaks",
+  planner "The rule checks that the max time to the first meal break and between"
+          " meal breaks is satisified. A meal break can be any of a meal stop,"
+          " meal on ground in ac or meal during flight.";
+end
+
+/*
+** Rule:
+**    Min nr of meal breaks in duty
+**
+** Description:
+**    The rule checks that at least two meal-breaks are planned
+**    if time between first block-off and last block-on is more than 10:00, 
+**    and there is no  meal stop planned to start <= 10:00 hrs. from block-off.
+**
+**    If the meal stop starts > 6:00 from check-in, so that a meal load is
+**    required to satisfy the 6:00 rule, the meal stop following will also be
+**    allocated, so there will be 2 meal breaks
+**    If the meal stop starts <= 6:00 from check-in, then there is no need for
+**    any further meal breaks.
+**
+**    4ExNG CC: There must always be 2 meal breaks, even when the first break is
+                a 'X' meal stop.
+** Agreement:
+**    4ExNG 6.8
+*/
+rule ind_min_nr_meal_breaks_in_duty_ALL =
+  valid trip.%check_rules% and
+        (duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) or
+         parameters.%k4exng_fc_sp5_1_valid%(duty.%start_day%)) and
+        duty.%start_hb% >= %pp_start% and
+        duty.%is_short_haul% and
+        meal.%duty_requires_two_meal_breaks% and
+        /*(duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) or
+         not meal.%duty_includes_meal_stop%)*/
+        %two_meal_corona_bypass% and
+        /* Duty must be complete to avoid illegal subchains,
+           otherwise a duty with x legs might be illegal but when
+           adding another leg (first or last) there might be a new
+           meal stop and the duty would be legal */
+        duty.%is_closed%
+        and not meal.%has_meal_rules_off_QA_CC_FD%;
+        
+  meal.%nr_best_meal_breaks% >=  %min_nr_meal_breaks% -
+                rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+  startdate  = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(Int value, Int limit) =
+    concat(rules.%failtext_int%("Coll: Meal breaks in duty", value, limit),
+           format_time(meal.%duty_requiring_two_breaks%, " for duty > %h:%02M"));
+  remark "Coll: Min number of meal breaks in duty",
+  planner "";
+end
+
+%two_meal_corona_bypass% =
+if not ((system_db_parameters.%K20_sks_cc_meal_stop%(duty.%start_day%)and duty.%is_ac_employer_sks%) or (system_db_parameters.%K20_skd_cc_meal_stop%(duty.%start_day%) and duty.%is_ac_employer_skd%) or (system_db_parameters.%K20_skn_cc_meal_stop%(duty.%start_day%)and duty.%is_ac_employer_skn%))
+    then (duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) or
+         not meal.%duty_includes_meal_stop%) 
+    else
+    not meal.%duty_includes_meal_stop%;
+
+%min_nr_meal_breaks% = 2;
+
+
+/* end of file */
+

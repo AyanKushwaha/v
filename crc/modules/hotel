@@ -1,0 +1,742 @@
+/* -*- crc -*-/
+ *
+ * Purpose:
+ *   This module contains basic hotel definitions, mainly for use in cost
+ *   and rule calculations. The main components are rest room cost and 
+ *   transportation times and cost.
+ *
+ * Sections:
+ *   1. Parameters
+ *   2. Const level definitions
+ *   3. Duty level definitions
+ *   4. Leg level definition
+ *   5. External tables
+ *   6. Special Local Transport
+ *
+ * Created by:
+ *   Extracted from the Carmen Standard User, 07-Dec-2005
+ *
+ * Major changes:
+ *   061026 External table driven version rewritten to use UDM
+ *
+ */
+
+root module hotel
+import levels;
+import trip;
+import duty;
+import leg;
+import fundamental;
+import system_db_parameters;
+
+/****************************************************************
+ * Section 1: Parameters
+ ***************************************************************/
+
+export %hotel_table_p% =
+  parameter "hotel"
+  remark "External table with hotel names and contact information";
+ 
+export %hotel_contract_table_p% =
+  parameter "hotel_contract"
+  remark "External table with hotel agreements, check-in/out times and cost";
+  
+export %hotel_transport_table_p% =
+  parameter "hotel_transport"
+  remark "External table with local transport times and costs for hotels";
+  
+export %airport_hotel_table_p% =
+  parameter "airport_hotel"
+  remark "External table linking hotels to airports";
+  
+export %preferred_hotel_table_p% =
+  parameter "preferred_hotel"
+  remark "External table with preferred hotel for an airport";
+  
+export %preferred_hotel_exc_table_p% =
+  parameter "preferred_hotel_exc"
+  remark "External table with exceptions to the preferred hotels";
+
+export %hotel_default_cost_per_night_p% =
+  parameter 4000 minvalue 0
+  remark "Default cost of one hotel night";
+
+export %hotel_default_check_in_p% =
+  parameter 10:00 minvalue 0:00 maxvalue 23:59
+  remark "Default earliest hotel Check-In time";
+
+export %hotel_default_check_out_p% =
+  parameter 18:00 minvalue 0:01 maxvalue 24:00
+  remark "Default latest hotel Check-Out time";
+
+export %hotel_default_transport_cost_p% =
+  parameter 500 minvalue 0
+  remark "Default transport cost to/from a hotel";
+
+export %hotel_default_transport_time_p% =
+  parameter 1:00 minvalue 0:00
+  remark "Default transport time to/from a hotel";
+
+export %hotel_time_of_day_change% = 
+  parameter 02:00 minvalue 0:00 maxvalue 24:00
+  remark "Hotel and transport day break";
+
+/****************************************************************
+ * Section 2: Const level definitions
+ ***************************************************************/
+
+/*
+** Hotel data (Adress, telephone etc.)
+*/
+
+export %name%(String hotel_id) = %hotel_name%(hotel_id);
+export %street%(String hotel_id) = %hotel_street%(hotel_id);
+export %city%(String hotel_id) = %hotel_city%(hotel_id);
+export %state%(String hotel_id) = %hotel_state%(hotel_id);
+export %postalcode%(String hotel_id) = %hotel_postalcode%(hotel_id);
+export %country%(String hotel_id) = %hotel_country%(hotel_id);
+export %telephone%(String hotel_id) = %hotel_tel%(hotel_id);
+export %fax%(String hotel_id) = %hotel_fax%(hotel_id);
+export %info%(String hotel_id) = %hotel_si%(hotel_id);
+export %email%(String hotel_id) = %hotel_email%(hotel_id);
+
+/*
+** Airport hotel data
+*/ 
+
+export %airport%(String hotel_id) = %hotel_airport_id%(hotel_id);
+export %hotel_at_airport%(String airport_id) = %airport_hotel_id%(airport_id);
+export %airport_hotel_info%(String airport_id, String hotel_id) =
+  %airport_hotel_si%(airport_id, hotel_id);
+
+/* 
+** Constants (default check-in, default check-out)
+*/
+export %default_early_checkin% = 10:00;
+export %default_late_checkout% = 18:00;
+
+/*
+** Contract data (Prices, check-in, check-out etc).
+*/
+export %contract_valid_from%(String hotel_id, AbsTime atime) = 
+  %hotel_contract_validfrom%(hotel_id, atime);
+export %contract_valid_to%(String hotel_id, AbsTime atime) = 
+  %hotel_contract_validto%(hotel_id, atime);
+export %extra_early_checkin%(String hotel_id, AbsTime atime) = 
+  %hotel_contract_xeci%(hotel_id, atime);
+export %early_checkin%(String hotel_id, AbsTime atime) = 
+  %hotel_contract_eci%(hotel_id, atime);
+export %late_checkout%(String hotel_id, AbsTime atime) = 
+  %hotel_contract_lco%(hotel_id, atime);
+export %extra_late_checkout%(String hotel_id, AbsTime atime) = 
+  %hotel_contract_xlco%(hotel_id, atime); 
+export %cost_per_night%(String hotel_id, AbsTime atime) =
+  if fundamental.%flight_crew% then
+    %cost_per_night_fc%(hotel_id, atime)
+  else
+    %cost_per_night_ca%(hotel_id, atime);
+export %cost_per_night_fc%(String hotel_id, AbsTime atime) =
+  %hotel_contract_costco%(hotel_id, atime);
+export %cost_per_night_ca%(String hotel_id, AbsTime atime) =
+  %hotel_contract_costca%(hotel_id, atime);
+export %contact_person%(String hotel_id, AbsTime atime) =
+  %hotel_contract_contact%(hotel_id, atime);
+export %contract_info%(String hotel_id, AbsTime atime) =
+  %hotel_contract_si%(hotel_id, atime);
+
+/*
+** Preferred hotels
+*/
+
+export %preferred_id%(String airport_id, AbsTime atime) = 
+  %hotel_contract_hotel_id%(%preferred_hotel_hotel_id%(airport_id, atime), atime);
+export %preferred_valid_from%(String airport_id, AbsTime atime) = 
+  %preferred_hotel_validfrom%(airport_id, atime);
+export %preferred_valid_to%(String airport_id, AbsTime atime) = 
+  %preferred_hotel_validto%(airport_id, atime);
+export %preferred_info%(String airport_id, AbsTime atime) = 
+  %preferred_hotel_si%(airport_id, atime);
+  
+/*
+** Exceptions to preferred hotels
+*/
+
+export %preferred_exc_id%(String airport_id, String region_id, String arr_flight_nr, String dep_flight_nr,
+                          AbsTime atime, String category, Bool airport_hotel, String weekday) =
+    first(times(7), %preferred_hotel_exc_hotel_id%(airport_id, region_id, arr_flight_nr, dep_flight_nr,
+                                                   atime, category, airport_hotel, %times_index_0%))
+    where(%preferred_exc_match_weekday_ix%(airport_id, region_id, arr_flight_nr, dep_flight_nr,
+                                           atime, category, airport_hotel, weekday, %times_index_0%)
+          and not void(hotel.%hotel_contract_hotel_id%(%preferred_hotel_exc_hotel_id%(airport_id, region_id, arr_flight_nr, dep_flight_nr,
+                                                   atime, category, airport_hotel, %times_index_0%), atime)));
+
+export %preferred_exc_valid_from%(String airport_id, String region_id, String arr_flight_nr, String dep_flight_nr,
+                                  AbsTime atime, String category, Bool airport_hotel, String weekday) =
+    first(times(7), %preferred_hotel_exc_validfrom%(airport_id, region_id, arr_flight_nr, dep_flight_nr,
+                                                    atime, category, airport_hotel, %times_index_0%))
+    where(%preferred_exc_match_weekday_ix%(airport_id, region_id, arr_flight_nr, dep_flight_nr,
+                                           atime, category, airport_hotel, weekday, %times_index_0%));
+
+export %preferred_exc_valid_to%(String airport_id, String region_id, String arr_flight_nr, String dep_flight_nr,
+                                AbsTime atime, String category, Bool airport_hotel, String weekday) =
+    first(times(7), %preferred_hotel_exc_validto%(airport_id, region_id, arr_flight_nr, dep_flight_nr,
+                                                  atime, category, airport_hotel, %times_index_0%))
+    where(%preferred_exc_match_weekday_ix%(airport_id, region_id, arr_flight_nr, dep_flight_nr,
+                                           atime, category, airport_hotel, weekday, %times_index_0%));
+
+export %preferred_exc_info%(String airport_id, String region_id, String arr_flight_nr, String dep_flight_nr,
+                            AbsTime atime, String category, Bool airport_hotel, String weekday) =
+    first(times(7), %preferred_hotel_exc_si%(airport_id, region_id, arr_flight_nr, dep_flight_nr,
+                                                  atime, category, airport_hotel, %times_index_0%))
+    where(%preferred_exc_match_weekday_ix%(airport_id, region_id, arr_flight_nr, dep_flight_nr,
+                                           atime, category, airport_hotel, weekday, %times_index_0%)); 
+
+%preferred_exc_match_weekday_ix%(String airport_id, String region_id, String arr_flight_nr, String dep_flight_nr,
+                                 AbsTime atime, String category, Bool airport_hotel, String weekday, Int ix) =
+    locate(weekday, %preferred_hotel_exc_week_days%(airport_id, region_id, arr_flight_nr, dep_flight_nr,
+                                                    atime, category, airport_hotel, ix)) > 0;
+
+/*
+** Hotel transport (Time and cost)
+*/
+
+export %transport_time%(String airport_id, String hotel_id, AbsTime atime) =
+  if %cabin_crew% then %hotel_transport_time_cc%(airport_id, hotel_id, atime)
+  else %hotel_transport_time_fc%(airport_id, hotel_id, atime);
+export %transport_cost%(String airport_id, String hotel_id, AbsTime atime) =
+  %hotel_transport_cost%(airport_id, hotel_id, atime);
+export %transport_valid_from%(String airport_id, String hotel_id, AbsTime atime) =
+  %hotel_transport_validfrom%(airport_id, hotel_id, atime);
+export %transport_valid_to%(String airport_id, String hotel_id, AbsTime atime) =
+  %hotel_transport_validto%(airport_id, hotel_id, atime);
+export %transport_info%(String airport_id, String hotel_id, AbsTime atime) =
+  %hotel_transport_si%(airport_id, hotel_id, atime);
+
+
+/****************************************************************
+ * Section 3: Duty level definitions
+ ***************************************************************/
+ 
+/* Find the hotel by looking at preferred hotels. If no
+   hotel is found void is returned */
+export %duty_hotel_id% = last(leg(duty), %leg_hotel_id%);
+
+/* Catch void values */
+%duty_hotel_safe% = default(%duty_hotel_id%, ""); 
+
+export %duty_cost_per_night% = %cost_per_night%(%duty_hotel_safe%, duty.%end_UTC%);
+export %duty_check_in% = %early_checkin%(%duty_hotel_safe%, duty.%end_UTC%);
+export %duty_check_out% = %late_checkout%(%duty_hotel_safe%, duty.%end_UTC%);
+
+export %duty_transport_time_apt_to_hotel% =
+  last(leg(duty), %leg_local_transport_apt_to_hotel%);
+
+export %duty_transport_cost_apt_to_hotel% =
+  if is_last(duty(trip)) then
+    0
+  else
+    default(%transport_cost%(duty.%end_station%, 
+                             %duty_hotel_safe%,
+                             duty.%end_UTC%),
+            %hotel_default_transport_cost_p%);
+
+export %duty_transport_time_hotel_to_apt% =
+  first(leg(duty), %leg_local_transport_hotel_to_apt%);
+
+export %duty_transport_cost_hotel_to_apt% =
+  if is_first(duty(trip)) then
+    0
+  else
+    default(%transport_cost%(duty.%start_station%, 
+                             prev(duty(trip),%duty_hotel_safe%),
+                             duty.%start_UTC%),
+            %hotel_default_transport_cost_p%);
+
+
+export %duty_cost_hotel% = 
+  %duty_rest_nr_of_nights% * %duty_cost_per_night%;
+
+export %duty_rest_check_in_date% =
+  round_down((duty.%end_lt% 
+              + %duty_transport_time_apt_to_hotel%
+              - %duty_check_in%)
+              , 24:00);
+
+export %duty_rest_check_out_date% =
+  round_down((duty.%start_lt% 
+              - %duty_transport_time_hotel_to_apt%
+              + (24:00 - %duty_check_out%))
+              , 24:00);
+
+export %duty_rest_nr_of_nights% =
+  let hb = if trip.%homebase% = "STO" then "ARN" else trip.%homebase%;
+  if duty.%end_station% = hb then
+    0
+  else
+    (next(duty(trip),%duty_rest_check_out_date%)
+       where (duty.%has_flight_duty% or
+              duty.%has_deadhead%) -
+     %duty_rest_check_in_date%) / 24:00;
+  
+
+/****************************************************************
+ * Section 4: Leg level definitions
+ ***************************************************************/
+
+/*
+** The minimum stop length for which airport hotel is to be used according to
+** 4ExNG rules.
+**
+** This uses property table parameters. For days in the the period before they
+** apply, the table returna VOID, but this is handled in %use_airport_hotel%,
+** which uses the old rules variable %_airport_hotel_stop_limit% as default.
+*/
+table airport_hotel_stop_limit (String station) =
+  %flight_crew%,
+  leg.%region%,
+  leg.%arrival_is_interscand%
+                         ->%airport_hotel_stop_limit%;
+
+  true ,   -  , true   -> system_db_parameters.%min_stop_for_city_hotel_in_scand_fc%(duty.%start_day%);
+  true ,   -  , false  -> system_db_parameters.%min_stop_for_city_hotel_not_scand_fc%(duty.%start_day%);
+  false, "SKD", true   -> system_db_parameters.%min_stop_for_city_hotel_in_scand_cc_skd%(duty.%start_day%);
+  false, "SKD", false  -> system_db_parameters.%min_stop_for_city_hotel_not_scand_cc_skd%(duty.%start_day%);
+  false, "SKN", true   -> system_db_parameters.%min_stop_for_city_hotel_in_scand_cc_skn%(duty.%start_day%);
+  false, "SKN", false  -> system_db_parameters.%min_stop_for_city_hotel_not_scand_cc_skn%(duty.%start_day%);
+  false, "SKS", true   -> system_db_parameters.%min_stop_for_city_hotel_in_scand_cc_sks%(duty.%start_day%);
+  false, "SKS", false  -> system_db_parameters.%min_stop_for_city_hotel_not_scand_cc_sks%(duty.%start_day%);
+                                                                     
+    -  ,   -  ,   -    -> %_airport_hotel_stop_limit%(station);
+end
+
+/* The following applied before 4ExNG */
+%_airport_hotel_stop_limit%(String station) = 
+ if (station = "TRD" or station="BGO") 
+    and leg.%region% = "SKD"
+    and not fundamental.%flight_crew%
+ then 16:00
+ /* CR 211: FD at BLL should use airport hotel if stop less than 16h */
+ else if station = "BLL" and fundamental.%flight_crew% then
+    16:00
+ else 14:00;
+
+%_scheduled_stop_time% =
+  default(next(leg(wop), leg.%activity_scheduled_start_time_UTC%)
+          where (leg.%is_considered_as_flight_duty%)
+          - leg.%activity_scheduled_end_time_UTC%,
+          0:00);
+
+%scheduled_stop_time% =
+  /* SASCMS-4718 */
+  if default(next(leg(wop), leg.%code%)
+             where (leg.%is_considered_as_flight_duty%), "") = "HC"
+  then
+    %_scheduled_stop_time% + 0:40
+  else
+    %_scheduled_stop_time%;
+
+/*
+** Airport hotel is to be used when the length of the stop demands it
+** or when crew have training ground activities away from homebase on the next day.
+*/
+export %use_airport_hotel% =
+  let next_day_start = round_up(leg.%end_lt% + 0:01, 24:00),
+      next_day_end = round_up(leg.%end_lt% + 24:01, 24:00),
+      this_station = leg.%end_station%;
+  %scheduled_stop_time% < 
+    default(%airport_hotel_stop_limit%(leg.%end_station%),
+            %_airport_hotel_stop_limit%(leg.%end_station%)) or
+  default(any(leg(trip), leg.%end_station% = this_station and %_activity_at_airport% ) where (leg.%start_lt% >= next_day_start and leg.%start_lt% < next_day_end), false);
+             
+%_activity_at_airport% =
+  leg.%is_simulator% or
+  leg.%is_course% or
+  leg.%is_pgt% or
+  leg.%is_emg_pgt% or
+  leg.%is_crm% or
+  leg.%is_cd%;
+
+/* Find the hotel by looking at preferred hotels. If no
+   hotel is found void is returned.
+   The region used to select a hotel is the same as the region definition
+   used for all legality (crew region on the roster, employer region for
+                          open time) */
+export %leg_hotel_id% = 
+  default(%leg_hotel_id_exc%,          
+          %preferred_id%(leg.%end_station%, leg.%end_UTC%));
+
+%leg_hotel_id_exc% =
+    let weekday = format_int(leg.%start_weekday%,"%d"),
+        use_airport_hotel = %use_airport_hotel%; /* putting this in a "let" makes the calculation visible in explore. */
+
+    default(%preferred_exc_id%(leg.%end_station%, leg.%region%, %flight_id%, %next_flight_id%,
+                               leg.%end_UTC%, fundamental.%main_cat%, use_airport_hotel, weekday),
+        default(%preferred_exc_id%(
+                               leg.%end_station%, leg.%region%, %flight_id%, "*",
+                               leg.%end_UTC%, fundamental.%main_cat%, use_airport_hotel, weekday),
+            default(%preferred_exc_id%(
+                               leg.%end_station%, leg.%region%, "*", %next_flight_id%,
+                               leg.%end_UTC%, fundamental.%main_cat%, use_airport_hotel, weekday),
+                    %preferred_exc_id%(
+                               leg.%end_station%, leg.%region%, "*", "*",
+                               leg.%end_UTC%, fundamental.%main_cat%, use_airport_hotel, weekday))));
+
+%flight_id% = concat(leg.%flight_carrier%,format_int(leg.%flight_nr%,"%03d"));
+%next_flight_id% = next(leg(chain), %flight_id%);
+
+export %leg_hotel_id_override% =
+  %leg_hotel_id%; 
+
+export %is_cancelled_booking% = False;
+
+/* region used for hotel and transport reports */
+export %region% = leg.%region%;
+
+export %crew_region% =
+  if %is_roster% then leg.%region%
+  else leg.%flight_owner_region%;
+
+/* Catch void values */
+%leg_hotel_safe% = default(%leg_hotel_id_override%, "");
+%leg_hotel_safe_check_cancelled% =
+  if %leg_hotel_safe% = "" then
+    if %is_cancelled_booking% then
+       %leg_hotel_id%
+    else ""
+  else %leg_hotel_safe%;
+
+export %leg_cost_per_night% = %cost_per_night%(%leg_hotel_safe%, leg.%end_UTC%);
+export %leg_check_in% = %early_checkin%(%leg_hotel_safe%, leg.%end_UTC%);
+export %leg_check_out% =
+  %late_checkout%(prev(leg(trip),%leg_hotel_safe%), leg.%end_UTC%);
+
+export %leg_transport_time_apt_to_hotel% =
+  %transport_time%(leg.%end_station%, 
+                   %leg_hotel_safe_check_cancelled%,
+                   leg.%end_UTC%);
+
+export %leg_transport_cost_apt_to_hotel% =
+  default(%transport_cost%(leg.%end_station%, 
+                           %leg_hotel_safe%,
+                           leg.%end_UTC%),
+          %hotel_default_transport_cost_p%);
+
+export %leg_transport_time_hotel_to_apt% =
+  %transport_time%(leg.%start_station%, 
+                   prev(leg(trip),%leg_hotel_safe_check_cancelled%),
+                   leg.%start_UTC%);
+
+export %leg_transport_cost_hotel_to_apt% =
+  default(%transport_cost%(leg.%start_station%, 
+                           prev(leg(trip),%leg_hotel_safe%),
+                           leg.%start_UTC%),
+          %hotel_default_transport_cost_p%);
+
+export %leg_cost_hotel% = 
+  %leg_rest_nr_of_nights% * %leg_cost_per_night%;
+
+export %leg_rest_check_in_date% =
+  round_down((leg.%end_lt% 
+              + %leg_transport_time_apt_to_hotel%
+              - %leg_check_in%)
+              , 24:00);
+
+export %leg_rest_check_out_date% =
+  round_down((leg.%start_lt% 
+              - %leg_transport_time_hotel_to_apt%
+              + (24:00 - %leg_check_out%))
+              , 24:00);
+
+export %leg_rest_nr_of_nights% =
+  (next(leg(trip),%leg_rest_check_out_date%)
+     where (leg.%is_flight_duty% or
+            leg.%is_deadhead%) -
+   %leg_rest_check_in_date%) / 24:00;
+  
+/* local transport times */
+export %leg_local_transport_hotel_to_apt% = 
+  default(%slt_before_leg%,
+          %leg_local_transport_time_hotel_to_apt%);
+
+export %leg_local_transport_apt_to_hotel% = 
+  default(%slt_after_leg%,
+          %leg_local_transport_time_apt_to_hotel%);
+
+%call_to_default% = %default_local_transport_time%;
+
+export %leg_local_transport_apt_to_hotel_new% = 
+  default(%slt_after_leg%,
+          %leg_local_transport_time_apt_to_hotel_new%);
+  
+%leg_local_transport_time_hotel_to_apt% = 
+    default(
+        /* if home-SBY or hotel-SBY */
+        if leg.%is_standby_with_rest% then
+            0:00
+        else
+            /* if the leg is _not_ the first leg of the trip */
+            if not is_first(leg(trip))
+                    /* and  the previous leg is followed by hotel-rest _or_ it is hotel-SBY */
+                    and prev(leg(trip), %leg_followed_by_rest_at_hotel% or leg.%is_standby_at_hotel%) then
+
+                /* if this leg starts at the same station as the previous leg ended */
+                if prev(leg(trip), leg.%end_station%) = leg.%start_station%
+                        /* _and_ the previous leg was hotel-SBY */
+                        and prev(leg(trip), leg.%is_standby_at_hotel%) then
+
+                    /* use the transport time from the instance before */
+                    %prev_leg_local_transport_time_apt_to_hotel%
+
+                else
+                    /* previous leg was _not_ hotel-SBY */
+                    %leg_transport_time_hotel_to_apt%
+
+            else
+                /* a simple redirect for debugging purposes*/
+                %call_to_default%,
+
+        /* default */
+        %default_local_transport_time%);
+
+
+%leg_local_transport_time_apt_to_hotel% = 
+  default(
+    if leg.%is_standby_with_rest% then
+      0:00
+    else if %leg_followed_by_rest_at_hotel% then
+      if leg.%is_flight_duty% or
+         leg.%is_deadhead% or
+         leg.%is_standby_at_airport% then
+        %leg_transport_time_apt_to_hotel%
+      else
+        %prev_leg_local_transport_time_apt_to_hotel%
+    else
+      %default_local_transport_time%,
+  %default_local_transport_time%);
+
+%leg_local_transport_time_apt_to_hotel_new% =
+  default(
+    if leg.%is_standby_with_rest% then
+      0:00
+    else 
+      if leg.%is_flight_duty% or
+         leg.%is_deadhead% then
+        %leg_transport_time_apt_to_hotel%
+      else
+        %prev_leg_local_transport_time_apt_to_hotel%,
+  %default_local_transport_time%);
+
+%prev_leg_local_transport_time_apt_to_hotel% = 
+  prev(leg(trip),%leg_transport_time_apt_to_hotel%)
+          where (leg.%is_flight_duty% or
+                 leg.%is_deadhead%);
+
+%leg_followed_by_rest_at_hotel% = 
+  /* always assume hotel at end of dutypass */
+  is_last(leg(duty)) and 
+  not leg.%arrives_at_homebase%;
+
+%default_local_transport_time% = 1:00;
+
+
+/****************************************************************
+ * Section 3: Interface to external tables
+ ***************************************************************/
+
+/* hotel */
+table hotel_table(String hotel_id) =
+  hotel_id -> 
+    String %hotel_name%, 
+    String %hotel_street%, 
+    String %hotel_city%,
+    String %hotel_state%, 
+    String %hotel_postalcode%,
+    String %hotel_country%,
+    String %hotel_tel%,
+    String %hotel_fax%,
+    String %hotel_si%,
+    String %hotel_email%;
+    
+  External %hotel_table_p%;
+  "id" -> "name", "street", "city", "state", 
+          "postalcode", "country", "tel", "fax", "si", "email";
+  - -> void_string, void_string, void_string, void_string, void_string,
+       void_string, void_string, void_string, void_string, void_string;
+end
+
+/* airport_hotel */
+table airport_hotel_table(String airport_id, String hotel_id) = 
+  airport_id, hotel_id -> String %airport_hotel_airport_id%,
+                          String %airport_hotel_hotel_id%,
+                          String %airport_hotel_si%;
+                          
+  External %airport_hotel_table_p%;
+  "airport", "hotel" -> "airport", "hotel", "si";
+  -, - -> void_string, void_string, void_string;
+end
+
+table airport_hotel_lookup_table(String airport_id) = 
+  airport_id -> String %airport_hotel_id%;
+  External %airport_hotel_table_p%;
+  "airport" -> "hotel";
+  -         -> void_string;
+end
+
+table hotel_airport_lookup_table(String hotel_id) = 
+  hotel_id -> String %hotel_airport_id%;
+  External %airport_hotel_table_p%;
+  "hotel" -> "airport";
+  -         -> void_string;
+end
+
+/* hotel_contract */
+export %hotel_contract_hotel_id%(String hotel_id, AbsTime validat) = 
+  default(%_hotel_contract_hotel_id%(hotel_id, validat), void_string);
+%hotel_contract_validfrom%(String hotel_id, AbsTime validat) = 
+  default(%_hotel_contract_validfrom%(hotel_id, validat), void_abstime);
+%hotel_contract_validto%(String hotel_id, AbsTime validat) = 
+  default(%_hotel_contract_validto%(hotel_id, validat), void_abstime);
+%hotel_contract_xeci%(String hotel_id, AbsTime validat) = 
+  default(%_hotel_contract_xeci%(hotel_id, validat), %hotel_default_check_in_p%);
+%hotel_contract_eci%(String hotel_id, AbsTime validat) = 
+  default(%_hotel_contract_eci%(hotel_id, validat), %hotel_default_check_in_p%);
+%hotel_contract_lco%(String hotel_id, AbsTime validat) = 
+  default(%_hotel_contract_lco%(hotel_id, validat), %hotel_default_check_out_p%);
+%hotel_contract_xlco%(String hotel_id, AbsTime validat) = 
+  default(%_hotel_contract_xlco%(hotel_id, validat), %hotel_default_check_out_p%);
+%hotel_contract_costco%(String hotel_id, AbsTime validat) = 
+  default(%_hotel_contract_costco%(hotel_id, validat), %hotel_default_cost_per_night_p%);
+%hotel_contract_costca%(String hotel_id, AbsTime validat) = 
+  default(%_hotel_contract_costca%(hotel_id, validat), %hotel_default_cost_per_night_p%);
+%hotel_contract_contact%(String hotel_id, AbsTime validat) = 
+  default(%_hotel_contract_contact%(hotel_id, validat), "");
+%hotel_contract_si%(String hotel_id, AbsTime validat) = 
+  default(%_hotel_contract_si%(hotel_id, validat), concat("Default values, no match in table ", %hotel_contract_table_p%));
+
+table hotel_contract_table(String hotel_id, AbsTime validat) =
+  hotel_id, validat ->
+    String %_hotel_contract_hotel_id%,
+    AbsTime %_hotel_contract_validfrom%,
+    AbsTime %_hotel_contract_validto%,
+    RelTime %_hotel_contract_xeci%,
+    RelTime %_hotel_contract_eci%,
+    RelTime %_hotel_contract_lco%,
+    RelTime %_hotel_contract_xlco%,
+    Int %_hotel_contract_costco%,
+    Int %_hotel_contract_costca%,
+    String %_hotel_contract_contact%,
+    String %_hotel_contract_si%;
+    
+  External %hotel_contract_table_p%;
+  /* Match a hotel and date to a contract valid at 'validat' */
+  "hotel", ("validfrom", "validto"( -> "hotel",
+                                       "validfrom", 
+                                       "validto", 
+                                       "xeci", 
+                                       "eci", 
+                                       "lco", 
+                                       "xlco", 
+                                       "costco", 
+                                       "costca", 
+                                       "contact", 
+                                       "si";
+  /* Default values if no valid contract is found */
+  -, - -> void_string, 
+          void_abstime, void_abstime,
+          void_reltime, void_reltime, void_reltime, void_reltime, 
+          void_int, void_int,
+          void_string, void_string;
+end
+
+/* preferred_hotel */
+table preferred_hotel_table(String airport_id, AbsTime validat) = 
+  airport_id, validat -> String %preferred_hotel_airport_id%,
+                         AbsTime %preferred_hotel_validfrom%,
+                         AbsTime %preferred_hotel_validto%,
+                         export String %preferred_hotel_hotel_id%,
+                         String %preferred_hotel_si%;
+   
+  External %preferred_hotel_table_p%;
+  "airport", ("validfrom", "validto"( -> "airport",
+                                         "validfrom",
+                                         "validto",
+                                         "hotel",
+                                         "si";
+  -, - -> void_string, void_abstime, void_abstime, void_string, void_string;
+end
+
+/* preferred_hotel_exc */
+table preferred_hotel_exc_table(String airport_id, String region_id, String arr_flight_nr, String dep_flight_nr,
+                                AbsTime validat, String category, Bool airport_hotel, Int ix) = 
+  airport_id, region_id, arr_flight_nr, dep_flight_nr,
+  category, airport_hotel, validat, ix ->
+    String %preferred_hotel_exc_airport_id%,
+    String %preferred_hotel_exc_region_id%,
+    AbsTime %preferred_hotel_exc_validfrom%,
+    AbsTime %preferred_hotel_exc_validto%,
+    String %preferred_hotel_exc_week_days%,
+    String %preferred_hotel_exc_hotel_id%,
+    String %preferred_hotel_exc_si%;
+   
+  External %preferred_hotel_exc_table_p%;
+  "airport", "region", "arr_flight_nr", "dep_flight_nr", 
+  "maincat", "airport_hotel", ("validfrom", "validto"(, "match_number" -> "airport",
+                                                                          "region",
+                                                                          "validfrom",
+                                                                          "validto",
+                                                                          "week_days",
+                                                                          "hotel",
+                                                                          "si";
+  -, -, -, -, -, -, -, - -> void_string,
+                            void_string,
+                            void_abstime,
+                            void_abstime,
+                            void_string,
+                            void_string,
+                            void_string;
+end
+
+/* hotel_transport */
+table hotel_transport_table(String airport_id, String hotel_id, AbsTime validat) =
+  airport_id, hotel_id, validat ->
+    String %hotel_transport_airport_id%,
+    String %hotel_transport_hotel_id%,
+    AbsTime %hotel_transport_validfrom%,
+    AbsTime %hotel_transport_validto%,
+    RelTime %hotel_transport_time_fc%,
+    RelTime %hotel_transport_time_cc%,
+    Int %hotel_transport_cost%,
+    String %hotel_transport_si%;
+    
+  External %hotel_transport_table_p%;
+  "airport", "hotel", ("validfrom", "validto"( -> "airport",
+                                                  "hotel",
+                                                  "validfrom",
+                                                  "validto",
+                                                  "durationfc",
+                                                  "durationcc",
+                                                  "cost",
+                                                  "si";
+  -, -, - -> "airport",
+             "hotel",
+             void_abstime,
+             void_abstime,
+             %hotel_default_transport_time_p%,
+             %hotel_default_transport_time_p%,
+             %hotel_default_transport_cost_p%,
+             concat("Default values, no match in table ", 
+                    %hotel_transport_table_p%);
+end
+
+/****************************************************************
+ * Section 6: Special Local Transport
+ ***************************************************************/
+export %slt_after_leg% = void_reltime;
+
+export %slt_before_leg% = void_reltime;
+
+export %slt_mean_time% = void_reltime;
+
+export %can_set_local_transport% = void_bool;
+
+/* end of file */

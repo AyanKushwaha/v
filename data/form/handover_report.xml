@@ -1,0 +1,331 @@
+<!-- $Header$ -->
+<views>
+<head>
+
+<title>Handover Report</title>
+
+<alias id="selected_tmp_handover_message" source="tmp_handover_message"/>
+
+<on-loaded>
+    setEventEnabled(on-changed,false);
+    setEventEnabled(on-selection-changed,false);
+    setEventEnabled(on-before-sort,false);
+    setEventEnabled(on-after-sort,false);
+    model("init_wave_client", "handover_initialize_module");
+</on-loaded>
+
+<on-opened>
+    setEventEnabled(on-changed,false);
+    setEventEnabled(on-selection-changed,false);
+    setEventEnabled(on-before-sort,false);
+    setEventEnabled(on-after-sort,false);
+    model("init_wave_client");
+    setFilter("tmp_handover_message", "(removed_=false)");
+    setFilter("selected_tmp_handover_message", "(id=NULL)");
+    reset_table_contents();
+    setEventEnabled(on-changed,true);
+    setEventEnabled(on-selection-changed,true);
+    setEventEnabled(on-before-sort,true);
+    setEventEnabled(on-after-sort,true);
+</on-opened>
+
+<action name="reset_table_contents" args=""><![CDATA[
+context.action('clearSelection', 'tmp_handover_message_id')
+context.action('setEventEnabled', 'on-changed', 'false')
+global handover_errmsg
+try:
+    for id in handover_errmsg.keys()[:]:
+        context.action('removeMessage', id)
+        del handover_errmsg[id]
+except:
+    pass
+context.action('model', 'submit_trans')
+context.action('model', 'handover_refresh')
+context.action('refreshClient')
+context.action('setValue', 'is_modified', 'false')
+context.action('setEventEnabled', 'on-changed', 'true')
+]]></action>
+
+<action name="validate_and_save" args=""><![CDATA[
+context.action('clearSelection', 'tmp_handover_message_id')
+context.action('validate_rows')
+global handover_errmsg
+try:
+    validate_ok = (len(handover_errmsg) == 0)
+except:
+    validate_ok = True
+if validate_ok:
+    context.action('progress', 'true');
+    context.action("model", "submit_opaq", "Save/Handover");
+    context.action("model", "handover_save");
+    context.action("refreshClient");
+    context.action("setValue", "is_modified", "false");
+    context.action('progress', 'false');
+]]></action>
+
+<action name="insert_row" args=""><![CDATA[
+rowcount = int(context.sm.resolve("${tmp_handover_message._rowcount}"))
+ids = [context.sm.resolve("${tmp_handover_message[%s,id]}" % r) for r in range(rowcount)]
+context.action('model', 'handover_createrow')
+context.action('refreshClient')
+for r in range(rowcount+1):
+    if context.sm.resolve("${tmp_handover_message[%s,id]}" % r) not in ids:
+        context.action('selectTableRow', 'tmp_handover_message_id', r)
+        break
+else:
+    context.action('clearSelection', 'tmp_handover_message_id')
+]]></action>
+
+<action name="delete_row" args="row_num"><![CDATA[
+context.action('setTableValue', 'tmp_handover_message', row_num, 'removed_', 'true')
+last_row = int(context.sm.resolve("${tmp_handover_message._rowcount}")) - 1
+if int(row_num) <= last_row:
+    context.action('selectTableRow', 'tmp_handover_message_id', row_num)
+else:
+    context.action('clearSelection', 'tmp_handover_message_id')
+]]></action>
+
+<action name="validate_rows" args=""><![CDATA[
+global handover_errmsg, handover_mmm2mm
+try:
+    handover_errmsg
+except:
+    handover_mmm2mm = {"jan":"01","feb":"02","mar":"03","apr":"04",
+                       "may":"05","jun":"06","jul":"07","aug":"08",
+                       "sep":"09","oct":"10","nov":"11","dec":"12"}
+    handover_errmsg = {}
+    
+def cmpdate(fld):
+    d = context.sm.resolve(fld)
+    if d == 'NULL':
+        return None
+    d += " 00:00"
+    return "%4s%2s%2s%2s%2s" \
+           % (d[5:9],handover_mmm2mm[d[2:5].lower()], d[:2], d[10:12], d[13:15])
+
+for id in handover_errmsg.keys()[:]:
+    context.action('removeMessage', id)
+    del handover_errmsg[id]
+
+context.action('model','refresh_wave_values')
+now = cmpdate("${tmp_wave_values[now_utc,v]}")
+now_date = cmpdate("${tmp_wave_values[now_date_utc,v]}")
+
+num_rows = int(context.sm.resolve("${tmp_handover_message._rowcount}"))
+for row_num in range(num_rows):
+    id = context.sm.resolve("${tmp_handover_message[%s,id]}" % row_num)
+    valid_day_id = 'tmp_handover_message_id[%s,valid_day]}' % id
+    validto_id = 'tmp_handover_message_id[%s,validto]}' % id
+    valid_day = cmpdate("${tmp_handover_message[%s,valid_day]}" % row_num)
+    validto = cmpdate("${tmp_handover_message[%s,validto]}" % row_num)
+    if valid_day is None:
+        handover_errmsg[valid_day_id] = "Valid Day must not be empty"
+        context.action('setMessage', valid_day_id, handover_errmsg[valid_day_id], 'error')
+    elif valid_day < now_date and validto is None:
+        handover_errmsg[valid_day_id] = "Valid Day must be >= current date (or < Valid To)"
+        context.action('setMessage', valid_day_id, handover_errmsg[valid_day_id], 'error')
+    if validto is not None:
+        if validto < now:
+            handover_errmsg[validto_id] = "Valid To must be >= current time"
+            context.action('setMessage', validto_id, handover_errmsg[validto_id], 'error')
+        elif valid_day is not None and validto <= valid_day:
+            handover_errmsg[validto_id] = "Valid To must be > Valid Day"
+            context.action('setMessage', validto_id, handover_errmsg[validto_id], 'errr')
+]]></action>
+
+</head>
+
+<box id="hidden_helper_components" visible="false">
+    <text-field id="is_modified" value="false"/>
+</box>
+
+<menu-bar>
+    <menu label="File">
+        <menu-item ref="generate_button"/>
+        <menu-item ref="refresh_button"/>
+        <menu-item ref="save_button"/>
+        <menu-item ref="exit_button"/>
+    </menu>
+    <menu label="Edit">
+        <menu-item ref="create_button"/>
+        <menu-item ref="remove_button"/>
+        <menu label="Jump To">
+            <menu-item label="Selected _M_essage" accelerator="alt M"
+                       filter.enabled="(!(tmp_handover_message_id=NULL))">
+                <on-click>
+                    setFocus("selected_tmp_handover_message_id");
+                </on-click>
+            </menu-item>
+            <menu-item label="Text Colum_n_" accelerator="alt N"
+                       filter.enabled="(!(tmp_handover_message_id=NULL))">
+                <on-click>
+                    setFocus(tmp_handover_message_id,${tmp_handover_message_id},0);
+                </on-click>
+            </menu-item>
+            <menu-item label="Valid Da_y_ Column" accelerator="alt Y"
+                       filter.enabled="(!(tmp_handover_message_id=NULL))">
+                <on-click>
+                    setFocus(tmp_handover_message_id,${tmp_handover_message_id},1);
+                </on-click>
+            </menu-item>
+            <menu-item label="Val_i_d To Column" accelerator="alt I"
+                       filter.enabled="(!(tmp_handover_message_id=NULL))">
+                <on-click>
+                    setFocus(tmp_handover_message_id,${tmp_handover_message_id},2);
+                </on-click>
+            </menu-item>
+            <menu-item label="Days _F_ield" accelerator="alt F"
+                       filter.visible="(${tmp_wave_values[tm_mode,v]}=STUDIO)">
+                <on-click>
+                    setFocus(report_days);
+                </on-click>
+            </menu-item>
+        </menu>
+    </menu>
+</menu-bar>
+
+<box style.orientation="border" style.height="500" style.width="800">
+    <hbox style.constraints="North" label="Settings">
+        <box label="Crew Category">
+            <table-cell id="main_category_setting"
+                        source="tmp_handover_settings"
+                        row="0"
+                        column="main_category"
+                        style.display.column="name"
+                        style.width="190"
+                        style.left="0"
+                        style.maxRadioCount="0"
+                        filter.enabled="(is_modified=false)"
+                        nullable="false">
+                <on-changed>
+                    lockInput(true);
+                    reset_table_contents();
+                    lockInput(false);
+                </on-changed>
+            </table-cell>
+        </box>
+        <box label="Region">
+            <table-cell ref="main_category_setting"
+                        column="region"
+                        style.display.column="id"
+                        style.width="50"/>
+        </box>
+        <box label="Long/Shorthaul">
+            <table-cell ref="main_category_setting"
+                        column="long_short_haul"
+                        style.width="165"/>
+        </box>
+        <box label="Unit">
+            <table-cell ref="main_category_setting"
+                        column="avv_disp"
+                        style.width="220"/>
+        </box>
+    </hbox>
+     
+    <box style.constraints="Center" style.orientation="border" label="Messages">
+        <box style.constraints="North" label="Selected Text"
+             filter.enabled="(!(tmp_handover_message_id=NULL))">
+            <table-cell source="selected_tmp_handover_message"
+                        id="selected_tmp_handover_message_id"
+                        column="free_text" row="0"
+                        style.left="0"
+                        style.nrows="3"
+                        style.scroll="false"
+                        filter.enabled="(!(tmp_handover_message_id=NULL))"
+                        >
+            </table-cell>
+        </box>
+        <box style.constraints="Center">
+            <table id="tmp_handover_message_id"
+                   source="tmp_handover_message"
+                   columns="free_text,valid_day,validto,id"
+                   sort.column="valid_day"
+                   table.selectionmode="SINGLE"
+                   style.autoresize="off"
+                   >
+                <columninfo column="free_text" label="Text"      width="500"/>
+                <columninfo column="valid_day" label="Valid Day" width="100" nullable="false"/>
+                <columninfo column="validto"  label="Valid To"  width="135"/>
+                <columninfo column="id" visible="false"/>
+                <on-changed>
+                    setValue(is_modified,true);
+                    validate_rows();
+                </on-changed>
+                <on-selection-changed>
+                    setFilter("selected_tmp_handover_message","(id=${tmp_handover_message_id[id]})");
+                </on-selection-changed>
+                <on-before-sort>
+                    setEventEnabled(on-changed,false);
+                </on-before-sort>
+                <on-after-sort>
+                    setEventEnabled(on-changed,true);
+                </on-after-sort>
+            </table>
+        </box>
+        <hbox style.constraints="South">
+            <button label="Crea_t_e" id="create_button" style.width="75">
+                <on-click>
+                    insert_row();
+                </on-click>
+            </button>
+            <button label="Remo_v_e" id="remove_button" style.width="75"
+                    filter.enabled="(!(tmp_handover_message_id=NULL))">
+                <on-click>
+                    delete_row("${tmp_handover_message_id}");
+                    setValue(is_modified, true);
+                    validate_rows();
+                </on-click>
+            </button>
+        </hbox>
+    </box>
+    <box style.constraints="South" style.orientation="border">
+        <hbox style.constraints="Center">
+            <button label="${tmp_wave_values[save_label,v]}"
+                    id="save_button" style.width="75"
+                    filter.enabled="(forms.messages.local.any=0)">
+                <on-click>
+                    validate_and_save();
+                </on-click>
+            </button>
+            <button label="${tmp_wave_values[exit_label,v]}" id="exit_button" style.width="75"
+                    filter.enabled="(is_modified=false)">
+                <on-click>
+                    closeForm();
+                </on-click>
+            </button>
+            <button label="_R_efresh" id="refresh_button" style.width="75">
+                <on-click>
+                    lockInput(true);
+                    reset_table_contents();
+                    lockInput(false);
+                </on-click>
+            </button>
+        </hbox>
+        <hbox style.constraints="East" label="Report" filter.visible="(${tmp_wave_values[tm_mode,v]}=STUDIO)">
+            <table-cell source="tmp_handover_settings"
+                        id="report_days"
+                        row="0"
+                        column="days"
+                        label="Da_y_s"
+                        style.left="35"
+                        style.width="30"
+                        value.min="1"
+                        value.max="7"
+                        nullable="false"/>
+            <text value="  "/>
+            <button label="_G_enerate" id="generate_button" style.width="75"
+                    filter.enabled="(&amp;(${tmp_wave_values[tm_mode,v]}=STUDIO)(is_modified=false)(forms.messages.local.any=0))"
+                    filter.visible="(${tmp_wave_values[tm_mode,v]}=STUDIO)">
+                <on-click>
+                    progress(true);
+                    model("submit_trans");
+                    model("handover_generate");
+                    refreshClient();
+                    progress(false);
+                </on-click>
+            </button>
+        </hbox>
+    </box>
+</box>
+
+</views>

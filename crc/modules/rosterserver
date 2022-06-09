@@ -1,0 +1,241 @@
+/* -*- crc -*-
+ *
+ *
+ *
+ * Purpose:
+ *   This module is used to consolidate all the rave expressions
+ *   required for RosterServer (Crew Info Server @ SAS)
+ *
+ * Sections:
+ *
+ * Created by:
+ *   Henrik Edholm, 23Apr2019
+ *
+ * Major changes:
+ *
+ */
+
+root module rosterserver
+
+import attributes;
+import base_utils;
+import checkinout;
+import crew;
+import crew_pos;
+import duty;
+import duty_code;
+import fdp;
+import fundamental;
+import hotel;
+import iterators;
+import keywords;
+import leg;
+import levels;
+import oma16;
+import model_crew;
+import packed_roster;
+import report_common;
+import report_meal;
+import task;
+import trip;
+import training_log;
+
+/* 1. Crew Profiles */
+
+/* 1.1 General Crew Info */
+%crew_id% = crew.%id%;
+%empno% = crew.%employee_number_at_date%(%now%);
+%name% = crew.%login_name%;
+%gender% = default(crew.%sex%, ""); /* Male (M) or Female (F) */
+%empno_by_id%(String id) = crew.%empno_by_id%(id);
+
+/* 1.1 Employment Info */
+%seniority% = default(crew.%seniority%, 0); /* 9999 */
+%main_rank% = default(crew.%main_func%, ""); /* Cabin Crew (C) or Flight Deck (F) */
+%title_rank% = default(crew.%rank_at_date%(%now%), ""); /* Flight Deck/Cabin Crew ranks, e.g. FP, FC, AP & AH */
+%company% = default(crew.%company_at_date%(%now%), ""); /* SK */
+%region% = default(crew.%region%, ""); /* SKD, SKN, SKS */
+%homebase% = default(crew.%homebase%, "");  /* CPH, STO, OSL, SVG, TRD */
+%civic_station% = default(crew.%civicstation_at_date%(%now%), ""); /* CPH, STO, OSL, SVG, TRD */
+%station% = default(crew.%station_at_date%(%now%), ""); /* CPH, STO, OSL, SVG, TRD */
+%group_type% = default(crew.%group%, ""); /* Variable (V) or Fixed (F) group */
+%is_line_check% = crew.%is_line_check%(%now%); /* True or False*/
+%is_scc_qualified% = crew.%is_scc%(%now%); /* True or False*/
+%ac_qual_grp% = default(crew.%ac_qlns_at_date%(%now%), ""); /* Aircraft Qualification Group, e.g. 38, A3 or AL */
+%sub_category% =
+    /* Subcategory shall contain different information for flight/cabin crew, see SKCMS-1568
+    * I = Instructor, A or N = Training restriction, M = Medical restriction, + = 60+ */
+    if %flight_crew% then default(crew.%sub_category_fc%(%now%), "")
+    else default(crew.%sub_category%(%now%), "");
+
+/* 1.2 Contact Info */
+%mobile_number% = default(crew.%phone_primary%, "");
+%email_address% = default(crew.%phone_no%("Email", "work"), "");
+
+/* 1.3 Documents and expiration (Airside) */
+
+%count_rows% = model_crew.%number_of_doc%(crew.%id%, %now%, 31DEC2036 00:00);
+
+%doc_type%(Int ix) = default(model_crew.%all_doc_type_as%(crew.%id%, %now%, ix), "N/A");
+%doc_subtype%(Int ix) = default(model_crew.%all_doc_subtype_as%(crew.%id%, %now%, ix), "N/A");
+%doc_validfrom%(Int ix) = default(%abs2iso%(model_crew.%all_doc_start_date_as%(crew.%id%, %now%, ix)), "N/A");
+%doc_validto%(Int ix) = default(%abs2iso%(model_crew.%all_doc_exp_date_as%(crew.%id%, %now%, ix)), "N/A");
+%doc_no%(Int ix) = default(model_crew.%all_doc_nr_as%(crew.%id%, %now%, ix), "N/A");
+%doc_maindoc%(Int ix) = default(model_crew.%all_doc_main_doc_no_as%(crew.%id%, %now%, ix), "N/A");
+%doc_issuer%(Int ix) = default(model_crew.%all_doc_issuer_as%(crew.%id%, %now%, ix), "N/A");
+
+/* 2 Crew Rosters */
+
+/* Crew services uses attributes.%crew_last_published% for "released until".
+*  This is problematic since the attr table only has 1 entry per crew.
+*/
+%released_until%(Abstime t) = %abs2iso%(default(round_up_month(t + 0:01) , 01 Jan 1986 0:00));
+
+
+/* 2.1 Activity information */
+%activity_id% = keywords.%activity_id%;
+%activity_type% =  if keywords.%flight_duty% then "F" else "B";
+%duty_code% = default(duty_code.%leg_code%, "");
+
+/* Check-in/out & stop duration */
+%check_in_time% = if %_mandatory_ci% then default(%abs2iso%(leg.%duty_brief_start_lt%), "") else "";
+%check_out_time% = if %_mandatory_co% then default(%abs2iso%(leg.%duty_debrief_end_scheduled_lt%), "") else "";
+%_mandatory_ci% = checkinout.%leg_has_mandatory_ci%;
+%_mandatory_co% = checkinout.%leg_has_mandatory_co%;
+%_scheduled_start% = report_common.%leg_scheduled_start%;
+%_scheduled_end% = report_common.%leg_scheduled_end%;
+%stop_duration% =
+  %rel2str%(default(%stop_duration_scheduled%, 00:00));
+%stop_duration_scheduled% =
+  next(leg(chain), %_scheduled_start%) where (leg.%is_on_duty% and not leg.%is_blank_day%)
+  - %_scheduled_end%;
+
+%crew_list_allowed% = report_common.%crew_list_allowed%;
+
+%flying_passive% = leg.%is_deadhead%;
+
+%meal_code% = report_meal.%meal_code%;
+%meal_code_excl_meal_break% = report_meal.%meal_code_excl_meal_on_ground%;
+%meal_break_code% = report_meal.%meal_on_ground_code%;
+
+/* 2.2 Leg details */
+%flight_id% = default(leg.%flight_id%, "");
+%origin_date% =
+    if leg.%is_flight_duty% or leg.%is_ground_transport% then
+        %abs2iso%(leg.%udor%)
+    else
+        %abs2iso%(leg.%start_date_utc%);
+
+%task_code% = default(report_common.%leg_code%, "");
+%dep_station% = default(leg.%start_station%, "");
+%arr_station% = default(leg.%end_station%, "");
+/* scheduled time of departure/arrival */
+%std% = %abs2iso%(leg.%activity_scheduled_start_time_UTC%);
+%std_lt% = %abs2iso%(default(leg.%activity_scheduled_start_time_lt%, 01 Jan 1986 0:00));
+%std_lt_abstime% = default(leg.%activity_scheduled_start_time_lt%, 01 Jan 1986 0:00);
+%sta% = %abs2iso%(leg.%activity_scheduled_end_time_UTC%);
+%sta_lt% = %abs2iso%(default(leg.%activity_scheduled_end_time_lt%, 01 Jan 1986 0:00));
+%sta_lt_abstime% = default(leg.%activity_scheduled_end_time_lt%, 01 Jan 1986 0:00);
+
+/* estimated and actual time of departure/arrival */
+%etd% = %abs2iso%(leg.%activity_estimated_start_time_UTC%);
+%eta% = %abs2iso%(leg.%activity_estimated_end_time_UTC%);
+%atd% = %abs2iso%(leg.%activity_actual_start_time_UTC%);
+%ata% = %abs2iso%(leg.%activity_actual_end_time_UTC%);
+
+%etd_lt% = %abs2iso%(leg.%activity_estimated_start_time_lt%);
+%eta_lt% = %abs2iso%(leg.%activity_estimated_end_time_lt%);
+%atd_lt% = %abs2iso%(leg.%activity_actual_start_time_lt%);
+%ata_lt% = %abs2iso%(leg.%activity_actual_end_time_lt%);
+
+/* 2.2.1 Aircraft details */
+%ac_reg% = default(leg.%ac_reg%, "");
+%ac_type% = default(leg.%ac_type%, "");
+
+%trip_matches_month%(Abstime s, Abstime e) =
+  leg.%start_hb% < e
+  and leg.%end_hb% > s;
+
+/* 2.2.2 Extended flight information */
+%pic% = default(max(equal_legs, %empno%)
+  where (crew_pos.%acting_commander%),"");
+
+export %type_of_flight% =
+  if leg.%is_domestic% then
+    concat("DOMESTIC ", leg.%start_country%)
+  else if leg.%is_interscand% then
+    "INTRASCAND"
+  else if leg.%is_european% then
+    "EUROPEAN"
+  else if leg.%is_intercont% then
+    "INTERCONT"
+  else if leg.%is_charter% then
+    "CHARTER"
+  else
+    "*";
+
+/* 2.3 Base activities only */
+
+/* Roster do not show times and station */
+set base_act_set =
+"BL", "BL1", "BL12", "BL2", "BL20", "BL3", "BL5", "BL6", "BL7", "BL8", "BL9", "F", "FE", "FK", "FN", "F0", "F1", "F10", "F11", "F12", "F14", "F2", "F20", "F22", "F3", "F3C", "F3M", "F3S", "F31", "F32", "F34", "F35", "F38", "F4", "F42", "F5", "F6", "F61", "F62", "F65", "F7", "F7S", "F71", "F72", "F8", "F81", "F82", "F84", "F85", "F88", "F9", "IL", "IL1", "IL12", "IL2", "IL3", "IL4", "IL41", "IL42", "IL5", "IL6", "IL8", "IL81", "IL82", "IL83", "KD", "LA", "LA11", "LA12", "LA13", "LA14", "LA15", "LA21", "LA22", "LA31", "LA32", "LA33", "LA34", "LA35", "LA36", "LA37", "LA39", "LA41", "LA42", "LA44", "LA45", "LA46", "LA47", "LA48", "LA5", "LA51", "LA52", "LA53", "LA57", "LA58", "LA59", "LA61", "LA62", "LA63", "LA64", "LA65", "LA66", "LA67", "LA68", "LA7", "LA70", "LA71", "LA72", "LA73", "LA76", "LA77", "LA8", "LA80", "LA81", "LA82", "LA83", "LA84", "LA85", "LA86", "LA87", "LA88", "LA89", "LA91", "LA92", "MI", "MT9", "IL14", "FS", "OX0", "OX9", "SB2", "SD", "SD1", "SD2", "SD3", "SD5", "SD8", "TN", "VA", "VA1", "VA3", "VA8", "VB", "WB";
+%task_code_not_in_base_act_set% = task.%code% not in base_act_set;
+%is_freeday_or_vacation% = duty.%is_freeday% or duty.%is_vacation%;
+
+%leg_code% = default(report_common.%leg_code%, "");
+%leg_is_simulator% = leg.%is_simulator%;
+%position_in_simulation% = default(first(leg(trip), training_log.%ground_log_type%) where (%leg_is_simulator%), "N/A");
+%leg_check_in% = leg.%check_in%;
+%leg_check_out% = leg.%check_out%;
+
+/* 2.4 Crew list */
+%sort_key% = crew.%sort_key%;
+%checked_in% =
+  first(leg(chain), checkinout.%leg_checked_in%) where (%has_not_arrived%);
+%next_activity% = default(packed_roster.%next_activity_one_slash%, "");
+%prev_activity% = default(packed_roster.%prev_activity_one_slash%, "");
+%next_duty% = default(packed_roster.%next_duty_one_slash%, "");
+%prev_duty% = default(packed_roster.%prev_duty_one_slash%, "");
+%last_flown_date% =
+default(prev(leg(chain), %abs2iso%(leg.%end_lt%)) where (leg.%is_flight_duty%), %abs2iso%(01 Jan 1986 0:00)); 
+
+%extperkey_to_id_now%(String extperkey) = crew.%extperkey_to_id_at_date%(extperkey, %now%); 
+
+%first_ci_trip% = (trip.%end_UTC% > %now%) and any(leg(trip), leg.%requires_cio%);
+
+%next_ci_trip% =
+  next(trip(chain), trip.%end_UTC% > %now%) and
+  any(leg(trip), leg.%requires_cio%);
+
+/* 2.5 Passport & Visa info */
+%country_lt% =
+  if leg.%country_is_domestic%(leg.%start_country%) then leg.%end_lt%
+  else leg.%start_lt%;
+%country_code% = default(leg.%stop_country%, "");
+
+%passport_nationality% = default(crew.%doc_current_dest_nationality%(%country_lt%, %country_code%), "");
+%passport_no% = default(crew.%doc_current_dest_passport_no%(%country_lt%, %country_code%), "");
+%visa_no% = default(crew.%doc_current_dest_visa_no%(%country_lt%, %country_code%), "");
+%visa_expire_date% = default(crew.%doc_current_dest_visa_validto_str%(%country_lt%, %country_code%), "");
+
+/* 2.6 Flight duty period */
+%leg_start% = leg.%start_UTC%;
+%prev_leg_is_prev_day%(Abstime start) = prev(leg(chain), round_down(start, 24:00) > round_down(leg.%start_UTC%, 24:00));
+
+%duty_start_date% = %abs2iso%(default(fdp.%start_utc%, 01 Jan 1986 00:00));
+%fdp% = default(fdp.%time%, 00:00);
+%max_fdp% = default(oma16.%max_daily_fdp%, 00:00);
+%is_extended% = default(oma16.%is_extended_fdp%, false);
+
+/* 3. Support functions */
+%has_employment% =
+    default(round_down_month(crew.%employment_start%(%now%)) <= %pp_end%, false) and
+    default(round_up_month(crew.%employment_end%(%now%)) >= %pp_start%, false);
+%abs2iso%(Abstime t) = format_time(t, "%4Y-%02m-%02dT%02H:%02M:00");
+%rel2str%(Reltime t) = base_utils.%reltime2str%(t);
+%has_not_arrived% = leg.%end_UTC% > %now%;
+
+/* Hotel and transport */
+
+%hotel_name%(String hotel_id) = hotel.%name%(hotel_id);
+%hotel_address%(String hotel_id) = hotel.%street%(hotel_id);

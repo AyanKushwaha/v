@@ -1,0 +1,182 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   Additional soft rules regarding cabin crew to be used in tracking.
+ *
+ * Sections:
+ *
+ * Created by:
+ *   Peter Jonsson, 24-Feb-2005
+ *
+ * Major changes:
+ *
+ */
+module rules_soft_cct_cc inherits rules_soft_cct
+import fundamental;
+import levels;
+import trip;
+import crew;
+import leg;
+
+/*
+** Rule:
+**    No overcrewed cabins are allowed.
+**
+** Description:
+**    Any roster containing overcrewed cabins in flights is considered
+**    illegal.
+**
+** Functional rule:
+*/
+rule (off) sft_no_overrcrewed_cabins =
+  valid alert_server.%check_alert_rules% and
+        %is_roster% and leg.%in_pp_extended% and
+        not leg.%is_deadhead% and 
+        not leg.%is_oag% and
+        not leg.%is_pact% and
+        %position_to_check% and
+        not crew.%is_leased_duty_start%;
+  
+  %comp_rostered_pos_cabin% <= %comp_need_pos_cabin% + 
+    rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%);
+  
+  startdate = leg.%activity_scheduled_start_time_UTC%;
+  failtext(Int value, Int limit) = %no_overcrewed_cabins%(value, limit);
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  remark "(CCT) Func: No overcrewed cabins are allowed.",
+  planner "The rule checks that no cabins are overcrewed. "
+          "The rule checks that the booked number of crew is "
+          "smaller or equal than the need for the "
+          "crew positions 5-8.";
+end
+
+%position_to_check% =
+  crew_pos.%assigned_function% = "AP" or
+  crew_pos.%assigned_function% = "AS" or
+  crew_pos.%assigned_function% = "AH";
+
+
+%comp_rostered_pos_cabin% = 
+  if crew_pos.%assigned_pos% = 6 or crew_pos.%assigned_pos% = 7 then
+    crew_pos.%leg_rostered_pos%(6) + 
+    crew_pos.%leg_rostered_pos%(7)
+  else
+    crew_pos.%leg_rostered_pos%(crew_pos.%assigned_pos%);
+
+%comp_need_pos_cabin% =
+  if crew_pos.%assigned_pos% = 6 or crew_pos.%assigned_pos% = 7 then
+    crew_pos.%need_in_pos%(6) + 
+    crew_pos.%need_in_pos%(7)
+  else
+    crew_pos.%need_in_pos%(crew_pos.%assigned_pos%);
+  
+%no_overcrewed_cabins%(Int value, Int limit) =
+  if crew_pos.%assigned_pos% = 6 or crew_pos.%assigned_pos% = 7 then
+    concat("Soft: Overcrewed: AS+AH:", format_int(value, ":%d"), format_int(limit, "(%d)"))
+  else
+    concat("Soft: Overcrewed: ", crew_pos.%assigned_function%, format_int(value, ":%d"), format_int(limit, "(%d)"));
+
+/*
+** Rule:
+**    No open trips are allowed (alert_server only)
+**
+** Description:
+**    Any open trip (even overbooked) are considered
+**
+** Functional rule:
+**    System specification Tracking, 
+**
+** Checks open-time flight duty trips.
+**   - The rule fails if the trip contains any leg with open
+**       time in a crew position that is not fully rostered. 
+**   - The fail object is the first such leg within the trip.
+**   - Trips with only manually created flights are excluded.
+**   - The fail message will include:
+**       - the number of calendar days covered by underrostered legs,
+**       - the first and last station touched by underrostered legs,
+**       - the underrostered crew positions that can be resolved with 
+**           legs in the trip, and by which number (which always is less
+**           than or equal to the assigned value in the trip).
+**     Example: "Soft: open time 2 days, 1AP, 1AH (CPH-AMS)"
+*/
+
+export rule sft_open_no_open_positions_CC =
+  valid alert_server.%check_alert_rules% and
+        not fundamental.%is_roster% and
+        any(leg(trip), leg.%cc_employer_is_SAS%) and
+        trip.%in_pp_extended% and
+        trip.%is_operating% and
+        not %trip_all_deadhead% and
+        not %trip_all_manual% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+        
+  crew_pos.%trip_assigned% = 0; /* Just to avoid trips with no complement */
+  
+  startdate = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = first(leg(trip), leg.%failobject_departure%);
+  failtext %sft_open_no_open_positions_failtext%;
+  remark "(CCT) Func: Do not allow open time",
+  planner ""
+          "This rule is used to generate alerts for the alert server."
+          " A trip is of course not illegal just because all positions are"
+          " not covered, but this is the only way to let the alert"
+          " server recognize the open time.";
+end
+    
+
+/*
+** Rule: 
+**    Maximum 20% Asian cabin crew on SK-Asia-SK legs
+**
+** Description:
+**    Based on Change Request SASCMS-3252
+**    A legality warning is to be displayed if more than 20% of
+**    the assigned crew is Asian.  Only applies to routes
+**    to and from Asian/Scandinavian destinations.
+**
+** Agreement:
+**    Functional rule
+*/
+
+export rule sft_asian_crew_limit_sk_asia_sk_flights =
+  valid %is_asian_crew% and
+        leg.%is_active_flight% and 
+        leg.%in_pp_extended%;
+  
+  %number_of_asian_crew% <= 
+      %asian_crew_restriction_limit% + 
+	    rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%);
+  
+  startdate = leg.%activity_scheduled_start_time_UTC%;
+  failtext(Int value, Int limit) = 
+    rules.%failtext_int%("Coll: Nr Asian crew on SK-Asia-SK ", value, limit);
+  severity =  %severity_filter_int%(leg.%start_utc%, %duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  remark "(CCT) Func: 20% Asian crew limit on SK-Asia-SK flights.",
+  planner "The rule checks that the maximum percentage of Asian "
+	      "crew on flights between Scandinavia-Asia or Asia-Scandinavia "
+          "does not exceed 20% ";
+end
+
+set asian_bases = "BJS", "SHA", "NRT", "HKG";
+set asian_countries = "CN", "JP", "HK";
+set sk_countries = "SE", "NO", "DK";
+
+%is_asian_crew% = crew.%homebase% in asian_bases;
+
+%is_sk_asia_sk_flight% =
+  (leg.%start_country% in sk_countries and leg.%end_country% in asian_countries) or
+  (leg.%start_country% in asian_countries and leg.%end_country% in sk_countries);
+  
+%number_of_asian_crew% = 
+  count(equal_legs) where (%is_asian_crew% and
+                           leg.%is_active_flight%);
+
+%asian_crew_restriction_limit% = default(crew_pos.%total_leg_rostered_cc% / 5, 999);
+
+/* End of file */
+

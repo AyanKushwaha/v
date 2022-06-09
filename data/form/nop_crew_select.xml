@@ -1,0 +1,639 @@
+<views style.alwaysontop="true">
+  <!--
+      Assign/Deassign Not-operating crew (additional crew) to flight
+      for APIS purpose 
+  -->
+   
+<head>
+
+<alias id="cs_crew_src" source="tmp_nop_crew"/>
+
+<on-opened>
+  context.action("reloadForm","nop_crew_select.xml")
+  context.action("setEventEnabled","on-selection-changed","true")
+</on-opened>
+<title>Not-operating crew</title>
+
+<action name="valiDateSave" args="tabu, rwu, colu, date, is_valid"><![CDATA[
+
+print "--- DEBUG: action:valiDateSave:pars ", tabu, rwu, colu, date, is_valid
+
+if is_valid == "True":
+  print "--- DEBUG: action:valiDateSave: UPDATE ON VALID !"
+  context.action("setTableValueDateWrap", tabu, rwu, colu, date)
+
+  if colu == "passport_validto":
+    context.action("setTableValue", "cs_dates_src", 0, "passport_valid", "true")
+    context.action("setProperty", "nop_crew_passport_validto", "label", "")
+    context.action("setProperty", "nop_crew_passport_validto", "style.border", "empty")
+    print "--- DEBUG: action:valiDateSave: passport_valid:true !"
+  elif colu == "visa_validto":
+    context.action("setTableValue", "cs_dates_src", 0, "visa_valid", "true")
+    context.action("setProperty", "nop_crew_visa_validto", "label", "")
+    context.action("setProperty", "nop_crew_visa_validto", "style.border", "empty")
+    print "--- DEBUG: action:valiDateSave: visa_valid:true !"
+else:
+  if colu == "passport_validto":
+    context.action("setTableValue", "cs_dates_src", 0, "passport_valid", "false")
+    context.action("setProperty", "nop_crew_passport_validto", "label", "")
+    context.action('setProperty', 'nop_crew_passport_validto', 'style.border', "line")
+    context.action('setProperty', 'nop_crew_passport_validto', 'style.border.color', "red")
+    context.action('setProperty', 'nop_crew_passport_validto', 'style.border.width', 1)
+    print "--- DEBUG: action:valiDateSave: passport_valid:false !"
+  elif colu == "visa_validto":
+    context.action("setTableValue", "cs_dates_src", 0, "visa_valid", "false")
+    context.action("setProperty", "nop_crew_visa_validto", "label", "")
+    print "--- DEBUG: action:valiDateSave: visa_valid:false !"
+
+print "--- DEBUG: action:valiDateSave: passport_valid: ", str(context.sm.resolve("${cs_dates_src[0,passport_valid]}"))
+print "--- DEBUG: action:valiDateSave: visa_valid: ",     str(context.sm.resolve("${cs_dates_src[0,visa_valid]}"))
+]]></action>
+
+<action name="setTableValueDateWrap" args="tabu, rwu, colu, date_val"><![CDATA[
+tab=str(tabu)
+rw=str(rwu)
+col=str(colu)
+
+if rw != 'NULL':
+  old_val_str = "${%s[%s,%s]}" % (tab,rw,col)
+  old_val = str(context.sm.resolve(old_val_str))
+  valstr = str(date_val)[0:9]
+  if old_val != valstr:
+    context.action("setTableValue", tab, rw, col, valstr)
+    context.action("setTableValue", tab, rw, 'add_','true')
+]]></action>
+
+<action name="setTableValueWrap" args="tabu, rwu, colu, val"><![CDATA[
+tab=str(tabu)
+rw=str(rwu)
+col=str(colu)
+if rw != 'NULL':
+  old_val_str = "${%s[%s,%s]}" % (tab,rw,col)
+  old_val = str(context.sm.resolve(old_val_str))
+  valstr=str(val)
+  if old_val != valstr:
+    context.action("setTableValue", tab, rw, col, valstr)
+    context.action("setTableValue", tab, rw, 'add_','true')
+]]></action>
+
+<action name="setEmpNo" args="tabu, rwu, colu, sn, gn"><![CDATA[
+tab=str(tabu)
+rw=str(rwu)
+col=str(colu)
+if rw != 'NULL':
+  empno = str((sum(ord(ch) for ch in sn) * sum(ord(ch) for ch in gn)) % 100000 )
+  context.action("setValue", "nop_crew_crew_id", empno)
+  context.action("setTableValue", tab, rw, col, empno)
+  context.action("setTableValue", tab, rw, 'add_','true')
+]]></action>
+
+<!-- temporary help table -->
+<data id="tmp_bool" type="etab"><![CDATA[
+1
+Btruefalse "",
+False,
+True,
+]]></data>
+
+<!-- temporary help table -->
+<data id="tmp_gender" type="etab"><![CDATA[
+1
+Sgendervals "",
+"F",
+"M",
+]]></data>
+
+<!-- temporary table that holds result -->
+<data id="cs_info_src" type="etab"><![CDATA[
+1
+Scid "crew id",
+"NULL",
+]]></data>
+
+<!-- temporary table that holds result -->
+<data id="cs_dates_src" type="etab"><![CDATA[
+5
+Abday "bday",
+Apassport_vto "passport_vto",
+Avisa_vto "visa_vto",
+Spassport_valid,
+Svisa_valid,
+01Jan1986,01Jan1986,01Jan1986,"false","false"
+]]></data>
+
+<!-- Set crew filter based on entered values -->
+<action name="cs_setWildCardFilter" args="ass,crew_id,sn,gn"><![CDATA[
+filter = tuple([f.upper() for f in crew_id,sn,gn]+[f.capitalize() for f in crew_id,sn,gn])
+if ass == 'false':
+  context.action('setFilter','cs_crew_src','(&(removed_=false)(|(&(crew_id=%s*)(sn=%s*)(gn=*%s*))(&(crew_id=%s*)(sn=%s*)(gn=*%s*))))' % filter)
+else:
+  context.action('setFilter','cs_crew_src','(&(removed_=false)(|(&(assigned=true)(crew_id=%s*)(sn=%s*)(gn=*%s*))(&(assigned=true)(crew_id=%s*)(sn=%s*)(gn=*%s*))))' % filter)
+]]></action>
+
+
+<action name="cs_set_values" args="selected_row"><![CDATA[
+if selected_row =='NULL':
+  context.action('selectTableRow','cs_crew_id',0)
+]]></action>
+
+<on-loaded>
+  setTableValue("cs_info_src",0,"cid","NULL");
+  setFilter("cs_crew_src","");
+  setEventEnabled("on-selection-changed",true);
+</on-loaded>
+
+<on-opened>
+  setFormTitle("Additional crew");
+  setFilter("cs_crew_src","");
+  setFocus("sn")
+</on-opened>
+
+<on-closing>
+  print("nop_crew_select.xml: on-closing");
+  <!--hideForm();-->
+  closeForm();
+</on-closing>
+</head>
+
+   <box style.constraints = "Center" 
+        label =             "Selected Leg(s)" 
+        style.width =       "500">
+
+     <text-field value =        "${modcom_non_op_crew_info[0,leg_info]}" 
+                 editable =     "false" 
+                 style.border = "empty" 
+                 style.nrows =  "4"/>
+   </box>
+
+
+  <box style.orientation="border"> 
+    <box style.constraints="North" style.orientation="border" label="Filter crew">
+      <hbox style.constraints="West" style.width="640">
+         <text-field id="dummy_fill1" value="" style.width="18" editable="false" style.border = "empty">
+         </text-field>
+         <check-box id="assigned" value="" style.width="73">
+          <on-changed>cs_setWildCardFilter("${assigned}","${crew_id}","${sn}","${gn}");</on-changed>
+        </check-box>
+         <text-field id="dummy_fill2" value="" style.width="22" editable="false" style.border = "empty">
+         </text-field>
+        <text-field id="crew_id" value="" style.width="73">
+          <on-keytyped>cs_setWildCardFilter("${assigned}","${crew_id}","${sn}","${gn}");</on-keytyped>
+        </text-field>
+        <text-field id="sn" value="" style.width="248">
+          <on-keytyped>cs_setWildCardFilter("${assigned}","${crew_id}","${sn}","${gn}");</on-keytyped>
+        </text-field>
+        <text-field id="gn" value="" style.width="248">
+          <on-keytyped>cs_setWildCardFilter("${assigned}","${crew_id}","${sn}","${gn}");</on-keytyped>
+        </text-field>
+      </hbox>
+    </box>
+
+    <box style.constraints="Center">
+      <table source="cs_crew_src" id="cs_crew_id" editable="false"
+             columns="id,assigned, position, crew_id, sn,gn,gender, nationality, birthday, birth_place, birth_state, birth_country,
+                      res_street,res_city, res_postal_code, res_country, passport, passport_issuer, passport_validto, visa_type, visa_number, visa_country, visa_validto, on_mcl,si,add_,removed_"
+             table.selectionmode="SINGLE"
+             style.autoresize="off"
+             style.width="595">
+        <columninfo column="assigned"        label="Assigned"   width="73"/>
+        <columninfo column="id"        label="uuid"   width="75" visible="false"/>
+        <columninfo column="position"        label="type"   width="75" visible="false" />
+        <columninfo column="crew_id"        label="Employee no"   width="73" visible="true" />
+        <columninfo column="sn"      label="Surname" width="250"/>
+        <columninfo column="gn" label="First name"     width="250"/>
+        <columninfo column="gender" label=""     width="250" visible='false'/>
+        <columninfo column="nationality" label=""     width="250" visible='false'/>
+        <columninfo column="birthday" label=""     width="250" visible='false' date.format="ddMMMyyyy"/>
+        <columninfo column="birth_place" label=""     width="250" visible='false'/>
+        <columninfo column="birth_state" label=""     width="250" visible='false'/>
+        <columninfo column="birth_country" label=""     width="250" visible='false'/>
+        <columninfo column="res_street"        label="res_street"   width="250" visible='false'/>
+        <columninfo column="res_city"        label="res_city"   width="250" visible='false' />
+        <columninfo column="res_country"        label="res_country"   width="250" visible='false' />
+        <columninfo column="res_postal_code"        label="res_postal_code"   width="250" visible='false'/>
+        <columninfo column="res_street"        label="res_street"   width="250" visible='false'/>
+        <columninfo column="passport"        label="passport"   width="250" visible='false'/>
+        <columninfo column="passport_issuer"        label="passport_issuer"   width="250" visible='false'/>
+        <columninfo column="passport_validto" label=""     width="250" date.format="ddMMMyyyy" visible='false'/>
+        <columninfo column="visa_type"        label="visa_type"   width="250" visible='false'/>
+        <columninfo column="visa_number"        label="visa_number"   width="250" visible='false'/>
+        <columninfo column="visa_country"        label="visa_country"   width="250" visible='false'/>
+        <columninfo column="visa_validto" label=""     width="250" date.format="ddMMMyyyy" visible='false'/>
+        <columninfo column="on_mcl" label=""     width="250" visible='false'/>
+        <columninfo column="si" label=""     width="250" visible='false'/>
+        <columninfo column="add_" label="added"     width="250" visible='false'/>
+        <columninfo column="removed_" label="removed"     width="250" visible='false'/>
+        <!--columninfo column="position" label=""  width="250" hiddden="true"-->
+        <!-- Seems on-loaded and on-opened does not get called when opening this
+             form the second time, therefore some initialization is done here. -->
+        <on-selection-changed>
+          progress(true);
+          setValue(nop_crew_sn, "${cs_crew_id[sn]}");
+          setValue(nop_crew_gn, "${cs_crew_id[gn]}");
+          setValue(nop_crew_position, "${cs_crew_id[position]}");
+          setValue(nop_crew_crew_id, "${cs_crew_id[crew_id]}");
+          setValue(nop_crew_gender, "${cs_crew_id[gender]}");
+          setValue(nop_crew_nationality, "${cs_crew_id[nationality]}");
+          setValue(nop_crew_birthday, ${cs_crew_id[birthday]});
+          setValue(nop_crew_birth_place, "${cs_crew_id[birth_place]}");
+          setValue(nop_crew_birth_state, "${cs_crew_id[birth_state]}");
+          setValue(nop_crew_birth_country, "${cs_crew_id[birth_country]}");
+          setValue(nop_crew_res_city, "${cs_crew_id[res_city]}");
+          setValue(nop_crew_res_street, "${cs_crew_id[res_street]}");
+          setValue(nop_crew_res_postal_code, "${cs_crew_id[res_postal_code]}");
+          setValue(nop_crew_res_country, "${cs_crew_id[res_country]}");
+          setValue(nop_crew_phone, "${cs_crew_id[phone]}");
+          setValue(nop_crew_email, "${cs_crew_id[email]}");
+          setValue(nop_crew_passport_validto, "${cs_crew_id[passport_validto]}");
+          setValue(nop_crew_passport, "${cs_crew_id[passport]}");
+          setValue(nop_crew_passport_issuer, "${cs_crew_id[passport_issuer]}");
+          setValue(nop_crew_visa_type, "${cs_crew_id[visa_type]}");
+          setValue(nop_crew_visa_number, "${cs_crew_id[visa_number]}");
+          setValue(nop_crew_visa_country, "${cs_crew_id[visa_country]}");
+          setValue(nop_crew_visa_validto, "${cs_crew_id[visa_validto]}");
+          setValue(nop_crew_on_mcl, "${cs_crew_id[on_mcl]}");
+          refreshClient();
+          progress(false);
+        </on-selection-changed>
+      </table>
+
+      <!-- Display all constant crew info -->
+      <hbox>
+        <vbox>
+          <check-box id="edit_mode_id" label="Edit" filter.enabled="(True=True)"/>
+        </vbox>
+        <box>
+          <check-box id="no_emp_no_id" label="No employee no" filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))">
+            <on-changed>
+              setEmpNo("cs_crew_src","${cs_crew_id[-1]}", crew_id, "${nop_crew_sn}", "${nop_crew_gn}");
+            </on-changed>
+          </check-box>
+
+          <text-field label="Employee no" id="nop_crew_crew_id" editable="true"
+                      filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true)(no_emp_no_id=false))"
+                      validate.pattern="[0-9]*"
+                      validate.failmessage="This field is mandatory"
+                      nullable="true">
+            <on-keytyped>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}", crew_id, "${nop_crew_crew_id}");
+            </on-keytyped>
+          </text-field>
+
+          <text-field label="First name" id="nop_crew_gn" editable="true"
+                      filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                      validate.pattern="[A-Za-z]*"
+                      validate.failmessage="This field is mandatory"
+                      nullable="true">
+            <on-keytyped>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}",gn,"${nop_crew_gn}");
+            </on-keytyped>
+          </text-field>
+
+          <text-field style.width="120" label="Surname" id="nop_crew_sn" editable="true"
+                      filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                      validate.pattern="[A-Za-z]*"
+                      validate.failmessage="This field is mandatory"
+                      nullable="true">
+            <on-keytyped>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}",sn,"${nop_crew_sn}");
+            </on-keytyped>
+          </text-field>
+
+          <table-column label="Type"
+                        id="nop_crew_position"
+                        editable="true"
+                        source = "nop_crew_position_set"
+                        column = "id"
+                        filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                        value = ""
+                        validate.pattern="[A-Z a-z0-9]*"
+                        validate.failmessage="This field is mandatory"
+                        nullable="true">
+            <on-changed>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}",position,"${nop_crew_position}")
+            </on-changed>
+          </table-column>
+
+          <table-column label="Gender" 
+                      id="nop_crew_gender" 
+                      editable="true"
+                      source="tmp_gender"
+                      column="gendervals"
+                      filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                      value = ""
+                      validate.pattern="[MFmf]{1,1}"
+                      validate.failmessage="This field is mandatory"
+                      nullable="true">
+            <on-changed>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}",gender,"${nop_crew_gender}");
+            </on-changed>
+          </table-column>
+
+          <table-column label = "Nationality" 
+                        id = "nop_crew_nationality"
+                        editable="true"
+                        source = "country"
+                        column = "id"
+                        filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                        validate.pattern="[A-Za-z]{2,2}"
+                        validate.failmessage="This field is mandatory"
+                        nullable="true">
+            <on-changed>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}",nationality,"${nop_crew_nationality}");
+            </on-changed>
+          </table-column>
+
+          <table-cell label="Birthday"
+                      id="nop_crew_birthday" 
+                      row="0"
+                      source = "cs_dates_src"
+                      date.format="ddMMMyyyy"
+                      column = "bday"
+                      filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                      validate.pattern="[0-9]{2,2}[A-Z][a-z]{2,2}[0-9]{4,4}"
+                      validate.failmessage="This field is mandatory"
+                      nullable="true">
+            <on-changed>
+              setTableValueDateWrap("cs_crew_src","${cs_crew_id[-1]}",birthday,${nop_crew_birthday});
+            </on-changed>
+          </table-cell>
+
+          <text-field label="Birth place" id="nop_crew_birth_place" editable="true"
+                      filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                      validate.pattern="[A-Za-z]*"
+                      validate.failmessage="This field is mandatory">
+            <on-keytyped>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}", birth_place, "${nop_crew_birth_place}");
+            </on-keytyped>
+          </text-field>
+          
+          <text-field label="Birth state" id="nop_crew_birth_state" editable="true"
+                      filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                      validate.pattern="[A-Za-z]*"
+                      validate.failmessage="This field is mandatory"
+                      nullable="true">
+            <on-keytyped>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}", birth_state, "${nop_crew_birth_state}");
+            </on-keytyped>
+          </text-field>
+
+          <table-column label="Birth country"
+                        id="nop_crew_birth_country"
+                        source = "country"
+                        editable="true"
+                        column = "id"
+                        filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                        validate.pattern="[A-Za-z]{2,2}"
+                        validate.failmessage="This field is mandatory"
+                        nullable="true">
+            <on-changed>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}", birth_country,"${nop_crew_birth_country}");
+            </on-changed>
+          </table-column>
+
+          <text-field label="Phone" id="nop_crew_phone" editable="true"
+                      filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                      validate.pattern="[0-9\-\+\(\)]*"
+                      validate.failmessage="This field is mandatory"
+                      nullable="true">
+            <on-keytyped>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}", phone, "${nop_crew_phone}");
+            </on-keytyped>
+          </text-field>
+
+          <text-field label="E-mail" id="nop_crew_email" editable="true"
+                      filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                      validate.pattern="[0-9A-Za-z._%+-]*@{0,1}[0-9A-Za-z.-]*"
+                      validate.failmessage="This field is mandatory"
+                      nullable="true">
+            <on-keytyped>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}", email, "${nop_crew_email}");
+            </on-keytyped>
+          </text-field>
+        </box>
+
+        <box style.width="350" >
+
+          <text-field label="City of residence" id="nop_crew_res_city"
+                      filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                      validate.pattern="[A-Za-z ]*"
+                      validate.failmessage="This field is mandatory"
+                      nullable="true">
+            <on-keytyped>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}", res_city, "${nop_crew_res_city}");
+            </on-keytyped>
+          </text-field>
+
+          <text-field label="Street of residence" id="nop_crew_res_street"
+                      filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                      validate.pattern="[0-9 A-Z a-z]*"
+                      validate.failmessage="This field is mandatory"
+                      nullable="true">
+            <on-keytyped>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}", res_street, "${nop_crew_res_street}");
+            </on-keytyped>
+          </text-field>
+
+          <text-field label="Postal code" id="nop_crew_res_postal_code"
+                      filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                      validate.pattern="[0-9A-Za-z]*"
+                      validate.failmessage="This field is mandatory"
+                      nullable="true">
+            <on-keytyped>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}", res_postal_code, "${nop_crew_res_postal_code}");
+            </on-keytyped>
+          </text-field>
+          
+          <table-column label = "Country of residence"
+                        id = "nop_crew_res_country" 
+                        source = "country"
+                        row = "0" 
+                        column = "id" 
+                        filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                        validate.pattern="[A-Za-z]*"
+                        validate.failmessage="This field is mandatory"
+                        nullable="true">
+            <on-changed>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}", res_country,"${nop_crew_res_country}");
+            </on-changed>
+          </table-column>
+
+          <text-field label = "Passport number" id="nop_crew_passport" editable = "true"
+                      filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+           	          validate.pattern="[0-9 A-Za-z]*"
+                      validate.failmessage="This field is mandatory"
+                      nullable="true">
+            <on-keytyped>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}", passport, "${nop_crew_passport}");
+            </on-keytyped>
+          </text-field>
+
+          <table-column label="Passport issue country"
+                        id = "nop_crew_passport_issuer"
+                        source = "country"
+                        column = "id"
+                        filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                        validate.pattern="[A-Za-z]{2,2}"
+                        validate.failmessage="This field is mandatory"
+                        nullable="true">
+            <on-changed>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}",passport_issuer,${nop_crew_passport_issuer});
+            </on-changed>
+          </table-column>
+
+          <table-cell label ="Passport valid to"
+                      id = "nop_crew_passport_validto"
+                      row = "0"
+                      source = "cs_dates_src"
+                      date.format = "ddMMMyyyy"
+                      column = "passport_vto"
+                      filter.enabled ="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                      value = ""
+                      validate.pattern = "[0-9]{2,2}[A-Z][a-z]{2,2}[0-9]{4,4}"
+                      validate.failmessage = "This field is mandatory"
+                      nullable="true">
+            <on-changed>
+              model("nopCrewEdit.nop_crew_validate_doc_date", "passport_validto", ${nop_crew_passport_validto});
+            </on-changed>
+          </table-cell>
+
+          <table-column label = "Visa type"
+                        id="nop_crew_visa_type"
+                        source = "crew_document_set"
+                        column = "subtype"
+                        filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                        nullable="true">
+            <on-changed>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}", visa_type, ${nop_crew_visa_type});
+            </on-changed>
+          </table-column>
+
+          <text-field label = "Visa number" id="nop_crew_visa_number" editable = "true"
+                      filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                      validate.pattern="[0-9 A-Za-z]*"
+                      nullable="true">
+            <on-keytyped>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}", visa_number, "${nop_crew_visa_number}");
+            </on-keytyped>
+          </text-field>
+
+          <table-column label="Visa issue country"
+                        id = "nop_crew_visa_country"
+                        source = "country"
+                        column = "id"
+                        filter.enabled="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                        validate.pattern="[A-Za-z]{2,2}"
+                        nullable="true">
+            <on-changed>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}",visa_country,${nop_crew_visa_country});
+            </on-changed>
+          </table-column>
+
+          <table-cell label ="Visa valid to"
+                      id = "nop_crew_visa_validto"
+                      row = "0"
+                      source = "cs_dates_src"
+                      date.format = "ddMMMyyyy"
+                      column = "visa_vto"
+                      filter.enabled ="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))"
+                      validate.pattern="[0-9A-Za-z]*"
+                      validate.failmessage="This field is mandatory"
+                      nullable="true">
+            <on-changed>
+              model("nopCrewEdit.nop_crew_validate_doc_date", "visa_validto", ${nop_crew_visa_validto});
+            </on-changed>
+          </table-cell>
+
+          <table-column id="nop_crew_on_mcl"
+                        label="Report on MCL"
+                        source="tmp_bool"
+                        column="truefalse"
+                        filter.enabled ="(&amp;(!(cs_crew_id[-1]=NULL))(edit_mode_id=true))">
+            <on-changed>
+              setTableValueWrap("cs_crew_src","${cs_crew_id[-1]}",on_mcl,${nop_crew_on_mcl});
+            </on-changed>
+          </table-column>
+
+        </box>
+      </hbox>
+    </box>
+
+    <hbox style.constraints="South">
+
+      <button label="Assign crew" filter.enabled="(&amp;(|(!(cs_crew_id=NULL))(1=${cs_crew_src._rowcount}))(${cs_crew_id[assigned]}=false))" isEnterHandler="true">
+        <on-click>
+          setTableValue("cs_crew_src","${cs_crew_id[-1]}", add_, true);
+          setTableValue("cs_crew_src","${cs_crew_id[-1]}", assigned, true);
+        </on-click>
+      </button>
+
+      <button label="Deassign crew" filter.enabled="(&amp;(|(!(cs_crew_id=NULL))(1=${cs_crew_src._rowcount}))(${cs_crew_id[assigned]}=true))">
+        <on-click>
+          setTableValue("cs_crew_src","${cs_crew_id[-1]}", add_, true);
+          setTableValue("cs_crew_src","${cs_crew_id[-1]}", assigned, false);
+        </on-click>
+      </button>
+
+      <button label="New">
+        <on-click>
+          setValue(edit_mode_id, "true");
+          setValue(sn,"");
+          setValue(gn,"");
+          setValue(assigned,"false");
+          cs_setWildCardFilter("${assigned}","${crew_id}","${sn}","${gn}");
+          insertRow(cs_crew_id, "rno=${tmp_nop_crew._rowcount}", "crew_id=","sn=", "gn=",
+          "birth_place=","birth_state=",
+          "res_street=", "res_city=","res_postal_code=",
+          "passport=", "on_mcl=false", "si=", "assigned=false", "add_=true", "removed_=false");
+          promoteAll(cs_crew_src);
+          setFocus("cs_crew_id",0);
+        </on-click>
+      </button>
+
+      <button label="Remove" filter.enabled="(&amp;(|(!(cs_crew_id=NULL))(1=${cs_crew_src._rowcount}))(edit_mode_id=true))">
+        <on-click>
+          setTableValue("cs_crew_src","${cs_crew_id[-1]}", removed_, true);
+          promoteAll(cs_crew_src);
+          cs_setWildCardFilter("${assigned}","${crew_id}","${sn}","${gn}");
+          setFocus("cs_crew_id",0);
+        </on-click>
+      </button>
+
+      <button label="OK" filter.enabled="(&amp;(!(nop_crew_crew_id=''))(!(nop_crew_gn=''))(!(nop_crew_sn=''))(!(nop_crew_position=''))(!(nop_crew_gender=''))(!(nop_crew_nationality=''))(!(nop_crew_birth_place=''))(!(nop_crew_birth_country=''))(!(nop_crew_phone=''))(!(nop_crew_email=''))(!(nop_crew_res_city=''))(!(nop_crew_res_street=''))(!(nop_crew_res_postal_code=''))(!(nop_crew_res_country=''))(!(nop_crew_passport=''))(!(nop_crew_passport_issuer=''))(${cs_dates_src[0,passport_valid]}=true))">
+        <on-click>
+          model("carmensystems.mirador.modelserversubmit.setLabel", "Nop Crew info");
+          submitClient();
+          model("carmensystems.mirador.modelserversubmit.setTrans");
+          model("nopCrewEdit.nop_crew_edit_save");
+          closeForm()
+        </on-click>
+      </button>
+
+      <button label="Cancel">
+        <on-click>
+          setTableValue("cs_info_src",0,"cid","");
+          closeForm();
+        </on-click>
+      </button>
+<!-- DEBUG !!!
+       <button label="Refresh Model">
+        <on-click>
+          refreshModel()
+        </on-click>
+      </button>
+
+      <button label="Refresh Client">
+        <on-click>
+          refreshClient()
+        </on-click>
+      </button>
+
+      <button label="Reload Form">
+        <on-click>
+          reloadForm()
+        </on-click>
+      </button>
+  -->
+    </hbox>
+  </box>
+</views>

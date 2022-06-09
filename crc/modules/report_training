@@ -1,0 +1,154 @@
+/* -*- crc -*- */
+root module report_training
+
+import leg;
+import trip;
+import task;
+import wop;
+import crew;
+import levels;
+import fundamental;
+import training;
+import report_per_diem;
+
+%crew_is_instructor% =
+    crew.%has_qln_in_pp%("INSTRUCTOR", "OL");
+
+%leg_is_training% =
+    leg.%is_training% and not leg.%is_cc_rec_web%;
+    
+%leg_is_training_with_instuctor% =  
+  %leg_is_training% and
+  any(equal_legs, %crew_is_instructor%)
+  where(%is_roster%); 
+  
+%leg_is_training_to_consider% =
+    %leg_is_first_in_taining_block%;
+    
+    
+%_leg_is_training_to_consider% =
+    %leg_is_training% and leg.%starts_in_pp%;
+    
+%leg_is_first_in_taining_block% =
+    %_leg_is_training_to_consider% and not
+    (default(%course_code% = prev(leg(wop), %course_code%), False));
+     /*
+     or
+    not default(%course_code% = prev(leg(wop), %course_code%), False));*/
+    
+%leg_is_last_in_taining_block% =
+    %_leg_is_training_to_consider% and
+    (default(%course_code% = prev(leg(wop), %course_code%), False) and
+       not default(%course_code% = next(leg(wop), %course_code%), false));
+    
+%crew_to_consider% =
+    (crew.%homebase% in training_airports_to_consider and %crew_has_training_in_pp%) or crew.%is_instructor_in_pp%;
+    
+%crew_has_training_in_pp% =
+    default(any(trip(roster), %trip_has_training%), false);
+    
+%trip_has_training% =
+    default(any(leg(trip), %leg_is_training_to_consider%), false);
+
+%trip_to_concider% =
+    (trip.%is_training% or trip.%is_simulator%) and any(leg(trip),leg.%arrival_airport_name% in training_airports_to_consider) and 
+    wop.%in_pp%;
+    
+set training_airports_to_consider =
+    parameter "CPH"
+    remark "Airport to consider from Crew Training report"; 
+    
+%wop_to_concider% =
+    any(trip(wop), %trip_to_concider%);
+    
+    
+%courseInstructorStudentLockup_table% =
+    "CourseInstructorStudentCodes.etab";
+    
+iterator training_group_leg_set =
+  partition(leg)
+  by(%instructor_student_group_code%, leg.%start_date_lt%, %leg_is_training_to_consider%);
+end
+
+%start_lt% =
+    leg.%start_lt%;
+    
+%end_lt% =
+    default(next(leg(wop),
+    leg.%end_lt%) where (%leg_is_last_in_taining_block%), leg.%end_lt%);
+
+%crew_name% =
+    crew.%fullname%;
+    
+%crew_adress% =
+    %crew_adress_at_date%(%pp_start%);
+    
+%crew_rank% =
+    crew.%rank_pp_start%;
+    
+%crew_department% =   
+    report_per_diem.%crew_department%;
+    
+%crew_adress_at_date%(abstime date) =
+    concat(crew.%street%(date), " ", crew.%postal_code%(date), " ",  crew.%city%(date), " ", crew.%country%(date));
+
+
+%crew_empno% =
+    crew.%employee_number%;
+    
+%crew_personal_no% =
+    crew.%personal_no%(crew.%id%, %pp_start%);
+
+%instructor_student_code% =
+    %instr_code_student_code%(leg.%code%);
+    
+%is_instructor_on_course% =
+    not void(%instructor_student_code%);
+    
+%student_code% =
+    let sub = substr(leg.%code%, 1,2);
+    if sub = "CX" and not (leg.%code% = "CX7") then
+        "CX*"
+    else
+        leg.%code%;
+        
+%course_code% =
+    leg.%code%;
+    
+%instructor_student_group_code% =
+    if %leg_is_training% then
+        default(%instructor_student_code%, %student_code%)
+    else
+        void_string;
+
+table sb_activity_details(String code) =
+  code ->
+  export string %instr_code_course_type%, export string %instr_code_ac_type%, export string %instr_code_student_code%;
+    external %courseInstructorStudentLockup_table%;
+    "InstrCode" ->
+    "CourseType",
+    "ACType",
+    "AttendantCode";
+  - -> void_string, void_string, void_string;
+end
+
+
+export %consolidation_ac_qual% = training.%consolidation_ac_qual%;
+export %consolidation_course_type% = training.%consolidation_course_type%;
+export %consolidation_period_start% = training.%consolidation_period_start_hb%;
+export %consolidation_period_end% = training.%consolidation_period_end_hb%;
+export %nr_consolidation_sectors_required% = training.%nr_consolidation_sectors_required%;
+export %nr_consolidation_sectors_perf% = training.%nr_consolidation_sectors_perf%;
+export %nr_consolidation_sectors_publ% = training.%nr_consolidation_sectors_publ%;
+export %nr_consolidation_sectors_plan% = training.%nr_consolidation_sectors_plan%;
+
+export %etops_training_ac_qual% = training.%etops_training_ac_qual%;
+export %etops_training_course_type% = training.%etops_training_course_type%;
+export %etops_training_period_start% = training.%etops_training_period_start_hb%;
+export %etops_training_period_end% = training.%etops_training_period_end_hb%;
+export %nr_etops_training_sectors_required% = training.%nr_etops_training_sectors_required%;
+export %nr_etops_training_sectors_perf% = training.%nr_etops_training_sectors_perf%;
+export %nr_etops_training_sectors_publ% = training.%nr_etops_training_sectors_publ%;
+export %nr_etops_training_sectors_plan% = training.%nr_etops_training_sectors_plan%;
+
+/* eof */

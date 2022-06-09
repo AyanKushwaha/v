@@ -1,0 +1,57 @@
+#!/usr/bin/env python
+
+import os,sys
+
+def readfile(file):
+    try:
+	f=open(file)
+	return f.read()
+    finally:
+	f.close()
+
+def latex(name,infile):
+    first=True
+    while True:
+	print 'pdflatex %s,%s' % (name, infile)
+	os.system('pdflatex \\\\nonstopmode\\\\input %s > /dev/null'%infile)
+	log=readfile('%s.log'%name)
+	i=log.find('! I can\'t write on file ')
+	if i>=0:
+	    dir=os.path.dirname(log[log.find("`",i+24)+1:log.find("'",i+24)])
+	    print 'mkdir',dir
+	    os.mkdir(dir)
+	    continue
+	if log.find('LaTeX Error:')>=0 or log.find('*** (job aborted,')>=0:
+	    print log
+	    sys.exit(-1)
+	# TeX talks too much...
+	#if log.find('LaTeX Warning:')>=0:
+	#    print log
+	if not first:
+	    if log.find('may have changed. Rerun to get')>=0:
+		continue
+	    else:
+		break
+	if os.path.isfile('%s.idx'%name):
+	    os.system('makeindex %s'%name)
+	if readfile('%s.aux'%name).find('bibdata')>=0:
+	    os.system('bibtex %s'%name)
+	first=False
+
+infile=os.path.abspath(sys.argv[1])
+name=os.path.splitext(os.path.basename(infile))[0]
+
+path='%s:%s:'%(os.getcwd(),os.path.dirname(infile))
+os.environ['TEXINPUTS']=path
+os.environ['BIBINPUTS']=path
+
+tmpdir='tmp%d'%os.getpid()
+os.mkdir(tmpdir)
+os.chdir(tmpdir)
+latex(name,os.path.join('..',infile))
+os.chdir('..')
+
+result='%s.pdf'%name
+os.rename(os.path.join(tmpdir,result),result)
+
+os.system('rm -rf %s'%tmpdir)

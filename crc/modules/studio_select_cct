@@ -1,0 +1,165 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   Definitions for studio select filters
+ *
+ * Sections:
+ *
+ * Created by:
+ *   David Lennartsson, 1Aug2006
+ *
+ * Major changes:
+ *   6Sep2008 - pergr:
+ *     *Move a lot of code to studio_select_ccr to use MiniSelect in CCR
+ *
+ */
+
+module studio_select_cct inherits studio_select_ccr
+
+import checkinout;
+import report_illness;
+import crew;
+import rescheduling;
+import keywords;
+import crg_info;
+import report_common;
+
+/*
+** Sortings of crew.
+*/
+
+/* Check-in today */
+/* [acosta:08/257@01:52] Changed to only consider mandatory check-in */
+%sort_mandatory_check_in_after_now% = 
+  default(first(leg(roster) where (checkinout.%about2ci_m% and not %_leg_has_started%),
+    checkinout.%leg_checkin_utc%), 31DEC2099);
+    
+%_leg_has_started% =
+  if fundamental.%now% <> keywords.%nowtime% then /* For debug now */
+    fundamental.%now% >= leg.%start_UTC%
+  else 
+    leg.%has_started%;
+
+%sort_any_check_in_at_homebase% /* today only! */ =  
+  default(first(leg(roster), leg.%departure_airport_base%) 
+      where (leg.%start_date% = fundamental.%now_date% /* Performance: rule out the obvious */
+         and leg.%departs_from_homebase%
+         and checkinout.%about2ci_m%),
+    concat(%_sort_crew_homebase%, "Z") /* No ci today -> last within base */);
+
+/* Flight descriptor (or "ZZ "+task code) for sorted-on check-in */
+%sort_check_in_after_now_flight_descriptor% =
+  default(first(leg(roster) where (checkinout.%about2ci_m%),
+    default(leg.%flight_descriptor%, concat("ZZ ",leg.%code%))), "z");
+
+%_sort_crew_homebase% =
+  default(if crew.%homebase% = "-" or crew.%homebase% = ""
+          then "ZZZ" else crew.%homebase%, "ZZZ");
+
+
+/* Crew block hours (BLH) in calendar year */
+%sort_crew_blh_calendar_year% =
+    default(%_block_time%, "X");
+
+%_block_time% = default(format_time(report_common.%block_time_in_full_calendar_year%, "%03h%02M"), "");
+
+/*
+** Simple select for crew currently checked in but not departed
+** NOTE: Also used by CommandlineCommands.py
+*/
+
+export %crew_checked_in_not_departed% = 
+  leg.%checked_in% 
+  and not leg.%has_started%;
+
+/*
+** Simple select for crew currently checked in early
+*/
+
+%crew_checked_in_early% = 
+  checkinout.%leg_crew_checked_in_early%;
+
+/*
+** Simple select for crew late for checkin
+*/
+
+%crew_late_for_checkin% =
+  checkinout.%leg_crew_late_for_check_in%;
+
+
+/*
+** Simple select for crew currently on illness
+*/
+
+%crew_is_ill_on_fourth_day_today% =
+  any(leg(roster), report_illness.%day_in_sickness_period% = 4)
+  where(fundamental.%now_date% = leg.%start_date%);
+
+export %crew_is_ill_with_report_back_today% =
+  any(leg(roster), report_illness.%is_report_back%)
+  where(fundamental.%now_date% = leg.%start_date%);
+
+export %crew_is_ill_with_report_back% =
+  first(leg(roster), report_illness.%is_report_back%)
+  where(fundamental.%now_date% <= leg.%start_date% and report_illness.%is_report_back%);
+
+export %early_date_ill_crew_report_back% =
+  first(leg(roster), leg.%start_date%)
+  where(fundamental.%now_date% <= leg.%start_date% and report_illness.%is_report_back%);
+
+/*
+** Mini Selection Form search criteria
+*/
+
+
+export %blank_day%(abstime t1, abstime t2) =
+  not void(%blank_day_start%(t1, t2)) and
+  crew.%available_start% <= t1 and
+  crew.%available_end% >= t2;
+
+export %blank_day_hb%(abstime t1, abstime t2) =
+  %blank_day%(crew.%utc_time%(t1), crew.%utc_time%(t2));
+
+%blank_day_start%(abstime t1, abstime t2) =
+  nmax(t1, crew.%utc_time%(rescheduling.%period_inf_pcat_start%(
+                                            rescheduling.%pcat_blank%,
+                                            crew.%hb_time%(t1),
+                                            crew.%hb_time%(t2))));
+  
+%is_off_duty_period%(Abstime start_utc, Abstime end_utc) =
+  (end_utc - start_utc) <=
+  sum(duty(roster), nmin(duty.%end_UTC%, end_utc) - nmax(duty.%start_UTC%, start_utc)) while(duty.%start_UTC% < end_utc) where(duty.%is_off_duty% and duty.%end_UTC% > start_utc)
+  ;
+
+export %has_informed_blank_day_in_period%(Abstime start_utc, Abstime end_utc) =
+  let start_hb = round_down(rescheduling.%crew_time_hb%(start_utc), 24:00),
+	  newstart_utc = rescheduling.%crew_time_utc%(start_hb),
+      end_hb = rescheduling.%crew_time_hb%(end_utc),
+      max_days = (round_up(end_hb, 24:00) - start_hb) / 24:00;  
+  any(times(max_days), (rescheduling.%dt_inf_any_flag%(rescheduling.%flag_blank%, start_hb + ((%times_index_0% - 1) * 24:00)))
+  and not %is_off_duty_period%(nmax(start_utc, newstart_utc + ((%times_index_0% - 1) * 24:00)), nmin(end_utc, newstart_utc + ((%times_index_0%) * 24:00)))
+  /*If only whole days should be considered
+  not any(duty(roster), duty.%is_off_duty%) while(duty.%start_UTC% < nmin(end_utc, newstart_utc + ((%times_index_0%) * 24:00))) where(duty.%end_UTC% > nmax(start_utc, newstart_utc + ((%times_index_0% - 1) * 24:00)))*/
+  );
+
+/*
+** Added to use in selection form. Request from SAS (Fredrik Sk�rman).
+*/
+%tot_overstaffed_jar_cc% =
+  crg_info.%jar_diff%(5) + crg_info.%jar_diff%(6)+ crg_info.%jar_diff%(7);
+
+/* Activity Code redefined for tracking to support special case selection of
+   "FLIGHT_DUTY" */
+redefine export %activity_code%(string code, abstime t1, abstime t2) =
+    if code = "FLIGHT_DUTY" then
+        any(leg(roster), leg.%is_flight_duty%)
+            while(leg.%start_utc% < t2)
+            where(leg.%end_utc% > t1)
+    else
+        any(leg(roster), %leg_has_activity_code%(code))
+            while(leg.%start_utc% < t2)
+            where(leg.%end_utc% > t1);
+
+/* End of file */

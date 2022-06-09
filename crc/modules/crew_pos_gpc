@@ -1,0 +1,345 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains rostering additions to crew_pos.
+ *
+ * Created by:
+ *   Extracted from the Carmen Standard User, 07-Dec-2005
+ *
+ * Major changes:
+ *
+ */
+
+module crew_pos_gpc inherits crew_pos_ccr
+import crew;
+import attributes;
+
+/*
+** Rest on board.
+*/
+redefine export %chief_of_cabin% =
+  let this_seniority = crew.%seniority%;
+  if leg.%is_active_flight% and %assigned_function% = "AP" then
+    true
+  else
+    if not any(equal_legs, %assigned_function% = "AP")
+           where (%is_roster% and not (leg.%is_deadhead% or leg.%is_supernum%))
+    then
+       crew.%is_scc_leg_start%
+       and not (leg.%is_deadhead% or leg.%is_supernum%)
+       and all(equal_legs, this_seniority <= crew.%seniority%)
+           where (not (leg.%is_deadhead% or leg.%is_supernum%)
+                  and crew.%is_scc_leg_start%
+                  and %cabin_crew%)
+    else
+      false;
+
+/* Variables for assigned legs */
+export %leg_is_fully_assigned% =
+  if %flight_crew% then
+    %leg_rostered_fc% = crew_pos.%leg_booked_fc%
+  else
+    %leg_rostered_cc% = crew_pos.%leg_booked_cc%;
+
+export %leg_has_open_func%(string func) =
+    default(%leg_has_open_pos%(%func2pos%(func)), false);
+            
+redefine export %leg_has_open_pos%(int pos) = 
+    %leg_rostered_pos%(pos) <  %leg_booked_pos%(pos);
+
+export %trip_has_open_func%(string func) = 
+     all(leg(trip),%leg_has_open_func%(func)) where (not leg.%is_deadhead%);
+     
+/* Keyword rostered_crew_position is only available in studio, why it has to
+ * be defined here and not in crew_pos.
+ * Flight crew has position 1-4, but supernum position (4) is not interesting,
+ * and cabin crew has position 5-8, but supernum position (8) is not interesting */
+export %leg_rostered% = sum(times(12), %leg_rostered_pos%(%times_index_0%));
+redefine export %leg_rostered_fc% = rostered_crew_position_1
+                         + rostered_crew_position_2
+                         + rostered_crew_position_3;
+export %leg_rostered_cc% = rostered_crew_position_5
+                         + rostered_crew_position_6
+                         + rostered_crew_position_7;
+redefine export %total_leg_rostered_fc% =
+  %leg_rostered_fc% + rostered_crew_position_4;
+
+redefine export %total_leg_rostered_cc% = 
+  %leg_rostered_cc% + rostered_crew_position_8;
+
+table leg_rostered_pos(Int Pos)= 
+  Pos -> redefine export %leg_rostered_pos%;
+  1 -> rostered_crew_position_1;
+  2 -> rostered_crew_position_2;
+  3 -> rostered_crew_position_3;
+  4 -> rostered_crew_position_4;
+  5 -> rostered_crew_position_5;
+  6 -> rostered_crew_position_6;
+  7 -> rostered_crew_position_7;
+  8 -> rostered_crew_position_8;
+  9 -> rostered_crew_position_9;
+  10 -> rostered_crew_position_10;
+  - -> 0;
+end
+
+/* Pos 4 and 8, FU/AU, are always available */
+%leg_available_pos%(Int pos) =
+  pos = 8 or pos = 4 or
+  %leg_booked_pos%(pos) > %leg_rostered_pos%(pos);
+  
+/*
+** Over/under rostered flight crew
+*/
+
+export %overrostered_in_pos% =
+  (%leg_has_assigned_fc% and %overrostered_flight_crew%)
+  or (%leg_has_assigned_cc% and %overrostered_cabin_crew%);
+  
+redefine export %overrostered_cabin_crew% =
+  /* Crew has to be assigned in correct position for everything to work
+  if leg.%is_short_haul% then
+    rostered_crew_position_5 > %n_pos5% or
+    %rostered_cabin_without_pursers% > %cabin_need_without_pursers%
+  else
+  */
+    rostered_crew_position_5 > %n_pos5% or
+    rostered_crew_position_6 > %n_pos6% or
+    rostered_crew_position_7 > %n_pos7%;
+  
+/* Crew has to be assigned in correct position for everything to work
+%rostered_cabin_without_pursers% =
+  rostered_crew_position_6 + rostered_crew_position_7;
+  
+%cabin_need_without_pursers% =
+  %n_pos6% + %n_pos7%;
+*/
+
+export %overrostered_flight_crew% =
+  rostered_crew_position_1 > %n_pos1% or
+  rostered_crew_position_2 > %n_pos2% or
+  rostered_crew_position_3 > %n_pos3%;
+
+export %underrostered_in_pos% =
+  (%leg_has_assigned_fc% and %underrostered_flight_crew%)
+  or (%leg_has_assigned_cc% and %underrostered_cabin_crew%);
+
+export %underrostered_cabin_crew% =
+  /* Crew has to be assigned in correct position for everything to work
+  if leg.%is_short_haul% then
+    rostered_crew_position_5 < %n_pos5% or
+    %rostered_cabin_without_pursers% < %cabin_need_without_pursers%
+  else
+  */
+    rostered_crew_position_5 < %n_pos5% or
+    rostered_crew_position_6 < %n_pos6% or
+    rostered_crew_position_7 < %n_pos7%;
+  
+%underrostered_flight_crew% =
+  rostered_crew_position_1 < %n_pos1% or
+  rostered_crew_position_2 < %n_pos2% or
+  rostered_crew_position_3 < %n_pos3%;
+
+/* 
+ * Extra flight deck crew is the crew that are more than the mandatory 
+ * captain and first officer 
+*/ 
+/*
+redefine export %number_of_extra_flight_deck_crew% = 
+  first(leg(duty), booked_crew_position_1)  +
+  first(leg(duty), booked_crew_position_2)  +
+  first(leg(duty), booked_crew_position_3) - 2;
+*/
+/*
+** Over/under rostered ground activities
+*/
+
+export %gd_overrostered% =
+  rostered_crew_position_1 > %n_pos1% or
+  rostered_crew_position_2 > %n_pos2% or
+  rostered_crew_position_3 > %n_pos3% or
+  rostered_crew_position_5 > %n_pos5% or
+  rostered_crew_position_6 > %n_pos6% or
+  rostered_crew_position_7 > %n_pos7% or
+  rostered_crew_position_9 > %n_pos9%;
+
+export %gd_underrostered% =
+  (%leg_has_assigned_fc% and %gd_underrostered_fc%)
+  or (%leg_has_assigned_cc% and %gd_underrostered_cc%);
+
+%gd_underrostered_fc% =
+  (%n_pos1%  < 99 and rostered_crew_position_1  < %n_pos1%) or
+  (%n_pos2%  < 99 and rostered_crew_position_2  < %n_pos2%) or
+  (%n_pos3%  < 99 and rostered_crew_position_3  < %n_pos3%) or
+  (%n_pos4%  < 99 and rostered_crew_position_4  < %n_pos4%) or
+  (%n_pos9%  < 99 and rostered_crew_position_9  < %n_pos9%) or
+  (%n_pos10% < 99 and rostered_crew_position_10 < %n_pos10%);
+
+%gd_underrostered_cc% =
+  (%n_pos5%  < 99 and rostered_crew_position_5  < %n_pos5%) or
+  (%n_pos6%  < 99 and rostered_crew_position_6  < %n_pos6%) or
+  (%n_pos7%  < 99 and rostered_crew_position_7  < %n_pos7%) or
+  (%n_pos8%  < 99 and rostered_crew_position_8  < %n_pos8%) or
+  (%n_pos9%  < 99 and rostered_crew_position_9  < %n_pos9%) or
+  (%n_pos10% < 99 and rostered_crew_position_10 < %n_pos10%);
+
+/*
+** Under rostered jar
+*/
+export %underrostered_jar% =
+  (%leg_has_assigned_fc% and %underrostered_jar_fc%)
+  or (%leg_has_assigned_cc% and %underrostered_jar_cc%);
+
+
+%underrostered_jar_fc% =
+  rostered_crew_position_1 < crew_pos.%jar_need_in_pos%(1) or
+  rostered_crew_position_2 < crew_pos.%jar_need_in_pos%(2) or
+  rostered_crew_position_3 < crew_pos.%jar_need_in_pos%(3);
+
+%underrostered_jar_cc% =
+  /* Crew has to be assigned in correct position for everything to work
+
+  if leg.%is_short_haul% then
+    rostered_crew_position_5 < crew_pos.%jar_need_in_pos%(5) or
+    %rostered_cabin_without_pursers% < crew_pos.%jar_need_in_pos%(6) + crew_pos.%jar_need_in_pos%(7)
+  else
+  */
+    rostered_crew_position_5 < crew_pos.%jar_need_in_pos%(5) or
+    rostered_crew_position_6 < crew_pos.%jar_need_in_pos%(6) or
+    rostered_crew_position_7 < crew_pos.%jar_need_in_pos%(7);
+
+/*
+** Overbooked leg
+**
+** All positions of the trip has to be overbooked to be considered overbooked.
+*/
+
+export %overbooked_in_pos% =  
+  (booked_crew_position_1 - %n_pos1% >= assigned_crew_position_1 and assigned_crew_position_1 > 0 or assigned_crew_position_1 = 0) and
+  (booked_crew_position_2 - %n_pos2% >= assigned_crew_position_2 and assigned_crew_position_2 > 0 or assigned_crew_position_2 = 0) and
+  (booked_crew_position_3 - %n_pos3% >= assigned_crew_position_3 and assigned_crew_position_3 > 0 or assigned_crew_position_3 = 0) and
+  (booked_crew_position_5 - %n_pos5% >= assigned_crew_position_5 and assigned_crew_position_5 > 0 or assigned_crew_position_5 = 0) and
+  (booked_crew_position_6 - %n_pos6% >= assigned_crew_position_6 and assigned_crew_position_6 > 0 or assigned_crew_position_6 = 0) and
+  (booked_crew_position_7 - %n_pos7% >= assigned_crew_position_7 and assigned_crew_position_7 > 0 or assigned_crew_position_7 = 0) and
+  (booked_crew_position_9 - %n_pos9% >= assigned_crew_position_9 and assigned_crew_position_9 > 0 or assigned_crew_position_9 = 0) and
+  (booked_crew_position_10 - %n_pos10% >= assigned_crew_position_10 and assigned_crew_position_10 > 0 or assigned_crew_position_10 = 0);
+
+  
+/*
+** In Studio need is calculated for legs which either is not OAG or
+** where the employer is a SAS employer
+*/
+table calculate_need_for_pos(Int Pos) =
+  Pos     -> %calculate_need_for_pos%;
+  (1, 4)  -> leg.%fd_employer_is_SAS%;
+  (5, 8)  -> leg.%cc_employer_is_SAS%;
+  (9, 10) -> leg.%fd_employer_is_SAS% or leg.%cc_employer_is_SAS%;
+  -       -> false;
+end
+
+redefine export %flight_need_in_pos%(Int Pos) =
+  if not leg.%is_oag% or %calculate_need_for_pos%(Pos) then
+    %default_flight_need_in_pos%(Pos) + %need_exc_in_pos%(Pos)
+  else
+    0;
+
+/*
+** Studio cached values are used for service need instead of calculated
+*/
+
+table n_pos(Int Pos) =
+  Pos -> export %n_pos%;
+  1   -> %n_pos1%;
+  2   -> %n_pos2%;
+  3   -> %n_pos3%;
+  4   -> %n_pos4%;
+  5   -> %n_pos5%;
+  6   -> %n_pos6%;
+  7   -> %n_pos7%;
+  8   -> %n_pos8%;
+  9   -> %n_pos9%;
+  10  -> %n_pos10%;
+  - -> 0;
+end
+
+redefine export %n_pos1% = default(needed_crew_position(1), %n_pos1_map%);
+redefine export %n_pos2% = default(needed_crew_position(2), %n_pos2_map%);
+redefine export %n_pos3% = default(needed_crew_position(3), %n_pos3_map%);
+/*redefine export %n_pos4% = default(needed_crew_position(4), %n_pos4_map%); Dependin bugzilla 31516 */
+redefine export %n_pos4% = %n_pos4_map%;
+redefine export %n_pos5% = default(needed_crew_position(5), %n_pos5_map%);
+redefine export %n_pos6% = default(needed_crew_position(6), %n_pos6_map%);
+redefine export %n_pos7% = default(needed_crew_position(7), %n_pos7_map%);
+/*redefine export %n_pos8% = default(needed_crew_position(8), %n_pos8_map%); Dependin bugzilla 31516 */
+redefine export %n_pos8% = %n_pos8_map%;
+redefine export %n_pos9% = default(needed_crew_position(9), %n_pos9_map%);
+/*redefine export %n_pos10% = default(needed_crew_position(10), %n_pos10_map%); Dependin bugzilla 31516 */
+redefine export %n_pos10% = %n_pos10_map%;
+
+
+export %AS_to_AH_at_publish% =
+  %is_roster% and leg.%is_active_flight% and not leg.%is_school_flight% and
+  leg.%is_short_haul% and trip.%starts_in_publ_period% and
+  any(leg(trip), leg.%is_long_haul_aircraft%) where (leg.%is_active_flight%) and
+  %default_flight_need_in_pos%(6) = 0 and
+  %assigned_pos% = 6;
+
+export %overbooked_pos1% =
+  default(min(leg(trip), nmax(%leg_booked_pos%(1) - %n_pos1%, 0))
+          where (not leg.%is_deadhead% and %leg_assigned_pos%(1) > 0), 0);
+export %overbooked_pos2% =
+  default(min(leg(trip), nmax(%leg_booked_pos%(2) - %n_pos2%, 0))
+          where (not leg.%is_deadhead% and %leg_assigned_pos%(2) > 0), 0);
+export %overbooked_pos3% =
+  default(min(leg(trip), nmax(%leg_booked_pos%(3) - %n_pos3%, 0))
+          where (not leg.%is_deadhead% and %leg_assigned_pos%(3) > 0), 0);
+export %overbooked_pos4% =
+  default(min(leg(trip), nmax(%leg_booked_pos%(4) - %n_pos4%, 0))
+          where (not leg.%is_deadhead% and %leg_assigned_pos%(4) > 0), 0);
+export %overbooked_pos5% =
+  default(min(leg(trip), nmax(%leg_booked_pos%(5) - %n_pos5%, 0))
+          where (not leg.%is_deadhead% and %leg_assigned_pos%(5) > 0), 0);
+export %overbooked_pos6% =
+  default(min(leg(trip), nmax(%leg_booked_pos%(6) - %n_pos6%, 0))
+          where (not leg.%is_deadhead% and %leg_assigned_pos%(6) > 0), 0);
+export %overbooked_pos7% =
+  default(min(leg(trip), nmax(%leg_booked_pos%(7) - %n_pos7%, 0))
+          where (not leg.%is_deadhead% and %leg_assigned_pos%(7) > 0), 0);
+export %overbooked_pos8% =
+  default(min(leg(trip), nmax(%leg_booked_pos%(8) - %n_pos8%, 0))
+          where (not leg.%is_deadhead% and %leg_assigned_pos%(8) > 0), 0);
+export %overbooked_pos9% =
+  default(min(leg(trip), nmax(%leg_booked_pos%(9) - %n_pos9%, 0))
+          where (not leg.%is_deadhead% and %leg_assigned_pos%(9) > 0), 0);
+export %overbooked_pos10% =
+  default(min(leg(trip), nmax(%leg_booked_pos%(10) - %n_pos10%, 0))
+          where (not leg.%is_deadhead% and %leg_assigned_pos%(10) > 0), 0);
+
+export %overbooked_positions% =
+  %overbooked_pos1% +
+  %overbooked_pos2% +
+  %overbooked_pos3% +
+  %overbooked_pos4% +
+  %overbooked_pos5% +
+  %overbooked_pos6% +
+  %overbooked_pos7% +
+  %overbooked_pos8% +
+  %overbooked_pos9% +
+  %overbooked_pos10%;
+
+export %overbooked_trip% =
+  %overbooked_positions% > 0;
+  
+
+/* Cabin Seniority number if no one has responsibility for the cabin.(SKCMS-1239)*/
+%seniority_cc% = min(equal_legs, crew.%seniority%)
+    where (
+            crew.%is_cabin% and
+    	    crew.%is_scc_leg_start% and
+    	    not attributes.%is_in_charge%
+    	   );
+      
+/* end of file */
+
+

@@ -1,0 +1,135 @@
+#!/bin/sh
+
+#Setting up cvs connection parameters
+CVS_RSH=ssh
+export CVS_RSH
+
+umask 2
+
+# Save name of this command
+PROG=`basename $0`
+
+# Add directory for Xvfb virtual display, needed to start studio from cron.
+export PATH="$PATH:/usr/X11R6/bin"
+
+# Log starting point
+echo -n "Starting $PROG at "
+date
+echo ""
+
+usage()
+{
+  cat <<EOF
+This script is used to
+- stop the system
+- update cvs files
+- compile the rave rule sets
+- start the system again
+
+usage:
+$0 [-h]
+EOF
+}
+
+update_and_restart_system()
+{
+  # Sets the CARMUSR variable, if it is not set
+  if [ -z "$CARMUSR" ]; then
+      # Assume that this script is located in the carmusr, go to the carmuser
+      # root directory by assuming that a crc directory exist at the top level
+      a=`pwd`
+      cd `dirname $0`
+      while [ `pwd` != '/' -a ! -d "crc" ]; do
+        cd ..
+      done
+      CARMUSR=`pwd`
+      export CARMUSR
+  fi
+
+  # Go to CARMUSR directory
+  cd $CARMUSR
+
+  # Show desmond status before stop
+  echo "Status from desmond..."
+  bin/desmond.sh -h cct_node status
+  echo -e "Status from desmond...done\n"
+
+  # Stop the system
+  echo "Stopping desmond..."
+  bin/desmond.sh stop
+  echo -e "Stopping desmond...done\n"
+
+  # Run a CVS update on the user
+  echo "Updating CVS..."
+  cvs -q up -Pd
+  echo -e "Updating CVS...done\n"
+
+  # Check that configuration syntax is OK
+  echo "Checking xml configuration syntax..."
+  bin/xmlconfig.sh --xml >/dev/null || exit $?
+  echo -e "Checking xml configuration syntax...done\n"
+
+  (
+  # Sets CARMDATA, CARMSYS, CARMTMP and variables from CONFIG_extension.
+  echo "Setting up environment..."
+  . etc/carmenv.sh || exit $?
+  echo -e "Setting up environment...done\n"
+
+  # Get the db schema and url for the plan we use
+  DB_URL=`getMandatoryProperty $CARMUSR/etc/site.xml site/db/url` || exit $?
+  DB_SCHEMA=`getMandatoryProperty $CARMUSR/etc/site.xml site/db/user` || exit $?
+  DB_PASSWD=`getMandatoryProperty $CARMUSR/etc/site.xml site/db/passwd` || exit $?
+
+  # Creating new table entities
+  #echo "Creatating table entities..."
+  #carmrunner MkSchema -x -N -c $DB_URL -s $DB_SCHEMA
+  #echo -e "Creatating table entities...done\n"
+  )
+
+  # Compile the rave code
+  echo "Compiling rule sets..."
+  bin/admin/compileRulesets.sh -e -l all
+  [ $? -ne 0 ] && \
+  echo -e "Can't compile rule sets !!!\n\n" && exit -1
+  echo -e "Compiling rule sets...done\n"
+
+  # Start the system
+  echo "Starting desmond..."
+  bin/desmond.sh start
+  echo -e "Starting desmond...done\n"
+
+  # Show desmond status after start, sleep 60 first
+  echo "Status from desmond..."
+  sleep 60
+  bin/desmond.sh -h cct_node status
+  echo -e "Status from desmond...done\n"
+
+  # Run nightly tests
+  #run_nigthly_tests
+
+  # Log ending point
+  echo -n "Ending $PROG at "
+  date ; echo -e "\n\n"
+}
+
+run_nigthly_tests()
+{
+  echo "Running nigthly tests."
+  echo "Starting studio. Log in $HOME/NightlyTests/studiolog.txt"
+  bin/trackeradmin.sh -d -p 'PythonRunFile("testing/nightlyTests.py")'> $HOME/NightlyTests/studiolog.txt 2>&1
+  echo "Finnished nigthly tests."
+  
+}
+
+#
+# Get the command line options and take actions
+#
+while getopts h option
+do
+    case "$option" in
+        h) usage; exit 0 ;;
+    esac
+done
+
+update_and_restart_system
+

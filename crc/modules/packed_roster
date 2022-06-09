@@ -1,0 +1,567 @@
+/* -*- crc -*-
+ *
+ * [acosta:06/304@13:07] Moved packed roster from report_cio/report_crewlists.
+ *
+ * A packed roster is a compressed way of presenting a crew roster.
+ * The specification is in document:
+ * "PS07 - Packed roster in Crew Services and Flow", 2006-09-21
+ *
+ * Example: 645 / P.341 444 655 / - 555
+ *    "Flight SK645, daybreak, passive on SK341, SK444, SK655, daybreak,
+ *    continuation of SK655, SK555"
+ *
+ * [acosta:08/035@13:58] Modified the presentation so that 'F / - / - / - *'
+ * will be presented as 'F *', this makes sense since an eight day 'F' can be
+ * regarded as eight one-day 'F's.
+ *
+ * [acosta:08/036@11:35] Modified, to better handle activities that span
+ * several days.
+ */
+
+module packed_roster
+
+import fundamental;
+import base_break;
+import duty_code;
+import iterators;
+import leg;
+import levels;
+import task;
+import report_meal;
+import report_common;
+
+/* packed_roster ***************************************************** {{{1 */
+/* packed roster for the whole chain */
+export %packed_roster% =
+  cat(leg(chain), %roster_current_activity%);
+
+
+/* packed_roster_relative ******************************************** {{{1 */
+/* packed_roster where current leg is substituted by a * star ('*'). */
+export %packed_roster_relative% =
+  concat(
+    /* before */
+    if is_first(leg(roster)) then
+      ""
+    else 
+      concat(
+        cat(leg(roster) from (first) to (prev), %roster_current_activity%), 
+        " "),
+    /* current */
+    concat("*", %dayshift_current%, %roster_slashes_after%),
+    /* after */
+    if is_last(leg(roster)) then 
+      "" 
+    else 
+      concat(
+        " ", 
+        cat(leg(roster) from (next) to (last), %roster_current_activity%))
+    );
+
+
+/* interval_packed_roster ******************************************** {{{1 */
+export %interval_packed_roster%(abstime s, abstime e) =
+  concat(
+    default(
+      %lead_in%(s, e), 
+      %slashes%(%activity_days%(s, e) - 1)),
+    cat(leg(roster) where (%_overlap%(s, e)), 
+      concat(
+        %meal_code_before%,
+        %current_activity_code%(true, 
+          %activity_days%(nmax(s, %lst%), nmin(e, %let%))),
+        %meal_code_after%,
+        if is_last(leg(roster) where (%_overlap%(s, e))) then
+          ""
+        else
+          %roster_slashes_after%)),
+    default(
+      %lead_out%(s, e),
+      "")
+    );
+
+set meal_codes_after = "X", "V";
+%meal_code_before% =
+  default(
+    if report_meal.%meal_code% > "" and not (report_meal.%meal_code% in meal_codes_after) then
+      concat(report_meal.%meal_code%," ")
+    else
+      "",
+    "");
+
+%meal_code_after% =
+  default(
+    if (report_meal.%meal_code% in meal_codes_after) then
+      concat(" ", report_meal.%meal_code%)
+    else
+      "",
+    "");
+
+
+/* interval_packed_roster_relative *********************************** {{{1 */
+/* interval_packed_roster where current leg is replaced by a star ('*') */
+export %interval_packed_roster_relative%(abstime s, abstime e) =
+  concat(
+    default(
+      %lead_in%(s, e), 
+      %slashes%(%activity_days%(s, e) - 1)),
+    /* before */
+    if is_first(leg(roster) where (%_overlap%(s, e))) then
+      ""
+    else
+      cat(leg(roster) from (first) to (prev) where (%_overlap%(s, e)), 
+        concat(
+          %current_activity_code%(true, 
+            %activity_days%(nmax(s, %lst%), nmin(e, %let%))),
+          if is_last(leg(roster) where (%_overlap%(s, e))) then
+            ""
+          else
+            %roster_slashes_after%)),
+    /* current */
+    concat("*", %dayshift_current%, %roster_slashes_after%),
+    /* after */
+    if is_last(leg(roster) where (%_overlap%(s, e))) then
+      ""
+    else
+      cat(leg(roster) from (next) to (last) where (%_overlap%(s, e)), 
+        concat(
+          %current_activity_code%(true, 
+            %activity_days%(nmax(s, %lst%), nmin(e, %let%))),
+          if is_last(leg(roster) where (%_overlap%(s, e))) then
+            ""
+          else
+            %roster_slashes_after%)),
+    default(
+      %lead_out%(s, e),
+      "")
+    );
+
+
+/* wop_packed_roster ************************************************* {{{1 */
+/* returns packed_roster for a wop */
+export %wop_packed_roster% =
+  cat(leg(wop), %wop_current_activity%);
+
+
+/* wop_packed_roster_relative **************************************** {{{1 */
+/* wop_packed_roster where current leg is replaced by a star ('*') */
+export %wop_packed_roster_relative% =
+  concat(
+    if is_first(leg(wop)) then
+      ""
+    else 
+      concat(
+        cat(leg(wop) from (first) to (prev), %wop_current_activity%), 
+        " "),
+    concat("*", %dayshift_current%, %wop_slashes_after%),
+    if is_last(leg(wop)) then 
+      "" 
+    else 
+      concat(
+        " ", 
+        cat(leg(wop) from (next) to (last), %wop_current_activity%))
+    );
+
+
+/* trip_packed_roster ************************************************ {{{1 */
+/* returns packed_roster for a trip */
+export %trip_packed_roster% =
+  cat(leg(trip), %trip_current_activity%);
+
+
+/* trip_packed_roster_relative *************************************** {{{1 */
+/* trip_packed_roster where current leg is replaced by a star ('*') */
+export %trip_packed_roster_relative% =
+  concat(
+    if is_first(leg(trip)) then
+      ""
+    else 
+      concat(
+        cat(leg(trip) from (first) to (prev), %trip_current_activity%), 
+        " "),
+    concat("*", %dayshift_current%, %trip_slashes_after%),
+    if is_last(leg(trip)) then 
+      "" 
+    else 
+      concat(
+        " ", 
+        cat(leg(trip) from (next) to (last), %trip_current_activity%))
+    );
+
+
+/* duty_packed_roster ************************************************ {{{1 */
+/* returns packed_roster for a duty */
+export %duty_packed_roster% =
+  cat(leg(duty), %duty_current_activity%);
+
+
+/* duty_packed_roster_relative *************************************** {{{1 */
+/* duty_packed_roster where current leg is replaced by a star ('*') */
+export %duty_packed_roster_relative% =
+  concat(
+    if is_first(leg(duty)) then
+      ""
+    else 
+      concat(
+        cat(leg(duty) from (first) to (prev), %duty_current_activity%), 
+        " "),
+    concat("*", %dayshift_current%, %duty_slashes_after%),
+    if is_last(leg(duty)) then 
+      "" 
+    else 
+      concat(
+        " ", 
+        cat(leg(duty) from (next) to (last), %duty_current_activity%))
+    );
+    
+
+/* prev_activity ***************************************************** {{{2 */
+/* Get previous activity as seen from the current leg */
+export %prev_activity% =
+  if is_first(leg(chain)) then
+    ""
+  else
+    prev(leg(chain), %current_activity_code%(true, 0));
+
+export %prev_activity_slash% =
+  let start_time = %lst%;
+  if is_first(leg(chain)) then
+    ""
+  else
+    prev(leg(chain), concat(%current_activity_code%(true, 0), %slashes%(%day_shifts%(%let%, start_time))));
+
+export %prev_activity_one_slash% =
+  let start_time = %lst%;
+  if is_first(leg(chain)) then
+    ""
+  else if prev(leg(chain), %day_shifts%(%let%, start_time) = 0) then
+    prev(leg(chain), %current_activity_code%(true, 0))
+  else
+    prev(leg(chain), concat(%current_activity_code%(true, 0), %slashes%(1)));
+
+/* next_activity ***************************************************** {{{2 */
+/* Get next activity as seen from the current leg */
+export %next_activity% =
+  if is_last(leg(chain)) then
+    ""
+  else
+    next(leg(chain), %current_activity_code%(true, 0));
+
+export %next_activity_slash% =
+  let end_time = %let%;
+  if is_last(leg(chain)) then
+    ""
+  else
+    next(leg(chain), concat(%slashes%(%day_shifts%(end_time, %lst%)), %current_activity_code%(true, 0)));
+
+export %next_activity_one_slash% =
+  let end_time = %let%;
+  if is_first(leg(chain)) then
+    ""
+  else if next(leg(chain), %day_shifts%(end_time, %lst%) = 0) then
+    next(leg(chain), %current_activity_code%(true, 0))
+  else
+    next(leg(chain), concat(%slashes%(1), %current_activity_code%(true, 0)));
+
+/* prev_duty ********************************************************* {{{2 */
+/* Get prev duty as seen from the current leg */
+export %prev_duty% =
+  if is_first(leg(chain)) then
+    ""
+  else
+    prev(leg(chain), %current_activity_code%(true, 0))
+      where(leg.%is_on_duty%);
+
+export %prev_duty_slash% =
+  let start_time = %lst%;
+  if is_first(leg(chain)) then
+    ""
+  else
+    prev(leg(chain), concat(%current_activity_code%(true, 0), %slashes%(%day_shifts%(%let%, start_time))))
+      where(leg.%is_on_duty%);
+
+export %prev_duty_one_slash% =
+  let start_time = %lst%;
+  if is_first(leg(chain)) then
+    ""
+  else if prev(leg(chain), %day_shifts%(%let%, start_time) = 0) where(leg.%is_on_duty%) then
+    prev(leg(chain), %current_activity_code%(true, 0))
+  else
+    prev(leg(chain) where(leg.%is_on_duty%), concat(%current_activity_code%(true, 0), %slashes%(1)));
+
+/* next_duty ********************************************************* {{{2 */
+/* Get next duty as seen from the current leg */
+export %next_duty% =
+  if is_last(leg(chain)) then
+    ""
+  else
+    next(leg(chain), %current_activity_code%(true, 0))
+      where(leg.%is_on_duty%);
+
+export %next_duty_slash% =
+  let end_time = %let%;
+  if is_last(leg(chain)) then
+    ""
+  else
+    next(leg(chain), concat(%slashes%(%day_shifts%(end_time, %lst%)), %current_activity_code%(true, 0)))
+      where(leg.%is_on_duty%);
+
+export %next_duty_one_slash% =
+  let end_time = %let%;
+  if is_first(leg(chain)) then
+    ""
+  else if next(leg(chain), %day_shifts%(end_time, %lst%) = 0) where(leg.%is_on_duty%) then
+    next(leg(chain), %current_activity_code%(true, 0))
+  else
+    next(leg(chain) where(leg.%is_on_duty%), concat(%slashes%(1), %current_activity_code%(true, 0)));
+
+
+/* current_activity_code ********************************************* {{{2 */
+export %current_activity_code%(bool bb, int days) =
+  if bb then
+    concat(%break_before%, %_current_activity_code%(days), %break_after%)
+  else
+    %_current_activity_code%(days);
+
+
+/* current_activity ************************************************** {{{1 */
+export %current_activity% =
+  %current_activity_code%(true, %this_activity_days%);
+
+/* rev_roster_activity *********************************************** {{{1 */
+export %rev_roster_activity% =
+  concat(%break_before%, %_rev_roster_curr_activity%, %break_after%);
+
+%_rev_roster_curr_activity% =
+    if leg.%is_flight_duty% then
+      concat(%duty_code%, leg.%flight_name%, %leg_nr_suffix%, %over_night%)
+    else
+      if length(%_task_code%) = 1 and %_task_code% <> "F" then
+        concat(%_task_code%,
+          format_time(%lst%, "%02H%02M"), "-",
+          format_time(%let%, "%02H%02M"))
+      else
+        %_task_code%;
+
+/* Private variables ************************************************* {{{1 */
+
+/* current activity ************************************************** {{{2 */
+%_current_activity_code%(int days) =
+    if leg.%is_flight_duty% then
+      concat(%duty_code%, leg.%flight_name%, %leg_nr_suffix%, %over_night%)
+    else
+      if length(%task_code%) = 1 and %task_code% <> "F" then
+        concat(%task_code%,
+          format_time(%lst%, "%02H%02M"), "-",
+          format_time(%let%, "%02H%02M"))
+      else
+        if days > 1 then
+          %multiday_code%(days)
+        else
+          %task_code%;
+
+%duty_current_activity% = 
+  concat(%current_activity%, %duty_slashes_after%);
+
+%trip_current_activity% = 
+  concat(%current_activity%, %trip_slashes_after%);
+
+%wop_current_activity% = 
+  concat(%current_activity%, %wop_slashes_after%);
+
+%roster_current_activity% = 
+  concat(%current_activity%, %roster_slashes_after%);
+  
+
+/* base breaks ******************************************************* {{{2 */
+%break_before% = 
+  if base_break.%is_break_before% then
+    concat("BB ", base_break.%depstn_code%, " ")
+  else
+    "";
+
+%break_after% =
+  if base_break.%is_break_after% then
+    concat(" BB ", base_break.%arrstn_code%)
+  else
+    "";
+
+
+/* duty codes ******************************************************** {{{2 */
+%duty_code% =
+  if duty_code.%leg_code% <> "" then
+    concat(duty_code.%leg_code%, ".")
+  else
+    "";
+
+
+/* task code ********************************************************* {{{2 */
+%_task_code% = report_common.%leg_code%;
+
+%_sim_briefing% =
+  if leg.%is_simulator% and leg.%check_in% > 0:00 then
+    concat("B", substr(%_task_code%, 2, length(%_task_code%)), " ")
+  else
+    "";
+
+%_sim_debriefing% =
+  if leg.%is_simulator% and leg.%check_out% > 0:00 then
+    concat(" D", substr(%_task_code%, 2, length(%_task_code%)))
+  else
+    "";
+
+%task_code% =
+  concat(%_sim_briefing%, %_task_code%, %_sim_debriefing%);
+      
+
+/* date spans ******************************************************** {{{2 */
+%lst% = leg.%start_hb%;
+%let% = leg.%end_hb%;
+
+/* Let a five day F be presented as F / F / F / F / F */
+%multiday_code%(int days) =
+  /* NOTE: THIS WILL NOT WORK WITH MULTI-DAY SIMULATOR ACTIVITIES */
+  let code = %task_code%;
+  if days > 1 then
+    cat(times(days) where (%dummy%), code, " / ")
+  else
+    code;
+
+/* Flight spanning day shift */
+%over_night% =
+  if %day_shifts%(%lst%, %let%) > 0 then
+    " / -"
+  else
+    "";
+
+/* " / -" times number of days for current activity */
+%dayshift_current% =
+  default(
+    if leg.%is_pact% then 
+      /* Note: [acosta:08/037@13:35] This is not entirely correct... */
+      if %this_activity_days% > 1 then " / -" else ""
+    else 
+      cat(times(%this_activity_days%) where (%dummy%), " / -"),
+    "");
+
+
+/* date span to next activity **************************************** {{{2 */
+%_duty_slashes% =
+  %slashes%(%day_shifts%(%let%, next(leg(duty), %lst%)));
+
+%duty_slashes_after% = 
+  if is_last(leg(duty)) then
+    ""
+  else
+    concat(" ", %_duty_slashes%, if length(%_duty_slashes%) > 0 then " " else "");
+
+%_trip_slashes% =
+  %slashes%(%day_shifts%(%let%, next(leg(trip), %lst%)));
+
+%trip_slashes_after% = 
+  if is_last(leg(trip)) then
+    ""
+  else
+    concat(" ", %_trip_slashes%, if length(%_trip_slashes%) > 0 then " " else "");
+
+%_wop_slashes% =
+  %slashes%(%day_shifts%(%let%, next(leg(wop), %lst%)));
+
+%wop_slashes_after% = 
+  if is_last(leg(wop)) then
+    ""
+  else
+    concat(" ", %_wop_slashes%, if length(%_wop_slashes%) > 0 then " " else "");
+
+%_roster_slashes% =
+  %slashes%(%day_shifts%(%let%, next(leg(roster), %lst%)));
+
+%roster_slashes_after% = 
+  if is_last(leg(roster)) then
+    ""
+  else
+    concat(" ", %_roster_slashes%, if length(%_roster_slashes%) > 0 then " " else "");
+
+
+/* leg number calculations ******************************************* {{{2 */
+/* Coding of activities */
+%leg_nr_suffix% = %leg_nr_suffix_light%;
+
+%leg_nr_suffix_light% =
+  if leg.%leg_number% <> 1 and leg.%leg_number% <> 0 then
+    format_int(leg.%leg_number%, ":%d")
+  else
+    "";
+
+/* [acosta:08/037@13:16] Can't activate this, because it takes too much
+ * resources (using lp_activity).
+ * Note: If leg number are not correctly filled in, then the "light"
+ * method will not work.
+ */
+%leg_nr_suffix_heavy% =
+  if %flight_legs% > 1 then
+    format_int(%flight_leg_number%, ":%d")
+  else
+    "";
+
+export %flight_legs% =
+  let this_leg_id = leg.%flight_id%, this_leg_udor = leg.%udor%;
+  context(lp_activity, 
+    count(iterators.flight_leg_set) 
+    where (leg.%flight_id% = this_leg_id and leg.%udor% = this_leg_udor));
+
+export %flight_leg_number% =
+  let this_leg_id = leg.%flight_id%, 
+    this_leg_udor = leg.%udor%, 
+    this_leg_start = leg.%start_utc%;
+  context(lp_activity,
+    count(iterators.flight_leg_set)
+    where (leg.%flight_id% = this_leg_id 
+      and leg.%udor% = this_leg_udor
+      and leg.%start_utc% < this_leg_start)
+  ) + 1;
+
+
+/* Slashes before and after chain ************************************ {{{2 */
+%lead_in%(abstime s, abstime e) =
+  let d = %activity_days%(s, first(leg(chain) where (%_overlap%(s, e)), %lst%));
+  if d > 0 then 
+    concat(%slashes%(d), " ")
+  else
+    "";
+
+%lead_out%(abstime s, abstime e) =
+  let d = %activity_days%(last(leg(chain) where (%_overlap%(s, e)), %let%), e) - 1;
+  if d > 0 then
+    concat(" ", %slashes%(d))
+  else
+    "";
+
+/* misc ************************************************************** {{{2 */
+/*
+ * Note %times_index_0% > 0 is a dummy expression (always true), to avoid
+ * unnecessary compiler warning
+ */
+%dummy% = %times_index_0% > 0;
+
+/* Number of day breaks */
+%day_shifts%(abstime st, abstime et) =
+  scale_time(st, et + 0:01, 0, 0:00, 0:01, 1) / 0:01;
+
+/* Duration of multi-day activity */
+%this_activity_days% =
+  %activity_days%(%lst%, %let%);
+
+%activity_days%(abstime st, abstime et) =
+  (round_down(et, 24:00) - round_down(st, 24:00)) / 24:00;
+
+%slashes%(int days) =
+  cat(times(days) where (%dummy%), "/", " ");
+
+%_overlap%(abstime s, abstime e) =
+  overlap(s, e, %lst%, %let%) > 0:00;
+
+
+/* modeline ********************************************************** {{{1 */
+/* vim: set fdm=marker fdl=1: */
+/* eof */

@@ -1,0 +1,118 @@
+/* -*- crc -*- 
+ * 
+ * Purpose:
+ *    Definitions of variables to use with studio functionality for freedays,
+ *
+ * Sections:
+ *     1: Definitions for script 
+ *     Create > Freedays > F36 targets (create_F36_targets.py)
+ *
+ * Created by:
+ *   Ulf Hansryd
+ *
+ * Agreement:
+ *  
+ * Notes:
+ *    Section 1: See SASCMS-6040
+ */
+
+module studio_freedays
+
+import compdays;
+import freedays;
+import fundamental;
+import levels;
+import trip;
+import crew;
+import pp;
+
+/****************************************************************
+ * Section 1: Definitions for F36 target calculation
+ * Used by script create_F36_targets.py
+ ***************************************************************/
+
+%planning_period_start% = pp.%start_month%;
+%one_month_after_pp_start% = add_months(pp.%start_month%, 1);
+%x_months_after_pp_start% = add_months(pp.%start_month%, %months_for_avalability_calc_p%);
+%crew_id% = crew.%id%;
+%crew_region% = crew.%region%;
+%balance_F36_x100% = compdays.%balance_at_date%("F36", %planning_period_start%);
+
+/*
+
+Availability:
+
+Variable group:
+---------------
+availability = 
+    (days in month 1 + days in month 2 - preassigned activity) 
+    - (required freedays in month 1 + required freedays in month 2)
+    - Already assigned FRE/PFR freedays
+
+A parameter is introduced in order to include/exclude month 2 from the calculation
+
+Fixed group:
+------------
+availability = 
+    (days in month 1 + days in month 2 - preassigned activity) 
+    - Already assigned FRE/PFR freeday
+
+A parameter is introduced in order to include/exclude month 2 from the calculation
+
+*/
+
+%availability% = 
+    freedays.%qual_days_in_period%(pp.%start_month%, %x_months_after_pp_start%)
+    
+    +
+    (if crew.%in_variable_group_pp_start% then
+    - %min_required_freedays_in_x_month%
+    else 
+        0);
+
+%months_for_avalability_calc_p% = parameter 2 minvalue 1 maxvalue 2 
+  remark "Number of months to include in F36 availability calculation",
+  planner "Use this parameter to decide if the availability of only the current month ('1')"
+          "or the current and the next month ('2') should be used as input"
+          "in the calculation of individual F36 targets. During the first part of the year,'1' is encouraged to be used, "
+          "whereas '2' should be used as the availability in coming months is more important.";
+
+%max_individual_target_p% = parameter 0 minvalue 0
+  remark "Maximum target to be set in F36 target calculation",
+  planner "To ensure a fair spread in the assignment of F36 among crew,"
+           "a maximum number to the targeted F36 can be set by this parameter."
+           "Crew members will then not gain a target higher than the value of the parameter."
+           "If 0 is chosen, this means that there will be no upper limit. Note that there should"
+           "preferably not be any limitation (i.e. the parameter should be set to '0') at the end of year.";
+
+group f36_target_params =
+  %months_for_avalability_calc_p%,
+  %max_individual_target_p%;
+
+%min_required_freedays_in_x_month%=
+    freedays.%min_required_in_interval%(%planning_period_start%,%one_month_after_pp_start%) + 
+    (%months_for_avalability_calc_p% - 1) * freedays.%min_required_in_interval%(%one_month_after_pp_start%,%x_months_after_pp_start%);
+
+%days_in_x_month_period% =
+    overlap(trip.%start_day%, trip.%end_day%+24:00,%planning_period_start%, %x_months_after_pp_start%)
+    / 24:00;
+
+%assigned_freedays_in_x_months% =
+    sum(trip(roster), %days_in_x_month_period%)
+    where (trip.%group_code% in freedays_included_in_min_f);
+
+set freedays_included_in_min_f =
+ "FRE", "PFR";
+
+
+/* Total number of F36 to assign */
+
+table f36_to_assign(int match_nr)=
+ match_nr, %planning_period_start% -> String %region_group%, Int %total_target%;
+ external "f36_total";
+    match_number, period -> region, extra_freedays_total;
+    -,- -> void_string, void_int;
+end
+
+/* end of file */
+

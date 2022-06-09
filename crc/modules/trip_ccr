@@ -1,0 +1,639 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *
+ * Created by:
+ *   Extracted from the Carmen Standard User, 07-Dec-2005
+ *
+ * Major changes:
+ *
+ */
+
+module trip_ccr inherits trip
+import fundamental;
+import task;
+import levels;
+import crew;
+import duty;
+import leg;
+import compdays;
+import parameters;
+import accumulators;
+
+
+
+/* The definition is used in the wop level calculation in the file 
+ * levels_ccr. This is required in order to avoid circular references.
+ */
+
+export %levels_trip_is_last_in_wop% =
+  is_last(trip(chain)) or
+  (%is_on_duty_level% and 
+    (%next_is_off_duty_and_code_breaks_wop% or
+     %on_duty_and_days_break_wop% or
+     %illness_breaks_wop%)) or
+  (%is_off_duty_level% and
+    (%code_breaks_wop_and_next_is_on_duty% or
+     %next_is_off_duty_and_different_code% or
+     %off_duty_and_days_break_wop% or
+     %illness_breaks_wop%));
+
+%is_on_duty_level% =
+  if crew.%is_skd% and %cabin_crew% then
+    %is_on_duty% and not %is_off_duty_cmp%
+  else
+    %is_on_duty%;
+
+%is_off_duty_level% =
+  if crew.%is_skd% and %cabin_crew% then
+    %is_off_duty% or %is_off_duty_cmp%
+  else
+    %is_off_duty%;
+    
+%illness_breaks_wop% =
+  false;
+
+set no_wop_break_group_codes =
+  "ILL";
+set no_wop_break_task_codes =
+  "LA91", "LA91R", "LA92", "LA92R", "UF", "UF1", "UF2", "UFO", "UFH", "UFP", "UFE";
+export %min_valid_freedays% = 2;
+%group_code_breaks_wop% = true; /*not (%group_code% in no_wop_break_group_codes);*/
+%task_code_breaks_wop% = true; /*not (%code% in no_wop_break_task_codes);*/
+%next_is_off_duty_and_code_breaks_wop% = 
+  next(trip(chain), %is_off_duty_level% and (%group_code_breaks_wop% and 
+                                       %task_code_breaks_wop%));
+%code_breaks_wop_and_next_is_on_duty% = 
+  %group_code_breaks_wop% and next(trip(chain),%is_on_duty_level%);
+%next_is_off_duty_and_different_code% = 
+  let current_group_code = %group_code%;
+  next(trip(chain),%is_off_duty_level% and current_group_code <> %group_code%);
+%off_duty_and_days_break_wop% = 
+  (next(trip(chain),%start_hb_level%) - %end_hb_level%) >= 24:00;
+%on_duty_and_days_break_wop% = %days_between_trips% >= %min_valid_freedays%;
+export %days_between_trips%=
+  (next(trip(roster),round_down(%start_hb_level%,24:00)) - 
+   round_up(%end_hb_level% - 0:01, 24:00)) / 24:00;
+
+redefine export %is_complete% = true;
+
+%trip_num_in_wop% =
+    count(trip(wop)) from(first) to(current);
+
+export %pp_standbys% =
+  if %is_standby% and %starts_in_pp% then 1 else 0;
+
+export %pp_standby_days% = 
+  if %is_standby% then
+    sum(duty(trip), duty.%days_in_period%(%pp_start%,%publ_period_end%)) 
+    where (duty.%is_standby% and duty.%in_publ_period%)
+  else 0;
+
+redefine export %is_on_duty% =
+  any(duty(trip), duty.%is_on_duty%);
+
+export %has_active_flight% = any(duty(trip), duty.%has_active_flight%);
+export %has_extra_seat% = any(duty(trip), duty.%has_extra_seat%);
+
+/*
+** After 4ExNG, all CMP codes except F7S and F89 are considered as on-duty for
+** SKD CC. However, including a check for the agreement validity parameter
+** involves using a date, e.g trip.%start_day%, but that results only in
+** circularity and level definition issues, so we have to do without it. It only
+** has consequences for freeday requirement per month, so it should only be a
+** problem when working with historic months.
+**
+** The above seems to be wrong.
+** All codes with group CMP are normally considered on duty, except very rare cases:
+** If CC SKD, and code is F7S or F89, they are regarded off duty.
+** F72 is an older code with little use. F89 is for SKD only.
+** It's seems as a very complicated implementation of a rather simple matter.
+*/
+export %is_on_duty_cmp% =
+  %is_cmp% and
+  not (crew.%is_skd% and %cabin_crew% and
+       (%is_F7S% or %is_F89%));
+export %is_off_duty_cmp% =
+  %is_cmp% and not %is_on_duty_cmp%;
+
+export %is_F7S% = all(duty(trip), duty.%is_F7S%);
+export %is_F0% = all(duty(trip), duty.%is_F0%);
+export %is_F3% = all(duty(trip), duty.%is_F3%);
+export %is_FS% = all(duty(trip), duty.%is_FS%);
+export %is_FS1% = all(duty(trip), duty.%is_FS1%);
+export %is_FW% = all(duty(trip), duty.%is_FW%);
+export %is_f31% = all(duty(trip), duty.%is_f31%);
+export %is_f36% = all(duty(trip), duty.%is_f36%);
+export %is_f89% = all(duty(trip), duty.%is_f89%);
+export %is_f9% = all(duty(trip), duty.%is_f9%);
+export %is_passive_transfer_act% = any(duty(trip), duty.%is_passive_transfer_act%);
+export %is_loa% = first(duty(trip), duty.%is_loa%);
+export %is_illness% = first(leg(trip), leg.%is_illness%);
+export %is_illness_during_duty% = first(leg(trip), leg.%is_illness_during_duty%);
+export %is_on_duty_illness% = first(leg(trip), leg.%is_on_duty_illness%);
+export %is_off_duty_illness% = trip.%is_illness% and not %is_on_duty_illness%;
+export %is_child_illness% = first(leg(trip), leg.%is_child_illness%);
+export %is_child_illness_during_duty% = first(leg(trip), leg.%is_child_illness_during_duty%);
+export %is_child_illness_entire_day% = first(leg(trip), leg.%is_child_illness_entire_day%);
+export %is_unfit_for_flight% = first(leg(trip), leg.%is_unfit_for_flight%);
+export %is_pt_freeday% = first(leg(trip), task.%is_pt_freeday%(leg.%code%));
+
+export %is_fs_on_weekend% = %is_on_weekend% and %is_FS%;
+
+export %is_allowed_on_free_weekend% =
+  %is_allowed_on_free_weekend_fcsh% or
+  ((%cabin_crew% or crew.%is_SKI%) and
+   task.%is_allowed_on_free_weekend%(trip.%code%)) or
+  trip.%is_bought%;
+
+export %is_allowed_on_free_weekend_fcsh% =
+  %flight_crew% and
+  not crew.%is_SKI% and
+  (parameters.%param_table%("weekend_free_activity_codes_fc_sh",
+                            %code%,%start_day%) or
+   parameters.%param_table%("weekend_free_activity_groups_fc_sh",
+                            task.%group%(%code%),%start_day%));
+
+ export %is_freeday% = first(duty(trip), duty.%is_freeday%);
+export %is_rest% = first(duty(trip), duty.%is_rest%);
+export %is_group_valid_freeday% = first(duty(trip), duty.%is_group_valid_freeday%);
+export %is_group_valid_pt_freeday% = first(duty(trip), duty.%is_group_valid_pt_freeday%);
+export %is_vacation% = first(duty(trip), duty.%is_vacation%);
+export %is_meeting% = first(duty(trip), duty.%is_meeting%);
+export %is_office_duty% = first(duty(trip), duty.%is_office_duty%);
+/* SKN concept - we assume no days btw standby exist in same wop */
+export %is_isolated_standby_SKN% = 
+  %is_standby_not_bought_day% and 
+  %standby_block_days% < 3;
+
+/* SKCMS-97: Training should be included */
+export %is_qualifying_skbu_resource_pool% =
+  %is_on_duty% or %code% = "IL";
+  /*(%is_on_duty% and not %is_training%) or %code% = "IL";*/
+  
+export %has_2_pilot_long_haul% = any(duty(trip), duty.%has_2_pilot_long_haul%);
+
+/* Standby Lines. */
+export %is_first_in_standby_line% =
+  first(duty(trip), duty.%is_first_in_standby_line%);
+export %is_last_in_standby_line% =
+  last(duty(trip), duty.%is_last_in_standby_line%);
+export %standby_line_start% =
+  first(duty(trip), duty.%standby_line_start%);
+
+/*
+** Assumption is that a standby block is inside wop range.
+** It is also assumed that standby types are not mixed within same wop ie.
+** a wop doesnt contain neither scattered standby and ordinary standby in same wop
+** nor standby line standby and ordinary standby in same wop
+*/
+export %standby_block_days% =
+  sum(trip(wop), %days%)
+  where (%is_standby% or
+         %is_standby_line%);
+
+/* Current construction seems oblivious but is needed to avoid compile warnings */
+export %bl_days_in_period%(Abstime p_start, Abstime p_end) =  
+  sum(trip(chain), trip.%days_in_period%(p_start, p_end))
+  from (current) backwards
+  while (trip.%end_day% > p_start)
+  where (trip.%is_blank_day%);
+
+export %on_red_day% = any(duty(trip), duty.%on_red_day%);
+
+/* This variable will disregard season and ac family */
+export %pgt_code_compact% =
+  if %is_pgt% and length(%code%) = 4 then
+    concat(substr(%code%,1,1), substr(%code%,3,1))
+  else
+    %code%;
+/* This variable will disregard ac family */
+export %pgt_code_ext% =
+  if %is_pgt% and length(%code%) = 4 then
+    substr(%code%,1,3)
+  else
+    %code%;
+export %pgt_start_day% =
+  first(leg(trip), round_down(leg.%start_lt%,24:00))
+  where (task.%is_pgt%(leg.%code%));
+
+export %is_training% = any(duty(trip), duty.%is_training%);
+export %is_ground_training% = any(duty(trip), duty.%is_ground_training%);
+export %is_safety_training% = any(duty(trip), duty.%is_safety_training%);
+
+export %is_new_hire_follow_up_trip% = any(leg(trip), leg.%is_new_hire_follow_up_student%);
+
+export %is_pact% = first(leg(trip), leg.%is_pact%);
+export %has_pact% = any(leg(trip), leg.%is_pact%);
+export %is_preassigned% = %start_hb% < %pp_start%;
+/* SAS ??? syntax conflict */
+export %is_locked% = 
+  any(leg(trip), leg.%is_locked%);
+  
+export %is_any_sim_instr% =
+  any(duty(trip),duty.%is_any_sim_instr%);
+
+export %is_sim_instr% =
+    %is_simulator% and 
+    first(leg(trip), leg.%is_sim_instr%)
+    where (leg.%is_simulator%);
+    
+export %is_sim_instr_supervis% =
+    %is_simulator% and 
+    first(leg(trip), leg.%is_sim_instr_supervis%)
+    where (leg.%is_simulator%);   
+    
+export %is_sim_instr_ol% = 
+  %is_simulator% and
+  first(leg(trip), leg.%is_sim_instr_ol%)
+  where (leg.%is_simulator%);
+
+export %is_sim_instr_supol% = 
+  %is_simulator% and
+  first(leg(trip), leg.%is_sim_instr_supol%)
+  where (leg.%is_simulator%);
+    
+export %is_untouchable% = false;
+
+export %crew_homebase% = crew.%base_at_date%(%start_day%);
+export %crew_homestation% = crew.%station_at_date%(%start_day%);
+
+export %num_all_layovers% = 
+  sum(duty(trip), duty.%num_all_layovers%)
+  where (duty.%in_pp%);
+
+export %is_course_period_min_length%(Int min_days) = 
+  %first_trip_in_course_period% and
+  %long_course_period_days% >= min_days;
+  
+export %is_long_course_period% = 
+  %first_trip_in_course_period% and
+  %long_course_period_days% >= %min_days_in_long_course_period_p%;
+
+export %is_long_THSI_period% = 
+  %first_trip_in_course_period% and
+  %long_course_period_days% >= %min_days_in_long_THSI_period_p%;
+
+%min_days_in_long_THSI_period_p% = 
+  parameter 15
+  remark "(CCR) Minimum length in days for TH1 and SI1 to be counted as PC/OPC.";
+
+%min_days_in_long_course_period_p% = 
+  parameter 5
+  remark "(CCR) Minimum length in days of definition of long course period.";
+
+redefine export %late_check_out_para% =
+  parameter 02:00
+  remark "(CCR) Max time considered as late check-out";
+  
+%first_trip_in_course_period% =
+    %is_course% and 
+    not %prev_trip_in_course_period%;
+
+%prev_trip_in_course_period% =
+    not is_first(trip(wop)) and
+    prev(trip(wop), %is_course% and %no_days_btw_trips_fwd%);
+
+export %last_trip_in_course_period% =
+    %is_course% and 
+    not %next_trip_in_course_period%;
+
+%next_trip_in_course_period% = 
+    not is_last(trip(wop)) and
+    %no_days_btw_trips_bwd% and
+    next(trip(wop), %is_course%);
+
+%long_course_period_days% = 
+  (%last_course_day% - %start_day%) / 24:00 + 1;
+
+%last_course_day% =
+  default(next(trip(wop), %end_day%)
+          where (%last_trip_in_course_period%), last(trip(wop),%end_day%));
+/* 
+** First / Last
+*/
+export %is_first_flt_sby_or_bl_in_pp% =
+  default(%_is_first_flt_sby_or_bl%(%pp_start%), true);
+
+export %is_first_flt_sby_or_bl_in_month% =
+  default(%_is_first_flt_sby_or_bl%(%end_month_start%), true);
+
+export %is_last_flt_sby_or_bl_in_pp% =
+  default(%_is_last_flt_sby_or_bl%(%pp_end%), true);
+
+export %is_last_flt_sby_or_bl_in_month% =
+  default(%_is_last_flt_sby_or_bl%(%start_month_end%), true);
+
+%_is_first_flt_sby_or_bl%(Abstime date) =
+  (%has_flight_duty% or %is_standby% or %is_blank_day%) and
+  %start_hb% >= date and
+  prev(trip(roster), %start_hb% < date)
+  where (%has_flight_duty% or %is_standby% or %is_blank_day%);
+
+%_is_last_flt_sby_or_bl%(Abstime date) =
+  (%has_flight_duty% or %is_standby% or %is_blank_day%) and
+  %start_hb% <= date and
+  next(trip(roster), %start_hb% > date)
+  where (%has_flight_duty% or %is_standby% or %is_blank_day%);
+
+/* Week start/end for trip start hb */
+export %start_week_start% = round_down_week(%start_hb%);
+export %start_week_end% = round_up_week(%start_hb%);
+
+export %is_last_in_week% =
+  let this = %start_week_end%;
+  default(next(trip(roster), %start_week_end% > this) where (%is_on_duty%),
+  true);
+
+export %start_month_start% = round_down_month(%start_hb%);
+export %start_month_end% = round_up_month(%start_hb% + 0:01);
+
+export %end_month_start% = round_down_month(%end_hb%);
+export %end_month_end% = round_up_month(%end_hb% + 0:01);
+
+export %start_year_start% = round_down_year(%start_hb%);
+export %start_year_end% = round_up_year(%start_hb% + 0:01);
+
+/* Add more attributes here, and create cache variables */
+table trip_attribute(String attr) =
+  attr -> %attribute%;
+  "Flight"          -> %has_only_flight_duty%;
+  "ShortHaul"       -> %is_short_haul%;
+  "LongHaul"        -> %is_long_haul%;
+  "BlankDay"        -> %is_blank_day%;
+  "Standby"         -> %is_standby%;
+  "IsolatedStandby" -> %is_isolated_standby_SKN%;
+  "OnDuty"          -> %is_on_duty%;
+  "NightDuty"       -> %is_night_duty%;
+end
+
+export %is_last_short_haul_in_month% = %_is_last_in_month%("ShortHaul");
+export %is_last_long_haul_in_month% = %_is_last_in_month%("LongHaul");
+export %is_last_blank_day_in_month% = %_is_last_in_month%("BlankDay");
+export %is_last_standby_in_month% = %_is_last_in_month%("Standby");
+export %is_last_isolated_standby_in_month% = %_is_last_in_month%("IsolatedStandby");
+export %is_last_on_duty_in_month% = %_is_last_in_month%("OnDuty");
+export %is_last_night_duty_in_month% = %_is_last_in_month%("NightDuty");
+
+%_is_last_in_month%(String attr) =
+  %attribute%(attr) and
+  default(next(trip(roster), %start_month_start%) where (%attribute%(attr))
+          > %start_month_start%,
+  true);
+
+export %is_last_on_duty_in_month_or_pp% =
+  %is_last_on_duty_in_month% or
+  %_is_last_in_pp%("OnDuty");
+
+export %is_last_blank_day_in_month_or_pp% =
+  %is_last_blank_day_in_month% or
+  %_is_last_in_pp%("BlankDay");
+
+%_is_last_in_pp%(String attr) =
+  %attribute%(attr) and
+  trip.%start_hb% < %pp_end% and
+  default(next(trip(roster), %start_hb% > %pp_end%) where (%attribute%(attr)), true);
+  
+export %consecutive_trips_bw% = 
+  (trip.%start_day% - prev(trip(chain), trip.%end_day%))/24:00 <= 1;
+
+export %consecutive_trips_fw% = 
+  (next(trip(chain), trip.%start_day%) - trip.%end_day%)/24:00 <= 1;
+
+/*
+** Rest after trip
+*/
+
+/* True if rest ends inside PP. 
+** This variable should be used in valid statement for rest rules
+** to make sure we do not create illegal rosters in the "skarv".
+*/
+export %rest_ends_in_pp% =
+  %rest_end% >= %pp_start% and %rest_end% < %pp_end%;
+
+redefine export %rest_time% = 
+  %rest_end_UTC% - %rest_start_UTC%;
+/* Rest starts at end of trip */
+export %rest_start_UTC% = %end_utc%;
+/* Rest ends at start of next not rest activity*/
+export %rest_end_UTC% =
+  default(next(trip(wop), %start_utc%) where (not %is_rest%),
+          default(next(trip(roster), %start_utc%)
+                    where (not %is_rest%),
+                  %rest_start_UTC% + 5 * 24:00));
+
+export %rest_time_scheduled% = 
+  %rest_end_scheduled_UTC% - %rest_start_scheduled_UTC%;    
+/* Rest starts at end of trip */
+%rest_start_scheduled_UTC% = %end_scheduled_utc%;
+/* Rest ends at start of next not rest activity*/
+%rest_end_scheduled_UTC% =
+  next(trip(wop), %start_scheduled_utc%) where (not %is_rest%);
+  
+export %rest_end_before_UTC% = %start_utc%;
+
+export %rest_start% = %end_hb%;
+export %rest_end% = 
+  next(trip(chain),%rest_end_before%) where (not %is_rest%);
+
+export %rest_end_before% = %start_hb%;
+
+export %rest_start_day% = 
+  round_up(%rest_start% - 0:01, 24:00);
+
+export %rest_end_day_before% = round_down(%rest_end_before%, 24:00);
+
+export %rest_time_before% =
+  prev(trip(wop), %rest_time%)
+  where (%is_on_duty%);
+
+redefine export %check_rules% =
+  %is_trip% or
+  (%is_roster% and not crew.%is_leased_trip_start%);
+
+export %days_btw_trips_fwd% =
+  default((next(trip(roster), trip.%start_day%) - (trip.%end_day% + 24:00)) / 24:00, 1000); 
+
+export %days_btw_trips_bwd% =
+  default((trip.%start_day% - prev(trip(roster), trip.%end_day% + 24:00)) / 24:00, 1000); 
+
+export %no_days_btw_trips_fwd% =
+  not is_last(trip(roster)) and
+  %days_btw_trips_fwd% = 0;
+
+export %no_days_btw_trips_bwd% =
+  not is_first(trip(roster)) and
+  %days_btw_trips_bwd% = 0;
+
+/*
+** Long / Short haul
+*/
+export %is_preceded_by_short_haul_or_gd% = 
+  default(prev(trip(wop), (%is_short_haul% or 
+                          (%is_ground_duty% and not %is_standby%))),
+  false);
+
+/*
+** Compdays
+*/
+
+export %is_compensation_day% = compdays.%trip_is_compday%;
+
+/****************************************************************
+ * Section X: Training
+ ***************************************************************/
+
+export %has_training_code% = any(duty(trip), duty.%has_training_code%);
+
+redefine export %can_be_assigned_with_attribute% =
+    %starts_in_pp% and (%has_only_flight_duty% or %is_ground_duty%) and not %is_pact% and not %is_standby%;
+    
+redefine export %invalid_for_attribute_text% =
+    "Only valid on flights starting in the planning period";
+
+export %is_cnf% =
+  %has_active_flight% and all(duty(trip), duty.%is_cnf%);
+export %is_lifus% =
+  %has_active_flight% and all(duty(trip), duty.%is_lifus%);
+export %is_zftt_lifus% =
+  %has_active_flight% and all(duty(trip), duty.%is_zftt_lifus%);
+export %is_lc% =
+  %has_active_flight% and 
+  count(leg(trip))
+  where (leg.%is_lc%) >= 2; /* all(duty(trip), duty.%is_lc%);*/
+export %is_ilc% =
+  %has_active_flight% and all(duty(trip), duty.%is_ilc%);
+export %is_t_flight% =
+  %has_active_flight% and all(duty(trip), duty.%is_t_flight%);
+export %is_release% =
+  %has_active_flight% and all(duty(trip), duty.%is_release%);
+export %is_supernum% =
+  %has_active_flight% and all(duty(trip), duty.%is_supernum%);
+
+export %has_any_lifus% =
+  %has_active_flight% and any(duty(trip), duty.%has_any_lifus%);
+export %has_lifus% =
+  %has_active_flight% and any(duty(trip), duty.%is_lifus%);
+export %has_lc% =
+  %has_active_flight% and any(duty(trip), duty.%is_lc%);
+  
+export %is_skill_test% =
+    %is_simulator% and any(leg(trip), leg.%is_skill_test%);
+
+export %is_pc_change_month% =
+    %is_simulator% and any(leg(trip), leg.%is_pc_change_month%);
+
+export %is_forced_pc% =
+    %is_simulator% and any(leg(trip), leg.%is_forced_pc%);
+
+export %is_airport_sim% =
+    %is_ffs% and any(leg(trip), leg.%is_airport_sim%);
+export %is_sim_for_airport%(String airport) =
+    %is_airport_sim% and any(leg(trip), leg.%airport_sim% = airport);
+  
+
+/* Select */
+export %manko_in_pp% =
+  %starts_in_pp% and %has_only_flight_duty%;
+
+/********************
+*** Super Freedays **
+********************/
+
+export %super_freedays_in_period%(Abstime start, Abstime stop) =
+  if trip.%is_fs% then
+    (nmin(round_up(stop,24:00), round_up(%end_hb%, 24:00)) - 
+     nmax(start, %start_hb%))/24:00
+  else
+    0;
+
+    
+/*********************
+***    Per Diem     **
+*********************/
+redefine export %per_diem_entitled% = 
+  (%flight_per_diem% or %course_per_diem%)
+  and any(leg(trip), leg.%is_per_diem%)
+  and not crew.%is_leased_without_perdiem%(%start_hb%)
+  and not %has_passive_transfer%;
+
+/** 
+*  For SVS Amaount of per diem in minutes 
+*  For the rest Amount of Per diem in 1/4. */
+redefine export %per_diem_total% =
+  if crew.%has_agmt_group_svs% then
+     sum(leg(trip),leg.%per_diem_amount%)
+  else
+    per_diem.%per_diem_amount%(default(%per_diem_time%, 0:00), %cabin_crew%, %is_SKN%, %end_UTC%);
+
+/** 
+*  For SVS Amount of per diem in minutes 
+*  For the rest Amount of Per diem in 1/4. */
+export %per_diem_total_at_date%(Abstime Date) =
+  if crew.%has_agmt_group_svs_at_date%(Date) then
+     sum(leg(trip),leg.%per_diem_amount_at_date%(Date))
+  else
+    per_diem.%per_diem_amount%(default(%per_diem_time%, 0:00), %cabin_crew%, %is_SKN%, %end_UTC%);
+
+  
+/************************************
+ * Define blank day used for CR404
+*************************************/
+export %is_blank_day_BL% = all(leg(trip), leg.%is_blank_day_BL%);
+export %has_blank_day_BL% = any(leg(trip), leg.%is_blank_day_BL%);
+
+/************************************
+ * LAYOVER used in fairness_customization
+*************************************/
+export %publ_layover_in_station%(String station) =
+  if %has_only_flight_duty% and
+     %starts_in_publ_period%
+  then count(duty(trip)) 
+       where (station = duty.%layover_station% and 
+              not is_last(duty(trip)))
+  else 0;
+
+/************************************
+ * TWO PILOT used in fairness_customization
+*************************************/
+export %publ_2_pilot_long_haul% = 
+  if %starts_in_publ_period% and
+     %has_2_pilot_long_haul% and
+     %block_time% > 5:00 /* Avoid ferry flights */
+  then 1
+  else 0;
+
+/* Crew licence */
+export %licence_required% =
+  any(duty(trip),duty.%licence_required%);
+
+/* Crew on loan to other region */
+redefine export %crew_is_on_loan% =
+  any(duty(trip),duty.%crew_is_on_loan%);
+
+redefine export %region_crew_is_on_loan_to% =
+  first(duty(trip) where (duty.%crew_is_on_loan%),
+        duty.%region_crew_is_on_loan_to%);
+
+/***********************************************
+** The following condition defines a far single-slipping flight
+** from the east to the west (SKCMS-677).
+***********************************************/
+export %is_far_single_slipping_longhaul% =
+  let
+    is_privately_traded = first(duty(trip) where (duty.%is_long_haul%), duty.%is_privately_traded%),
+    is_standby = first(leg(trip) where (leg.%is_long_haul%), leg.%is_standby%),
+    is_bought = first(leg(trip) where (leg.%is_long_haul%), leg.%is_bought%);
+
+  (%is_long_haul%) and
+  (crew.%has_agmt_group_ski_fd% or crew.%has_agmt_group_sk_fd_mff%) and
+  (crew.%in_variable_group_trip_start%) and
+  (%has_single_slipp%) and
+  (%lh_layover_time_zone% <= parameters.%slipp_layover_time_zone_p%) and
+  (not is_bought) and
+  (not is_standby) and
+  (not is_privately_traded);
+
+/* end of file */

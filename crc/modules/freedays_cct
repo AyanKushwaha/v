@@ -1,0 +1,311 @@
+/* -*- crc -*- 
+ * 
+ * 
+ * Purpose:
+ *    Definitions of variables to use with the rules about freedays,
+ *    free weekend, check in times, VA- LA-scheduling, FG-cycles.
+ *    Definition of time off variables.
+ *
+ * Sections:
+ *     1: Fundamental definitions.
+ *
+ * Created by:
+ *    Johan Astrom, 2008-02-25 
+ *
+ */
+
+module freedays_cct inherits freedays
+
+import rescheduling;
+import rules_resched_cct;
+
+redefine export %qual_freedays_in_period%(Abstime start, Abstime stop) =
+  (stop - start) / 24:00 -
+  %nr_days_not_qualifying_freedays%(start, stop) +
+  bought_days.%bought_type_days_in_period%("COUNT_FREEDAYS", start, stop);
+
+redefine export %nr_qualifying_in_1_month% =
+  let start_t = wop.%start_month_start%,
+      end_t = wop.%start_month_end%;
+  %qual_freedays_in_period%(crew.%variable_group_start%(start_t, end_t),
+                            crew.%variable_group_end%(start_t, end_t))
+  -   bought_days.%bought_type_days_in_period%("COUNT_FREEDAYS", start_t, end_t);
+
+redefine %_freedays_after_wop% =
+  last(duty(wop),
+       sum(duty(roster), duty.%days%)
+       from (next) forwards
+       while (duty.%consecutive_duties_bw% and (duty.%is_freeday% or duty.%is_bought%))
+       where (duty.%is_freeday% or duty.%is_bought%))
+  where (not duty.%is_bought%);
+
+
+/* count freedays following last duty in wop. In CCT the rule is strict - demands no gaps */
+redefine export %count_cau1412_662_regarded_as_freedays% =
+  duty.%consec_days_after%(duty.%duty_sel_freedays_mix%);
+
+/**
+  * WOP is followed by free weekend if,
+  * followed by freedays on weekends.
+**/
+
+%start_fp% = next(wop(roster), prev(wop(roster), wop.%end_hb%))
+                       where(wop.%is_allowed_on_free_weekend%);
+%end_fp%   = next(wop(roster),
+                  default(max(wop(roster),
+                              default((if (wop.%end_day% + 24:00) - 
+                                 next(wop(roster), wop.%start_day%) = 0:00 then
+                                 next(wop(roster), wop.%start_hb%)
+                              else
+                                wop.%end_hb%), wop.%end_hb%))
+                          from(current) forwards
+                          while(wop.%is_allowed_on_free_weekend% and 
+                                (round_up(prev(wop(roster), wop.%end_hb%), 24:00) - 
+                                 wop.%start_day%) = 0:00),
+                          wop.%end_hb%))
+             where(wop.%is_allowed_on_free_weekend%);
+             
+%we_checkin_after% = next(wop(roster), wop.%start_hb%)
+                     where(not wop.%is_allowed_on_free_weekend%);
+
+                     
+redefine export %nr_before%(Abstime before_time) =
+    (before_time - %start_day_of_prev_consecutive_freedays_before%(before_time))
+    / 24:00;
+
+%start_day_of_prev_consecutive_freedays_before%(Abstime before_time) =
+    default(last(duty(chain), %start_day_of_prev_consecutive_freedays%)
+                 where(%is_prev_duty_consecutive_freeday%(before_time)),
+            01Jan1986);
+
+%start_day_of_prev_consecutive_freedays% =
+    prev(duty(chain), duty.%start_day%)
+         where (not %is_prev_duty_consecutive_freeday%(duty.%start_day%));
+
+%is_prev_duty_consecutive_freeday%(Abstime start_day) =
+    prev(duty(chain), %is_bought_freeday_or_freeday% and
+                      (start_day - duty.%end_day%)/24:00 >= 0 and
+                      (start_day - duty.%end_day%)/24:00 < 2);
+
+%is_bought_freeday_or_freeday% =
+    %is_bought_freeday%(duty.%start_day%) or duty.%is_freeday%;
+
+redefine export %freedays_and_bought_days_after_wop% =
+  if not (last(duty(wop), duty.%consecutive_duties_fw%)) then
+    0
+  else     
+    default(
+            (last(duty(wop), next(duty(chain) 
+                                   where (not duty.%is_freeday% and
+                                          not duty.%is_bought% or
+                                          not duty.%consecutive_duties_fw%), 
+                                   (if not duty.%consecutive_duties_fw% then
+                                      duty.%end_day% + 24:00 
+                                    else
+                                      duty.%start_day%))) -
+             last(duty(wop), duty.%end_day% + 24:00))/24:00,
+            12);
+
+redefine export %n153_time_in_period%(Abstime start, Abstime stop) =
+  sum(trip(roster), trip.%8_to_16_time_in_period%(start, stop))
+  where (trip.%start_utc% < stop and
+         trip.%end_utc% > start and
+         (trip.%code% = "IL" or trip.%code% = "ILR") and
+         %consecutive_ill_days% <= 16 and
+         %n153_applies%);
+
+%consecutive_ill_days% =
+  prev(trip(roster), sum(trip(roster), trip.%days%)
+                     from(next) forwards while(trip.%is_illness%))
+  where(not trip.%is_illness%);
+
+%n153_applies% =
+  any(trip(wop), rescheduling.%trip_is_rescheduled%)
+  backwards while(not (trip.%code% = "IL" or trip.%code% = "ILR"));
+
+/*********************************************************************
+* Freedays after production (takes buy days into calc)
+*********************************************************************/
+/* CC SKS can not wrap freedays around anything. 
+   CC SKD can not wrap freedays around F7S*/
+redefine export %freedays_after_duty% =
+  %_freedays_after_duty% + 
+  (if %_wrap_around_vacation% and
+      (%next_not_freedays_wop_is_vacation% or
+       %next_not_freedays_wop_is_vacation_skd_cc%) and
+      %next_not_freedays_wop_is_vacation% then
+     sum(duty(roster),duty.%days%) from (next where (duty.%is_vacation%)) 
+     while (duty.%is_freeday% or duty.%is_vacation% or %duty_is_SKI_LA% or
+            %_duty_is_special_comp_day% or duty.%is_on_duty_illness% or
+            duty.%is_off_duty_illness% or duty.%code% = "LA42" 
+            or %activity_is_allowed_around_summer_vacation%)
+     where (%counts_as_freeday%)
+   else 0);
+       
+/* This definition treats empty days as production as opposed
+**   to the rostering version where empty days are FREE
+*/
+
+redefine %_freedays_after_duty% =
+  if parameters.%is_request_bidding% then
+    %_basic_freedays_after_duty%
+  else
+    default(next(duty(roster),(if %counts_as_freeday% then
+                               duty.%days% + %_trailing_freedays%
+                             else
+                               0)), 12);
+
+                      
+%_trailing_freedays% = 
+  sum(duty(roster) from (next) 
+      while (duty.%consecutive_duties_bw_scheduled% and
+             ((%any_off_duty_counts_as_freeday% and
+               duty.%is_off_duty% and
+               not duty.%is_vacation%) or
+              (not %any_off_duty_counts_as_freeday% and
+               (duty.%is_freeday% or
+                duty.%is_bought% or
+                duty.%is_off_duty_illness%) or
+                duty.%is_on_duty_illness%))),
+      duty.%days%);
+
+/* Bought days or F31 days is not qualifying for production freedays */
+redefine export %wop_days% =
+  nmin(((if default(next(wop(roster),wop.%start_day%) = wop.%end_day%,
+                    true) then 
+           wop.%end_day%
+         else
+           default(next(wop(roster) where (wop.%is_off_duty%),
+                     wop.%start_day%),
+                   wop.%end_day%)) -
+           %wop_start_for_prod_freedays%)/24:00,
+       12);
+  
+%wop_start_for_prod_freedays% =
+  default(first(duty(wop),duty.%start_day%)
+                  where (not (duty.%is_bought% or
+                              duty.%is_off_duty% or
+                              duty.%is_f31%)),
+          wop.%start_day%);
+  
+
+redefine export %valid_freedays_after_duty% =
+  if parameters.%is_request_bidding% then
+    %_valid_freedays_after_duty%
+  else
+    duty.%is_on_duty% and
+    not (duty.%is_f31%) and
+    (duty.%end_day% + 24:00 + 
+      freedays.%min_required_freedays_after_duty_total% * 24:00 > 
+     %pp_start% and duty.%end_day% + 24:00 < %pp_end_extended%) and
+     ((is_last(duty(wop)) and
+     /* 2 empty days followed by on duty*/
+     default(next(duty(chain), duty.%is_off_duty%), false) or                 
+     default(next(duty(chain), duty.%is_bought%), false)) or
+
+     (is_last(duty(wop)) where(not (duty.%is_off_duty_cmp% or duty.%is_illness%)) and 
+      next(duty(wop), (duty.%is_off_duty_cmp% or duty.%is_illness%) and 
+                      default(next(duty(chain), duty.%is_off_duty% or duty.%is_bought%) 
+                              where(not duty.%is_off_duty_cmp%), 
+                              false))));
+  
+   
+redefine %wop_is_short_haul% =
+  any(duty(wop) from(current) backwards while(not duty.%is_bought%), 
+      duty.%is_short_haul%) and
+  not %wop_is_long_haul%;
+  
+redefine %next_duty_is_isolated_FS% =
+  let fs_day = default(next(duty(roster), duty.%start_day%), 01jan1986);
+  crew.%is_skd% and
+  default(next(duty(roster), duty.%is_fs% and duty.%days% = 1 and
+               next(duty(roster), duty.%is_on_duty% and
+                    duty.%start_day% = fs_day + 24:00)), false);
+  
+redefine %wop_is_long_haul% =
+  any(duty(wop) from(current) backwards while(not duty.%is_bought%), 
+      duty.%is_long_haul%);
+
+redefine %wop_has_ground_duty% =
+  any(duty(wop) from(current) backwards while(not duty.%is_bought%), 
+      duty.%is_ground_duty%); 
+
+redefine %wop_is_ground_duty% =
+  all(duty(wop) from(current) backwards while(not duty.%is_bought%),
+      duty.%is_ground_duty%);
+
+redefine %wop_has_short_standby_block% =
+  any(duty(wop) from(current) backwards while(not duty.%is_bought%),  
+      duty.%has_standby% and
+      not duty.%is_standby_line% and
+      not duty.%is_scattered_standby_at_home%) and
+  not (count(duty(wop)) 
+       where(duty.%has_standby% or duty.%has_standby_line%) <= 1);
+
+redefine %next_duty_is_F_followed_by_SFJ% =
+  default(%wop_days% = 1 and 
+          /*trip.%is_one_day_greenland_return%*/
+          is_first(duty(trip)) and duty.%days% = 1 and
+          is_last(duty(trip)) and
+          last(leg(duty), leg.%start_country% = "GL") and
+          next(duty(roster), (duty.%is_freeday% or 
+                              bought_days.%duty_bought_type% = "F") 
+                             and duty.%days% = 1 and 
+          next(duty(roster), is_first(duty(trip)) and duty.%days% = 1 and
+                             is_last(duty(trip)) and
+                             last(leg(duty), leg.%start_country% = "GL"))),
+         false);
+
+redefine %wop_work_days% =
+  wop.%days% - wop.%gnd_days% -
+  wop.%standby_line_days% - wop.%illness_days% -
+  freedays.%nr_off_duty_cmp_first_in_wop% -
+  freedays.%nr_off_duty_cmp_last_in_wop%;
+
+/* Redefinition of what is considered to be qualifying work for tracking.
+ * In contrast to rostering standby line days should be considered work
+ * and have thus been removed from the variable definition. */
+redefine %wop_is_qualifying% =
+  wop.%is_on_duty% and
+  not (wop.%is_vacation% or
+       %is_bought_vacation%) and
+  (crew.%k4exng_cc_sp5_1_valid%(wop.%start_month_start%) or
+   (not (wop.%in_long_course_period% or
+         %non_qualifying_ground_duty_period%) and
+    not (%cabin_crew% and
+         crew.%is_SKD% and
+         wop.%is_long_haul%)));
+
+
+/* Planned summer vacation should be counted */
+redefine %activity_is_allowed_around_summer_vacation% =
+    %_activity_is_allowed_around_summer_vacation%
+    or all(trip(wop),rescheduling. %trip_inf_flag_vacation%);
+
+/* Qual days in period shall take care of part time factors in  stanby lines 
+** Please refer to SKCMS-337
+*/
+redefine %_qual_days_in_period%(Abstime start, Abstime stop) =
+    (stop - start) / 24:00 
+    - %nr_non_qualifying_days%(start, stop);
+redefine export %nr_non_qualifying_days_in_period_cc_skn_vg%(Abstime start, Abstime stop) =
+  %nr_non_qualifying_days%(start, stop);
+  
+/* SKCMS-731 */
+
+%_inf_is_sbl_or_sbb5% =
+(rules_resched_cct.%trip_inf_is_standby_line% or rules_resched_cct.%inf_is_standby_block_length_5_days%);
+
+redefine export %min_freedays_cau1412_662% = 
+   if default(%_is_LH_trip_callout_preceded_by_sby%,False) then 3
+   else 4;
+   
+%_is_trip_LH_callout% =
+    %_inf_is_sbl_or_sbb5% and trip.%is_long_haul%;
+ 
+%_is_LH_trip_callout_preceded_by_sby% = 
+  if %_is_trip_LH_callout% then
+     prev(trip(roster),(%_inf_is_sbl_or_sbb5% and trip.%is_standby%)) or prev(trip(roster), prev(trip(roster),(%_inf_is_sbl_or_sbb5% and trip.%is_standby%) ))
+     
+  else
+     false;

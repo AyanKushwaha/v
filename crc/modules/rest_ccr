@@ -1,0 +1,505 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains rest definitions and calculations for both cabin crew 
+ *   and flight crew.
+ *
+ * Sections:
+ *
+ * Created by:
+ *   Johan Astrom, 2008-08-28
+ *
+ * Major changes:
+ *
+ */
+
+module rest_ccr inherits rest_common
+
+import crew;
+import training;
+import standby;
+
+%crew_is_temporary_safe% = default(crew.%is_temporary%, false);
+%crew_is_SKS_safe% = default(crew.%is_SKS%, homebase="STO");
+
+redefine export %min_time% =
+  if leg.%arrives_at_homebase% and %crew_is_temporary_safe% and not %crew_is_SKS_safe% then
+    6:00
+  else
+    8:00;
+  
+/* Agreement: FC 1:3 mom3.c */
+redefine %fc_training_rest_between_simulator_passes% = 
+  crew.%has_restr_training_capt_dct_foc_refr_wop_start% and 
+  training.%duty_is_in_school_period_min_7x24%  and
+  %this_duty_simulator_or_school_flight% and
+  %next_duty_simulator_or_school_flight%;
+
+%this_duty_simulator_or_school_flight% =
+    any(leg(duty), leg.%is_simulator% or leg.%is_school_flight%);
+
+%next_duty_simulator_or_school_flight% =
+    default(next(duty(chain),
+                 %this_duty_simulator_or_school_flight%),
+            false);
+    
+redefine export %trip_night_rest% =
+  let night_end = next(trip(wop), rest.%trip_night_end_UTC%);
+  scale_time(nmax(trip.%end_UTC%, round_down(trip.%end_UTC%, 24:00) + night_end), 
+             next(trip(wop), trip.%start_UTC%), 0,
+             rest.%trip_night_start_UTC%, night_end, 1);
+
+/* A rest period is isolated if the duty is surrounded by 24hrs of rest */
+redefine export %isolated_24hr_period% =
+  default(prev(duty(wop), duty.%rest_time%) >= 24:00, true) and 
+  (duty.%rest_time% >= 24:00 or is_last(duty(wop)));
+
+redefine export %in_24hrs_stop% =
+  if flight_duty or not flight_duty
+  then first(leg(duty), %_in_24hrs_stop% + 24:00)
+  else 1Jan1901;
+  
+%_in_24hrs_stop% =
+  if leg.%is_standby_callout%
+  then default(next(leg(duty), leg.%ci_start_utc%)
+               where(leg.%is_on_duty%),
+               leg.%ci_start_utc%)
+  else leg.%duty_start_UTC%;
+
+
+/* additional rest for flight */
+export %use_additional_rest% =
+    parameter True
+    remark "Use additional rest after specific flights";
+
+export %additional_rest_for_flight_after% =
+    if %use_additional_rest% then
+        default(max(leg(trip),
+                    /* Check if the leg can have additional rest for performance reasons */
+                    if %_additional_rest_has_entry% then
+                        %lookup_additional_rest_after%
+                    else
+                        00:00),
+                00:00)
+     else
+        00:00;
+
+export %additional_rest_for_flight_before% =
+    if %use_additional_rest% then
+        default(max(leg(trip),
+                    /* Check if the leg can have additional rest for performance reasons */
+                    if %_additional_rest_has_entry% then
+                        %lookup_additional_rest_before%
+                    else
+                        00:00),
+                00:00)
+     else
+        00:00;
+
+table weekday_to_additional_rest_after =
+    leg.%start_weekday% -> RelTime %lookup_additional_rest_after%;
+    1 -> %lookup_additional_rest_after_mon%;
+    2 -> %lookup_additional_rest_after_tue%;
+    3 -> %lookup_additional_rest_after_wed%;
+    4 -> %lookup_additional_rest_after_thu%;
+    5 -> %lookup_additional_rest_after_fri%;
+    6 -> %lookup_additional_rest_after_sat%;
+    7 -> %lookup_additional_rest_after_sun%;
+end
+
+%lookup_additional_rest_after_mon% =
+    let mc = fundamental.%main_cat%,
+        fn = leg.%flight_id_no_suffix%;
+    
+    if %_additional_rest_after_mon%(mc, fn) <> -00:01 then
+        %_additional_rest_after_mon%(mc, fn)
+    else if %_additional_rest_after_mon%("*", fn) <> -00:01 then
+        %_additional_rest_after_mon%("*", fn)
+    else if %_additional_rest_after_mon%(mc, "*") <> -00:01 then
+        %_additional_rest_after_mon%(mc, "*")
+    else if %_additional_rest_after_mon%("*", "*") <> -00:01 then
+        %_additional_rest_after_mon%("*", "*")
+    else
+        00:00;
+
+%lookup_additional_rest_after_tue% =
+    let mc = fundamental.%main_cat%,
+        fn = leg.%flight_id_no_suffix%;
+    
+    if %_additional_rest_after_tue%(mc, fn) <> -00:01 then
+        %_additional_rest_after_tue%(mc, fn)
+    else if %_additional_rest_after_tue%("*", fn) <> -00:01 then
+        %_additional_rest_after_tue%("*", fn)
+    else if %_additional_rest_after_tue%(mc, "*") <> -00:01 then
+        %_additional_rest_after_tue%(mc, "*")
+    else if %_additional_rest_after_tue%("*", "*") <> -00:01 then
+        %_additional_rest_after_tue%("*", "*")
+    else
+        00:00;
+        
+%lookup_additional_rest_after_wed% =
+    let mc = fundamental.%main_cat%,
+        fn = leg.%flight_id_no_suffix%;
+    
+    if %_additional_rest_after_wed%(mc, fn) <> -00:01 then
+        %_additional_rest_after_wed%(mc, fn)
+    else if %_additional_rest_after_wed%("*", fn) <> -00:01 then
+        %_additional_rest_after_wed%("*", fn)
+    else if %_additional_rest_after_wed%(mc, "*") <> -00:01 then
+        %_additional_rest_after_wed%(mc, "*")
+    else if %_additional_rest_after_wed%("*", "*") <> -00:01 then
+        %_additional_rest_after_wed%("*", "*")
+    else
+        00:00;
+        
+%lookup_additional_rest_after_thu% =
+    let mc = fundamental.%main_cat%,
+        fn = leg.%flight_id_no_suffix%;
+    
+    if %_additional_rest_after_thu%(mc, fn) <> -00:01 then
+        %_additional_rest_after_thu%(mc, fn)
+    else if %_additional_rest_after_thu%("*", fn) <> -00:01 then
+        %_additional_rest_after_thu%("*", fn)
+    else if %_additional_rest_after_thu%(mc, "*") <> -00:01 then
+        %_additional_rest_after_thu%(mc, "*")
+    else if %_additional_rest_after_thu%("*", "*") <> -00:01 then
+        %_additional_rest_after_thu%("*", "*")
+    else
+        00:00;
+        
+%lookup_additional_rest_after_fri% =
+    let mc = fundamental.%main_cat%,
+        fn = leg.%flight_id_no_suffix%;
+    
+    if %_additional_rest_after_fri%(mc, fn) <> -00:01 then
+        %_additional_rest_after_fri%(mc, fn)
+    else if %_additional_rest_after_fri%("*", fn) <> -00:01 then
+        %_additional_rest_after_fri%("*", fn)
+    else if %_additional_rest_after_fri%(mc, "*") <> -00:01 then
+        %_additional_rest_after_fri%(mc, "*")
+    else if %_additional_rest_after_fri%("*", "*") <> -00:01 then
+        %_additional_rest_after_fri%("*", "*")
+    else
+        00:00;
+        
+%lookup_additional_rest_after_sat% =
+    let mc = fundamental.%main_cat%,
+        fn = leg.%flight_id_no_suffix%;
+    
+    if %_additional_rest_after_sat%(mc, fn) <> -00:01 then
+        %_additional_rest_after_sat%(mc, fn)
+    else if %_additional_rest_after_sat%("*", fn) <> -00:01 then
+        %_additional_rest_after_sat%("*", fn)
+    else if %_additional_rest_after_sat%(mc, "*") <> -00:01 then
+        %_additional_rest_after_sat%(mc, "*")
+    else if %_additional_rest_after_sat%("*", "*") <> -00:01 then
+        %_additional_rest_after_sat%("*", "*")
+    else
+        00:00;
+        
+%lookup_additional_rest_after_sun% =
+    let mc = fundamental.%main_cat%,
+        fn = leg.%flight_id_no_suffix%;
+    
+    if %_additional_rest_after_sun%(mc, fn) <> -00:01 then
+        %_additional_rest_after_sun%(mc, fn)
+    else if %_additional_rest_after_sun%("*", fn) <> -00:01 then
+        %_additional_rest_after_sun%("*", fn)
+    else if %_additional_rest_after_sun%(mc, "*") <> -00:01 then
+        %_additional_rest_after_sun%(mc, "*")
+    else if %_additional_rest_after_sun%("*", "*") <> -00:01 then
+        %_additional_rest_after_sun%("*", "*")
+    else
+        00:00;
+        
+table weekday_to_additional_rest_before =
+    leg.%start_weekday% -> RelTime %lookup_additional_rest_before%;
+    1 -> %lookup_additional_rest_before_mon%;
+    2 -> %lookup_additional_rest_before_tue%;
+    3 -> %lookup_additional_rest_before_wed%;
+    4 -> %lookup_additional_rest_before_thu%;
+    5 -> %lookup_additional_rest_before_fri%;
+    6 -> %lookup_additional_rest_before_sat%;
+    7 -> %lookup_additional_rest_before_sun%;
+end
+
+%lookup_additional_rest_before_mon% =
+    let mc = fundamental.%main_cat%,
+        fn = leg.%flight_id_no_suffix%;
+    
+    if %_additional_rest_before_mon%(mc, fn) <> -00:01 then
+        %_additional_rest_before_mon%(mc, fn)
+    else if %_additional_rest_before_mon%("*", fn) <> -00:01 then
+        %_additional_rest_before_mon%("*", fn)
+    else if %_additional_rest_before_mon%(mc, "*") <> -00:01 then
+        %_additional_rest_before_mon%(mc, "*")
+    else if %_additional_rest_before_mon%("*", "*") <> -00:01 then
+        %_additional_rest_before_mon%("*", "*")
+    else
+        00:00;
+
+%lookup_additional_rest_before_tue% =
+    let mc = fundamental.%main_cat%,
+        fn = leg.%flight_id_no_suffix%;
+    
+    if %_additional_rest_before_tue%(mc, fn) <> -00:01 then
+        %_additional_rest_before_tue%(mc, fn)
+    else if %_additional_rest_before_tue%("*", fn) <> -00:01 then
+        %_additional_rest_before_tue%("*", fn)
+    else if %_additional_rest_before_tue%(mc, "*") <> -00:01 then
+        %_additional_rest_before_tue%(mc, "*")
+    else if %_additional_rest_before_tue%("*", "*") <> -00:01 then
+        %_additional_rest_before_tue%("*", "*")
+    else
+        00:00;
+        
+%lookup_additional_rest_before_wed% =
+    let mc = fundamental.%main_cat%,
+        fn = leg.%flight_id_no_suffix%;
+    
+    if %_additional_rest_before_wed%(mc, fn) <> -00:01 then
+        %_additional_rest_before_wed%(mc, fn)
+    else if %_additional_rest_before_wed%("*", fn) <> -00:01 then
+        %_additional_rest_before_wed%("*", fn)
+    else if %_additional_rest_before_wed%(mc, "*") <> -00:01 then
+        %_additional_rest_before_wed%(mc, "*")
+    else if %_additional_rest_before_wed%("*", "*") <> -00:01 then
+        %_additional_rest_before_wed%("*", "*")
+    else
+        00:00;
+        
+%lookup_additional_rest_before_thu% =
+    let mc = fundamental.%main_cat%,
+        fn = leg.%flight_id_no_suffix%;
+    
+    if %_additional_rest_before_thu%(mc, fn) <> -00:01 then
+        %_additional_rest_before_thu%(mc, fn)
+    else if %_additional_rest_before_thu%("*", fn) <> -00:01 then
+        %_additional_rest_before_thu%("*", fn)
+    else if %_additional_rest_before_thu%(mc, "*") <> -00:01 then
+        %_additional_rest_before_thu%(mc, "*")
+    else if %_additional_rest_before_thu%("*", "*") <> -00:01 then
+        %_additional_rest_before_thu%("*", "*")
+    else
+        00:00;
+        
+%lookup_additional_rest_before_fri% =
+    let mc = fundamental.%main_cat%,
+        fn = leg.%flight_id_no_suffix%;
+    
+    if %_additional_rest_before_fri%(mc, fn) <> -00:01 then
+        %_additional_rest_before_fri%(mc, fn)
+    else if %_additional_rest_before_fri%("*", fn) <> -00:01 then
+        %_additional_rest_before_fri%("*", fn)
+    else if %_additional_rest_before_fri%(mc, "*") <> -00:01 then
+        %_additional_rest_before_fri%(mc, "*")
+    else if %_additional_rest_before_fri%("*", "*") <> -00:01 then
+        %_additional_rest_before_fri%("*", "*")
+    else
+        00:00;
+        
+%lookup_additional_rest_before_sat% =
+    let mc = fundamental.%main_cat%,
+        fn = leg.%flight_id_no_suffix%;
+    
+    if %_additional_rest_before_sat%(mc, fn) <> -00:01 then
+        %_additional_rest_before_sat%(mc, fn)
+    else if %_additional_rest_before_sat%("*", fn) <> -00:01 then
+        %_additional_rest_before_sat%("*", fn)
+    else if %_additional_rest_before_sat%(mc, "*") <> -00:01 then
+        %_additional_rest_before_sat%(mc, "*")
+    else if %_additional_rest_before_sat%("*", "*") <> -00:01 then
+        %_additional_rest_before_sat%("*", "*")
+    else
+        00:00;
+        
+%lookup_additional_rest_before_sun% =
+    let mc = fundamental.%main_cat%,
+        fn = leg.%flight_id_no_suffix%;
+    
+    if %_additional_rest_before_sun%(mc, fn) <> -00:01 then
+        %_additional_rest_before_sun%(mc, fn)
+    else if %_additional_rest_before_sun%("*", fn) <> -00:01 then
+        %_additional_rest_before_sun%("*", fn)
+    else if %_additional_rest_before_sun%(mc, "*") <> -00:01 then
+        %_additional_rest_before_sun%(mc, "*")
+    else if %_additional_rest_before_sun%("*", "*") <> -00:01 then
+        %_additional_rest_before_sun%("*", "*")
+    else
+        00:00;
+
+table additional_rest_check_table =
+  leg.%departure_airport_name%,
+  leg.%arrival_airport_name%,
+  leg.%start_hb%
+   ->
+    Bool %_additional_rest_has_entry%;
+  external %additional_rest_table%;
+  departure_station,
+  arrival_station,
+  (validfrom,validto) ->
+    any(row_number);
+end
+
+table additional_rest_mon_table(String a_main_cat, String a_flight_name) =
+  a_main_cat,
+  a_flight_name,
+  leg.%departure_airport_name%,
+  leg.%arrival_airport_name%,
+  True,
+  leg.%start_hb%
+   ->
+    RelTime %_additional_rest_after_mon%,
+    RelTime %_additional_rest_before_mon%;
+  external %additional_rest_table%;
+  main_cat,
+  flightname,
+  departure_station,
+  arrival_station,
+  mon,
+  (validfrom,validto) ->
+    additional_rest_after,
+    additional_rest_before;
+  -, -, -, -, -, - -> -00:01, -00:01;
+end
+
+table additional_rest_tue_table(String a_main_cat, String a_flight_name) =
+  a_main_cat,
+  a_flight_name,
+  leg.%departure_airport_name%,
+  leg.%arrival_airport_name%,
+  True,
+  leg.%start_hb%
+   ->
+    RelTime %_additional_rest_after_tue%,
+    RelTime %_additional_rest_before_tue%;
+  external %additional_rest_table%;
+  main_cat,
+  flightname,
+  departure_station,
+  arrival_station,
+  tue,
+  (validfrom,validto) ->
+    additional_rest_after,
+    additional_rest_before;
+  -, -, -, -, -, - -> -00:01, -00:01;
+end
+
+table additional_rest_wed_table(String a_main_cat, String a_flight_name) =
+  a_main_cat,
+  a_flight_name,
+  leg.%departure_airport_name%,
+  leg.%arrival_airport_name%,
+  True,
+  leg.%start_hb%
+   ->
+    RelTime %_additional_rest_after_wed%,
+    RelTime %_additional_rest_before_wed%;
+  external %additional_rest_table%;
+  main_cat,
+  flightname,
+  departure_station,
+  arrival_station,
+  wed,
+  (validfrom,validto) ->
+    additional_rest_after,
+    additional_rest_before;
+  -, -, -, -, -, - -> -00:01, -00:01;
+end
+
+table additional_rest_thu_table(String a_main_cat, String a_flight_name) =
+  a_main_cat,
+  a_flight_name,
+  leg.%departure_airport_name%,
+  leg.%arrival_airport_name%,
+  True,
+  leg.%start_hb%
+   ->
+    RelTime %_additional_rest_after_thu%,
+    RelTime %_additional_rest_before_thu%;
+  external %additional_rest_table%;
+  main_cat,
+  flightname,
+  departure_station,
+  arrival_station,
+  thu,
+  (validfrom,validto) ->
+    additional_rest_after,
+    additional_rest_before;
+  -, -, -, -, -, - -> -00:01, -00:01;
+end
+
+table additional_rest_fri_table(String a_main_cat, String a_flight_name) =
+  a_main_cat,
+  a_flight_name,
+  leg.%departure_airport_name%,
+  leg.%arrival_airport_name%,
+  True,
+  leg.%start_hb%
+   ->
+    RelTime %_additional_rest_after_fri%,
+    RelTime %_additional_rest_before_fri%;
+  external %additional_rest_table%;
+  main_cat,
+  flightname,
+  departure_station,
+  arrival_station,
+  fri,
+  (validfrom,validto) ->
+    additional_rest_after,
+    additional_rest_before;
+  -, -, -, -, -, - -> -00:01, -00:01;
+end
+
+table additional_rest_sat_table(String a_main_cat, String a_flight_name) =
+  a_main_cat,
+  a_flight_name,
+  leg.%departure_airport_name%,
+  leg.%arrival_airport_name%,
+  True,
+  leg.%start_hb%
+   ->
+    RelTime %_additional_rest_after_sat%,
+    RelTime %_additional_rest_before_sat%;
+  external %additional_rest_table%;
+  main_cat,
+  flightname,
+  departure_station,
+  arrival_station,
+  sat,
+  (validfrom,validto) ->
+    additional_rest_after,
+    additional_rest_before;
+  -, -, -, -, -, - -> -00:01, -00:01;
+end
+
+table additional_rest_sun_table(String a_main_cat, String a_flight_name) =
+  a_main_cat,
+  a_flight_name,
+  leg.%departure_airport_name%,
+  leg.%arrival_airport_name%,
+  True,
+  leg.%start_hb%
+   ->
+    RelTime %_additional_rest_after_sun%,
+    RelTime %_additional_rest_before_sun%;
+  external %additional_rest_table%;
+  main_cat,
+  flightname,
+  departure_station,
+  arrival_station,
+  sun,
+  (validfrom,validto) ->
+    additional_rest_after,
+    additional_rest_before;
+  -, -, -, -, -, - -> -00:01, -00:01;
+end
+
+%additional_rest_table% = %etab_path%(%additional_rest_table_p%);
+%additional_rest_table_p% =
+  parameter "additional_rest"
+  remark "ETAB: Additional rest";
+
+/* end of file */

@@ -1,0 +1,573 @@
+<!-- $Header$ -->
+<views>
+<head>
+
+<title>Crew Meal Order</title>
+
+<alias id="order_search_table" source="tmp_meal_order"/>
+<alias id="forecast_search_table" source="tmp_meal_forecast"/>
+<alias id="update_search_table" source="tmp_meal_update"/>
+
+
+<on-loaded>
+    setEventEnabled(on-changed,false);
+    model("carmensystems.mirador.tablemanager.crew_meal_initiate_tables");
+    refreshClient();
+</on-loaded>
+<on-opened>
+    setEventEnabled(on-changed,false);
+    setEnabled(order_airport_input, false);
+    setEnabled(forecast_airport_input, false);
+    setEnabled(update_airport_input, false);
+    setEventEnabled(on-changed,true);
+</on-opened>
+
+<action name="updateWarningMessage" args="message"><![CDATA[
+if message == '' or message == 'NULL':
+    color = ''
+else:
+    color = 'red'
+context.action('setProperty', 'warning_message', 'style.backgroundColor', color) 
+context.action('setValue', 'warning_message', message)
+]]></action>
+
+</head>
+
+<menu-bar>
+    <menu label="File">
+        <menu-item label="Job Status...">
+            <on-click>openForm("job.xml", frame, new, "channel=meal", "submitter=crew_meal_manual_job");</on-click>
+        </menu-item>
+        <separator/>
+        <menu-item ref="exit_button"/>
+    </menu>
+    <menu label="Basic Data Management">
+        <menu-item label="Consumption Corrections">
+            <on-click>openForm("cmsadm_table.xml", frame, new, "tablesource=meal_cons_correction", "title=Meal Consumption Correction", "allowedit=true")</on-click>
+        </menu-item>
+        <menu-item label="Customers">
+            <on-click>openForm("cmsadm_table.xml", frame, new, "tablesource=meal_customer", "title=Meal Customer", "allowedit=true")</on-click>
+        </menu-item>
+        <menu-item label="Load Corrections">
+            <on-click>openForm("cmsadm_table.xml", frame, new, "tablesource=meal_load_correction", "title=Meal Load Correction", "allowedit=true")</on-click>
+        </menu-item>
+        <menu-item label="Meal Airports">
+            <on-click>openForm("cmsadm_table.xml", frame, new, "tablesource=meal_airport", "title=Meal Airport", "allowedit=true")</on-click>
+        </menu-item>
+        <menu-item label="Meal Codes">
+            <on-click>openForm("cmsadm_table.xml", frame, new, "tablesource=meal_code", "title=Meal Code")</on-click>
+        </menu-item>
+        <menu-item label="Meal Consumptions Codes">
+            <on-click>openForm("cmsadm_table.xml", frame, new, "tablesource=meal_consumption_code", "title=Meal Consumption Codes", "allowedit=true")</on-click>
+        </menu-item>
+        <menu-item label="Suppliers">
+            <on-click>openForm("cmsadm_table.xml", frame, new, "tablesource=meal_supplier", "title=Meal Supplier", "allowedit=true")</on-click>
+        </menu-item>
+    </menu>
+    <menu label="Order Data Management">
+        <menu-item label="Change filter period">
+            <on-click>openForm("change_filter_month.xml", frame, new, "title=Change filter month")</on-click>
+        </menu-item>
+        <menu-item label="Meal Orders">
+            <on-click>
+                revertTables("meal_order");
+                revertTables("meal_order_line");
+                openForm("crew_meal_order_tables.xml", frame, new)
+            </on-click>
+        </menu-item>
+        <menu-item label="Meal Update Orders">
+            <on-click>
+                revertTables("meal_order_update");
+                revertTables("meal_order_update_line");
+                openForm("crew_meal_order_update_tables.xml", frame, new)
+            </on-click>
+        </menu-item>
+    </menu>
+    <menu label="Debug">
+        <menu-item label="Action Dialog"> <on-click>actionDialog()</on-click></menu-item>
+        <menu-item label="List Actions"> <on-click>listActions()</on-click></menu-item>
+    </menu>
+</menu-bar>
+
+<box style.orientation="border" style.height="800">
+    <tabbed-box style.constraints="Center">
+        <box style.orientation="border" label="Meal Order">
+            <vbox style.constraints="West" label="Show Meal Orders">
+                <vbox style.height="120">
+                    <text-field id="order_show_airport" visible="false"/>
+                    <table-cell label="One Airport" id="order_one_station" source="tmp_meal_order_param" row="0" column="one_station" onchanged.direct="true">
+                         <on-changed>
+                            setValue(order_show_airport, "${order_one_station}");
+                            setEnabled(order_airport_input, ${order_show_airport});
+                         </on-changed>
+                    </table-cell>
+                    <table-cell label="Load Airport" id="order_airport_input" source="tmp_meal_order_param" row="0" column="load_station" onchanged.direct="true"/>
+                    <table-cell label="Date"         id="order_date_input" source="tmp_meal_order_param" row="0" column="from_date" onchanged.direct="true">
+                         <on-changed>
+                            model("check_date_in_filter", ${order_date_input});
+                            refreshClient();
+                            updateWarningMessage(${warning_message_cell});
+                         </on-changed>
+                    </table-cell>
+                    <table-cell label="Region" id="order_region_input" source="tmp_meal_order_param" row="0" column="region" style.maxRadioCount="0" onchanged.direct="true"/>
+                </vbox>
+                <check-box  id="orderReloadTables"
+                            label="Reload data before creating order"
+                            tooltip="Force server to reload data, to apply recent basic data changes.">
+                </check-box>
+                <hbox filter.enabled="(!(|(order_date_input=NULL)(order_region_input=NULL)))">
+                    <button label="Search/Refresh"
+                            tooltip="Update the list of orders according to the selection">
+                        <on-click>
+                            progress(true);
+                            submitClient();
+                            model("search_meal_order", "order");
+                            refreshClient();
+                            progress(false);
+                            updateWarningMessage(${warning_message_cell});
+                        </on-click>
+                    </button>
+                    <button label="Create New"
+                            tooltip="Create a new order">
+                        <on-click>
+                            progress(true);
+                            submitClient();
+                            model("create_meal_order", false, ${orderReloadTables});
+                            model("search_meal_order", "order");
+                            refreshClient();
+                            progress(false);
+                            updateWarningMessage(${warning_message_cell});
+                        </on-click>
+                    </button>
+                </hbox>
+            </vbox>
+            <box style.constraints="Center" label="Meal Orders" style.orientation="border">
+                <vbox style.constraints="Center">
+                    <table id="order_search_result"
+                           source="order_search_table"
+                           columns="select,order_number,load_station,supplier,from_date,sent,pdf_doc,xml_doc,username, order_date"
+                           sort.ascending="true"
+                           sort.column="order_number"
+                           style.grid="false"
+                           style.height="300"
+                           style.scroll="true">
+                        <columninfo column="select" label=" " width="10" editable="true" />
+                        <columninfo column="order_number" label="Order" width="75" editable="false" />
+                        <columninfo column="load_station" label="Airport" width="50" editable="false" />
+                        <columninfo column="supplier" label="Caterer" width="100" editable="false" />
+                        <columninfo column="from_date" label="Order Date" width="100" editable="false" />
+                        <columninfo column="sent" label="To Supplier" width="100" editable="false" />
+                        <columninfo column="pdf_doc" label="pdf Doc" width="100" editable="false" />
+                        <columninfo column="xml_doc" label="xml Doc" width="100" editable="false" />
+                        <columninfo column="username" label="Run By" width="100" editable="false" />
+                        <columninfo column="order_date" label="Run Date" width="100" editable="false" />
+                        <on-changed>
+                            submitClient();
+                            model("save_nr_selected_rows", "MealOrderReport");
+                            refreshClient();
+                        </on-changed>
+                    </table>
+                </vbox>
+                <vbox style.constraints="South">
+                    <hbox filter.enabled="(!(${order_search_table._rowcount}=0))">
+                        <button label="Mark All" style.width="75"
+                                tooltip="Mark all orders for operations">
+                             <on-click>
+                                 submitClient();
+                                 model("check_meal_orders", "order", true);
+                                 model("search_meal_order", "order");
+                                 refreshClient();
+                             </on-click>
+                        </button>
+                        <button label="Unmark All" style.width="75"
+                                filter.enabled="(&amp;(${tmp_nr_selected[MealOrderReport,nr_selected_rows]}>0)(!(${order_search_table._rowcount}=0)))"
+                                tooltip="Unmark all marked orders">
+                             <on-click>
+                                 submitClient();
+                                 model("check_meal_orders", "order", false);
+                                 model("search_meal_order", "order");
+                                 refreshClient();
+                             </on-click>
+                        </button>
+                    </hbox>
+                    <text> </text>
+                    <vbox label="Marked Orders Operations" filter.enabled="(${tmp_nr_selected[MealOrderReport,nr_selected_rows]}>0)">
+                        <hbox>
+                            <button label="Send to Supplier" style.width="120"
+                                    tooltip="Send reports for marked orders to the supplier">
+                                <on-click>
+                                    progress(true);
+                                    submitClient();
+                                    model("send_meal_orders_reports", "order", false, "");
+                                    refreshClient();
+                                    progress(false);
+                                </on-click>
+                            </button>
+                        </hbox>
+                        <hbox>
+                            <button label="Forward Reports" style.width="120"
+                                    filter.enabled="(&amp;(${tmp_nr_selected[MealOrderReport,nr_selected_rows]}>0)(!(''=${order_mail_addr}))(!('NULL'=${order_mail_addr})))"
+                                    tooltip="&lt;HTML>
+                                              Forward reports for marked orders to the list of recipients&lt;P>
+                                              Example: &lt;I>any.1@my.org,any.2@my.org,any.X@my.org
+                                             &lt;/HTML>">
+                                <on-click>
+                                    print("FORWARD");
+                                    progress(true);
+                                    submitClient();
+                                    model("send_meal_orders_reports", "order", true, "${forecast_mail_addr}");
+                                    refreshClient();
+                                    progress(false);
+                                </on-click>
+                            </button>
+                            <table-cell id="order_mail_addr" source="tmp_meal_order_param" row="0" column="mail"
+                                        label="  to" style.left="25" style.width="400"
+                                        onchanged.direct="true"
+                                        tooltip="&lt;HTML>
+                                                   List of recipients&lt;P>
+                                                   Example: &lt;I>any.1@my.org,any.2@my.org,any.X@my.org
+                                                 &lt;/HTML>"/>
+                        </hbox>
+                        <hbox>
+                            <button label="Cancel" style.width="120"
+                                    tooltip="Cancel reports for marked orders">
+                                <on-click>
+                                    progress(true);
+                                    submitClient();
+                                    model("cancel_meal_order", false);
+                                    model("search_meal_order", "order");
+                                    model("save_nr_selected_rows", "MealOrderReport");
+                                    refreshClient();
+                                    progress(false);
+                                </on-click>
+                            </button>
+                            <text> </text>
+                        </hbox>
+                        <hbox>
+                            <button label="Write Test Reports" style.width="120"
+                                    tooltip="Write test reports for marked orders">
+                                <on-click>
+                                    progress(true);
+                                    submitClient();
+                                    model("write_all_report_types", false);
+                                    refreshClient();
+                                    progress(false);
+                                </on-click>
+                            </button>
+                            <text> </text>
+                        </hbox>
+                    </vbox>
+                </vbox>
+            </box>
+        </box>
+
+        <box style.orientation="border" label="Meal Forecast">
+            <vbox style.constraints="West" label="Show Meal Forecasts">
+                <vbox style.height="120">
+                    <text-field id="forecast_show_airport" visible="false" />
+                    <table-cell label="One Airport" id="forecast_one_station" source="tmp_meal_order_param" row="0" column="one_station" onchanged.direct="true">
+                         <on-changed>
+                            setValue(forecast_show_airport, "${forecast_one_station}");
+                            setEnabled(forecast_airport_input, ${forecast_show_airport});
+                         </on-changed>
+                    </table-cell>
+                    <table-cell label="Load Airport" id="forecast_airport_input" source="tmp_meal_order_param" row="0" column="load_station" onchanged.direct="true"/>
+                    <table-cell label="From Date"    id="forecast_from_date_input" source="tmp_meal_order_param" row="0" column="from_date" onchanged.direct="true">
+                         <on-changed>
+                            model("check_date_in_filter", ${forecast_from_date_input});
+                            refreshClient();
+                            updateWarningMessage(${warning_message_cell});
+                         </on-changed>
+                    </table-cell>
+                    <table-cell label="To Date"      id="forecast_to_date_input" source="tmp_meal_order_param" row="0" column="to_date" onchanged.direct="true">
+                         <on-changed>
+                            model("check_date_in_filter", ${forecast_to_date_input});
+                            refreshClient();
+                            updateWarningMessage(${warning_message_cell});
+                         </on-changed>
+                    </table-cell>
+                    <table-cell label="Region"       id="forecast_region_input" source="tmp_meal_order_param" row="0" column="region" style.maxRadioCount="0" onchanged.direct="true"/>
+                </vbox>
+                <check-box  id="forecastReloadTables"
+                            label="Reload data before creating forecast"
+                            tooltip="Force server to reload data, to apply recent basic data changes.">
+                </check-box>
+                <hbox filter.enabled="(!(|(forecast_from_date_input=NULL)(forecast_to_date_input=NULL)(forecast_region_input=NULL)))">
+                    <button label="Search/Refresh"
+                            tooltip="Update the list of forecasts according to the selection">
+                        <on-click>
+                            progress(true);
+                            submitClient();
+                            model("search_meal_order", "forecast");
+                            refreshClient();
+                            progress(false);
+                            updateWarningMessage(${warning_message_cell});
+                        </on-click>
+                    </button>
+                    <button label="Create New"
+                            tooltip="Create a new forecast">
+                        <on-click>
+                            progress(true);
+                            submitClient();
+                            model("create_meal_order", true, ${forecastReloadTables});
+                            model("search_meal_order", "forecast");
+                            refreshClient();
+                            progress(false);
+                            updateWarningMessage(${warning_message_cell});
+                        </on-click>
+                    </button>
+                </hbox>
+            </vbox>
+            <box style.constraints="Center" label="Meal Forecasts" style.orientation="border">
+                <vbox style.constraints="Center">
+                    <table id="forecast_search_result"
+                           source="forecast_search_table"
+                           columns="select,order_number,load_station,supplier,from_date,to_date,sent,pdf_doc,xml_doc,username, order_date"
+                           sort.ascending="true"
+                           sort.column="order_number"
+                           style.grid="false"
+                           style.height="200"
+                           style.scroll="true">
+                        <columninfo column="select" label=" " width="10" editable="true" />
+                        <columninfo column="order_number" label="Order" width="75" editable="false" />
+                        <columninfo column="load_station" label="Airport" width="50" editable="false" />
+                        <columninfo column="supplier" label="Caterer" width="100" editable="false" />
+                        <columninfo column="from_date" label="From" width="100" editable="false" />
+                        <columninfo column="to_date" label="To" width="100" editable="false" />
+                        <columninfo column="sent" label="To Supplier" width="100" editable="false" />
+                        <columninfo column="pdf_doc" label="pdf Doc" width="100" editable="false" />
+                        <columninfo column="xml_doc" label="xml Doc" width="100" editable="false" />
+                        <columninfo column="username" label="Run By" width="100" editable="false" />
+                        <columninfo column="order_date" label="Run Date" width="100" editable="false" />
+                        <on-changed>
+                            submitClient();
+                            model("save_nr_selected_rows", "MealForecastReport");
+                            refreshClient();
+                        </on-changed>
+                    </table>
+                </vbox>
+                <vbox style.constraints="South">
+                    <hbox filter.enabled="(!(${forecast_search_table._rowcount}=0))">
+                        <button label="Mark All" style.width="75"
+                                tooltip="Mark all forecasts for operations">
+                             <on-click>
+                                 submitClient();
+                                 model("check_meal_orders", "forecast", true);
+                                 model("search_meal_order", "forecast");
+                                 refreshClient();
+                             </on-click>
+                        </button>
+                        <button label="Unmark All" style.width="75"
+                                filter.enabled="(&amp;(${tmp_nr_selected[MealForecastReport,nr_selected_rows]}>0)(!(${forecast_search_table._rowcount}=0)))"
+                                tooltip="Unmark all marked forecasts">
+                             <on-click>
+                                 submitClient();
+                                 model("check_meal_orders", "forecast", false);
+                                 model("search_meal_order", "forecast");
+                                 refreshClient();
+                             </on-click>
+                        </button>
+                    </hbox>
+                    <text> </text>
+                    <vbox label="Marked Forecasts Operations" filter.enabled="(${tmp_nr_selected[MealForecastReport,nr_selected_rows]}>0)">
+                        <hbox>
+                            <button label="Send to Supplier" style.width="120"
+                                    tooltip="Send reports for marked forecasts to the supplier">
+                                <on-click>
+                                    progress(true);
+                                    submitClient();
+                                    model("send_meal_orders_reports", "forecast", false, "");
+                                    refreshClient();
+                                    progress(false);
+                                </on-click>
+                            </button>
+                        </hbox>
+                        <hbox>
+                            <button label="Forward Reports" style.width="120"
+                                    filter.enabled="(&amp;(${tmp_nr_selected[MealForecastReport,nr_selected_rows]}>0)(!(''=${forecast_mail_addr}))(!('NULL'=${forecast_mail_addr})))"
+                                    tooltip="&lt;HTML>
+                                              Forward reports for marked forecasts to the list of recipients&lt;P>
+                                              Example: &lt;I>any.1@my.org,any.2@my.org,any.X@my.org
+                                             &lt;/HTML>">
+                                <on-click>
+                                    print("FORWARD");
+                                    progress(true);
+                                    submitClient();
+                                    model("send_meal_orders_reports", "forecast", true, "${forecast_mail_addr}");
+                                    refreshClient();
+                                    progress(false);
+                                </on-click>
+                            </button>
+                            <table-cell id="forecast_mail_addr" source="tmp_meal_order_param" row="0" column="mail"
+                                        label="  to" style.left="25" style.width="400"
+                                        onchanged.direct="true"
+                                        tooltip="&lt;HTML>
+                                                   List of recipients&lt;P>
+                                                   Example: &lt;I>any.1@my.org,any.2@my.org,any.X@my.org
+                                                 &lt;/HTML>"/>
+                        </hbox>
+                        <hbox>
+                            <button label="Cancel" style.width="120"
+                                    tooltip="Cancel reports for marked forecasts">
+                                <on-click>
+                                    progress(true);
+                                    submitClient();
+                                    model("cancel_meal_order", true);
+                                    model("search_meal_order", "forecast");
+                                    model("save_nr_selected_rows", "MealForecastReport");
+                                    refreshClient();
+                                    progress(false);
+                                </on-click>
+                            </button>
+                            <text> </text>
+                        </hbox>
+                        <hbox>
+                            <button label="Write Test Reports" style.width="120"
+                                    tooltip="Write test reports for marked forecasts">
+                                <on-click>
+                                    progress(true);
+                                    submitClient();
+                                    model("write_all_report_types", true);
+                                    refreshClient();
+                                    progress(false);
+                                </on-click>
+                            </button>
+                            <text> </text>
+                        </hbox>
+                    </vbox>
+                </vbox>
+            </box>
+        </box>
+        
+        
+        <box style.orientation="border" label="Meal Update">
+            <vbox style.constraints="West" label="Show Meal Updates">
+                <vbox style.height="120">
+                    <text-field id="update_show_airport" visible="false" />
+                    <table-cell label="One Airport" id="update_one_station" source="tmp_meal_order_param" row="0" column="one_station" onchanged.direct="true">
+                         <on-changed>
+                            setValue(update_show_airport, "${update_one_station}");
+                            setEnabled(update_airport_input, ${update_show_airport});
+                            setFocus(update_airport_input);
+                         </on-changed>
+                    </table-cell>
+                    <table-cell label="Load Airport" id="update_airport_input" source="tmp_meal_order_param" row="0" column="load_station" onchanged.direct="true"/>
+                    <table-cell label="Load Date"    id="update_from_date_input" source="tmp_meal_order_param" row="0" column="from_date" onchanged.direct="true">
+                         <on-changed>
+                            model("check_date_in_filter", ${update_from_date_input});
+                            refreshClient();
+                            updateWarningMessage(${warning_message_cell});
+                         </on-changed>
+                    </table-cell>
+                    <table-cell label="Region" id="update_region_input" source="tmp_meal_order_param" row="0" column="region" style.maxRadioCount="0" onchanged.direct="true"/>                    
+                </vbox>
+                <hbox filter.enabled="(!(|(update_from_date_input=NULL)(update_region_input=NULL)))">
+                    <button label="Search/Refresh"
+                            tooltip="Update the list of updates according to the selection"
+                            id = "refresh_button">
+                        <on-click>
+                            progress(true);
+                            submitClient();
+                            model("search_meal_order", "update");
+                            refreshClient();
+                            progress(false);
+                            updateWarningMessage(${warning_message_cell});
+                        </on-click>
+                    </button>
+                </hbox>
+            </vbox>
+            <box style.constraints="Center" label="Meal Updates" style.orientation="border">
+                <vbox style.constraints="Center">
+                    <table id="update_search_result"
+                           source="update_search_table"
+                           columns="select,update_order_num,load_station,supplier,from_date,pdf_doc,xml_doc,username, order_time"
+                           sort.ascending="true"
+                           sort.column="update_order_num"
+                           style.grid="false"
+                           style.height="200"
+                           style.scroll="true">
+                        <columninfo column="select" label=" " width="10" editable="true" />                           
+                        <columninfo column="update_order_num" label="Order" width="75" editable="false" />
+                        <columninfo column="load_station" label="Airport" width="50" editable="false" />
+                        <columninfo column="supplier" label="Caterer" width="100" editable="false" />
+                        <columninfo column="from_date" label="Date" width="100" editable="false" />
+                        <columninfo column="pdf_doc" label="pdf Doc" width="100" editable="false" />
+                        <columninfo column="xml_doc" label="xml Doc" width="100" editable="false" />
+                        <columninfo column="username" label="Run By" width="100" editable="false" />
+                        <columninfo column="order_time" label="Run Time" width="100" editable="false" />
+                        <on-changed>
+                            submitClient();
+                            model("save_nr_selected_rows", "MealUpdateReport");
+                            refreshClient();
+                        </on-changed>
+                    </table>
+                </vbox>
+                <vbox style.constraints="South">
+                    <hbox filter.enabled="(!(${update_search_table._rowcount}=0))">
+                        <button label="Mark All" style.width="75"
+                                tooltip="Mark all updates for operations">
+                             <on-click>
+                                 submitClient();
+                                 model("check_meal_orders", "update", true);
+                                 model("search_meal_order", "update");
+                                 refreshClient();
+                             </on-click>
+                        </button>
+                        <button label="Unmark All" style.width="75"
+                                filter.enabled="(&amp;(${tmp_nr_selected[MealUpdateReport,nr_selected_rows]}>0)(!(${update_search_table._rowcount}=0)))"
+                                tooltip="Unmark all marked updates">
+                             <on-click>
+                                 submitClient();
+                                 model("check_meal_orders", "update", false);
+                                 model("search_meal_order", "update");
+                                 refreshClient();
+                             </on-click>
+                        </button>
+                    </hbox>
+                    <text> </text>
+                    <vbox label="Marked Updates Operations" filter.enabled="(${tmp_nr_selected[MealUpdateReport,nr_selected_rows]}>0)">
+                        <hbox>
+                            <button label="Forward Reports" style.width="120"
+                                    filter.enabled="(&amp;(${tmp_nr_selected[MealUpdateReport,nr_selected_rows]}>0)(!(''=${update_mail_addr}))(!('NULL'=${update_mail_addr})))"
+                                    tooltip="&lt;HTML>
+                                              Forward reports for marked updates to the list of recipients&lt;P>
+                                              Example: &lt;I>any.1@my.org,any.2@my.org,any.X@my.org
+                                             &lt;/HTML>">
+                                <on-click>
+                                    print("FORWARD");
+                                    progress(true);
+                                    submitClient();
+                                    model("send_meal_orders_reports", "update", true, "${update_mail_addr}");
+                                    refreshClient();
+                                    progress(false);
+                                </on-click>
+                            </button>
+                            <table-cell id="update_mail_addr" source="tmp_meal_order_param" row="0" column="mail"
+                                        label="  to" style.left="25" style.width="400"
+                                        onchanged.direct="true"
+                                        tooltip="&lt;HTML>
+                                                   List of recipients&lt;P>
+                                                   Example: &lt;I>any.1@my.org,any.2@my.org,any.X@my.org
+                                                 &lt;/HTML>"/>
+                        </hbox>
+                    </vbox>
+                </vbox>
+                
+                
+                
+            </box>
+        </box>
+    </tabbed-box>
+
+    <vbox style.constraints="South">
+        <button id="exit_button" label="_E_xit" style.width="75"
+                tooltip="Close the Crew Meal Order form">
+            <on-click>closeForm()</on-click>
+        </button>
+        <table-cell id="warning_message_cell" source="tmp_meal_message" row="0" column="message" editable="false" visible="false"/>
+        <text-field id="warning_message" value="" editable="false"/>
+    </vbox>
+</box>
+</views>
+
+<!-- vim: set ts=4 sw=4 et sta: -->

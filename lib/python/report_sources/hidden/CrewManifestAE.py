@@ -1,0 +1,34 @@
+
+
+"""
+CR SASCMS-2700
+
+PDF report with Flight Crew Manifest (FCM) for Dubai (AE).
+"""
+
+import report_sources.hidden.CrewManifestPDF as pdf
+
+the_country = "AE"
+
+
+# CrewManifestAE ========================================================={{{1
+class CrewManifestAE(pdf.CrewManifestPDF):
+    country = the_country
+    show_visa = False
+
+
+def reportSelectedFlight():
+    return pdf.reportSelectedFlight(the_country)
+
+
+bit = reportSelectedFlight
+
+
+# __main__ ==============================================================={{{1
+if __name__ == '__main__':
+    bit()
+
+
+# modeline ==============================================================={{{1
+# vim: set fdm=marker:
+# eof

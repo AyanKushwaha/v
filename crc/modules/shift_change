@@ -1,0 +1,148 @@
+/* -*- crc -*-
+ *
+ * Shift Change Module
+ *
+ * Identifies shift changes between duties
+ * and controls them with a rule OR cost.
+ *
+ */
+
+
+root module shift_change
+import fundamental;
+import duty;
+import levels;
+import trip;
+import duty_period;
+
+
+/* 0. Fundamentals */
+
+group rulecost =
+    %rulecost_header%,
+    maximum_number_of_shift_changes,
+    %use_cost%,
+    %cost_for_shift_change%;
+
+%rulecost_header% =
+    parameter ""
+    remark "#HEADER# Shift Change Rule/Cost";
+
+group parameters =
+    %parameters_header%,
+    %early_shift_starts_before%,
+    %late_shift_ends_after%,
+    %minimum_days_to_check%,
+    %maximum_number_of_shift_changes%;
+
+%parameters_header% =
+    parameter ""
+    remark "#HEADER# Shift Change Parameters";
+
+%early_shift_starts_before% =
+    parameter 08:00
+    remark "Early Shift starts before";
+
+%late_shift_ends_after% =
+    parameter 20:00
+    remark "Late Shift ends after";
+
+%early_shift% =
+    duty.%start_od_lt% < %early_shift_starts_before%;
+
+%late_shift% =
+    not %early_shift% and
+    (duty.%start_od_lt% > %late_shift_ends_after% or
+     %is_in_range_rel%(%late_shift_ends_after%+0:01,
+                       duty.%start_od_lt%,
+                       duty.%end_od_lt%));
+
+%neutral_shift% =
+    not (%early_shift% or %late_shift%);
+
+
+/* 1. Shift Changes */
+
+%followed_by_early_shift% =
+    default(next(duty(trip), %early_shift%)
+                where (not %neutral_shift%),
+            false);
+
+%followed_by_late_shift% =
+    default(next(duty(trip), %late_shift%)
+                where (not %neutral_shift%),
+            false);
+
+%early_shift_followed_by_late_shift% =
+    %early_shift% and
+    %followed_by_late_shift%;
+
+%late_shift_followed_by_early_shift% =
+    %late_shift% and
+    %followed_by_early_shift%;
+
+%shift_change% =
+    %early_shift_followed_by_late_shift% or
+    %late_shift_followed_by_early_shift%;
+
+export %number_of_shift_changes% =
+    count(duty(trip))
+        where (%shift_change%);
+
+
+/* 2. Rule */
+/* Redefined for rostering */
+
+export %minimum_days_to_check% =
+    parameter 3
+    remark "Check shift change on trips of at least x days long";
+
+export %maximum_number_of_shift_changes% =
+    parameter 1
+    remark "Maximum number of shift changes in a trip";
+
+rule maximum_number_of_shift_changes =
+    valid not %use_cost% and
+          %maximum_number_of_shift_changes_valid%;
+
+    %number_of_shift_changes% <= %maximum_number_of_shift_changes%;
+
+    remark "Maximum number of shift changes in a trip";
+    failtext %maximum_number_of_shift_changes_failtext%;
+end
+
+/* Valid statement is used in both the rule and cost below
+    - Trip needs to be in pp
+    - Trip is not a standby
+    - Trip is at least as long as the minimum days to check
+    - Trip is NOT a 2 day long split duty */
+export %maximum_number_of_shift_changes_valid% =
+    trip.%in_pp% and
+    not trip.%is_standby% and
+    trip.%days% >= %minimum_days_to_check% and
+    not (duty_period.%trip_has_split_duty% and trip.%days% = 2);
+
+%maximum_number_of_shift_changes_failtext% =
+    concat("No more than ",
+           format_int(%maximum_number_of_shift_changes%, "%d"),
+           " shift change(s) allowed");
+
+
+/* 3. Cost */
+
+export %use_cost% =
+    parameter false
+    remark "Use Shift Change cost INSTEAD of the rule";
+
+%cost_for_shift_change% =
+    parameter 5000
+    remark "Cost for breaking shift change maximum";
+
+export %cost% =
+    if %use_cost% and
+       %maximum_number_of_shift_changes_valid% and
+       %number_of_shift_changes% > %maximum_number_of_shift_changes%
+    then
+        %cost_for_shift_change% * %number_of_shift_changes%
+    else
+        0;

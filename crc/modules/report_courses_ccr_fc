@@ -1,0 +1,160 @@
+
+module report_courses_ccr_fc inherits report_courses
+import fundamental;
+import training;
+import crew;
+import leg;
+import levels;
+import task;
+import attributes;
+
+%start_date% = format_time(leg.%start_hb%, "%02d-%b-%Y");
+%crew_has_training% = any(leg(roster), %ground_course_or_sim%);
+%course_name% = %restr_info%(leg.%start_hb%, 1);
+%aircraft_type% = crew.%ac_family_by_qual%;
+%group_code% =
+    default(%group_by_activity%(%code%), task.%group_code%);
+    
+table activity_set_table(String activity) = 
+  activity -> String  %group_by_activity%, String %desc%;
+  external task.%activity_set_table%;
+  "id" -> "grp", "si";
+  -    -> void_string, void_string; 
+end    
+%code% =
+    default(training.%leg_code_redefined%, task.%code%);
+    
+redefine %has_attribute% =
+    attributes.%leg_has_training_code%;
+
+redefine %training_attribute% =
+    attributes.%leg_training_code%;
+
+%description% =
+    default(task.%description_by_code%(%code%), task.%description%);
+    
+%briefing_start% = time_of_day(leg.%ci_start_lt%);
+%debriefing_end% = time_of_day(leg.%co_end_lt%);
+
+%ground_course% =
+    (if %simulator% then
+        False
+    else
+        (leg.%is_course% or leg.%is_recurrent% or leg.%is_emg_pgt%)) and not void(%course_name%);
+    
+%simulator% =
+    leg.%is_simulator% and not void(%course_name%);
+    
+%ground_course_or_sim% =
+    %ground_course% or %simulator%;
+
+set excluded_tasks =
+    "TH1";
+    
+%show_in_common% =
+    not (task.%code% in excluded_tasks);
+
+export iterator all_course_activity_leg_set =
+  partition(leg)
+  by(%ground_course_or_sim%,
+     %course_name%,
+     task.%code%,
+     task.%group_code%,
+     leg.%start_hb%,
+     leg.%end_hb%);
+end
+
+export iterator course_leg_set =
+  partition(leg)
+  by(%ground_course_or_sim%,
+     %course_name%);
+end
+export iterator course_activity_leg_set =
+  partition(leg)
+  by(%ground_course%,
+     task.%code%,
+     task.%group_code%,
+     leg.%start_hb%,
+     leg.%end_hb%);
+end
+
+export iterator course_simulator_leg_set =
+    partition(leg)
+    by(%simulator%,
+     task.%code%,
+     task.%group_code%,
+     leg.%start_hb%,
+     leg.%end_hb%);
+end
+
+table crew_restriction(AbsTime date, Int ix) =
+  crew.%id%, date, ix ->
+    export String  %restr_type%,
+    export String  %restr_subtype%,
+    export String %restr_info%;
+  external crew.%restriction_table%;
+  crew, (validfrom, validto(, match_number -> 
+    rest_typ, rest_subtype, si;
+  -, -, - -> void_string, void_string, void_string;
+end
+
+export enum SimReportMode = 
+  simReport_All remark "All"; 
+  simReport_Rec remark "Rec"; 
+  simReport_Course remark "Course";
+  remark "Sim Report";
+end
+    
+%sim_report_type% =
+    parameter simReport_All
+    remark "SimDatedInfo, which activities to show in report";
+    
+set rec_set =
+    parameter "S", "Y", "CH", "K"
+    remark "SimDatedInfo Recurent codes";
+
+set rec_number_set =
+    parameter "S", "K", "Y"
+    remark "SimDatedInfo Recurent first letter in code followed by number";
+
+set course_set =
+    parameter "C", "Z", "CG"
+    remark "SimDatedInfo Course codes";
+
+set course_number_set =
+    parameter "C", "Z"
+    remark "SimDatedInfo Course first letter in code followed by number";
+
+set number_set = "0", "1", "2", "3", "4", "5", "6", "7", "8", "9";
+
+%is_simulator_rec% =
+    let char1 = substr(%code%,1,1),
+        char2 = default(substr(%code%,2,1),""),
+        chars = concat(char1,char2);
+    %code% in rec_set or
+    chars in rec_set or 
+    (char1 in rec_number_set and char2 in number_set);
+    
+%is_simulator_course% =
+    let char1 = substr(%code%,1,1),
+        char2 = default(substr(%code%,2,1),""),
+        chars = concat(char1,char2);
+    %code%  in course_set or 
+    chars in course_set or 
+    (char1 in course_number_set and char2 in number_set);
+
+redefine %simulator_for_dated_report% =
+    %is_simulator_leg% and
+    not default(prev(leg(duty), %is_simulator_leg%), false);
+
+set course_simulator_set = "AST","ASF","FFS"; 
+set rec_simulator_set = "SIM","OPC","PC";
+set simulator_set = "SIM","OPC","PC","AST","ASF","FFS";
+
+%is_simulator_leg% =
+    if %sim_report_type% = simReport_All then
+        %is_simulator_rec% or %is_simulator_course%
+    else if %sim_report_type% = simReport_Rec then
+        %is_simulator_rec%
+    else
+        %is_simulator_course%;

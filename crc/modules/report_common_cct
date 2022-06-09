@@ -1,0 +1,157 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   List common variables used in reports in Tracking.
+ *
+ * Created by:
+ *   Hugo Vazquez, 09-Mar-2009
+ *
+ * Major changes:
+ *
+ */
+ 
+module report_common_cct inherits report_common_ccr
+ 
+import salary_overtime;
+import salary_loss_of_rest;
+import report_overtime;
+import report_meal;
+import salary;
+import crew;
+import duty;
+import leg;
+import duty_time;
+import base_break;
+import calendar;
+import rest;
+import compdays;
+import accumulators;
+import roster;
+
+export %bought_day_code% = if leg.%is_bought% then "FX" else "";
+export %base_break_code% = if base_break.%is_break% then "BB" else "";
+export %private_trade_code% = if duty.%is_privately_traded% then "PT" else "";
+export %meal_code% = report_meal.%meal_code%;
+export %temp_ill_code% = salary_overtime.%temp_ill_code%;
+export %ac_type% = leg.%ac_type%;
+export %start_stn% = leg.%start_station%;
+export %end_stn% = leg.%end_station%;
+export %leg_time% = leg.%time%;
+export %leg_start% = leg.%start_UTC%;
+export %leg_end% = leg.%end_UTC%;
+export %leg_number% = leg.%leg_number%;
+
+export %mdc_leg% = default(salary_overtime.%maitre_de_cabin_long_haul_leg%,0:00) + default(salary_overtime.%maitre_de_cabin_short_haul_leg%,0:00);
+export %scc_leg% = salary_overtime.%senior_cc_allowance_leg%;
+
+export %leg_in_period% = salary_overtime.%leg_in_period%;
+export %duty_in_period% = salary_overtime.%duty_in_period%;
+export %wop_in_period% = salary_overtime.%wop_in_period%;
+
+export %leg_is_touching%(abstime t1, abstime t2) = 
+  leg.%start_utc% <= t2 and leg.%end_utc% >= t1;
+
+export %leg_is_touching_hb%(abstime t1, abstime t2) = 
+  leg.%start_hb% <= t2 and leg.%end_hb% >= t1;
+
+export %duty_followed_by_minimum_rest% = rest.%duty_followed_by_minimum_rest%;
+  
+export %duty_is_touching_sunday%(Abstime month) =
+  %_duty_is_touching_sunday%(duty.%start_hb%, duty.%end_hb%, month)
+  and default(next(duty(roster),
+                   not %_duty_is_touching_sunday%(duty.%start_hb%, duty.%end_hb%, month)),
+               true);
+%_duty_is_touching_sunday%(Abstime st,Abstime et,Abstime month) =
+  let duty_start = nmax(st, month),
+      duty_end = nmin(et, add_months(month,1) - 0:01);
+  ((duty_start <= (round_down_week(duty_end) - 0:01) 
+    and (duty_end - 0:01) >= (round_down_week(duty_end) - 24:00))
+   or 
+   (duty_start <= (round_up_week(duty_end) - 0:01) 
+    and (duty_end - 0:01) >= (round_up_week(duty_end) - 24:00)));
+    
+export %leg_scheduled_start% = 
+  let std = leg.%activity_scheduled_start_time_utc%;
+  if leg.%is_simulator% then std - default(leg.%check_in%, 0:00) else std;
+export %leg_scheduled_end% = 
+  let sta = leg.%activity_scheduled_end_time_utc%;
+  if leg.%is_simulator% then sta + default(leg.%check_out%, 0:00) else sta;
+
+
+export %is_loss_of_rest_high% = salary_loss_of_rest.%is_loss_of_rest_high%;
+export %is_loss_of_rest_low% = salary_loss_of_rest.%is_loss_of_rest_low%;
+        
+export %is_first_loss_of_rest_high% =
+  last(duty(roster), duty.%start_utc% >= salary.%salary_month_start%
+                    and %is_loss_of_rest_high%)
+  where(duty.%end_utc% < salary.%salary_month_start%);
+  
+export %is_first_loss_of_rest_low% =
+  last(duty(roster), duty.%start_utc% >= salary.%salary_month_start%
+                     and %is_loss_of_rest_low%)
+  where (duty.%end_utc% < salary.%salary_month_start%); 
+  
+export %first_loss_of_rest_high_str% = 
+  last(duty(roster), %loss_of_rest_high_str%)
+  where(duty.%end_utc% < salary.%salary_month_start%
+        and next(duty(roster), duty.%start_utc% >= salary.%salary_month_start%)
+        and salary_loss_of_rest.%is_loss_of_rest_high%);
+        
+export %first_loss_of_rest_low_str% = 
+  last(duty(roster), %loss_of_rest_low_str%)
+  where(duty.%end_utc% < salary.%salary_month_start%
+        and next(duty(chain), duty.%start_utc% >= salary.%salary_month_start%)
+        and salary_loss_of_rest.%is_loss_of_rest_low%);
+export %loss_of_rest_high_str% =
+  concat(%rest_start_str%, %rest_end_str%, ", ", salary_loss_of_rest.%rest_time_high_str%);
+export %loss_of_rest_low_str% = 
+  concat(%rest_start_str%, %rest_end_str%, ", ", salary_loss_of_rest.%rest_time_low_str%);
+
+
+export %rest_start_str% =
+  default(format_time(duty.%rest_start_utc%, "%02d%b %02H:%02M"),"");
+export %rest_end_str% =
+  let rest_end =
+      if salary_loss_of_rest.%is_loss_rest_sh_24hrs_SKD%
+         or salary_loss_of_rest.%is_loss_rest_lh_24hrs_SKS%
+      then last(leg(duty), rest.%in_24hrs_stop%)
+      else %_rest_end_utc%;
+  if (salary_loss_of_rest.%is_loss_rest_lh_SKD%
+      or salary_loss_of_rest.%is_loss_rest_lh_SKN%)
+  then ""
+  else concat(" - ", default(format_time(rest_end, "%02d%b %02H:%02M"),""));
+%_rest_end_utc% =
+  next(duty(chain), duty.%start_UTC%) where (duty.%is_on_duty%);
+
+export %duty_is_last_in_calendar_month% =
+  let this = duty.%start_month_end%;
+  default(duty.%is_on_duty% and
+          next(duty(roster), duty.%start_month_start% = this)
+          where (duty.%is_on_duty%), true);
+
+export %block_time_6_months%(Abstime end_date) =
+  let start_date = add_months(end_date, -6);
+  accumulators.%block_time_in_period_caa%(start_date, end_date);
+export %block_time_12_months%(Abstime end_date) =
+  let start_date = add_months(end_date, -12);
+  accumulators.%block_time_in_period_caa%(start_date, end_date);
+
+
+export %block_time_in_period%(Abstime start_date, Abstime end_date) =
+  accumulators.%block_time_in_period_caa%(start_date, end_date);
+
+
+export %duty_time_in_period%(Abstime start_date, Abstime end_date) =
+  accumulators.%duty_time_in_period%(start_date, end_date);
+
+export %block_time_in_previous_28_days% = %block_time_in_period%(%now_date% - 28 * 24:00, %now_date%);
+export %block_time_in_following_28_days% = %block_time_in_period%(%now_date%, %now_date% + 28 * 24:00);
+export %duty_time_in_current_month% = %duty_time_in_period%(round_down_month(%now%), round_up_month(%now%));
+export %block_time_in_full_calendar_year% = %block_time_in_period%(round_down_year(%now%), round_up_year(%now%) - 0:01);
+export %aircraft_qlns% = default(crew.%aircraft_qlns_pos_w_new_restr%, "");
+
+export %now_year_down% = round_down_year(%now%);
+export %now_year_up% = round_up_year(%now%);
+export %now_year_up_one% = round_up_year(%now%) - 0:01;

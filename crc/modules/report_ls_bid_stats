@@ -1,0 +1,533 @@
+/* -*- crc -*- */
+module report_ls_bid_stats
+
+import base_utils;
+import bid;
+import crew;
+import fundamental;
+import iterators;
+import keywords;
+import leg;
+import levels;
+import lifestyle;
+import planning_area;
+import trip;
+import time_utils;
+
+%plan_is_fd_lh% =
+    planning_area.%crew_planning_group% = "SKI";
+
+%plan_is_cc% =
+    planning_area.%_crew_category% = "CC";
+
+%trip_descriptor% =
+    if %trip_has_base_variants% then
+        concat(
+            cat(leg(trip), %int2str%(leg.%flight_nr%)) where(not leg.%is_deadhead%),
+            "|",
+            %abstime2str%(%trip_nonvariant_start_utc%))
+    else concat(
+        cat(leg(trip), %int2str%(leg.%flight_nr%)),
+        "|",
+        %abstime2str%(first(leg(trip), leg.%start_utc%)));
+
+%trip_has_base_variants% =
+    first(leg(trip), keywords.%crr_has_base_variant%);
+
+%trip_nonvariant_start_utc% =
+    first(leg(trip), leg.%start_utc%) where(not leg.%is_deadhead%);
+
+%num_crew% =
+    count(roster_set);
+
+%num_bids% =
+    sum(roster_set, bid.%crew_num_dated_bids_in_period%);
+
+%num_granted_bids% =
+    sum(roster_set, %crew_num_granted_bids%);
+
+%crew_num_granted_bids% =
+    count(times(bid.%crew_num_bids%))
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%get_roster_granted_value%(times_index(0)) >= 1);
+
+%num_crew_with_lifestyle% =
+    count(roster_set)
+    where(lifestyle.%has_lifestyle_bid%);
+
+%rp_target% = bid.%target%;
+
+%num_crew_with_db% =
+    count(roster_set)
+    where(bid.%crew_num_dated_bids_in_period% > 0);
+
+%num_crew_with_no_granted_pp_bids% =
+    count(roster_set)
+    where(bid.%crew_has_dated_bids% and bid.%roster_points% = 0);
+
+%bidding_crew_percentage% =
+    fundamental.%div_rounds%(
+        %num_crew_with_db% * 100,
+        %num_crew%);
+
+%lifestyling_crew_percentage% =
+    fundamental.%div_rounds%(
+        %num_crew_with_lifestyle% * 100,
+        %num_crew%);
+
+%percent_crew_with_no_granted_pp_bids% =
+    fundamental.%div_rounds%(
+        %num_crew_with_no_granted_pp_bids% * 100,
+        %num_crew%);
+
+%num_crew_below_bid_target% =
+    count(roster_set)
+    where(bid.%crew_has_dated_bids% and
+          bid.%roster_points% < bid.%target%);
+
+%percent_crew_below_bid_target% =
+    fundamental.%div_rounds%(
+    %num_crew_below_bid_target% * 100,
+    %num_crew_with_db%);
+
+%average_roster_points% =
+    default(
+        avg(roster_set, bid.%roster_points%)
+        where(bid.%crew_has_dated_bids%),
+        0);
+
+/* Dated Bids */
+
+%total_timeoff_bids% =
+    sum(roster_set, %timeoff_bids%);
+
+%timeoff_bids% =
+    count(times(bid.%crew_num_bids%))
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%is_timeoff_bid%(times_index(0)));
+
+%total_granted_timeoff_bids% =
+    sum(roster_set, %crew_num_granted_timeoff_bids%);
+
+%percent_granted_timeoff_bids% =
+    fundamental.%div_rounds%(
+        %total_granted_timeoff_bids% * 100,
+        %total_timeoff_bids%);
+
+%crew_num_granted_timeoff_bids% =
+    count(times(bid.%crew_num_bids%))
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%is_timeoff_bid%(times_index(0)) and
+          bid.%get_roster_granted_value%(times_index(0)) >= 1);
+
+
+%total_timeoff_bids_on_day%(Abstime date) =
+    sum(roster_set, %timeoff_bids_on_day%(date) );
+
+%timeoff_bids_on_day%(Abstime date) =
+    count(times(bid.%crew_num_bids%))
+            where(bid.%is_valid_dated_bid%(times_index(0)) and
+                bid.%is_timeoff_bid%(times_index(0)) and
+                time_utils.%times_overlap%(
+                bid.%abs1%(%times_index_0%, 0),
+                bid.%abs2%(%times_index_0%, 0),
+                date,
+                date+24:00)
+          );
+
+%total_granted_timeoff_bids_on_day%(Abstime date) =
+    sum(roster_set, %crew_num_granted_timeoff_bids_on_day%(date));
+
+%crew_num_granted_timeoff_bids_on_day%(Abstime date) =
+    count(times(bid.%crew_num_bids%))
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%is_timeoff_bid%(times_index(0)) and
+          bid.%get_roster_granted_value%(times_index(0)) >= 1 and
+          time_utils.%times_overlap%(
+                bid.%abs1%(%times_index_0%, 0),
+                bid.%abs2%(%times_index_0%, 0),
+                date,
+                date+24:00));
+
+%percent_granted_timeoff_bids_on_day%(Abstime date) =
+    fundamental.%div_rounds%(
+        %total_granted_timeoff_bids_on_day%(date) * 100,
+        %total_timeoff_bids_on_day%(date));
+
+
+
+%total_flightid_bids% =
+    sum(roster_set, %crew_num_flightid_bids%);
+
+%crew_num_flightid_bids% =
+    count(times(bid.%crew_num_bids%))
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%is_flightid_bid%(times_index(0)));
+
+%total_granted_flightid_bids% =
+    sum(roster_set, %crew_num_granted_flightid_bids%);
+
+%percent_granted_flightid_bids% =
+    fundamental.%div_rounds%(
+        %total_granted_flightid_bids% * 100,
+        %total_flightid_bids%);
+
+%crew_num_granted_flightid_bids% =
+    count(times(bid.%crew_num_bids%))
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%is_flightid_bid%(times_index(0)) and
+          bid.%get_roster_granted_value%(times_index(0)) >= 1);
+
+%total_stop_bids% =
+    sum(roster_set, %crew_num_stop_bids%);
+
+%crew_num_stop_bids% =
+    count(times(bid.%crew_num_bids%))
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%is_stop_bid%(times_index(0)));
+
+%total_granted_stop_bids% =
+    sum(roster_set, %crew_num_granted_stop_bids%);
+
+%crew_num_granted_stop_bids% =
+    /* count number of stop bids granted at least once */
+    count(times(bid.%crew_num_bids%))
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%is_stop_bid%(times_index(0)) and
+          bid.%get_roster_granted_value%(times_index(0)) >= 1);
+
+%total_times_granted_stop_bids% =
+    sum(roster_set, %crew_total_num_granted_stops%);
+
+%crew_total_num_granted_stops% =
+    /* count all stops granted by stop bids */
+    sum(times(bid.%crew_num_bids%), bid.%get_roster_granted_value%(times_index(0)))
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%is_stop_bid%(times_index(0)));
+
+%percent_granted_stop_bids% =
+    fundamental.%div_rounds%(
+        %total_granted_stop_bids% * 100,
+        %total_stop_bids%);
+
+%trip_grants_stop_bid%(String station) =
+    default(%_trip_grants_stop_bid%(station), false);
+
+%_trip_grants_stop_bid%(String station) =
+    bid.%trip_is_valid_for_stop_bid_in_period%(%pp_start_day%, %pp_end_day%) and
+    bid.%report_trip_granted_value_for_stop_bid%(station) > 0;
+
+
+/*   CHECKIN IN - CHECK OUT BIDS */
+
+%total_checkin_bids_overall% =
+    sum(roster_set,
+        sum(times(bid.%crew_num_bids%),%crew_num_checkin_bids%(times_index(0)))
+            where(bid.%is_checkin_bid%(times_index(0))));
+
+%total_checkin_bids%(Int No) =
+    sum(roster_set, %crew_num_checkin_bids%(No));
+
+%crew_num_checkin_bids%(Int no) =
+    count(trip(roster))
+    where(bid.%get_trip_is_valid%(no) and bid.%is_first_trip_in_production%);
+
+%total_granted_checkin_bids% =
+    sum(roster_set,
+        sum(times(bid.%crew_num_bids%),%crew_num_granted_checkin_bids%(times_index(0)))
+            where(bid.%is_checkin_bid%(times_index(0))));
+
+%crew_num_granted_checkin_bids%(Int No) =
+    bid.%get_roster_granted_value%(No);
+
+%total_checkout_bids_overall% =
+    sum(roster_set,
+        sum(times(bid.%crew_num_bids%),%total_checkout_bids%(times_index(0)))
+            where(bid.%is_checkout_bid%(times_index(0))));
+
+%total_checkout_bids%(Int No) =
+    sum(roster_set, %crew_num_checkout_bids%(No));
+
+%crew_num_checkout_bids%(Int no) =
+    count(trip(roster))
+        where(bid.%get_trip_is_valid%(no) and bid.%is_last_trip_in_production%);
+
+%total_granted_checkout_bids% =
+    sum(roster_set,
+        sum(times(bid.%crew_num_bids%),%crew_num_granted_checkout_bids%(times_index(0)))
+            where(bid.%is_checkout_bid%(times_index(0))));
+
+%crew_num_granted_checkout_bids%(Int No) =
+    bid.%get_roster_granted_value%(No);
+
+/* Dated Bids Per Weight */
+
+/* plan / window level */
+%total_num_timeoff_bids_low% =
+    sum(roster_set, %crew_total_num_timeoff_bids_low%);
+%total_num_timeoff_bids_medium% =
+    sum(roster_set, %crew_total_num_timeoff_bids_medium%);
+%total_num_timeoff_bids_high% =
+    sum(roster_set, %crew_total_num_timeoff_bids_high%);
+
+%granted_num_timeoff_bids_low% =
+    sum(roster_set, %crew_granted_num_timeoff_bids_low%);
+%granted_num_timeoff_bids_medium% =
+    sum(roster_set, %crew_granted_num_timeoff_bids_medium%);
+%granted_num_timeoff_bids_high% =
+    sum(roster_set, %crew_granted_num_timeoff_bids_high%);
+
+%total_num_stop_bids_low% =
+    sum(roster_set, %crew_total_num_stop_bids_low%);
+%total_num_stop_bids_medium% =
+    sum(roster_set, %crew_total_num_stop_bids_medium%);
+%total_num_stop_bids_high% =
+    sum(roster_set, %crew_total_num_stop_bids_high%);
+
+%granted_num_stop_bids_low% =
+    sum(roster_set, %crew_granted_num_stop_bids_low%);
+%granted_num_stop_bids_medium% =
+    sum(roster_set, %crew_granted_num_stop_bids_medium%);
+%granted_num_stop_bids_high% =
+    sum(roster_set, %crew_granted_num_stop_bids_high%);
+
+%total_num_flightid_bids_low% =
+    sum(roster_set, %crew_total_num_flightid_bids_low%);
+%total_num_flightid_bids_medium% =
+    sum(roster_set, %crew_total_num_flightid_bids_medium%);
+%total_num_flightid_bids_high% =
+    sum(roster_set, %crew_total_num_flightid_bids_high%);
+
+%granted_num_flightid_bids_low% =
+    sum(roster_set, %crew_granted_num_flightid_bids_low%);
+%granted_num_flightid_bids_medium% =
+    sum(roster_set, %crew_granted_num_flightid_bids_medium%);
+%granted_num_flightid_bids_high% =
+    sum(roster_set, %crew_granted_num_flightid_bids_high%);
+
+%total_num_checkin_bids_low% =
+    sum(roster_set, %crew_total_num_checkin_bids_low%);
+%total_num_checkin_bids_medium% =
+    sum(roster_set, %crew_total_num_checkin_bids_medium%);
+%total_num_checkin_bids_high% =
+    sum(roster_set, %crew_total_num_checkin_bids_high%);
+
+%granted_num_checkin_bids_low% =
+    sum(roster_set, %crew_granted_num_checkin_bids_low%);
+%granted_num_checkin_bids_medium% =
+    sum(roster_set, %crew_granted_num_checkin_bids_medium%);
+%granted_num_checkin_bids_high% =
+    sum(roster_set, %crew_granted_num_checkin_bids_high%);
+
+%total_num_checkout_bids_low% =
+    sum(roster_set, %crew_total_num_checkout_bids_low%);
+%total_num_checkout_bids_medium% =
+    sum(roster_set, %crew_total_num_checkout_bids_medium%);
+%total_num_checkout_bids_high% =
+    sum(roster_set, %crew_total_num_checkout_bids_high%);
+
+%granted_num_checkout_bids_low% =
+    sum(roster_set, %crew_granted_num_checkout_bids_low%);
+%granted_num_checkout_bids_medium% =
+    sum(roster_set, %crew_granted_num_checkout_bids_medium%);
+%granted_num_checkout_bids_high% =
+    sum(roster_set, %crew_granted_num_checkout_bids_high%);
+
+%total_num_bids_low% =
+    sum(roster_set, %crew_total_bids_low%);
+%total_num_bids_medium% =
+    sum(roster_set, %crew_total_bids_medium%);
+%total_num_bids_high% =
+    sum(roster_set, %crew_total_bids_high%);
+
+%granted_num_bids_low% =
+    sum(roster_set, %crew_granted_bids_low%);
+%granted_num_bids_medium% =
+    sum(roster_set, %crew_granted_bids_medium%);
+%granted_num_bids_high% =
+    sum(roster_set, %crew_granted_bids_high%);
+
+
+%crew_total_num_timeoff%(Int weight) =
+    count(times(bid.%crew_num_bids%))
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%points%(times_index(0)) = weight and
+          bid.%is_timeoff_bid%(times_index(0)));
+
+%crew_granted_num_timeoff%(Int weight) =
+    count(times(bid.%crew_num_bids%))
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%points%(times_index(0)) = weight and
+          bid.%is_timeoff_bid%(times_index(0)) and
+          bid.%get_roster_granted_value%(times_index(0)) >= 1);
+
+%crew_total_num_stop%(Int weight) =
+    count(times(bid.%crew_num_bids%))
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%points%(times_index(0)) = weight and
+          bid.%is_stop_bid%(times_index(0)));
+
+%crew_granted_num_stop%(Int weight) =
+    count(times(bid.%crew_num_bids%))
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%points%(times_index(0)) = weight and
+          bid.%is_stop_bid%(times_index(0)) and
+          bid.%get_roster_granted_value%(times_index(0)) >= 1);
+
+%crew_total_num_flightid%(Int weight) =
+    count(times(bid.%crew_num_bids%))
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%points%(times_index(0)) = weight and
+          bid.%is_flightid_bid%(times_index(0)));
+
+%crew_granted_num_flightid%(Int weight) =
+    count(times(bid.%crew_num_bids%))
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%points%(times_index(0)) = weight and
+          bid.%is_flightid_bid%(times_index(0)) and
+          bid.%get_roster_granted_value%(times_index(0)) >= 1);
+
+/*   TOTAL AND GRANTED CHECKIN CHECKOUT BIDS BY WEIGHT  */
+%crew_total_num_checkin%(Int weight) =
+    sum(times(bid.%crew_num_bids%), %crew_num_checkin_bids%(times_index(0) ))
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%points%(times_index(0)) = weight and
+          bid.%is_checkin_bid%(times_index(0)));
+
+%crew_granted_num_checkin%(Int weight) =
+    sum(times(bid.%crew_num_bids%), %crew_num_granted_checkin_bids%(times_index(0)))
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%points%(times_index(0)) = weight and
+          bid.%is_checkin_bid%(times_index(0)) and
+          bid.%get_roster_granted_value%(times_index(0)) >= 1);
+
+%crew_total_num_checkout%(Int weight) =
+    sum(times(bid.%crew_num_bids%), %crew_num_checkout_bids%(times_index(0))  )
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%points%(times_index(0)) = weight and
+          bid.%is_checkout_bid%(times_index(0)));
+
+%crew_granted_num_checkout%(Int weight) =
+    sum(times(bid.%crew_num_bids%), %crew_num_granted_checkout_bids%(times_index(0)))
+    where(bid.%is_valid_dated_bid%(times_index(0)) and
+          bid.%points%(times_index(0)) = weight and
+          bid.%is_checkout_bid%(times_index(0)) and
+          bid.%get_roster_granted_value%(times_index(0)) >= 1);
+
+%crew_total_num_timeoff_bids_low% =
+    %crew_total_num_timeoff%(bid.%_low_points%);
+%crew_total_num_timeoff_bids_medium% =
+    %crew_total_num_timeoff%(bid.%_medium_points%);
+%crew_total_num_timeoff_bids_high% =
+    %crew_total_num_timeoff%(bid.%_high_points%);
+
+%crew_granted_num_timeoff_bids_low% =
+    %crew_granted_num_timeoff%(bid.%_low_points%);
+%crew_granted_num_timeoff_bids_medium% =
+    %crew_granted_num_timeoff%(bid.%_medium_points%);
+%crew_granted_num_timeoff_bids_high% =
+    %crew_granted_num_timeoff%(bid.%_high_points%);
+
+%crew_total_num_stop_bids_low% =
+    %crew_total_num_stop%(bid.%_low_points%);
+%crew_total_num_stop_bids_medium% =
+    %crew_total_num_stop%(bid.%_medium_points%);
+%crew_total_num_stop_bids_high% =
+    %crew_total_num_stop%(bid.%_high_points%);
+
+%crew_granted_num_stop_bids_low% =
+    %crew_granted_num_stop%(bid.%_low_points%);
+%crew_granted_num_stop_bids_medium% =
+    %crew_granted_num_stop%(bid.%_medium_points%);
+%crew_granted_num_stop_bids_high% =
+    %crew_granted_num_stop%(bid.%_high_points%);
+
+%crew_total_num_flightid_bids_low% =
+    %crew_total_num_flightid%(bid.%_low_points%);
+%crew_total_num_flightid_bids_medium% =
+    %crew_total_num_flightid%(bid.%_medium_points%);
+%crew_total_num_flightid_bids_high% =
+    %crew_total_num_flightid%(bid.%_high_points%);
+
+%crew_granted_num_flightid_bids_low% =
+    %crew_granted_num_flightid%(bid.%_low_points%);
+%crew_granted_num_flightid_bids_medium% =
+    %crew_granted_num_flightid%(bid.%_medium_points%);
+%crew_granted_num_flightid_bids_high% =
+    %crew_granted_num_flightid%(bid.%_high_points%);
+
+/*    CHECKIN BIDS BY WEIGHT */
+%crew_total_num_checkin_bids_low% =
+    %crew_total_num_checkin%(bid.%_low_points%);
+%crew_total_num_checkin_bids_medium% =
+    %crew_total_num_checkin%(bid.%_medium_points%);
+%crew_total_num_checkin_bids_high% =
+    %crew_total_num_checkin%(bid.%_high_points%);
+
+%crew_granted_num_checkin_bids_low% =
+    %crew_granted_num_checkin%(bid.%_low_points%);
+%crew_granted_num_checkin_bids_medium% =
+    %crew_granted_num_checkin%(bid.%_medium_points%);
+%crew_granted_num_checkin_bids_high% =
+    %crew_granted_num_checkin%(bid.%_high_points%);
+
+/*    CHECKOUT BIDS BY WEIGHT */
+%crew_total_num_checkout_bids_low% =
+    %crew_total_num_checkout%(bid.%_low_points%);
+%crew_total_num_checkout_bids_medium% =
+    %crew_total_num_checkout%(bid.%_medium_points%);
+%crew_total_num_checkout_bids_high% =
+    %crew_total_num_checkout%(bid.%_high_points%);
+
+%crew_granted_num_checkout_bids_low% =
+    %crew_granted_num_checkout%(bid.%_low_points%);
+%crew_granted_num_checkout_bids_medium% =
+    %crew_granted_num_checkout%(bid.%_medium_points%);
+%crew_granted_num_checkout_bids_high% =
+    %crew_granted_num_checkout%(bid.%_high_points%);
+
+%crew_total_bids_low% =
+    %total_num_timeoff_bids_low% +
+    %total_num_stop_bids_low% +
+    %total_num_flightid_bids_low% +
+    %total_num_checkin_bids_low% +
+    %total_num_checkout_bids_low%;
+%crew_total_bids_medium% =
+    %total_num_timeoff_bids_medium% +
+    %total_num_stop_bids_medium% +
+    %total_num_flightid_bids_medium% +
+    %total_num_checkin_bids_medium% +
+    %total_num_checkout_bids_medium%;
+%crew_total_bids_high% =
+    %total_num_timeoff_bids_high% +
+    %total_num_stop_bids_high% +
+    %total_num_flightid_bids_high% +
+    %total_num_checkin_bids_high% +
+    %total_num_checkout_bids_high%;
+%crew_total_bids% =
+    %crew_total_bids_low% +
+    %crew_total_bids_medium% +
+    %crew_total_bids_high%;
+
+%crew_granted_bids_low% =
+    %granted_num_timeoff_bids_low% +
+    %granted_num_stop_bids_low% +
+    %granted_num_flightid_bids_low% +
+    %granted_num_checkin_bids_low% +
+    %granted_num_checkout_bids_low%;
+%crew_granted_bids_medium% =
+    %granted_num_timeoff_bids_medium% +
+    %granted_num_stop_bids_medium% +
+    %granted_num_flightid_bids_medium% +
+    %granted_num_checkin_bids_medium% +
+    %granted_num_checkout_bids_medium%;
+%crew_granted_bids_high% =
+    %granted_num_timeoff_bids_high% +
+    %granted_num_stop_bids_high% +
+    %granted_num_flightid_bids_high% +
+    %granted_num_checkin_bids_high% +
+    %granted_num_checkout_bids_high%;
+%crew_total_granted_bids% =
+    %crew_granted_bids_low% +
+    %crew_granted_bids_medium% +
+    %crew_granted_bids_high%;

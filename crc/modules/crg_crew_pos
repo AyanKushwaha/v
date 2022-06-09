@@ -1,0 +1,261 @@
+/* -*- crc -*- 
+
+ 
+
+crg_crew_pos: format crew_pos info
+
+*******************************************************/
+
+module crg_crew_pos
+import fundamental;
+import iterators;
+import levels;
+import leg;
+import trip;
+import crew_pos;
+
+%num_cockpit_pos% = %etab_cockpit_end_pos%;
+%num_cabin_pos% = %etab_cabin_end_pos% - %etab_cockpit_end_pos%;
+%num_other_pos% = %etab_other_end_pos% - %etab_cabin_end_pos%;
+%num_all_pos% = %num_cockpit_pos% + %num_cabin_pos% + %num_other_pos%;
+
+export enum VectorCalc = SingleTrip; SumTripSet; SumLegSet; end
+export enum VectorCat  = Cockpit; Cabin; Other; AllCat; end
+export enum VectorLook = Raw; Pretty; end
+
+export %vector_start_pos%(VectorCat CatType) =
+  if CatType = Other then %num_cockpit_pos% + %num_cabin_pos% + 1 
+  else if CatType = Cabin then %num_cockpit_pos% + 1 
+  else 1;
+
+table EndPosTable(VectorCat CatType) =
+  CatType -> export %vector_end_pos%;
+  Cockpit -> %num_cockpit_pos%;
+  Cabin   -> %num_cockpit_pos% + %num_cabin_pos%;
+  Other   -> %num_all_pos%;
+  AllCat  -> %num_all_pos%;
+end
+
+%cockpit_maincat_char% = crew_pos.%pos2cat%(%vector_start_pos%(Cockpit));
+%cabin_maincat_char% = crew_pos.%pos2cat%(%vector_start_pos%(Cabin));
+%other_maincat_char% = crew_pos.%pos2cat%(%vector_start_pos%(Other));
+
+%trip_assigned_pos%(Int Pos, VectorCalc CalcType) =
+  if CalcType = SumTripSet then
+    sum(trip_set, crew_pos.%trip_assigned_pos%(Pos))
+  else crew_pos.%trip_assigned_pos%(Pos);
+
+export %sum_trip_assigned_pos%(Int FromPos, Int ToPos, VectorCalc CalcType) =
+  sum(times(ToPos - FromPos + 1),
+      %trip_assigned_pos%(FromPos - 1 + %times_index_0%, CalcType));
+
+export %trip_assigned_sum%(VectorCat CatType, VectorCalc CalcType) =
+  %sum_trip_assigned_pos%(%vector_start_pos%(CatType), 
+                          %vector_end_pos%(CatType), CalcType);
+
+export %separator_after_pos%(int pos) =
+  if (crew_pos.%pos2cat%(pos) <> crew_pos.%pos2cat%(pos+1)) then "//"
+  else "/";
+
+export %strip_last_chars%(String Str) = substr(Str,1,length(Str)-2);
+
+%cat_trip_assigned_pos%(Int FromPos, Int ToPos, VectorCalc CalcType) =
+  %strip_last_chars%(
+    cat(times(ToPos - FromPos + 1),
+      concat(format_int(%trip_assigned_pos%(FromPos - 1 + %times_index_0%, CalcType), "%i"),
+             %separator_after_pos%(FromPos - 1 + %times_index_0%))
+    )
+  );
+
+export %trip_assigned_vector%(VectorCat CatType, VectorCalc CalcType) =
+    %cat_trip_assigned_pos%(%vector_start_pos%(CatType), 
+                            %vector_end_pos%(CatType), CalcType);
+
+%cat_function_pos%(Int FromPos, Int ToPos) =
+  %strip_last_chars%(cat(times(ToPos - FromPos + 1),
+    concat(crew_pos.%pos2func%(FromPos - 1 + %times_index_0%), 
+           %separator_after_pos%(FromPos - 1 + %times_index_0%))));
+
+export %function_vector%(VectorCat CatType) =
+  %cat_function_pos%(%vector_start_pos%(CatType), %vector_end_pos%(CatType));
+
+export %trip_assigned_vectors%(VectorCalc CalcType) =
+  let cockpit_str = 
+    if %num_cockpit_pos% > 0 then 
+      concat("[", %cat_trip_assigned_pos%(%vector_start_pos%(CockPit), 
+                               %vector_end_pos%(CockPit), CalcType), "]")
+    else "",
+  cabin_str = 
+    if %num_cabin_pos% > 0 then 
+      concat("[", %cat_trip_assigned_pos%(%vector_start_pos%(Cabin), 
+                               %vector_end_pos%(Cabin), CalcType), "]")
+    else "",
+  other_str = 
+    if %num_other_pos% > 0 then 
+      concat("[", %cat_trip_assigned_pos%(%vector_start_pos%(Other), 
+                               %vector_end_pos%(Other), CalcType), "]")
+    else "";
+  concat(cockpit_str, cabin_str, other_str);
+
+  
+/*
+** The following of the above definitions are mimiced below and re-implemented
+** on leg level:
+**
+** 1. trip_assigned_sum -> leg_assigned_sum
+** 2. sum_trip_assigned_pos -> sum_leg_assigned_pos
+** 3. trip_assigned_pos -> leg_assigned_pos
+** 4. trip_assigned_vector -> leg_assigned_vector
+** 5. cat_trip_assigned_pos -> cat_leg_assigned_pos
+**
+** The reason for this is that the original definition break when applied to
+** a chain of trips, i.e. a roster, and default_context
+**
+** Used in deadhead reports in the crew (roster) window
+*/
+
+export %leg_assigned_sum%(VectorCat CatType, VectorCalc CalcType) =
+  %sum_leg_assigned_pos%(crg_crew_pos.%vector_start_pos%(CatType),
+                         crg_crew_pos.%vector_end_pos%(CatType), CalcType);
+
+%sum_leg_assigned_pos%(Int FromPos, Int ToPos, VectorCalc CalcType) =
+  sum(times(ToPos - FromPos + 1),
+      %leg_assigned_pos%(FromPos - 1 + %times_index_0%, CalcType));
+
+%leg_assigned_pos%(Int Pos, VectorCalc CalcType) =
+  if CalcType = SumLegSet then
+    sum(leg_set, crew_pos.%leg_assigned_pos%(Pos))
+  else crew_pos.%leg_assigned_pos%(Pos);
+
+%leg_assigned_vector%(VectorCat CatType, VectorCalc CalcType) =
+    %cat_leg_assigned_pos%(%vector_start_pos%(CatType),
+                           %vector_end_pos%(CatType), CalcType);
+
+%cat_leg_assigned_pos%(Int FromPos, Int ToPos, VectorCalc CalcType) =
+  %strip_last_chars%(
+    cat(times(ToPos - FromPos + 1),
+      concat(format_int(%leg_assigned_pos%(FromPos - 1 + %times_index_0%, CalcType), "%i"),
+             %separator_after_pos%(FromPos - 1 + %times_index_0%))
+    )
+  );
+  
+/* ** */
+
+%compressed_trip_assigned_vector%(VectorCalc CalcType) =
+  let num_cockpit = %trip_assigned_sum%(Cockpit, CalcType),
+      num_cabin   = %trip_assigned_sum%(Cabin  , CalcType),
+      num_other   = %trip_assigned_sum%(Other  , CalcType);
+  concat("[",
+    if num_cockpit > 0 
+    then concat(format_int(num_cockpit,"%d"),%cockpit_maincat_char%) 
+    else "  ",
+    if num_cockpit > 0 and num_cabin > 0 then "/" else " ",
+    if num_cabin > 0 
+    then concat(format_int(num_cabin,"%d"),%cabin_maincat_char%) 
+    else "  ",
+    if num_cabin > 0 and num_other > 0 then "/" else " ",
+    if num_other > 0 
+    then concat(format_int(num_other,"%d"),%other_maincat_char%) 
+    else "  ",
+    "]");
+
+
+export %max_pos% = 12;
+
+export %etab_cockpit_end_pos% = 
+   first(times(%max_pos%), %times_index_0%) 
+   where (crew_pos.%pos2cat%(%times_index_0%) <> crew_pos.%pos2cat%(%times_index_0%+1));
+
+export %etab_cabin_end_pos% = 
+   first (times(%max_pos%), %times_index_0%) 
+   where (%times_index_0% > %etab_cockpit_end_pos%
+          and crew_pos.%pos2cat%(%times_index_0%) <> crew_pos.%pos2cat%(%times_index_0%+1));
+
+export %etab_other_end_pos% = 
+   first (times(%max_pos%), %times_index_0%) 
+   where (%times_index_0% > %etab_cabin_end_pos%
+          and crew_pos.%pos2cat%(%times_index_0%) <> crew_pos.%pos2cat%(%times_index_0%+1));
+
+/* For info reports */
+
+export %leg_nr_assigned_crew%(int pos) = 
+  sum(equal_legs, crew_pos.%leg_assigned_pos%(pos))
+  where(%is_roster% 
+	and not personal_activity
+	and not leg.%is_deadhead%);
+
+export %crew_func_trip_assigned% =
+   first(leg(trip),%crew_func_leg_assigned%);
+
+export %crew_func_leg_assigned% =
+   if (personal_activity) then
+      crew_pos.%pos2func%(-1)
+   else
+      crew_pos.%pos2func%(assigned_function + 1);
+
+export %assigned_function% = assigned_function;
+   
+/******************************************************/
+/***                                                ***/
+/***                ASSIGNED CREW                   ***/
+/***                                                ***/
+/******************************************************/
+ 
+ 
+table leg_rostered_pos(Int Pos)=
+  Pos -> export %leg_rostered_pos%;
+  1 -> rostered_crew_position_1;
+  2 -> rostered_crew_position_2;
+  3 -> rostered_crew_position_3;
+  4 -> rostered_crew_position_4;
+  5 -> rostered_crew_position_5;
+  6 -> rostered_crew_position_6;
+  7 -> rostered_crew_position_7;
+  8 -> rostered_crew_position_8;
+  9 -> rostered_crew_position_9;
+  10 -> rostered_crew_position_10;
+  11 -> rostered_crew_position_11;
+  12 -> rostered_crew_position_12;
+  - -> 0;
+end
+  
+%leg_rostered_cat%(VectorCat CatType) =
+  let fp = %vector_start_pos%(CatType),
+      tp = %vector_end_pos%(CatType);
+  sum(times(tp - fp + 1),
+      %leg_rostered_pos%(fp - 1 + %times_index_0%));
+
+export %leg_rostered_fc% = %leg_rostered_cat%(Cockpit);
+export %leg_rostered_cc% = %leg_rostered_cat%(Cabin);
+
+/*
+** For service need manipulation in Studio.
+ * Used for calculation of CustomMenuState:s (menu entry "dimming").
+ *
+ * For an entry to be enabled, there must be an additional service need
+ *   or exception in the specific crew position. Additionally, in the trip
+ *   window, the trip must be made for the position.
+ *
+ * (In order to ensure caching, avoid functions.)
+ */
+
+%has_service_need_and_proper_composition_AS% =
+  (%is_roster% or assigned_crew_position_6 > 0) and
+  crew_pos.%service_need_in_pos6% > 0;
+%has_service_need_and_proper_composition_AH% =
+  (%is_roster% or assigned_crew_position_7 > 0) and
+  crew_pos.%service_need_in_pos7% > 0;
+
+%has_need_exception_and_proper_composition_AS% =
+  (%is_roster% or assigned_crew_position_6 > 0) and
+  crew_pos.%service_need_exception_in_pos6% >= 0;
+%has_need_exception_and_proper_composition_AH% =
+  (%is_roster% or assigned_crew_position_7 > 0) and
+  crew_pos.%service_need_exception_in_pos7% >= 0;
+  
+%any_need_to_change% =
+  %has_service_need_and_proper_composition_AH% or
+  %has_service_need_and_proper_composition_AS% or
+  %has_need_exception_and_proper_composition_AH% or
+  %has_need_exception_and_proper_composition_AS%;
+

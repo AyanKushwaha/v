@@ -1,0 +1,991 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains training rules specific for cabin crew 
+ *   used in Carmen Crew Rostering and Carmen Crew Tracking.
+ *   All rules are studio only rules, i.e. there is no respect to these
+ *   rules during optimization.
+ *
+ * Sections:
+ *   1. Recency/Absence rules
+ *   2. Initial/Conversion/Transition training rules
+ *
+ * Created by:
+ *   Henrik Albertson, 03may2007
+ *
+ * Major changes:
+ *
+ */
+
+module rules_training_ccr_cc inherits rules_training_ccr
+
+import parameters;
+import system_db_parameters;
+
+set ap_training_codes = "SUPERNUM","X SUPERNUM","RELEASE", "AP TRAINING";
+
+redefine %nr_crew_on_training_type% =
+  let main_func = fundamental.%main_cat%,
+      ap_training = leg.%training_code% in ap_training_codes,
+      as_training = leg.%is_as_training%;
+  count(equal_legs)
+  where (crew.%main_func% = main_func and
+         (if ap_training then %is_crew_on_ap_training%
+          else if as_training then leg.%is_as_training%
+          else false));
+          
+%is_crew_on_ap_training% =
+    default(leg.%training_code% in ap_training_codes,
+            false);
+
+/****************************************************************
+ * Section 1: Recency/Absence rules
+****************************************************************/
+/*
+** Rule: Recency
+*/
+redefine %qln_recency_OK_ALL_failtext% =
+         rules.%failtext_int%(concat("OMA: Days since ", leg.%qual%), 
+                              recency.%days_since_last_recent%,
+                              recency.%max_days%);
+
+/*
+** Rule:
+**    Temporary crew must be recent
+**
+** Description:
+**    Check that temporary employed crew is recent. Checked in a separate
+**    rule since the requirements are totally different from the permanently
+**    employed crew.
+**
+** Agreement:
+**    OM-A 5.3.4.3
+*/
+export rule qln_temporary_crew_must_be_recent_CC =
+  valid roster.%check_rules% and
+        crew.%is_skd% and
+        crew.%is_temporary% and
+        trip.%in_pp% and
+        %_check_trip_for_recency% and
+        crew.%in_first_year_of_flying% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+  recency.%temporary_crew_is_recent%;
+  startdate = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = trip.%failobject_start%;
+  failtext "OMA: Temp crew is unrecent";
+  remark "(CCR) OMA: Temporary crew must be recent for flight duty",
+  planner "Check that temporary employed crew is recent. Checked in a separate"
+          " rule since the requirements are totally different from the"
+          " permanently employed crew. Valid for all cabin crew.";
+end
+
+%_check_trip_for_recency% =
+  if base_product.%is_rostering% then
+    %_check_trip_for_recency_ccr%
+  else
+    %_check_trip_for_recency_cct%;
+    
+%_check_trip_for_recency_ccr% =
+  trip.%is_on_duty% and
+  not any(leg(trip), leg.%is_training_or_has_training_code%) and
+  (trip.%is_first_flt_sby_or_bl_in_pp% or 
+   trip.%is_first_flt_sby_or_bl_in_month%);
+  
+%_check_trip_for_recency_cct% = 
+  default(next(trip(roster), 
+               trip.%start_month_start%) > trip.%start_month_start%, true);
+
+redefine %crew_is_absent% = absence.%crew_is_absent_on_leg%;
+redefine %crew_is_absent_a3_a5% = absence.%crew_is_absent_on_leg%;
+redefine %absence_requires_ground_training% = not leg.%is_supernum%;
+redefine %absence_requires_ground_training_a3a5% = not leg.%is_supernum%;
+
+/* Training log returns start_utc so we need to convert it to HB time and round
+** it up to the next day */
+
+%latest_refresh%(Abstime date) =
+  let start = nmin(date, %pp_start%);
+  default(last(leg(roster), leg.%start_utc%)
+          where (leg.%start_date% < date and (training.%leg_is_ref% or
+                                              training.%leg_is_cra% or
+                                              training.%leg_is_crb%)),
+          nmax(training.%last_perf_date_for_act_of_type%("REFRESHER", start),
+               training.%last_perf_date_for_act_of_type%("CONVERSION REFRESHER A", start),
+               training.%last_perf_date_for_act_of_type%("CONVERSION REFRESHER B", start)));
+
+/****************************************************************
+ * Section 2: Initial/Conversion/Transition training rules
+ ***************************************************************/
+
+/*
+** Rule: Crew should not be considered as NEW restricted
+*/
+redefine %sufficient_flight_experience_duty% =
+  training.%nr_perf_initial_flts_duty_start% >= 
+    training.%nr_reqd_initial_flts%;
+    
+redefine %sufficient_flight_experience_duty_start% =
+  training.%nr_perf_initial_flts_duty_start% >=
+  training.%nr_reqd_initial_flts_duty_start%;
+
+redefine %trng_crew_should_not_be_considered_as_new_restr_ALL_failtext% =
+   let value = training.%nr_perf_initial_flts_duty_start%,
+       limit = training.%nr_reqd_initial_flts_duty_start%;
+   rules.%failtext_int%("OMA: Remove NEW restr, flts", value, limit);
+
+/*
+** Rule: Dispensation date for NEW restriction
+**
+** Description:
+**    Check that there is a dispensation date set for crew with
+**    restriction NEW. The dispensation date should be from start
+**    of the restriction and max_days (as defined in table crew_training_need)
+**    forwards.
+**
+** Agreement:
+**    OM-A 5.2.12
+**    OM-A 5.3.3.2, 5.3.4.1
+*/
+
+export rule trng_dispensation_date_set_for_new_restr_CC =
+  valid roster.%check_rules% and
+        wop.%is_on_duty% and
+        crew.%has_qual_restr_new_actype_on_leg% and
+        %last_new_leg% and
+        leg.%in_pp%;
+        
+  crew.%new_actype_restr_on_leg_end_date% - 24:00 <=
+  %latest_dispensation_date_for_new_restr_cc% - 24:00 -
+  rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_utc%);
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext(Abstime value, Abstime limit) =
+    rules.%failtext_absdate%("OMA: Dispensation date for NEW", value, limit);
+  remark "OMA: Dispensation date for NEW on AC-qual",
+  planner "";
+end
+
+%last_new_leg% =
+  let qual = leg.%qual%;
+  leg.%is_new% and
+  default(next(leg(chain), not leg.%is_new%) where
+          (leg.%is_active_flight% and leg.%qual% = qual), true);
+  
+%latest_dispensation_date_for_new_restr_cc% =
+    let last_date = training.%last_perf_date_for_flight_of_type_and_code%(%prev_training_type%, leg.%qual%, leg.%start_utc%);
+    round_up(crew.%hb_time%(last_date) + 
+             training.%maxdays_of_type%("NEW", 
+                                        leg.%qual%, last_date) * 24:00, 24:00) + 
+    (if training.%last_perf_release_attr_for_flight_of_type_and_code%(%prev_training_type%, 
+                                                                      leg.%qual%,
+                                                                      leg.%start_utc%)
+        = "OVERNIGHT" then 24:00 else 0:00);
+    
+    
+%prev_training_type% = 
+    training.%course_attribute%(leg.%start_hb%, training.%index_of_type%("NEW", leg.%qual%, leg.%start_hb%) - 1);
+    
+/*
+** Rule:
+**    New entrant CC must perform flight training
+**
+** Description:
+**    The rule checks that new entrant cabin crew has performed required
+**    flight training. If the initial training is performed on a shorthaul
+**    aircraft, the limitation is on production days (apart from the number
+**    of training flights checked in rule trng_all_training_flights_performed),
+**    otherwise the limitation is on block hours.
+**
+** Agreement:
+**    OM-A 5.3.3.2 table 3
+*/
+export rule trng_initial_flight_training_performed_CC =
+  valid roster.%check_rules% and
+        training.%unperformed_training_in_pp% and
+        trip.%in_pp_extended% and
+        crew.%has_restr_new_new_trip_start% and
+        trip.%has_active_flight% and
+        leg.%is_active_flight% and
+        training.%is_reqd_for_ac_qual_leg_start% and
+        ((%leg_is_first_type_training_flight% and training.%last_flight_of_type%) or
+         (not %leg_is_first_type_training_flight% and %first_flight%)) and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+  %all_flight_training_performed%;
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %trng_initial_flight_training_performed_ALL_failtext%;
+  remark "(CCR) OMA: New entrant CC must perform initial flight training",
+  planner "";
+end
+
+%leg_is_first_type_training_flight% =
+  leg.%training_code_safe% = training.%course_attribute%(leg.%start_hb%, 1);
+
+%first_flight% =
+  crew.%has_restr_new_new_leg_start% and
+  default(prev(leg(roster), not crew.%has_restr_new_new_leg_start%), true);
+
+/* Rule check variables */
+%all_flight_training_performed% =
+  if leg.%with_long_haul_ac% then
+    %blh_in_flight_training% >= %min_req_blh_in_flight_training%
+  else
+    %p_days_in_flight_training% >= %min_req_p_days_in_flight_training%;
+
+/* Agreement: OM-A 5.3.3.2 table 3 */
+%min_req_blh_in_flight_training% = 20:00;
+%min_req_p_days_in_flight_training% = 6;
+
+%blh_in_flight_training% =
+  accumulators.%block_time_in_period_caa%(round_down(training.%course_start_leg_start%, 24:00),
+                                          leg.%end_hb% + 0:01);
+
+%p_days_in_flight_training% =
+  accumulators.%nr_production_days_in_period%("SH",
+                                              round_down(training.%course_start_leg_start%, 24:00),
+                                              duty.%end_hb% + 0:01) -  
+  accumulators.%bought_days_in_period%(round_down(training.%course_start_leg_start%, 24:00),
+                                       leg.%end_hb% + 0:01);
+
+/* Failtext */
+%trng_initial_flight_training_performed_ALL_failtext% =
+   let text = concat("OMA: New crew on ",
+                     training.%first_unplanned_course_name_trip%);
+   if leg.%with_long_haul_ac% 
+   then rules.%failtext_rel%(concat(text,
+                                    ",min blh"),
+                           %blh_in_flight_training%,
+                           %min_req_blh_in_flight_training%)
+   else rules.%failtext_int%(concat(text,
+                                    ",min p-days"),
+                             %p_days_in_flight_training%,
+                             %min_req_p_days_in_flight_training%);
+
+/****************************************************************
+ * Section 3: Composition check
+ ***************************************************************/
+/*
+** Rule: Crew performing some kind of training flight has an acceptable companion
+*/
+redefine %r_valid_acceptable_companion% =
+  /* For temporary crew on initial training, any rank as instructor is fine */
+  not (crew.%is_temporary_trip_start% and
+       crew.%has_restr_new_new_trip_start% and
+       leg.%is_supernum%);
+
+%leg_a2_319% = substr(leg.%ac_type%, 1, 2) = "31";
+
+
+/*
+** Rule: Max number of restricted NEW
+*/
+redefine export %limit_comp_max_restricted_new_ALL% = crew_pos.%total_cabin_crew_service_need% +
+  (if leg.%qual% = "AL" then
+    %max_restricted_new_lookup%
+  else if leg.%qual% = "A2" and not %leg_a2_319% then
+    %max_restricted_new_lookup_a2%
+  else 1);
+
+
+
+%is_supernum_or_xsupernum% = crew_pos.%is_supernum_cabin% or leg.%is_x_supernum%;
+%nr_supernum_or_xsupernum% = 
+  let main_func = fundamental.%main_cat%;
+  count(equal_legs)
+  where (crew.%main_func% = main_func and
+         %is_supernum_or_xsupernum%); 
+         
+%nr_crew_on_release_type% = 
+  let main_func = fundamental.%main_cat%;
+  count(equal_legs)
+  where (crew.%main_func% = main_func and
+      leg.%training_code% = "RELEASE");
+
+%dispensation_a2_cc_new_valid% = if leg.%is_skn% and parameters.%dispensation_a2_cc_new_skn_valid%(leg.%start_utc%) then true
+                                 else if leg.%is_skd% and parameters.%dispensation_a2_cc_new_skd_valid%(leg.%start_utc%) then true
+                                 else if leg.%is_sks% and parameters.%dispensation_a2_cc_new_sks_valid%(leg.%start_utc%) then true
+                                 else false;
+
+table max_restricted_new_cc =
+    default(%nr_crew_on_release_type%, 0), default(%nr_supernum_or_xsupernum%, 0)
+    -> Int %max_restricted_new_lookup%;
+    0, 0 -> if parameters.%dispensation_al_cc_new_release_valid%(leg.%start_utc%) then 3 else 1;
+    1, 0 -> if parameters.%dispensation_al_cc_new_release_valid%(leg.%start_utc%) then 3 else 1;
+    0, 1 -> 1;
+    -, - -> 0;
+end
+
+%max_restricted_new_lookup_a2%  = if %dispensation_a2_cc_new_valid% then 2 else 1;
+
+/*
+** Rule: Max number of cc with duty designator R (RELEASE)
+*/
+redefine export %max_crew_on_training_type% = if leg.%qual% = "AL" and leg.%training_code% = "RELEASE" then
+%max_crew_on_training_release_type_lookup% else 1;
+
+table max_crew_on_training_release_type =
+    default(%value_comp_max_restricted_new_ALL%, 0), default(%nr_supernum_or_xsupernum%, 0)
+    -> Int %max_crew_on_training_release_type_lookup%;
+    0, 0 -> if parameters.%dispensation_al_cc_new_release_valid%(leg.%start_utc%) then 2 else 1;
+    1, 0 -> 1;
+    2, 0 -> if parameters.%dispensation_al_cc_new_release_valid%(leg.%start_utc%) then 1 else 0;
+    3, 0 -> if parameters.%dispensation_al_cc_new_release_valid%(leg.%start_utc%) then 1 else 0;
+    -, - -> 0;
+end
+
+
+/*
+** Rule:
+**    Max nr of crew performing training with Purser as instructor on flight
+**
+** Description:
+**    The rule checks that the number of crew performing some kind of
+**    training flight requiring a Purser, or a crew with SCC qual if crew is SVS, as instructor
+**    is not greater than maximum allowed.
+**
+**
+** Agreement:
+**    OM-A ???
+*/
+export rule comp_max_nr_crew_with_purser_as_instr_on_flight_CC =
+  valid %valid_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL%;
+  %value_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL% <=
+    %limit_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL%; 
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %failtext_comp_max_nr_crew_with_purser_as_instr_on_flight_CC%;
+  remark "(CCR) OMA: Max crew performing training with AP (or SVS SCC) as instructor on flight",
+  planner "The rule checks that the number of crew performing some kind"
+          " of training (e.g. t-flight) requiring a Purser (or a SCC for SVS) as instructor"
+          " does not exceed maximum allowed. This a studio only rule and"
+          " applicable to all cabin crew in all regions.";
+end
+
+/* AS TRAINING does not have AP instructor 
+   CC SVS: Line flight does not have instructor
+   and ILC/LC does not have SCC/AP instructor */
+%nr_crew_on_training_with_purser% =
+  let main_func = crew.%main_func%;
+  count(equal_legs)
+  where (crew.%main_func% = main_func and
+         leg.%has_training_code% and 
+         not (leg.%is_as_training% or leg.%is_new% or leg.%is_cc_line_flight% or leg.%is_cc_lc_or_ilc%));
+
+%nr_crew_on_cc_fam_flt% =
+  let main_func = crew.%main_func%;
+  count(equal_legs)
+  where (crew.%main_func% = main_func and
+         leg.%is_cc_fam_flt%);
+
+%nr_crew_with_scc_qual% =
+  let main_func = crew.%main_func%;
+  count(equal_legs)
+  where (crew.%main_func% = main_func and
+         crew.%is_scc%(leg.%start_utc%) and not leg.%has_training_code%);
+
+%max_nr_crew_on_training_with_purser% = 
+    if crew.%has_agmt_group_svs_cc% then
+        %nr_crew_with_scc_qual% 
+        else if parameters.%dispensation_al_cc_new_release_valid%(leg.%start_utc%) 
+            then 3 
+    else 2;
+
+redefine export %valid_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL% =
+  roster.%check_rules% and
+  leg.%in_pp_extended% and
+  leg.%is_active_flight% and
+  leg.%has_training_code% and
+  not leg.%is_new% and
+  not leg.%is_cc_lc_or_ilc% and
+  not leg.%is_cc_line_flight%;
+
+redefine export %trigger_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL% =
+  %value_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL% <=
+    %limit_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL%;
+    
+redefine export %value_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL% =
+  if crew.%has_agmt_group_svs_cc% then
+        %nr_crew_on_cc_fam_flt% 
+  else %nr_crew_on_training_with_purser%;
+  
+redefine export %limit_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL% =
+  %max_nr_crew_on_training_with_purser% +
+  default(rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%), 0);
+
+redefine export %remark_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL% =
+  if crew.%has_agmt_group_svs_cc% then
+    "Min one SCC per cc FAM FLT trainee"  
+  else "Max crew performing training with AP as instructor on flight";
+  
+%failtext_comp_max_nr_crew_with_purser_as_instr_on_flight_CC% =
+  if crew.%has_agmt_group_svs_cc% then
+    "Min one SCC per cc FAM FLT"  
+  else rules.%failtext_int%("OMA: Max crew trn under AP/SVS SCC",%nr_crew_on_training_with_purser%, %max_nr_crew_on_training_with_purser%);
+
+/*
+** Check that there is always one SCC onboard
+*/
+
+/*
+** Rule:
+**    When crew flies in AP position crew must be AP or SCC
+**
+**
+** Description:
+**    This rule is part of the legality for at least on SCC.
+**    By enforcing this the legality check can be must faster.
+**
+** Agreement:
+**    OM-A ???
+*/
+
+export rule comp_assigned_in_ap_must_be_SCC_CC =
+  valid %valid_comp_assigned_in_ap_must_be_SCC_CC% and 
+        not crew.%is_leased_duty_start% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+  %trigger_comp_assigned_in_ap_must_be_SCC_CC%;
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext "OMA: Crew must be SCC";
+  remark "(CCR) OMA: Crew must be SCC when assigned in AP position";
+end
+
+redefine export %valid_comp_assigned_in_ap_must_be_SCC_CC% =
+  roster.%check_rules% and
+  leg.%in_pp_extended% and
+  leg.%is_active_flight% and
+  crew_pos.%assigned_pos% = 5; /* AP position */
+
+redefine export %trigger_comp_assigned_in_ap_must_be_SCC_CC% =
+  crew.%is_scc_leg_start%;
+
+redefine export %remark_comp_assigned_in_ap_must_be_SCC_CC% =
+  "Crew must be SCC when assigned in AP position";
+
+/*
+** Rule:
+**    At least one cabin crew must be SCC
+**
+**    This rule is turned off until data is available
+**
+** Description:
+**    The rule checks that at least one cabin crew is SCC qualified. The function
+**    bails out on a number of criteria for speed-up purposes. First it checks
+**    that the current crew is not SCC, then it checks that there is no open or
+**    assigned AP slice and then it counts the actually assigned crew.
+**    In rostering an open slice is considered to be SCC qualified while in Tracking
+**    an open slice is not considered to be SCC qualified.
+**
+** Agreement:
+**    OM-A    4.1.3.1
+**            4.1.3.2
+**            4.1.3.8
+*/
+export rule comp_at_least_one_SCC_on_flight_CC =
+  valid %valid_comp_at_least_one_SCC_on_flight_CC% and
+        not crew.%is_leased_duty_start% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+        
+  %trigger_comp_at_least_one_SCC_on_flight_CC%;
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext "OMA: No SCC assigned";
+  remark "OMA: At least one SCC on flight",
+  planner "The rule checks that at least one cabin crew is SCC qualified. The function"
+          " bails out on a number of criteria for speed-up purposes. First it checks"
+          " that the current crew is not SCC, then it checks that there is no open or"
+          " assigned AP slice and then it counts the actually assigned crew."
+          " In rostering an open slice is considered to be SCC qualified while in Tracking"
+          " an open slice is not considered to be SCC qualified.";
+end
+
+%valid_comp_at_least_one_SCC_on_flight_CC% =
+  roster.%check_rules% and
+  leg.%in_pp_extended% and
+  leg.%is_active_flight% and
+  not crew.%is_scc_leg_start%;
+
+%trigger_comp_at_least_one_SCC_on_flight_CC% =
+  if %product% = "CCT" then
+    %at_least_one_scc_assigned_cct%
+  else
+    %at_least_one_scc_assigned_ccr%;
+
+redefine %leg_is_considered_as_scc% =
+  if %product% = "CCT" then
+    %is_roster% and crew.%is_scc_leg_start% and not leg.%is_deadhead%
+  else
+    (%is_roster% and crew.%is_scc_leg_start% and not leg.%is_deadhead%) or
+    (not %is_roster% and (assigned_crew_position_5 > 0 or
+                          assigned_crew_position_6 > 0 or
+                          assigned_crew_position_7 > 0));
+
+%any_assigned_scc% =
+  any(equal_legs, %leg_is_considered_as_scc%);
+
+
+%at_least_one_scc_assigned_cct% = 
+  crew_pos.%n_pos5% > 0 or
+  %any_assigned_scc%;
+
+%at_least_one_scc_assigned_ccr% = 
+  booked_crew_position_5 > 0 or
+  %any_assigned_scc%;
+
+/*
+** Check that there is now lower higher inversion between AH and AP
+*/
+
+/*
+** Rule:
+**    When AP flies lower no AH shall fly higher
+**
+** Description:
+**    This is only checked for AH crew flying higher.
+**
+** Agreement:
+**    OM-A ???
+*/
+
+rule (on) comp_no_higher_ah_when_lower_ap_CC =
+  valid %valid_comp_no_higher_ah_when_lower_ap_CC% and 
+        not crew.%is_leased_duty_start% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+  
+  %trigger_comp_no_higher_ah_when_lower_ap_CC%;
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext "OMA: No AH higher with AP lower";
+  remark "(CCR) OMA: AH assigned higher on leg where AP flies lower";
+end
+
+redefine export %valid_comp_no_higher_ah_when_lower_ap_CC% =
+  roster.%check_rules% and
+  leg.%in_pp_extended% and
+  leg.%is_active_flight% and
+  crew.%rank_leg_start% = "AH" and
+  crew_pos.%higher_rank%;
+        
+redefine export %trigger_comp_no_higher_ah_when_lower_ap_CC% =
+  not(%leg_ap_assigned_lower_on_leg%);
+
+redefine export %remark_comp_no_higher_ah_when_lower_ap_CC% =
+  "AH assigned higher on leg where AP flies lower";
+
+%leg_ap_assigned_lower_on_leg% = 
+  any(equal_legs, %is_roster% and crew.%rank_leg_start% = "AP" and
+                  crew_pos.%lower_rank%);
+  
+/*
+** Rule:
+**    Resource Pool CC not allowed in AP position
+**
+**
+** Description:
+**    Check that a Resource Pool CC is not assigned as AP/SCC.
+**
+** Agreement:
+**    4ExNG
+*/
+
+export rule (off) comp_assigned_in_ap_must_not_be_temp_CC =
+  valid crew.%k4exng_cc_sp5_1_valid%(leg.%start_hb%) and
+        %valid_comp_assigned_in_ap_must_be_SCC_CC% and 
+        not crew.%is_leased_duty_start% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%) and
+        not crew.%is_skn%;
+
+  not crew.%is_temporary_at_date%(leg.%start_hb%);
+
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext "OMA: AP/SCC must not be Resource Pool";
+  remark "(CCR) OMA: Resource Pool must not be assigned in AP position";
+end
+
+/*
+** Rule:
+**    Max temporary crew on flight
+**
+** Description:
+**    The rule checks that the number of temporary crew does not exceed
+**    the maximum required:
+**      SH Main: 2
+**      SH RC:   1
+**      LH:      0
+**    It cannot be checked by the normal restriction rules, as it is actually
+**    not a restriction but a contract.
+** Corresponding constraint (for optimizer): roster_constraints.temp_crew_skd_sks_cc and roster_constraints.temp_crew_skn_cc
+**
+** Agreement:
+**    4ExNG
+*/
+rule comp_max_temp_crew_on_flight_CC =
+  valid %valid_comp_max_temp_crew_on_flight_CC% and
+        not crew.%is_leased_duty_start%;
+  %nr_temp_crew_on_flight% <=
+    %max_temp_crew_on_flight% +
+    default(rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%), 0);
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("Coll: Nr of temp crew",value,limit);
+  remark "Coll: Max number of temporary crew on flight",
+  planner "The rule checks that the number of temporary crew per flight"
+          " does not exceed 2 on SH Main, 1 on SH RC, and 0 on LH. (4ExNG)"
+          " CBA16: If SKN CC there is OK with 3 temp crew if one ordinarie AP"
+          " or 2 ordinarie AH/AS."
+          " Inshape: For CAU it is ok to assign a 3 RP in Tracking if the flight has a active AP onboard."
+          "For SKS it is ok to assign 3 RP in specified periods and if no crew has restriction NEW";
+end
+
+export %valid_comp_max_temp_crew_on_flight_CC% =
+  roster.%check_rules% and
+  (crew.%k4exng_cc_sp5_1_valid%(leg.%start_hb%) or
+   crew.%is_skd% or crew.%is_sks%) and
+  /* crew.%is_temporary_pp_end% and */
+  leg.%in_pp_extended% and
+  leg.%is_active_flight% and
+  crew.%is_temporary_leg_start%;
+
+export %trigger_comp_max_temp_crew_on_flight_CC% =
+  %nr_temp_crew_on_flight% <= %max_temp_crew_on_flight%;
+
+export %remark_comp_max_temp_crew_on_flight_CC% =
+  "Max number of temporary crew on flight";
+
+export %value_comp_max_temp_crew_on_flight_CC% =
+  %nr_temp_crew_on_flight%;
+
+export %limit_comp_max_temp_crew_on_flight_CC% =
+  %max_temp_crew_on_flight%;
+
+/* 
+** Maximum number of temp CC allowed on a flight
+**
+** 4ExNG: Max 2 on SH
+**        Max 1 on SH RC aircraft
+**        None on LH.
+**  SKCMS-1081. If SKN_CC if there is 3 temp crew there must be at least 1
+**              Ordinary AP or 2 ordinarie AH/AS
+**  SKCMS-1891. If SKD_CC there can be 3 temp crew if the last is assigned
+**              after rooster release and flight has an active AP assigned.
+**  SKCMS-2955  If SKS_CC in special periods 3 temp crew is allowed if no
+**              crew has new restriction. Valid in both 
+**              JCR and JCT and rest of crew composition does not matter.
+**
+*/
+
+%max_temp_crew_on_flight% =
+    if leg.%is_RC_aircraft% then
+      1
+    else if (crew.%has_agmt_group_skn_cc% and %has_enough_ordinary%) /*SKCMS-1081 */ 
+            or %SKS_3RP_valid% /*SKCMS-2955*/ then
+      3
+    else if /* SKCMS-1891 */ base_product.%is_tracking%
+                        and crew.%has_agmt_group_skd_cc%
+                        and %nr_ordinary_ap_crew_on_flight% > 0
+                        and %all_temp_crew_is_SKD%
+                        and system_db_parameters.%cau_inshape_3_RP%(fundamental.%now%) then
+      3
+    else
+      2;
+
+export %is_temp_crew_on_flight% =
+  leg.%is_active_flight% and crew.%is_cabin% and crew.%is_temporary_leg_start% and not crew_pos.%is_supernum%;
+
+%nr_ordinary_ap_crew_on_flight% =
+  count(equal_legs) where (leg.%is_active_flight% and
+                            crew.%is_cabin% and
+                            crew.%rank_leg_start% = "AP" and
+                            (crew.%is_SKD% or crew.%is_SKS%));
+
+
+%all_temp_crew_is_SKD% =
+    default(%nr_temp_crew_on_flight% = %nr_SKD_temp_crew_on_flight%, false);
+    /*if %nr_temp_crew_on_flight% = %nr_SKD_temp_crew_on_flight% then
+        true
+    else
+        false; */
+
+%nr_temp_crew_on_flight% =
+  count(equal_legs) where (%is_temp_crew_on_flight%);
+
+%nr_SKD_temp_crew_on_flight% =
+  count(equal_legs) where (%is_temp_crew_on_flight% and crew.%is_SKD%);
+
+%has_enough_ordinary% =
+  (sum(equal_legs,%_ordinary_AH_equivalent%) where (not crew.%is_temporary%)) >= 2;
+
+%_ordinary_AH_equivalent% =
+  if crew_pos.%assigned_pos% = 5 and crew_pos.%current_pos% = 5 then
+    2
+  else if crew_pos.%assigned_pos% >= 5 and crew_pos.%assigned_pos% <= 7 then
+    1
+  else
+    0;
+
+%SKS_3RP_valid% =
+    system_db_parameters.%cc_sks_3_rp_valid%(leg.%start_utc%) and
+    crew.%has_agmt_group_sks_cc% and
+    %nr_of_ahn_on_flight% < 1;
+    
+%nr_of_ahn_on_flight% =
+    count(equal_legs) where (leg.%is_active_flight% and
+                             crew.%is_cabin% and
+                             not crew_pos.%is_supernum% and
+                             crew.%has_qual_restr_new_actype_on_leg%);
+
+/*
+** Rule:
+**    Active SCC on charter positioning flight when other deadhead CC. 
+**
+** Description:
+**    The rule checks that if there are assigned deadhead CC on a charter
+**    positioning flight, that the SCC is assigned active
+**
+** Agreement:
+**    OM-A    4.1.3.6
+*/
+export rule comp_active_SCC_on_charter_ferry_flight_CC =
+  valid %valid_comp_active_SCC_on_charter_ferry_flight_CC% and
+        not crew.%is_leased_duty_start% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+
+  leg.%is_active_flight%;
+
+  startdate = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext "OMA: SCC must be active on charter positioning flight with deadhead CC";
+  remark "OMA: SCC must be active on charter positioning flight with deadhead CC",
+  planner "The rule checks that if deadhead CC are assigned on a charter"
+          " positioning flight departing scandinavia, then the most senior SCC"
+          " must be assigned active";
+end
+
+%valid_comp_active_SCC_on_charter_ferry_flight_CC% =
+  roster.%check_rules% and
+  leg.%in_pp_extended% and
+  leg.%is_charter_ferry_flight% and
+  leg.%departure_is_interscand% and
+  %any_deadhead_cc% and
+  crew.%seniority% = %most_senior_SCC_seniority%;
+  
+%most_senior_SCC_seniority% =
+  default(%most_senior_ap_SCC_seniority%,
+          %most_senior_not_ap_SCC_seniority%);
+
+%most_senior_ap_SCC_seniority% =
+  min(equal_legs, crew.%seniority%)
+    where (crew.%rank_at_date%(leg.%start_hb%) = "AP");
+
+%most_senior_not_ap_SCC_seniority% =
+  min(equal_legs, crew.%seniority%)
+    where (crew.%rank_at_date%(leg.%start_hb%) <> "AP" and
+           crew.%is_scc%(leg.%start_hb%));
+
+%any_deadhead_cc% = 
+  any(equal_legs, %cabin_crew% and
+                  leg.%is_deadhead%);
+
+/*
+** Rule:
+**    CC not eligable for TW99 training without AL qualification.
+**
+** Description:
+**    The rule checks that any crew assigned to the TW99 web training course 
+**    has the required AL aircraft qualification within 3 days of course start.
+**
+** JIRA: SKCMS-2087
+**
+*/
+export rule check_qual_AL_for_TW99 =
+  valid %_valid_check_qual_AL_for_TW99% and
+  rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+
+    model_crew.%has_ac_qual_at_date%(crew.%id%, "AL", leg.%start_hb%+3*24:00);
+
+
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext "TW99 not allowed without AL qualification at most 3 days later";
+  remark "TW99 not allowed without AL qualification at most 3 days later",
+  planner "Check that crew has AL qualification at course date or at most 3 days later.";
+end
+
+%_valid_check_qual_AL_for_TW99% =
+    roster.%check_rules% and
+    leg.%code% = ("TW99");
+
+/*
+** Rule:
+**    Check flight�s flying time is at least 4hrs duration for training of qualification AL
+**
+** Description:
+**    The rule checks that a training flight for crew with qualification AL
+**    is at least four hours long.
+**
+**  Agreement:
+**    Praxis, OM-?
+*/
+rule trng_min_training_flight_length_CC =
+  valid %valid_trng_min_release_flight_length_CC% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+        
+  %trigger_trng_min_release_flight_length_CC%;
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %trng_release_flight_lenght_ALL_failtext% ;
+  remark "OMA: AL training flight length",
+  planner "";
+end
+
+redefine export %valid_trng_min_release_flight_length_CC% =
+  roster.%check_rules% and
+  /* training.%unperformed_training_in_pp% and */
+  trip.%in_pp_extended% and
+  trip.%has_active_flight% and
+  leg.%is_active_flight% and
+  leg.%qual% = "AL" and
+  /* training.%unperformed_training_leg_start% and */
+  leg.%has_training_code%;
+
+redefine export %trigger_trng_min_release_flight_length_CC% =
+  leg.%time% >= %min_length_of_release%;
+
+redefine export %remark_trng_min_release_flight_length_CC% =
+  "AL training flight length";
+
+export %value_trng_min_release_flight_length_CC% =
+  leg.%time%;
+  
+export %limit_trng_min_release_flight_length_CC% =
+  %min_length_of_release%;
+
+%min_length_of_release% = 4:00;
+
+%trng_release_flight_lenght_ALL_failtext% = 
+  rules.%failtext_rel%("(CCR) Training AL training flight too short", 
+                       leg.%time%, 
+                       %min_length_of_release%);
+  
+rule trng_release_in_service_need_CC =
+  valid roster.%check_rules% and
+        leg.%is_active_flight% and
+		(not leg.%is_long_haul_aircraft%) and
+		leg.%starts_in_pp% and
+        leg.%is_release% and
+        crew_pos.%service_need_in_pos7% = 0;
+  crew_pos.%assigned_function% = "AU";
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext "Release should be assigned in AU if no service need on flight";
+  remark "OMA: Release flights should be performed above JAROPS need",
+  planner "";
+end
+
+/*
+** Rule:
+**    Check that crew assigned to recurrent instruction has valid qualification
+**    Valid instruction is INSTRUCTOR+REC which is to be replaced with INSTRUCTOR+OL.
+** Description:
+**    -
+**
+**  Agreement:
+**    SAS takeover of OAA planning
+*/
+rule trng_rec_instr_ok_CC =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        (leg.%is_cc_rec_instr% or leg.%is_ol123%) and
+        rule_exceptions.%rule_on%(leg.%start_UTC%);
+  %trng_rec_instr_ok_trigger%;
+  startdate  = leg.%start_UTC%;
+  severity = %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %trng_rec_instr_ok_failtext%;
+  remark "OMA: Crew must be valid for recurrent instruction duty";
+end
+
+%trng_rec_instr_ok_trigger% =
+  crew.%is_rec_instr%(leg.%start_hb%) or /* INSTRUCTOR+REC to be removed in future when transition from REC to OL is finished */
+  crew.%is_ol_instr%(leg.%start_hb%);
+    
+%trng_rec_instr_ok_failtext% =
+  concat("OMA: Instructor not qualified [",
+         leg.%code%, " requires INSTRUCTOR+OL]");
+
+
+/*
+** Rule:
+**    pm: goal activities attended
+**
+** Description:
+**    Check that enough performance management activities have been attended
+**    NOTE: this is turned off in tracking and alert monitoring based on SAS request - SKCMS-599.
+**
+*/
+
+%pm_last_period% =
+  (%pp_end% + 0:01) >= parameters.%pm_validity_end%;
+
+export rule pm_goal_not_attended_CC =
+  valid not base_product.%is_tracking%
+      and roster.%check_rules%
+      and %pm_last_period%
+      and crew.%is_pm_allowed%
+      and fundamental.%is_roster%
+      and rule_exceptions.%rule_on%(%pp_start%);
+
+  accumulators.%pm_attended% >= parameters.%pm_attend_goal%;
+  startdate  = %pp_start%;
+  severity = %severity_filter_int_chain%(%pp_start%);
+  failobject = first(leg(roster),leg.%failobject_departure%);
+  failtext
+    concat("PM: only ",format_int(accumulators.%pm_attended%,"%2d")," PM activities attended");
+  remark "PM: Not enugh PM activities attended in validity period",
+  planner "Checks if enough Performance Managment activitites attended in validity period.";
+end
+
+
+/*
+** Rule:
+**    pm: activities limit exceeded
+**
+** Description:
+**    Check that not to many performance mangagment activitites have been attended
+**
+*/
+
+export rule pm_limit_exceeded_CC =
+  valid roster.%check_rules%
+      and any(leg(roster),leg.%is_pm_student%)
+      and fundamental.%is_roster%
+      and rule_exceptions.%rule_on%(%pp_start%);
+
+  accumulators.%pm_attended% <= parameters.%pm_attend_limit%;
+  startdate  = %pp_start%; 
+  severity = %severity_filter_int_chain%(%pp_start%);
+  failobject = first(leg(roster),leg.%failobject_departure%);
+  failtext
+    concat("PM: ",format_int(accumulators.%pm_attended%,"%2d")," PM activities attended, max ",format_int(parameters.%pm_attend_limit%,"%2d"));
+  remark "PM: Too many PM activities attended in validity period",
+  planner "Checks if too many Performance Managment activitites attended in validity period.";
+end
+
+/* end of file */

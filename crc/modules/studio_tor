@@ -1,0 +1,291 @@
+/* -*- crc -*- 
+
+ 
+
+TOR (External Table fOr Regularity) Studio part
+-------------------------------------------------------
+Use:
+    This module contains definitions for the report 
+    TOR_etable.output, and for connection change
+    rudobs.
+
+Contents:
+    Some variables for writing to the external table
+    Other Definitions for the report
+    Rudob definitions
+*******************************************************/
+
+/*********************************************************
+ * Variables for writing to the external table.
+ *********************************************************/
+
+module studio_tor
+import levels;
+import tor;
+import iterators;
+
+%tor_write_weekdays_in_etable% =
+    if   lp_period_end - lp_period_start > 24:00 * 8 then
+      "DATED"
+    else if lp_period_end - lp_period_start > 24:00 * 3 then
+      "YES"
+    else
+      "NO";
+
+%tor_dep_traffic_day_write% =
+     if %tor_write_weekdays_in_etable% = "YES" then
+        time_of_week(tor.%tor_start_lt%)/24:00 + 1
+     else if %tor_write_weekdays_in_etable% = "DATED" then
+       (tor.%tor_start_lt%-01Jan1990)/24:00
+     else
+        0;
+    
+%tor_next_leg_dep_traffic_day_write% = 
+    default(next(leg(chain),%tor_dep_traffic_day_write%),-1);
+
+%tor_time% = format_time(time,"%2H.%02M");
+%tor_date% = format_time(time,"%02d %b %Y","G");
+
+/*****************************************************************************
+ * Rudob definitions (mapped into Studio in crc/report/studio_mappings_tor)
+ *****************************************************************************/
+
+/* Control parameters */
+%tor_rudob_show% = parameter false
+  /*remark "(TOR) 1.1 Use Rudobs to indicate connection changes",*/
+  remark "Show markers to indicate TOR connection changes",
+  planner "Parameter that states if rudobs should be used to indicate any connection changes between the trips and the TOR table, as well as more detailed information on the exact types of connection change.";
+
+/* Hard code for now to reduce parameters - JC 070626 */
+%tor_rudob_len% = 0:40; 
+/*%tor_rudob_len% = parameter 0:40 
+  remark "(TOR) 1.2 Length of rudobs",
+  planner "Parameter that states the length (in minutes) of the rudobs that indicates connection changes.";*/
+
+/* Before and after markers length  */ 
+%tor_rudob_before_duration% =
+  if %tor_rudob_show% 
+    and not tor.%tor_fallback_table_used% 
+    and %tor_rudob_before_color% > -1 then
+      nmin(%tor_rudob_len%,
+	default((tor.%tor_start_utc% - prev(leg(chain),tor.%tor_end_utc%))/2,999:00))
+  else
+      0:0;
+    
+%tor_rudob_after_duration% =
+  if %tor_rudob_show% 
+    and not tor.%tor_fallback_table_used% 
+    and %tor_rudob_after_color% > -1 then
+      nmin(%tor_rudob_len%,
+	default((next(leg(chain),tor.%tor_start_utc%)-tor.%tor_end_utc%)/2,999:00))
+    else
+      0:0;
+    
+/* Hard code for now to reduce parameters - JC 070626 */
+%tor_rudob_top% = 100;
+/*%tor_rudob_top% = parameter 100 
+  remark "(TOR) 1.3 Top of rudobs (0-100)",
+  planner "Parameter that states the top of the rudobs that indicate connection changes. Possible value 0-100.";*/  
+%tor_rudob_bottom% = 80;
+/*%tor_rudob_bottom% = parameter 80
+  remark "(TOR) 1.4 Bottom of rudobs (0-100)",
+  planner "Parameter that states the bottom of the rudobs that indicate connection changes. Possible value 0-100.";*/
+    
+%tor_rudob_after_start% = tor.%tor_end_utc%;
+%tor_rudob_before_start% = tor.%tor_start_utc% - %tor_rudob_before_duration%;
+
+/* Before and after markers text info  */ 
+%tor_rudob_before_text% = 
+  %tor_rudob_text%(tor.%tor_kind_of_connection_before%,FALSE);
+%tor_rudob_after_text% = 
+  %tor_rudob_text%(tor.%tor_kind_of_connection_after%,TRUE);
+       
+table tor_rudob_text(int case, bool after)  =
+    case,after -> %tor_rudob_text%;
+    0 , -     ->  "TOR, deadhead";    
+    1	, -     ->  "TOR, leg not in etable";     
+    2	, -     ->  "TOR, OK connection";
+    3	, TRUE  ->  "TOR, end of trip";
+    3	, FALSE ->  "TOR, start of trip";
+    4	, TRUE  ->  concat("TOR, layover to: ", tor.%tor_etab_after_id%);
+    4	, FALSE ->  concat("TOR, layover fr: ", tor.%tor_etab_before_id%);
+    5	, TRUE  ->  concat("TOR, layover to DH: ", tor.%tor_etab_after_id%);
+    5	, FALSE ->  concat("TOR, layover fr DH: ", tor.%tor_etab_before_id%);
+    6	, TRUE  ->  concat("TOR, next: ", tor.%tor_etab_after_id%);
+    6	, FALSE ->  concat("TOR, prev: ", tor.%tor_etab_before_id%);
+    7	, TRUE  ->  concat("TOR, next DH: ", tor.%tor_etab_after_id%);
+    7	, FALSE ->  concat("TOR, prev DH: ", tor.%tor_etab_before_id%);
+    &
+    -	, -     ->  "TOR, error";
+end    
+   
+/* Before and after markers colour definitions  */
+/* Hard code for now to reduce parameters - JC 070626 */
+%tor_rudob_color_case_0% = -1;
+/*%tor_rudob_color_case_0% = parameter -1 
+  remark "(TOR) 1.5 Rudob colour, deadhead (-1 --> Do not indicate)",
+  planner "Parameter that states the colour to use for deadhead legs that don't have a match within the TOR table. The numbers point at rule_color_1...32, these can be found under Options -> Colour Manager. Value -1 indicates that no colour should be used. Allowed value 1 - 32.";*/    
+%tor_rudob_color_case_1% = 1;
+/*%tor_rudob_color_case_1% = parameter 1   /* Black */
+/*  remark "(TOR) 1.6 Rudob colour, leg not in etable",
+  planner "Parameter that states the colour to use for legs that can't be found within the TOR table. The numbers point at rule_color_1...32, these can be found under Options -> Colour Manager. Value -1 indicates that no colour should be used. Allowed value 1 - 32.";*/
+%tor_rudob_color_case_2% = -1;
+/*%tor_rudob_color_case_2% = parameter -1
+  remark "(TOR) 1.7 Rudob colour, OK connection",
+  planner "Parameter that states the colour to use for a leg connection that are identical to that within the TOR table. The numbers point at rule_color_1...32, these can be found under Options -> Colour Manager. Value -1 indicates that no colour should be used. Allowed value 1 - 32.";*/
+%tor_rudob_color_case_3% = 13;
+/*%tor_rudob_color_case_3% = parameter 13  /* Yellow */
+/*  remark "(TOR) 1.8 Rudob colour, Changed from start/end in etable",
+  planner "Parameter that states the colour to use for a leg connection that previously started or ended a trip within the TOR table. The numbers point at rule_color_1...32, these can be found under Options -> Colour Manager. Value -1 indicates that no colour should be used. Allowed value 1 - 32.";*/ 
+%tor_rudob_color_case_4% = 11;
+/*%tor_rudob_color_case_4% = parameter 11  /* Pink */
+/*  remark "(TOR) 1.9 Rudob colour, Changed (from) layover to/from On-duty",
+  planner "Parameter that states the colour to use for a leg connection that previously started or ended a duty as an on-duty leg within the TOR table. The numbers point at rule_color_1...32, these can be found under Options -> Colour Manager. Value -1 indicates that no colour should be used. Allowed value 1 - 32.";*/
+%tor_rudob_color_case_5% = 16;
+/*%tor_rudob_color_case_5% = parameter 16  /* Light pink */
+/*  remark "(TOR) 1.10 Rudob colour, Changed (from) layover to/from Deadhead",
+  planner "Parameter that states the colour to use for a leg connection that previously started or ended a duty as a deadhead leg within the TOR table. The numbers point at rule_color_1...32, these can be found under Options -> Colour Manager. Value -1 indicates that no colour should be used. Allowed value 1 - 32.";*/ 
+%tor_rudob_color_case_6% = 3;
+/*%tor_rudob_color_case_6% = parameter 3   /* Blue */
+/*  remark "(TOR) 1.11 Rudob colour, Changed (from) day conn. to/from On-duty",
+  planner "Parameter that states the colour to use for a leg connection within a duty as an on-duty leg within the TOR table. The numbers point at rule_color_1...32, these can be found under Options -> Colour Manager. Value -1 indicates that no colour should be used. Allowed value 1 - 32.";*/
+%tor_rudob_color_case_7% = 14;
+/*%tor_rudob_color_case_7% = parameter 14  /* Light blue */
+/*  remark "(TOR) 1.12 Rudob colour, Changed (from) day conn. to/from Deadhead",
+  planner "Parameter that states the colour to use for a leg connection within a duty as a deadhead leg within the TOR table. The numbers point at rule_color_1...32, these can be found under Options -> Colour Manager. Value -1 indicates that no colour should be used. Allowed value 1 - 32.";*/
+    
+table tor_rudob_color(int case) =
+    case -> %tor_rudob_color%;
+    0	 -> %tor_rudob_color_case_0%;
+    1	 -> %tor_rudob_color_case_1%;
+    2	 -> %tor_rudob_color_case_2%;
+    3	 -> %tor_rudob_color_case_3%;
+    4	 -> %tor_rudob_color_case_4%;
+    5	 -> %tor_rudob_color_case_5%;
+    6	 -> %tor_rudob_color_case_6%;
+    7	 -> %tor_rudob_color_case_7%;
+    &
+    -	 -> -1; /* ERROR */
+end    
+
+%tor_rudob_before_color% = 
+  %tor_rudob_color%(tor.%tor_kind_of_connection_before%);
+%tor_rudob_after_color% = 
+  %tor_rudob_color%(tor.%tor_kind_of_connection_after%);
+
+/******************************************************
+ * Definitions for TORAnalysis report
+ *****************************************************/
+
+%tor_chain_number_of_connections_type_x%(int kind) =
+     count(leg(chain)) where (tor.%tor_kind_of_connection_after% = kind)
+     +
+     count(leg(chain)) where (tor.%tor_kind_of_connection_before% = kind);
+    
+%tor_chain_number_of_connections_type_0% =  
+  %tor_chain_number_of_connections_type_x%(0);
+%tor_chain_number_of_connections_type_1% =  
+  %tor_chain_number_of_connections_type_x%(1);
+%tor_chain_number_of_connections_type_2% =  
+  %tor_chain_number_of_connections_type_x%(2);
+%tor_chain_number_of_connections_type_3% =  
+  %tor_chain_number_of_connections_type_x%(3);
+%tor_chain_number_of_connections_type_4% =  
+  %tor_chain_number_of_connections_type_x%(4);
+%tor_chain_number_of_connections_type_5% =  
+  %tor_chain_number_of_connections_type_x%(5);
+%tor_chain_number_of_connections_type_6% =  
+  %tor_chain_number_of_connections_type_x%(6);
+%tor_chain_number_of_connections_type_7% =  
+  %tor_chain_number_of_connections_type_x%(7);
+
+%tor_plan_number_of_connections_type_0% = 
+  sum(chain_set,%tor_chain_number_of_connections_type_0%);
+%tor_plan_number_of_connections_type_1% = 
+  sum(chain_set,%tor_chain_number_of_connections_type_1%);
+%tor_plan_number_of_connections_type_2% = 
+  sum(chain_set,%tor_chain_number_of_connections_type_2%);
+%tor_plan_number_of_connections_type_3% = 
+  sum(chain_set,%tor_chain_number_of_connections_type_3%);
+%tor_plan_number_of_connections_type_4% = 
+  sum(chain_set,%tor_chain_number_of_connections_type_4%);
+%tor_plan_number_of_connections_type_5% = 
+  sum(chain_set,%tor_chain_number_of_connections_type_5%);
+%tor_plan_number_of_connections_type_6% = 
+  sum(chain_set,%tor_chain_number_of_connections_type_6%);
+%tor_plan_number_of_connections_type_7% = 
+  sum(chain_set,%tor_chain_number_of_connections_type_7%);
+
+/* Type of TOR changes to count towards changed connections */
+set tor_changed = 1,3,4,5,6,7;
+
+%tor_chain_is_changed% =
+    any(leg(chain),tor.%tor_kind_of_connection_before% in tor_changed or
+		   tor.%tor_kind_of_connection_after% in  tor_changed);
+
+%tor_duty_is_changed% =
+    any(leg(duty),tor.%tor_kind_of_connection_before% in tor_changed or
+		  tor.%tor_kind_of_connection_after% in  tor_changed);
+%tor_leg_is_changed% =
+    tor.%tor_kind_of_connection_before% in tor_changed or
+    tor.%tor_kind_of_connection_after% in  tor_changed;
+
+%tor_plan_num_chains% = 
+    count(chain_set);
+%tor_plan_num_changed_chains% = 
+    count(chain_set) where (%tor_chain_is_changed%);
+
+%tor_plan_degree_changed_chains% =
+  (100*%tor_plan_num_changed_chains%)/
+  %tor_plan_num_chains%;
+
+%tor_plan_num_duties% = 
+    count(duty_set);
+%tor_plan_num_changed_duties% = 
+    count(duty_set) where (%tor_duty_is_changed%);
+
+%tor_plan_degree_changed_duties% =
+  (100*%tor_plan_num_changed_duties%)/
+  %tor_plan_num_duties%;
+
+%tor_plan_num_legs% = 
+    count(leg_set);
+%tor_plan_num_changed_legs% = 
+    count(leg_set) where (%tor_leg_is_changed%);
+
+%tor_plan_degree_changed_legs% =
+  (100*%tor_plan_num_changed_legs%)/
+  %tor_plan_num_legs%;
+
+/*
+ * Definition of Degree of Regularity. 
+ *
+ * 100 if all chains exists on days in the local plan period.
+ * 0   if no CRRs are identical.
+ *
+ * 100 for Daily plans.
+ */
+
+iterator unique_tor_chain = 
+  partition(chain) 
+  by(map(leg(chain),tor.%tor_end_station%,
+    tor.%tor_id%,
+    tor.%tor_dh%,
+    tor.%tor_stop_type%));
+end
+
+%tor_plan_number_of_compressed_chains% = 
+    count(unique_tor_chain);
+
+%tor_num_days_in_plan% = 
+  max(chain_set,1 + (lp_period_end - lp_period_start)/24:00);
+
+%tor_plan_degree_of_regularity% =   
+    if %tor_num_days_in_plan% = 1 then 
+      100
+    else 
+      100*(%tor_plan_num_chains%-%tor_plan_number_of_compressed_chains%)/
+      (%tor_plan_number_of_compressed_chains%*(%tor_num_days_in_plan%-1));
+
+/* End of file */
+

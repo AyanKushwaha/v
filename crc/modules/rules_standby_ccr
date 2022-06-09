@@ -1,0 +1,266 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains standby rules used for flight crew in Carmen Crew Rostering
+ *
+ * Sections:
+ *   Standby rules
+ *
+ * Created by:
+ *   Henrik Mouritsen, 24-Sep-2006
+ *
+ * Major changes:
+ *
+ */
+
+root module rules_standby_ccr
+import levels;
+import fundamental;
+import base_utils;
+import roster;
+import wop;
+import trip;
+import duty;
+import leg;
+import crew;
+import freedays;
+import rules;
+import rule_exceptions;
+import accumulators;
+import parameters;
+import standby;
+
+/****************************************************************
+ * Section 1: Standby rules
+ ***************************************************************/
+
+/*
+** Rule:
+**    Crew must match standby qualification
+**
+** Description: 
+**    Ensure that a standby activity for a certain qualification only is assigned
+**    to crew with that qualification
+**
+*/
+rule sby_crew_qualified_for_sby_ALL = 
+  valid roster.%check_rules% and
+        duty.%in_pp_extended% and
+        duty.%is_standby% and
+        not duty.%is_standby_line% and
+        duty.%standby_code_with_qualification% and
+        rule_exceptions.%rule_on%(duty.%start_UTC%);
+  crew.%has_ac_qln%(duty.%start_UTC%, duty.%qual%);
+  startdate = duty.%start_UTC%;
+  failobject = duty.%failobject_start%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext concat("SBY: Standby activity with code ", duty.%code%,
+                  " requires crew qualified for aircraft family ", leg.%ac_fam_map%(duty.%code%));
+  remark "(CCR) SBY: Crew must have valid aircraft qualification",
+  planner "The rule checks that crew have the "
+          "qualification required by the standby code";
+end
+
+/*
+** Rule:
+**    Minimum sby line days
+**
+** Description:
+**    Check the minimum standby line days btw
+**    freedays surrounding sby line
+**
+** Agreement:
+**    Functionel
+**
+*/
+export rule stb_min_sb_line_working_days_btw_freedays_ALL =
+  valid %is_roster% and
+    not crew.%is_leased_wop_start% and
+    wop.%in_pp_extended% and
+    wop.%is_on_duty% and
+    wop.%is_standby_line_any%;
+  freedays.%work_days_btw_freedays% >= %min_allowed_sb_line_days_p% +
+                 rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+
+  startdate  = wop.%start_UTC%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("Coll: Min SB lineWorkdays btw F-days", value, limit);
+  remark "(CCR) Coll: Min SB line working days between freedays",
+  planner "The rule checks that the minimum allowed SB line days are"
+          " not exceeded.";
+end
+
+%min_allowed_sb_line_days_p% = parameter 7;
+
+/*
+** Rule:
+**    Minimum days between standby lines.
+**
+** Description:
+**    Check the minimum days between standby lines.
+**    Assumption is that a standby line is inside wop range.
+**
+** Agreement:
+**    Functional rule
+*/
+rule stb_min_days_btw_standby_lines_ALL =
+  valid roster.%check_rules% and
+        crew.%k4exng_cc_sp5_1_valid%(wop.%start_UTC%) and
+        wop.%in_pp_extended% and
+        wop.%is_standby_line% and
+        crew.%is_long_haul_wop_start%;
+
+        %standby_line_days_prev% >= %min_days_btw_standby_lines% -
+                               rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+
+  startdate = wop.%start_UTC%;
+  failobject = wop.%failobject_start%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(int val, int limit) =
+    concat("SBY: ", %int2str%(val),
+           " days between standby lines, ",
+           %int2str%(limit),
+           " required.");
+  remark "SBY: Min days between standby lines",
+  planner "The rule checks that the days between standby lines"
+          " fulfills the minimum requirement.";
+end
+
+%standby_line_days_prev% =
+  (round_down(standby.%first_standby_in_wop_date%,24:00) - round_up(%prev_standby_line_date%, 24:00)) / 24:00;
+
+%prev_standby_line_date% =
+    default(accumulators.%prev_standby_line_date%(wop.%start_UTC% - 0:01), 01jan1986);
+
+%min_days_btw_standby_lines% =
+  parameter 56
+  remark "(CCR) Min days between standby lines";
+
+/*
+** Rule:
+**    Standby line starts at the same time
+**
+** Description:
+**    Check that all sby lines in a row
+**    starts at same time
+**
+** Agreement:
+**    Functionel
+**
+*/
+export rule stb_standby_line_starts_same_in_line_ALL =
+  valid %is_roster% and
+    not crew.%is_leased_wop_start% and
+    not (crew.%is_skd% and crew.%is_temporary%) and
+    not (crew.%is_skj% or crew.%is_skk%) and
+    wop.%in_pp_extended% and
+    wop.%is_on_duty% and
+    trip.%is_standby_line%;
+  trip.%start_od% = wop.%start_od% +
+                  rule_exceptions.%overshoot_rel%(trip.%start_UTC%);
+
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(Reltime value, Reltime limit) =
+    rules.%failtext_rel%("Coll: All SB line must start at same time", value, limit);
+  remark "(CCR) Coll: Standby line must start at same time";
+end
+
+/*
+** Rule: 
+**    Maximum length of a standby line.
+**
+** Description:
+**    Check that a standby line length doesn't exceed the maximum allowed.
+**
+** Agreement:
+**    SCCA K04 B2 E2.1
+**    CAU B2 F.2.1.1
+**    NKF B6.7
+*/
+rule stb_max_len_standby_line_ALL =
+  valid roster.%check_rules% and 
+  /* Rule is valid for cabin crew with long haul qual and MFF crew */
+        ((crew.%is_cabin% and crew.%is_long_haul_wop_start%) 
+        or crew.%has_agmt_group_sk_fd_mff%) and
+        wop.%in_pp_extended% and
+        trip.%is_standby_line% and
+        is_last(trip(wop))
+          where (trip.%is_standby_line%);
+	
+	%nr_of_days_in_standby_line% <= %maximum_standby_line_length% + 
+		       rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+
+  startdate = trip.%start_UTC%;
+  failobject = trip.%failobject_start%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(int val, int limit) = 
+    concat("SBY: ", %int2str%(val), 
+           " SBY days in standby line. Only ", %int2str%(limit),
+           " allowed.");
+  remark "SBY: Maximum length of standby line",
+  planner "The rule checks that the maximum length of a standby line is not exceeded";
+end
+
+%maximum_standby_line_length% = 14; 
+/* The maximum length of standby lines is 14 for all cabin crew as well as for MFF crew */
+
+/* this set does not seem to be used anywhere */
+set k4exng_short_rl_set = "SKS","SKD";
+    
+%nr_of_days_in_standby_line% =
+  sum(trip(wop),trip.%days%)
+    from (current) backwards while(trip.%is_standby_line%);
+
+/*
+** Rule:
+**    LH, MFF and long haul qualified cabin crew should get at least 3 days off after at least
+**    3 consecutive long haul standby duties
+**
+**
+*/
+rule sby_min_days_off_after_lh_sb = 
+  valid roster.%check_rules% and
+        (crew.%has_agmt_group_ski_fd% or crew.%is_mff% 
+            or (%cabin_crew% and crew.%is_long_haul_pp_end%)) and
+        duty.%in_pp_extended% and
+        not duty.%is_standby_line% and
+        %sby_code_with_qual_or_long_haul_sb% and
+        is_last(duty(wop) where (duty.%is_standby%)) and
+        %is_preceeded_by_at_least_2_sby_days%;
+              
+        freedays.%freedays_after_duty% >= %freedays_after_lh_sb% - rule_exceptions.%overshoot_int%(duty.%start_utc%);
+        
+  
+  startdate = duty.%start_UTC%;
+  failobject = duty.%failobject_start%;
+  failtext concat("SBY: Min days off after ", duty.%code%," standby" ); 
+                  
+  remark "(CCR) SBY: Min days off after long haul standby";
+
+end
+
+%is_preceeded_by_at_least_2_sby_days% =
+let current_duty_start = duty.%start_day%;
+default(
+        prev(duty(roster),
+             prev(duty(roster), %sby_code_with_qual_or_long_haul_sb% and duty.%start_day% = current_duty_start - 48:00)
+             )
+        , false);
+
+%freedays_after_lh_sb% =
+if %cabin_crew% and freedays.%any_offduty_may_replace_one_freeday%
+then 2
+else 3;
+
+
+%sby_code_with_qual_or_long_haul_sb% =
+if (crew.%has_agmt_group_ski_fd% or crew.%is_mff%) 
+then duty.%standby_code_with_qualification% and not (duty.%code% = "R2") 
+else duty.%is_standby_long_haul%;
+    
+/* end of file */
+

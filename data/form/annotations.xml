@@ -1,0 +1,310 @@
+<!-- $Header$ -->
+<views>
+
+<head>
+
+<title>${form_name}s</title>
+
+<documentation>
+  Form used to display all valid annotations for a specific crew.
+  New annotations can be created.
+  Existing annotations can be removed.
+</documentation>
+
+<!-- Alias of the tables, used to filter information in the different views. -->
+<alias id="annotations" source="tmp_annotation_table"/>
+<alias id="selected_annotation" source="tmp_annotation_table"/>
+<alias id="selected_annotation_with_validfrom_gt_validto" source="selected_annotation" filter="(0=1)"/>
+<alias id="selected_ann_code" source="tmp_ann_codes"/>
+
+<on-loaded>
+  setEventEnabled(on-changed,false);
+  setEventEnabled(on-selection-changed,false);
+  model("init_wave_client");
+</on-loaded>
+
+<on-opened>
+  setEventEnabled(on-changed,false);
+  setEventEnabled(on-selection-changed,false);
+  setFilter("tmp_ann_form_data", "(form_id=${form_id})");
+  set_filter(annotations);
+  set_filter(selected_ann_code);
+  set_filter(selected_annotation);
+  setFormTitle("${form_name}s for ${tmp_ann_form_data[0,forminfo]}");
+  setEventEnabled(on-selection-changed,true);
+  setEventEnabled(on-changed,true);
+</on-opened>
+
+<on-closing>
+  cancel_close();
+</on-closing>
+
+<!-- Exit function. Checks for the correct codes before saving to the model -->
+<action name="check_save_close" args=""><![CDATA[
+context.action('model', 'annotations_valid_info', "${form_id}", "${ann_code}", "${ann_prop}")
+context.action('refreshClient')
+info_ok = context.sm.resolve("${tmp_ann_valid_info[0,err_status]}")
+if info_ok == "false":
+    context.action('openForm', 'warn.xml', 'modal',
+                   "title=Warning for Annotations",
+                   "msg=<b>Empty/illegal code/time specified.</b><br><br>" + \
+                          "Exit without adding/changing the annotation?")
+else:
+    context.action('model', 'submit_opaq', "${form_name}s for ${tmp_ann_form_data[0,forminfo]}")
+    context.action('model', 'annotations_save_changes', "${form_id}");
+    context.action('refreshClient')
+    context.action('closeForm')
+]]></action>
+
+<action name="cancel_close" args=""><![CDATA[
+context.action('model', 'submit_trans')
+context.action('model', 'annotations_clean_up', "${form_id}")
+context.action('closeForm')
+]]></action>
+
+<action name="insert_annotation" args="form_id,user,rownr"><![CDATA[
+today_as_date = context.sm.resolve("${tmp_wave_values[now_date_utc, v]}").split()[0]
+context.action('insertRow', 'annotation_list',
+               'form_id=%s' % form_id,
+               'username=%s' % user,
+               'rownr=%s' % rownr,
+               'validfrom=%s' % today_as_date,
+               'validto=%s' % today_as_date,
+               'text= ',
+               'deleted=false')
+context.action('promoteAll', 'annotations');
+view = context.sm.getContext().getView('annotations', context.comp)
+rownr_list = [str(row['rownr']) for row in view.getEntityIterator(0)]
+rownr_ix = rownr_list.index(rownr)
+context.action('selectTableRow', 'annotation_list', str(rownr_ix))
+context.action('setVisible', 'no_details', 'false')
+context.action('setVisible', 'details', 'true')
+context.action('setFocus','ann_code')
+]]></action>
+
+<action name="delete_selected_annotation" args=""><![CDATA[
+row_to_delete = context.sm.resolve('${annotation_list}')
+if row_to_delete and row_to_delete != 'NULL':
+    view = context.sm.getContext().getView('annotations', context.comp)
+    rownr_list = [str(row['rownr']) for row in view.getEntityIterator(0)]
+    rownr_ix = rownr_list.index(row_to_delete)
+    context.action('setTableValue','selected_annotation','0','deleted','true')
+    if rownr_ix < len(rownr_list) - 1:
+        context.action('selectTableRow', 'annotation_list', str(rownr_ix))
+    else:
+        context.action('clearSelection', 'annotation_list')
+]]></action>
+
+<action name="check_negative" args=""><![CDATA[
+code = context.sm.resolve("${ann_code}").strip().upper()
+prop = context.sm.resolve("${ann_prop}").strip().upper()
+if code == "ST" and (prop == "NULL" or int(prop) < 0):
+    context.action('setValue', 'ann_prop', "0")
+    context.action('refreshClient')
+    context.action('setFocus', 'ann_prop')
+else:
+    context.action('setFocus', 'ann_text')
+]]></action>
+
+<action name="adjust_ann_code" args=""><![CDATA[
+#
+# Fills in description when a valid code is entered.
+#
+global tmp_ann_codes
+try:
+    tmp_ann_codes
+except:
+    view = context.sm.getContext().getView('tmp_ann_codes', context.comp)
+    tmp_ann_codes = dict([("%s" % row['code'], \
+                           "%s: %s" % (row['code'],row['descript']) \
+                        ) for row in view.getEntityIterator(0)])
+code = context.sm.resolve("${ann_code}").strip().upper()
+try:
+    context.action('set_filter', 'selected_ann_code')
+    context.action('setValue', 'ann_code', tmp_ann_codes[code])
+    if context.sm.resolve("${selected_ann_code[0,hasprop]}") == 'true':
+        context.action('setVisible', 'no_ann_prop', 'false')
+        context.action('setVisible', 'ann_prop', 'true')
+        context.action('setFocus', 'ann_prop')
+        context.action('setValue', 'ann_prop', "0")
+    else:
+        context.action('setFocus', 'ann_text')
+except:
+    context.action('setMessage', 'ann_code', "Invalid code", 'border')
+    context.action('setFocus', 'ann_code')
+]]></action>
+
+<action name="set_if_not_null" args="field,value"><![CDATA[
+if value != "NULL":
+  context.action('setValue', field, value)
+  print "CHANGED",field,"TO",value
+]]></action>
+
+<action name="set_filter" args="table_or_alias"><![CDATA[
+#
+# Table filters must be re-evaluated whenever the filter parameters are changed.
+# (View filters, to the opposite, are dynamically re-evaluated.)
+#
+# The below table filters are reset in various places in the form, so they are
+# defined here in a global place to avoid duplication of code.
+
+global annotations_filters
+try:
+    annotations_filters
+except:
+    annotations_filters = {
+        'annotations': 
+            "(&(form_id=${form_id})" + \
+              "(!(deleted=true))" + \
+              "(|('true'=${view_history})" + \
+                "(validto=NULL)" + \
+                "(validto>=${tmp_wave_values[now_date_utc,v]})))",
+        'selected_ann_code': 
+            "(code=${annotation_list[code]})",
+        'selected_annotation':
+            "(&(form_id=${form_id})(rownr=${annotation_list}))",
+        }
+context.action('setFilter', table_or_alias, annotations_filters[table_or_alias])
+]]></action>
+
+</head>
+
+<!-- Top menu -->
+<menu-bar>
+  <menu label="_F_ile">
+    <menu-item ref="ok_button"/>
+    <menu-item ref="cancel_button"/>
+  </menu>
+</menu-bar>     
+
+<split-box style.orientation="horizontal">
+  <!-- This box contains the detailed info on the selected annotation -->
+  <vbox style.width="410" style.height="250">
+    <vbox id="no_details" label="" filter.visible="(annotation_list=NULL)">
+      <html> No entry selected </html>
+    </vbox>
+    <vbox id="details"  label="${form_name} Details" style.width="380"
+          filter.visible="(!(annotation_list=NULL))">
+      <custom>
+        <template id="ann_cell" source="selected_annotation" row="0" style.left="70"/>
+      </custom>
+      <box style.orientation="border" style.border="empty">
+        <hbox style.constraints="Center">
+          <table-cell label="Code" id="ann_code" ref="ann_cell" column="code"
+                      style.maxRadioCount="0"
+                      style.display.column="${code}: ${code.descript}"
+                      style.combo.allowany="true"
+                      style.display.column.clip="999">
+            <on-changed>
+              adjust_ann_code();
+            </on-changed>
+          </table-cell>
+        </hbox>
+        <hbox style.constraints="East">
+          <text id="no_ann_prop" style.width="55"
+                      filter.visible="(!('true'=${selected_ann_code[0,hasprop]}))"/> 
+          <table-cell label="" id="ann_prop" ref="ann_cell" column="property"
+                      value.min="0" style.left="5" style.width="50"
+                      filter.visible="('true'=${selected_ann_code[0,hasprop]})"> 
+            <on-changed>
+              check_negative();
+            </on-changed>
+          </table-cell>
+        </hbox>
+      </box>
+      <hbox>
+        <table-cell label="Text" id="ann_text" ref="ann_cell" column="text"
+                    style.nrows="3" style.width="500"/>
+      </hbox>
+      <vbox>
+        <hbox style.border="empty">
+          <table-cell label="Valid From" id="ann_start" ref="ann_cell" column="validfrom">
+            <on-changed>
+              setFilter(selected_annotation_with_validfrom_gt_validto,"(validto&lt;${ann_start})");
+              set_if_not_null("ann_end", "${selected_annotation_with_validfrom_gt_validto[0,validfrom]}");
+            </on-changed>
+          </table-cell>
+          <text>   </text>
+        </hbox>
+        <hbox style.border="empty">
+          <table-cell label="Valid To" id="ann_end" ref="ann_cell" column="validto"/>
+          <text>   </text>
+        </hbox>
+      </vbox>
+      <vbox>
+        <table-cell label="Created" ref="ann_cell" column="entrytime" editable="false"/>
+        <table-cell label="  By"    ref="ann_cell" column="username"  editable="false"/>
+      </vbox>
+    </vbox>
+    <vbox filter.visible="(0=1)" style.border="empty">
+      <table source="selected_annotation_with_validfrom_gt_validto">
+      </table>
+    </vbox>
+    <vbox filter.visible="(0=1)" style.border="empty">
+      <table source="selected_ann_code">
+      </table>
+    </vbox>
+  </vbox>
+
+  <!-- This box contains an annotation selection list. -->
+  <box label="${form_name} List" style.width="535" style.orientation="border">
+    <box style.constraints="Center" style.height="200">
+      <table id="annotation_list"
+             source="annotations" sourceColumn="rownr"
+             columns="rownr,code,text,validto"
+             editable="false"
+             sort.column="validto"
+             style.height="100">
+        <columninfo column="rownr" visible="false"/> 
+        <columninfo column="code" label="Code" width="70"/> 
+        <columninfo column="text" label="Text" width="350"/>
+        <columninfo column="validto" label="Valid To" width="90"/>
+        <on-selection-changed>
+          set_filter(selected_ann_code);
+          set_filter(selected_annotation);
+        </on-selection-changed>
+      </table>
+    </box>
+    <box style.constraints="South" style.orientation="border">
+      <hbox style.constraints="West">
+        <button label="Crea_t_e" id="create_button" style.width="75">
+          <on-click>
+            insert_annotation("${form_id}",
+                              "${tmp_ann_form_data[0,username]}",
+                              "${tmp_annotation_table._rowcount}");
+          </on-click>
+        </button> 
+        <button label="Remo_v_e" id="remove_button" style.width="75"
+                filter.enabled="(!(annotation_list=NULL))">
+          <on-click>
+            delete_selected_annotation();
+          </on-click>
+        </button>
+      </hbox>
+      <hbox style.constraints="East">
+        <check-box label="View _H_istory" id="view_history" value="false">
+          <on-changed>
+            set_filter(annotations);
+          </on-changed>
+        </check-box>
+     </hbox>
+    </box>
+  </box>  
+</split-box>
+
+<hbox>
+  <button id="ok_button" label="_O_k" style.width="75"
+          filter.enabled="(forms.messages.local.any=0)">
+    <on-click>
+      check_save_close();
+    </on-click>
+  </button>
+  <button id="cancel_button" label="_C_ancel" style.width="75">
+    <on-click>
+      cancel_close();
+    </on-click>
+  </button> 
+</hbox>
+  
+</views>
+

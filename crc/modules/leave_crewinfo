@@ -1,0 +1,364 @@
+/* -*- crc -*- 
+*/
+
+module leave_crewinfo
+
+/* Imports */
+import basic;
+import levels;
+import kwdmap;
+import model_crew;
+
+/* ----------------------------------------------------------- */
+export %cat%(abstime date) =
+  levels.%_cat%(date);
+
+export %base%(abstime date) = default(%base_training%(date), %base_real%(date));
+
+export %company%(abstime date) = default(%company_training%(date), %company_real%(date));
+
+export %region%(abstime date) = default(%region_training%(date), %region_real%(date));
+
+export %crewrank%(abstime date) = levels.%_crewrank%(date);
+
+export %titlerank%(abstime date) = default(%titlerank_training%(date), %titlerank_real%(date));
+
+export %country%(abstime date) = default(%country_training%(date), %country_real%(date));
+
+export %station%(abstime date) = default(%station_training%(date), %station_real%(date));
+
+/* seniority - seniority number */
+export %crew_seniority%(abstime date) =
+  default(%_crew_seniority%(date, "LOCAL"),%_crew_seniority%(date, "SAS"));
+
+  table crew_seniority_table(AbsTime date, string type)=
+   %crew_id%, date, type -> Int %_crew_seniority%;
+    external "crew_seniority";
+    crew, (validfrom,validto(, grp -> seniority;
+    -   , -,-                 -> void(int);
+end
+
+/* explicit vacation priority per crew */
+export %crew_vac_num% =
+  %_crew_vac_num%;
+
+table crew_vac_num_table = 
+  %crew_id% -> Int %_crew_vac_num%;
+  external "crew_vac_num";
+  crewid -> vanbr;
+  - -> void(int);
+end 
+
+export %is_retired%(abstime date) =
+  %crew_contract_grouptype%(date) = "R";
+
+export %crew_has_contract%(abstime date) =
+  not (%crew_contract%(date) = "Not Found");
+
+/*%last_working_day_at_date% is used instead of %retirement_date% to have the crew_contracts table
+  as the only source of retirement info. This way the system also handles more than one retirement contract*/
+export %last_working_day_at_date%(abstime date) =
+  if %is_retired%(date) then
+    %crew_contract_valid_from%(date) - 24:00
+  else 
+    date;
+
+export %next_working_day_in_year%(abstime date) =
+  if %next_working_day%(date) < add_years(round_down_year(date), 1) then
+    %next_working_day%(date)
+  else
+    void_abstime;
+
+/* Case contract on current date and not retired -> current date
+ * Case retired or no contract on current date but in the upcoming 10 years -> first day on contract
+ * Otherwise -> void
+ */
+export %next_working_day%(abstime date) =
+  if not %crew_has_contract%(date) or %is_retired%(date) then
+    min(times(20), %contract_start_date%(date, times_index(0)))
+        where (date <= %contract_start_date%(date, times_index(0)) and
+               not %is_retired%(%contract_start_date%(date, times_index(0))))
+  else
+    date;
+
+%contract_start_date%(abstime date, int match) =
+  %contract_start_dates%(date, add_years(date, 10), match);
+
+/* Aga, years since employment - for special vacation entitlement*/ 
+export %crew_age%(abstime date) =
+first(times(100), times_index(0)-1)
+        where(add_years(%birthday%, times_index(0)) > date);
+  /*(date - %birthday%)/(24:00*365);*/
+
+export %years_since_employment%(abstime date) =
+  first(times(100), times_index(0)-1)
+        where(add_years(%employment_date%, times_index(0)) > date);
+ /* (date - %employment_date%)/(24:00*365);*/
+ 
+
+table crew_table =
+  %crew_id% -> abstime %birthday%, abstime %employment_date%, export abstime %retirement_date%;
+  external "crew";
+  id -> birthday, employmentdate, retirementdate;
+  - -> void(abstime), void(abstime), void(abstime);
+end
+    
+/* Start and enddates, primarily used for entitlement and reduction calculations. */
+table crew_employments_start(abstime start_date, abstime end_date, int match) = 
+  %crew_id%, start_date, end_date, match -> export abstime %contract_start_dates%, export abstime %contract_end_dates%, export string %contract%;
+  external "crew_contract";
+  crew, <=validto, >validfrom, match_number -> validfrom, validto, contract;
+  -, -, -, - -> void(abstime), void(abstime), void(string);
+end
+
+table crew_employments_end = 
+  %crew_id% -> export abstime %last_employment_date%;
+  external "crew_contract";
+  crew -> max(validto);
+end
+
+/*part time*/
+export %no_of_part_time_days%(abstime date) =
+  %_pattern_part_time_days%(date);
+
+/* FD 50 percent crew has some special treatment of thier summer vacation rotations. 
+ * The vacation blocks need to be in connection with the part time free days. */
+export %crew_has_special_rotation_contract%(abstime date) = 
+  %has_no_vacation_on_parttime_days%(date) and (%full_summer_vacation_days%(date) = 9);
+
+export %has_no_vacation_on_parttime_days%(abstime date) =
+  default(
+    if %cat%(date)="F" and %crew_is_fixed_group%(date) and %dutypercent%(date) <> 100 then
+      true
+    else
+      false,
+    false);
+
+export %has_no_vacation_on_parttime_days_trip_start% =
+  %has_no_vacation_on_parttime_days%(%trip_start%);
+
+export %has_no_vacation_on_parttime_days_trip_end% =
+  %has_no_vacation_on_parttime_days%(%trip_end%);
+
+export %has_no_loa_transfer_to_va1%(abstime date) =
+  if %cat%(date)="F"
+     and %crew_is_fixed_group%(date)
+     and ((%crew_has_agmt_group_sks_fd%(date) and (date >= 01JUN2017))
+          or (%crew_has_agmt_group_skn_fd%(date) and (date >= 01JAN2018)))
+  then
+    true
+  else
+    false;
+
+/* LH definitions. Here also look in training and real tables.  */
+export %crew_has_A3_or_A4_or_AL_qual%(abstime date) =
+  %crew_has_qual%("A3", date) or %crew_has_qual%("A4", date) or  %crew_has_qual%("AL", date);
+
+export %crew_has_qual%(string qual, abstime date) =
+  default(
+    default(%crew_has_qual_training%(qual, date),
+      %crew_has_qual_real%(qual, date)),
+    false);
+
+%crew_has_qual_training%(string qual, abstime date) =
+  %_crew_has_qual_training%(qual, date) = %_crew_has_qual_training%(qual, date);
+
+%crew_has_qual_real%(string qual, abstime date) =
+  %_crew_has_qual_real%(qual, date) = %_crew_has_qual_real%(qual, date);
+
+export %crew_rotation%(string season, int year) =
+  default(%_crew_rotation%(season, year), "");
+
+/* Vacation rotation name*/
+%vacationrotation% = "vacation";
+
+export %crew_end_contract_on_date%(abstime date)=
+  %_crew_end_contract_on_date%(date) <> "Not Found";
+
+export %full_summer_vacation_days%(abstime date) =
+    default(%_full_summer_vacation_days%(date),0);
+
+export %crew_is_variable_group%(abstime date) =
+  %crew_contract_grouptype%(date) = "V";
+
+export %crew_is_variable_group_at_trip_start% =
+  %crew_is_variable_group%(%trip_start%);
+
+export %crew_is_fixed_group_at_trip_start% =
+  %crew_is_fixed_group%(%trip_start%);
+
+export %crew_is_fixed_group_at_trip_end% =
+  %crew_is_fixed_group%(%trip_end%);
+
+export %crew_is_fixed_group%(abstime date) =
+    %crew_contract_grouptype%(date) = "F";
+
+export %crew_is_fixed_or_FV_group%(abstime date) = 
+    %crew_is_fixed_group%(date) or %crew_contract_grouptype%(date) = "FV" or %crew_contract_grouptype%(date) = "X";
+
+export %_trip_start_offset_from_pattern_start%(abstime date) =
+  ((date - %pattern_start_date%(date))/24:00) mod
+      %pattern_length%(date);
+
+export %pattern_start_date%(abstime date) = %pattern_fixcyclestart%(date) + (%crew_cyclestart%(date)-1)*24:00;
+
+export %first_day_in_pattern_before%(abstime date) =
+  date - 24:00 * %_trip_start_offset_from_pattern_start%(date);
+
+/* Seems to only be used by the rule 'trailing freedays...
+is interested in freedays in the pattern -> freedays F, other X */
+export %pattern%(abstime date) =
+    cat(times(%pattern_length%(date)), if %pattern_contribution2%(%pattern_id%(date), times_index(0))= "F" then "F" else "X");
+
+
+%pattern_contribution%(int dayindex) =
+  %pattern_contribution2%(%pattern_id%(%trip_start%), dayindex);
+/* ----------------------------------------------------------- */
+
+
+/* Table Definitions */
+table crew_contract_change_lookup(abstime date) =
+  %crew_id%,date ->
+    export string %_crew_end_contract_on_date%;
+    external "crew_contract";
+  crew, validto -> contract;
+  -, - -> "Not Found";
+end
+
+
+table crew_contract_table(abstime date) =
+   %crew_id%,date ->
+    export int %crew_cyclestart%,
+    export string %crew_contract%,
+    export AbsTime %crew_contract_valid_from%;
+    external "crew_contract";
+  crew, (validfrom,validto( -> cyclestart,contract, validfrom;
+  -, - -> 0, "Not Found", void(abstime);
+end
+
+
+table crew_contract_type_table(abstime date) =
+  %crew_contract%(date) ->
+    export int %dutypercent%, export string %crew_contract_grouptype%, export int %pattern_id%,
+    int %pattern_free_days%, int %_pattern_part_time_days%, int %_full_summer_vacation_days%, export string %part_time_loa_code%,
+    export string %contract_desclong%;
+  external "crew_contract_set";
+  id -> dutypercent,grouptype, pattern, nooffreedays, noofparttime, noofvadays, parttimecode, desclong;
+  - -> void(int), "Not Found", void(int), 0, 0, void(int), "Not Found", void(string);
+end
+
+
+table crew_employment(abstime date)=
+  %crew_id%, date ->
+    string %base_real%, string %company_real%,
+    string %titlerank_real%, string %empno%, string %country_real%, string %region_real%, string %station_real%;
+  external "crew_employment";
+  crew, (validfrom, validto( -> base, company, titlerank, extperkey, country, region, station;
+  -, - -> void(string), void(string), void(string), void(string), void(string), void(string), void(string);
+ end
+
+
+/* Workaround for bug UICMP-2016 */
+%base_training%(abstime date) = void(string);
+%company_training%(abstime date) = void(string);
+%region_training%(abstime date) = void(string);
+%titlerank_training%(abstime date) = void(string);
+%country_training%(abstime date) = void(string);
+%station_training%(abstime date) = void(string);
+
+/*
+table crew_employment_training(abstime date)=
+  %crew_id%, date ->
+    string %base_training%,  string %company_training%,
+    string %titlerank_training%, string %country_training%, string %region_training%, string %station_training%;
+  external "tmp_crew_employment";
+  crew, (validfrom, validto( -> base, company, titlerank, country, region, station;
+  -, - -> void(string), void(string), void(string), void(string), void(string), void(string);
+ end
+*/
+
+
+table crew_qual_table(string qual, abstime date) =
+  %crew_id%, "ACQUAL", qual, date -> string %_crew_has_qual_real%;
+  external "crew_qualification";
+  crew, qual_typ, qual_subtype, (validfrom, validto( -> crew;
+  -, -, -, - -> void(string);
+end
+
+
+/* Workaround for bug UICMP-2016 */
+%_crew_has_qual_training%(string qual, abstime date) = void(string);
+/*
+table crew_qual_training_table(string qual, abstime date) =
+  %crew_id%, "ACQUAL", qual, date -> string %_crew_has_qual_training%;
+  external "tmp_crew_qualification";
+  crew, qual_typ, qual_subtype, (validfrom, validto( -> crew;
+  -, -, -, - -> void(string);
+end
+*/
+
+
+table crew_rotation_table(string season, int year) =
+  %crew_id%, season, year,%vacationrotation% -> string %_crew_rotation%;
+  external "leave_actual_rotation";
+  crew, lseason_season, lseason_planyear, rotationtype -> rotation;
+  -, -, -,- -> "";
+end
+
+
+table pattern_contribution_table2(int patternid, int dayindex)=
+  patternid, dayindex -> export string %pattern_contribution2%;
+  external "pattern_acts";
+  pattern, (startpos, endpos) -> activity;
+  -,- -> "";
+end
+
+
+/* The pattern lookups are needed eg when adjusting thing to the fixed patterns */
+table pattern_length_table(abstime date)=
+  %pattern_id%(date) -> int %_va_pattern_length%, export int %pattern_length%, export abstime %pattern_fixcyclestart%, int %pattern_prod_days%;
+  external "pattern_set";
+  id -> vapatternlength, noofdays, fixcyclestart, noofproddays;
+  - -> 0, 0, void(abstime), 0;
+end
+/*Only used by Interbids export to tell vacation request length*/
+export %va_pattern_length%(abstime date) =
+  default(%_va_pattern_length%(date), %pattern_length%(date));
+
+export %newly_employed%(abstime date) =
+  default(%years_since_employment%(date) < 1, false);
+
+export %trip_crew_base% =
+	%base%(%trip_start%);
+
+export %trip_crew_company% =
+	%company%(%trip_start%);
+
+/* Agreement group checks */
+export %crew_has_agmt_group_skin_fd%(abstime date) =
+  model_crew.%agmt_group_matching%(model_crew.%agreement_group_at_date%(%crew_id%, date),
+                                  model_crew.%AGMT_GROUP_SKIN_FD%);
+
+export %crew_has_agmt_group_sks_fd%(abstime date) =
+  model_crew.%agmt_group_matching%(model_crew.%agreement_group_at_date%(%crew_id%, date),
+                                  model_crew.%AGMT_GROUP_SKS_FD%);
+
+export %crew_has_agmt_group_skd_fd%(abstime date) =
+  model_crew.%agmt_group_matching%(model_crew.%agreement_group_at_date%(%crew_id%, date),
+                                  model_crew.%AGMT_GROUP_SKD_FD%);
+
+export %crew_has_agmt_group_skn_fd%(abstime date) =
+  model_crew.%agmt_group_matching%(model_crew.%agreement_group_at_date%(%crew_id%, date),
+                                  model_crew.%AGMT_GROUP_SKN_FD%);
+
+/* Defines fixed groups with 100% contracts */
+set fg_100_contracts_no = "F134", "F162", "F163", "F164", "F179", "F180";
+set fg_100_contracts_se = "F133";
+
+export %crew_has_fg_contract_100%(abstime date) =
+  if ((%crew_contract%(date) in fg_100_contracts_se) or
+      (%crew_contract%(date) in fg_100_contracts_no))
+  then
+    true
+  else
+    false;

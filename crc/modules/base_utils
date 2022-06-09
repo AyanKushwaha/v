@@ -1,0 +1,724 @@
+/* -*- crc -*-
+ *
+ * Purpose:
+ *   This module contains utilities with no dependency to environment.
+ *   Can be regarded as extension to Rave language.
+ *
+ * Sections:
+ * 1:   Fundamental rave type handling.
+ * 2:   String handling
+ * 3:   Record handling
+*  4:   Sorting util
+ *
+ * Created by:
+ *   Lars Westerlind 2015-06-04
+ *
+ * Major changes:
+ * Date   Name             Comment
+ *
+ * There are some duplicates with fundamental. This is a better place, but moving would take some time as utils must be imported.
+ * However, if the functions are declared "global" here, and removed in fundamental, that work would be reosonable big.
+ * Another option would be to let fundamental use the definitions in this module. 
+ */
+
+module base_utils
+
+/*****************************************************************************
+** Fundamental rave type handling
+*****************************************************************************/
+
+/* -- Standard int conversion to string for display -- */
+global export %int2str%(Int i) = format_int(i,"%d");
+
+/* -- Int rounding. resolution=100 rounds to nearest 100 -- */
+global export %round_int%(Int val,Int resolution) =
+  if val<0 then (val-resolution/2)/resolution*resolution
+  else (val+resolution/2)/resolution*resolution;
+
+/* -- Int overlap, amount of integers overlapping in two internvals.
+   4-6 and 5-9 will overlap with 2 (5 and 6). */
+export %int_overlap%(Int s1, Int e1, Int s2, Int e2) =
+  nmax(0, nmin(e1,e2) - nmax(s1, s2) + 1);
+
+/* -- Minimum abstime -- */
+global export %abstimemin% =
+  01jan1986;
+
+/* -- Maximum abstime -- */
+global export %abstimemax% =
+  31dec2035;
+
+/* -- Standard conversion of abstime for display (date, and time of day) -- */
+global export %abstime2str%(Abstime d) =
+  if d<=%abstimemin% then
+    "---" /* min date */
+  else if d>=%abstimemax% then
+    "+++" /* max date */
+  else
+    format_time(d, "%02d%b%Y %02H:%02M");
+
+export %abstime2str_raw%(Abstime d) =
+  format_time(d, "%02d%b%Y %02H:%02M");
+
+export %abstimestrlen% = 15;
+
+export %append_nodup_date%(String before, Abstime d) =
+  let lg = length(before),
+      x = %abstime2str%(d);
+  if lg<%abstimestrlen% or x<>substr(before, lg-%abstimestrlen%+1, %abstimestrlen%) then concat(before, x)
+  else before;
+
+export %date_ar_size%(String ar) =
+  %ar_size%(ar, %abstimestrlen%);
+
+export %date_ar_get%(String ar, Int ix) =
+  %ar_get%(ar, %abstimestrlen%, ix);
+
+/* -- Standard conversion of abstime to date, 7 chars -- */
+export %abstime2str7%(Abstime d) =
+  if d<=%abstimemin% then
+    "---    " /* min date */
+  else if d>%abstimemax% then
+    "+++    " /* max date */
+  else
+    format_time(d, "%2d%b%Y");
+
+/* -- Standard conversion of abstime to date, 7 chars -- */
+export %abstime2str7raw%(Abstime d) =
+  format_time(d, "%2d%b%Y");
+
+/* -- Standard converion of abstime to offset days, 1 = start day */
+export %abstime2str2%(Abstime ref, Abstime d) =
+  if d<=%abstimemin% then
+    "--" /* min date */
+  else if d>%abstimemax% then
+    "++" /* max date */
+  else
+    format_int( (d-ref)/24:00+1,"%2d");
+
+/* -- Conversion of abstime to iso date yyyy-mm-dd -- */
+export %abstime2isodatestr%(Abstime d) =
+  if d<=%abstimemin% then
+    "----------" /* min date */
+  else if d>%abstimemax% then
+    "++++++++++" /* max date */
+  else
+    format_time(d, "%4Y-%02m-%02d");
+ 
+/* -- Conversion of abstime to iso date yyyy-mm-dd hh:mm-- */
+export %abstime2isotimestr%(Abstime d) =
+  if d<=%abstimemin% then
+    "----------------" /* min date */
+  else if d>%abstimemax% then
+    "++++++++++++++++" /* max date */
+  else
+    format_time(d, "%4Y-%02m-%02d %02H:%02M");
+
+
+
+/*
+These 3 return a "strict" ISO DateTime String.
+They are "extended", and with second-padding in time, and minute-padding in offet.
+They should parse easily, including in JavaScript.
+
+Tests:
+base_util.%abstime2isotime_strict%(12jul1981 4:15, 2:00)
+base_util.%abstime2isotime_strict%(12jul1981 4:15, 0:00)
+base_util.%abstime2isotime_strict%(12jul1981 4:15, -2:00)
+
+base_util.%abstime2isotime_strict_Z%(12jul1981)
+base_util.%abstime2isotime_strict_Z%(12jul1981 4:15)
+
+base_util.%abstime2isotime_strict_alt%(12jul1981 4:15. "#JupiterTime")
+*/
+
+export %abstime2isotime_strict_alt%(AbsTime dt, String offset_str) =
+    let
+        dt_str =
+            format_time(dt, "%4Y-%02m-%02dT%02H:%02M:00");
+    concat(dt_str, offset_str);
+
+
+export %abstime2isotime_strict%(AbsTime dt, RelTime utc_offset) =
+    let
+        offset_str =
+                if (utc_offset >= 0:00) then
+                    format_time(utc_offset, "+%02H:%02M")
+                else
+                    format_time(-utc_offset, "-%02H:%02M");
+    %abstime2isotime_strict_alt%(dt, offset_str);
+
+
+export %abstime2isotime_strict_Z%(AbsTime dt) =
+   %abstime2isotime_strict_alt%(dt, "Z");
+
+
+
+
+/* -- Standard converion of reltime for display (hours, minutes) -- */
+global export %reltime2str%(Reltime t) =
+  if t >= 0:00 then
+    format_time(t, "%H:%02M")
+  else
+    format_time(-t, "-%H:%02M");
+
+/* -- Standard display of boolean -- */
+global export %bool2str%(Bool val) =
+  if (val) then
+    "True"
+  else
+    "False";
+
+/* -- Convert int (minutes) to reltime -- */
+global export %int2reltime%(int val) =
+  0:01 * val;
+  
+global export %abs_int%(Int val) =
+  if val<0 then -val
+  else val;
+  
+global export %abs_reltime%(Reltime val) =
+  if val<0:00 then -val
+  else val;
+  
+
+/* These index variables are only used in times() loops */
+export %ti0% = times_index(0);
+export %ti1% = times_index(1);
+export %ti2% = times_index(2);
+
+/*****************************************************************************
+** Date and time handling
+*****************************************************************************/
+
+/* month number 1-12 */
+global export %month_nr%(Abstime d) =
+  (round_down_month(d) - round_down_year(d)) / 696:00 + 1; /* 696 = 24:00 * 29, which gives 1-12 correctly */
+
+global export %year_nr%(Abstime d) = 
+  2000 + (round_down_year(d)-1jan2000)/8760:00; /* 24*365*/
+  
+/*****************************************************************************
+** String handling 
+*****************************************************************************/
+
+/* -- Replaceing a substring of a string with new value. -- */
+export %chg_substr%(String s, Int pos, Int len, String val) =
+  let l = if pos=1 then "" else substr(s,1,pos-1),
+      r = if pos+len>length(s) then "" else substr(s,pos+len,length(s)-pos-len+1);
+  concat(l,val,r);
+
+export %substr_rest%(String str, Int pos) =
+  let lg = length(str);
+  substr(str, pos, lg-pos+1);
+
+
+%_digit_val%(String digits, Int pos) =
+  locate(substr(digits,pos,1),"0123456789")-1;
+
+table uint_parse(String str) = 
+  length(str) -> %_uint_parse%; 
+  0 -> 0;
+  1 -> %_digit_val%(str,1);
+  2 -> %_digit_val%(str,1)*10+%_digit_val%(str,2);
+  3 -> %_digit_val%(str,1)*100+%_digit_val%(str,2)*10+%_digit_val%(str,3);
+  4 -> %_digit_val%(str,1)*1000+%_digit_val%(str,2)*100+%_digit_val%(str,3)*10+%_digit_val%(str,4);
+  5 -> %_digit_val%(str,1)*10000+%_digit_val%(str,2)*1000+%_digit_val%(str,3)*100+%_digit_val%(str,4)*10+%_digit_val%(str,5);
+end
+
+/* -- Parse a digit string with possible leading minus, to int. Currently maximum 5 digits -- */
+export %int_parse%(String str) = 
+  if substr(str,1,1)="-" then -%_uint_parse%(substr(str,2,length(str)-1))
+  else %_uint_parse%(str);
+
+%year_parse%(String str) =
+  let yr = %int_parse%(str);
+  if yr<50 then       add_years(1jan2000, yr)
+  else if yr<100 then add_years(1jan2000,yr-100)
+  else               add_years(1jan2000,yr-2000); 
+
+%month_parse%(String str) =
+  let m = (locate(%uppercase%(str),"JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC")+3)/4;
+  if m=0 then void_int
+  else m;
+
+%_abstime_parse_dt%(String dstr, String mstr, String ystr) =
+  add_months(%year_parse%(ystr) , %month_parse%(mstr)-1) +  (%int_parse%(dstr)-1)*24:00;
+
+table abstime_parse_tbl(String str) =
+  length(str) -> %abstime_parse_dt%;
+  6           -> %_abstime_parse_dt%(substr(str,1,1),substr(str,2,3),substr(str,5,2));
+  7           -> %_abstime_parse_dt%(substr(str,1,2),substr(str,3,3),substr(str,6,2));
+  8           -> %_abstime_parse_dt%(substr(str,1,1),substr(str,2,3),substr(str,5,4));
+  9           -> %_abstime_parse_dt%(substr(str,1,2),substr(str,3,3),substr(str,6,4));
+end
+
+%abstime_parse_tod%(String str) =
+  %int_parse%(substr(str,1,2))*1:00 + %int_parse%(substr(str,4,2))*0:01;
+
+/* parse a standard string to abstime */
+export %abstime_parse%(String str) =
+  let sp = locate(" ",str),
+      lg = length(str);
+  if lg=0 then void_abstime
+  else if substr(str,1,1)="-" then %abstimemin%
+  else if substr(str,1,1)="+" then %abstimemax%
+  else if sp = 0 then %abstime_parse_dt%(str)
+  else %abstime_parse_dt%(substr(str,1,sp-1)) + %abstime_parse_tod%(substr(str,sp+1,lg-sp-1));
+
+%_abstime_parseiso%(String str) =
+  add_months(%year_parse%(substr(str,1,4)), %int_parse%(substr(str,5,2))-1) +
+    (%int_parse%(substr(str,7,2))-1)*24:00;
+
+%parse_iso_hhmm%(String str) =
+  %int_parse%(substr(str,1,2))*1:00 + %int_parse%(substr(str,3,2))*0:01;
+
+/* parse iso string yyyymmdd or yyyymmddHHMMto abstime */
+export %abstime_parseiso%(String str) =
+  if str="" then void_abstime
+  else if substr(str,1,1)="-" then %abstimemin%
+  else if substr(str,1,1)="+" then %abstimemax%
+  else if length(str)>8 then
+    %_abstime_parseiso%(substr(str,1,8)) + %parse_iso_hhmm%(substr(str,9,4))
+  else
+    %_abstime_parseiso%(str);
+
+%pick%(String str,Int pos, String delim) =
+  let x = locate(delim,str, pos);
+  if x>0 then substr(str,pos,x-pos)
+  else if pos>length(str) then void_string
+  else substr(str,pos,length(str)-pos+1);
+
+%skip%(String str,Int pos, String delim) =
+  let x = locate(delim, str,pos);
+  if x>0 then x+1
+  else void_int;
+
+table str_extr(String compound_str, Int field_no, String delim) =
+  field_no -> %_string_extract%;
+  1 -> %pick%(compound_str,1,delim);
+  2 -> %pick%(compound_str,%skip%(compound_str,1,delim),delim);
+  3 -> %pick%(compound_str,%skip%(compound_str,%skip%(compound_str,1,delim),delim),delim);
+  4 -> %pick%(compound_str,%skip%(compound_str,%skip%(compound_str,%skip%(compound_str,1,delim),delim),delim),delim);
+  5 -> %pick%(compound_str,
+         %skip%(compound_str,
+           %skip%(compound_str,
+             %skip%(compound_str,
+               %skip%(compound_str,1,delim),
+             delim),
+           delim),
+         delim),
+       delim);
+  6 -> %pick%(compound_str,
+         %skip%(compound_str,
+           %skip%(compound_str,
+             %skip%(compound_str,
+               %skip%(compound_str,
+                 %skip%(compound_str,1,delim),
+               delim),
+             delim),
+           delim),
+         delim),
+       delim);
+  7 -> %pick%(compound_str,
+         %skip%(compound_str,
+           %skip%(compound_str,
+             %skip%(compound_str,
+               %skip%(compound_str,
+                 %skip%(compound_str,
+                   %skip%(compound_str,1,delim),
+                 delim),
+               delim),
+             delim),
+           delim),
+         delim),
+       delim);
+  8 -> %pick%(compound_str,
+         %skip%(compound_str,
+           %skip%(compound_str,
+             %skip%(compound_str,
+               %skip%(compound_str,
+                 %skip%(compound_str,
+                   %skip%(compound_str,
+                     %skip%(compound_str,1,delim),
+                   delim),
+                 delim),
+               delim),
+             delim),
+           delim),
+         delim),
+       delim);
+  - -> void_string;
+end
+
+/* -- Pick a string from comma separated string. Currently 3 elements allowed */
+export %string_extract%(String compound_str, Int field_no) = 
+  %_string_extract%(compound_str,field_no,",");
+
+%upper_char% = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+%lower_char% = "abcdefghijklmnopqrstuvwxyz";
+%spaces20% = "                    ";
+
+%char_replace%(String char,String src, String dest) =
+  let i = locate(char,src);
+  if i>0 then substr(dest,i,1)
+  else char;
+
+/* Key for doing lower case on strings */
+export %F_LOWER% = 1;
+/* Key for doing upper case on strings */
+export %F_UPPER% = 2;
+/* Key for doing upper case on first char, lower case on rest of string */
+export %F_CAPITALIZE% = 3;
+/* Key for remove all spaces */
+export %F_FULL_TRIM% = 10; /* all space removed */
+/* Key to remove leading spaces */
+export %F_LEFT_TRIM% = 11;
+/* Key to remove trailing spaces */
+export %F_RIGHT_TRIM% = 12;
+/* Key to remove leading and trailing spaces */
+export %F_BOTH_TRIM% = 13; 
+
+%_should_rtrim%(String str,Int pos) = 
+  let lg = length(str);
+  if pos+20<lg then False /*substr(str,pos,1)*/
+  else if substr(str,pos,lg-pos)=substr(%spaces20%,1,lg-pos) then True /*""*/
+  else False /*substr(str,pos,1)*/;
+  
+table char_manipul(String str,Int pos, Int function) = 
+  function -> %_char_manipul%;
+  1  -> %char_replace%(substr(str,pos,1),%upper_char%,%lower_char%); /* to lower */
+  2  -> %char_replace%(substr(str,pos,1),%lower_char%,%upper_char%); /* to upper */
+  3  -> if pos=1 then %char_replace%(substr(str,pos,1),%lower_char%,%upper_char%)  /* to upper */
+        else          %char_replace%(substr(str,pos,1),%upper_char%,%lower_char%); /* to lower */
+  10 -> if substr(str,pos,1)=" " then "" else substr(str,pos,1); /* remove spaces */
+  11 -> if pos<=20 and substr(str,1,pos)=substr(%spaces20%,1,pos) then ""
+        else substr(str,pos,1);
+  12 -> if %_should_rtrim%(str,pos) then ""
+        else substr(str,pos,1);
+  13 -> if (pos<=20 and substr(str,1,pos)=substr(%spaces20%,1,pos)) or %_should_rtrim%(str,pos) then ""
+        else substr(str,pos,1);
+  20 -> if pos=1 or substr(str,pos,1)="\"" then concat("\"",substr(str,pos,1))
+        else if pos=length(str) then concat(substr(str,pos,1),"\"")
+        else substr(str,pos,1);
+  21 -> if pos=1 or pos=length(str) then
+            if substr(str,pos,1)="\"" then ""
+            else substr(str,pos,1) /* actually wrong */
+        else if pos mod 2 = 0 and (substr(str,pos,2)="\"\"" or substr(str,pos-1,2)="\"\"") then ""
+        else substr(str,pos,1);
+end
+
+%string_manipul%(String str, Int function) =
+  cat(times(length(str)), %_char_manipul%(str,times_index(0),function));
+
+export %lowercase%(String str) =
+  %string_manipul%(str,%F_LOWER%);
+
+export %uppercase%(String str) =
+  %string_manipul%(str,%F_UPPER%);
+
+export %capitalize%(String str) =
+  %string_manipul%(str,%F_CAPITALIZE%);
+
+export %f_trim%(String str) =
+  %string_manipul%(str,%F_FULL_TRIM%);
+
+export %l_trim%(String str) =
+  %string_manipul%(str,%F_LEFT_TRIM%);
+
+export %r_trim%(String str) =
+  %string_manipul%(str,%F_RIGHT_TRIM%);
+
+export %b_trim%(String str) =
+  %string_manipul%(str,%F_BOTH_TRIM%);
+
+%x_sep_exact_match%(String key_str, String match_str, String sep) = 
+  locate(concat(sep, key_str,sep), concat(sep,match_str,sep));
+
+export %sp_sep_exact_match%(String key_str, String match_str) =
+  %x_sep_exact_match%(key_str, match_str, " ")>0;
+
+/* this is the recommended syntax to use in these cases; separate match string with ; and no extra spaces. 
+   separator first and last is optional as the routines adds such charactes anyway */
+export %semicol_sep_exact_match%(String key_str, String match_str) =
+  %x_sep_exact_match%(key_str, match_str,";")>0;
+
+%sp64% =
+  "                                                                ";
+%sp512% =
+  concat(%sp64%,%sp64%,%sp64%,%sp64%,%sp64%,%sp64%,%sp64%,%sp64%);
+
+export %pad%(String str, Int lg) =
+  if length(str) >= lg then substr(str,1,lg)
+  else concat(str, substr(%sp512%,1,lg-length(str)));
+
+export %strip_leading_comma%(string s) =
+  if locate(",",s) = 1 then
+    substr(s, 2, length(s))
+  else
+    s;
+
+
+/**************************************************
+** Record handling. Handles arrays of string records
+**************************************************/
+
+export %ar_size%(String ar, Int reclen) =
+  length(ar)/reclen;
+
+export %ar_get%(String ar, Int reclen, Int ix) =
+  let sz = %ar_size%(ar, reclen),
+      i  = if ix>0 then ix else sz+ix;
+  if i<1 or i>sz+1 then void_string
+  else if i>sz then ""
+  else substr(ar, 1+ (i-1)*reclen, reclen);
+
+export %ar_set%(String ar, Int reclen, Int ix, String it) =
+  let sz = %ar_size%(ar, reclen),
+      i  = if ix>0 then ix else sz+ix;
+  if i<1 or i>sz+1 then void_string
+  else if i=1 then concat(it,%substr_rest%(ar, reclen+1))
+  else if i>=sz then concat(substr(ar,1,(i-1)*reclen), it)
+  else concat(substr(ar,1,(i-1)*reclen), it, %substr_rest%(ar, i*reclen+1));
+
+export %ar_ins%(String ar, Int reclen, Int ix, String it) =
+  let sz = %ar_size%(ar, reclen),
+      i  = if ix>0 then ix else sz+ix;
+  if i<1 or i>sz+1 then void_string
+  else if i=1 then concat(it,ar) 
+  else if i>sz then concat(ar, it)
+  else concat(substr(ar,1,(i-1)*reclen), it, %substr_rest%(ar, (i-1)*reclen+1));
+
+export %ar_del%(String ar, Int reclen, Int ix) =
+  let sz = %ar_size%(ar, reclen),
+      i  = if ix>0 then ix else sz+ix;
+  if i<1 or i>sz+1 then void_string
+  else if i=1 then %substr_rest%(ar, reclen+1)
+  else if i>=sz then substr(ar,1,(i-1)*reclen)
+  else concat(substr(ar,1,(i-1)*reclen), %substr_rest%(ar, i*reclen+1));
+
+table ar_handle_tbl(String ctrl, String ar, Int ix, Int reclen, String param) =
+  alias rec = %ar_get%(ar, ix, reclen);
+  ctrl -> %ar_handle_1_elem%;
+  "lt" -> if rec < param then ar else ""; /* element if less than key, else empty string */
+  "gt" -> if rec > param then ar else ""; /* element if greater than key, else empty string */
+  "eq" -> if rec="" then "" else (if rec = param then "=" else (if rec < param then "<" else ">"));
+end
+
+%ar_cat_8_elem%(String ctrl, String ar, Int ix, Int reclen, String param) =
+  concat(
+    %ar_handle_1_elem%(ctrl, ar, ix, reclen, param),
+    %ar_handle_1_elem%(ctrl, ar, ix+1, reclen, param),
+    %ar_handle_1_elem%(ctrl, ar, ix+2, reclen, param),
+    %ar_handle_1_elem%(ctrl, ar, ix+3, reclen, param),
+    %ar_handle_1_elem%(ctrl, ar, ix+4, reclen, param),
+    %ar_handle_1_elem%(ctrl, ar, ix+5, reclen, param),
+    %ar_handle_1_elem%(ctrl, ar, ix+6, reclen, param),
+    %ar_handle_1_elem%(ctrl, ar, ix+7, reclen, param));
+
+%ar_cat_64_elem%(String ctrl, String ar, Int ix, Int reclen, String param) =
+  concat(
+    %ar_cat_8_elem%(ctrl, ar, ix, reclen, param),
+    %ar_cat_8_elem%(ctrl, ar, ix+8, reclen, param),
+    %ar_cat_8_elem%(ctrl, ar, ix+16, reclen, param),
+    %ar_cat_8_elem%(ctrl, ar, ix+24, reclen, param),
+    %ar_cat_8_elem%(ctrl, ar, ix+32, reclen, param),
+    %ar_cat_8_elem%(ctrl, ar, ix+40, reclen, param),
+    %ar_cat_8_elem%(ctrl, ar, ix+48, reclen, param),
+    %ar_cat_8_elem%(ctrl, ar, ix+56, reclen, param));
+
+%ar_cat_512_elem%(String ctrl, String ar, Int ix, Int reclen, String param) =
+  concat(
+    %ar_cat_64_elem%(ctrl, ar, ix, reclen, param),
+    %ar_cat_64_elem%(ctrl, ar, ix+64, reclen, param),
+    %ar_cat_64_elem%(ctrl, ar, ix+128, reclen, param),
+    %ar_cat_64_elem%(ctrl, ar, ix+192, reclen, param),
+    %ar_cat_64_elem%(ctrl, ar, ix+256, reclen, param),
+    %ar_cat_64_elem%(ctrl, ar, ix+320, reclen, param),
+    %ar_cat_64_elem%(ctrl, ar, ix+384, reclen, param),
+    %ar_cat_64_elem%(ctrl, ar, ix+448, reclen, param));
+
+%ar_cat_elem%(String ctrl, String ar, Int reclen, String param) =
+    let sz = %ar_size%(ar, reclen);
+    if sz<=8 then %ar_cat_8_elem%(ctrl, ar, 1, reclen, param)
+    else if sz<=64 then %ar_cat_64_elem%(ctrl, ar, 1, reclen, param)
+    else if sz<=512 then %ar_cat_512_elem%(ctrl, ar, 1, reclen, param)
+    else void_string;
+
+  
+/**************************************************
+** Date key strings 
+**************************************************/
+
+export %dks_get_key_iso%(String str, Int ix, Int reclen) =
+  %abstime_parseiso%(%ar_get%(str, ix, reclen));
+
+export %dks_locate_iso%(String str, Abstime d, Int reclen) =
+  default (
+    min(times(%ar_size%(str, reclen)), %ti0%)
+    where (%dks_get_key_iso%(str, %ti0%, reclen) >= d),
+    0);
+
+/**************************************************
+** Json light handling 
+** It's certainly not a full json syntax; extra spaces should be omitted,
+** and in lightest version tags are written without quotes. Backslash handling not implemented
+**
+** A typical json expression is {"name":"Mary","age":14,"male":false,"comment":null}
+**************************************************/
+
+%_json_lt_get_val_str%(String json, Int st) =
+  if substr(json, st, 1) = "\"" then
+    substr(json,st+1, %_json_lt_end%(json, st)-st-2)
+  else if substr(json, st, 4) = "null" then
+    void_string
+  else
+    substr(json,st, %_json_lt_end%(json, st)-st);
+
+%_json_lt_end%(String json, Int st) =
+  if substr(json, st, 1) = "\"" then locate("\"", json, st+1)+1
+  else if locate(",",json, st)>0 then locate(",",json, st)
+  else if locate("}",json, st)>0 then locate("}",json, st)
+  else length(json)+1;
+
+%_json_lt_add%(String json, String tag, String val) =
+  if length(json)<=2 then concat("{\"",tag,"\"",":", val)
+  else concat(substr(json,1,length(json)-1),",\"",tag,"\":",val,"}");
+
+%_json_lt_set%(String json, String tag,String val) =
+  let p = locate(concat("\"",tag,"\":"), json),
+      s = p + length(tag) +3,
+      e = %_json_lt_end%(json, s);
+  if p =0 then void_string
+  else concat(substr(json,1,s-1),val, substr(json,e,length(json) - e + 1));
+
+%_json_lt_next_tag_pos%(String json, Bool done, Int pos) =
+  let p = locate(":", json, pos);
+  if done or pos=0 then pos
+  else if p=0 then 0
+  else %_json_lt_end%(json, p+1) +1;
+
+/* get string for a tag. dflt returned if tag missing, void_string if null */
+export %json_lt_get_str%(String json, String tag, String dflt) =
+  let s = locate(concat("\"",tag,"\":"), json);
+  if s=0 then dflt
+  else %_json_lt_get_val_str%(json, s + length(tag) +3);
+
+/* get int value for a tag. dflt returned if tag missing, void_int if null */
+export %json_lt_get_int%(String json, String tag, Int dflt) =
+  default(
+    %int_parse%(%json_lt_get_str%(json, tag, format_int(dflt, "%d"))),
+    void_int);
+
+/* get true/false for a tag. dflt returned if tag missing, void_bool if null */
+export %json_lt_get_bool%(String json, String tag, Bool dflt) =
+  default(
+    "true"=%json_lt_get_str%(json, tag, if dflt then "true" else "false"),
+    void_bool);
+
+/* an empty json expression */
+export %json_lt_empty% = "{}";
+
+/* add a string value last to a json expression, no check for duplicates */
+export %json_lt_add_str%(String json, String tag, String str) =
+  %_json_lt_add%(json, tag, concat("\"",str,"\""));
+
+/* add an int value last to a json expression, no check for duplicates */
+export %json_lt_add_int%(String json, String tag, Int val) =
+  %_json_lt_add%(json, tag, format_int(val,"%d"));
+
+/* add a bool value last to a json expression, no check for duplicates */
+export %json_lt_add_bool%(String json, String tag, Bool val) =
+  %_json_lt_add%(json, tag, if val then "true" else "false");
+
+/* add a null value last to a json expression, no check for duplicates */
+export %json_lt_add_void%(String json, String tag) =
+  %_json_lt_add%(json, tag, "null");
+
+ 
+/* remove a tag and value from json, no change if not found */
+export %json_lt_del%(String json, String tag) =
+  let s = locate(concat("\"",tag,"\":"), json),
+      e = %_json_lt_end%(json, s + length(tag) + 3);
+  if s =0 then json
+  else if s=2 and e >= length(json) then %json_lt_empty%
+  else if s=2 then concat("{",substr(json, e+1,length(json)-e-1))
+  else             concat(substr(json, 1, s-2), substr(json, e, length(json)-e+2)); 
+
+/* set a string value to existing tag. void_string if tag not found */
+export %json_lt_set_str%(String json, String tag, String str) =
+  %_json_lt_set%(json, tag, concat("\"",str,"\""));
+
+/* set an int value to existing tag. void_string if tag not found */
+export %json_lt_set_int%(String json, String tag, Int val) =
+  %_json_lt_set%(json, tag, format_int(val,"%d"));
+
+/* set a bool value to existing tag. void_string if tag not found */
+export %json_lt_set_bool%(String json, String tag, Bool val) =
+  %_json_lt_set%(json, tag, if val then "true" else "false");
+
+/* set a null value to existing tag. void_string if tag not found */
+export %json_lt_set_void%(String json, String tag) =
+  %_json_lt_set%(json, tag, "null");
+
+/* set a string value to existing tag, add last if tag not found */
+export %json_lt_put_str%(String json, String tag, String str) =
+  default(
+    %json_lt_set_str%(json, tag, str),
+    %json_lt_add_str%(json, tag, str));
+
+/* set an int value to existing tag, add last if tag not found */
+export %json_lt_put_int%(String json, String tag, Int val) =
+  default(
+    %json_lt_set_int%(json, tag, val),
+    %json_lt_add_int%(json, tag, val));
+
+/* set a bool value to existing tag, add last if tag not found */
+export %json_lt_put_bool%(String json, String tag, Bool val) =
+  default(
+    %json_lt_set_bool%(json, tag, val),
+    %json_lt_add_bool%(json, tag, val));
+
+/* set a null value to existing tag, add last if tag not found */
+export %json_lt_put_void%(String json, String tag) =
+  default(
+    %json_lt_set_void%(json, tag),
+    %json_lt_add_void%(json, tag));
+
+/* get tag ix of an expression, 1 based. Maximum 12 is implemented */
+export %json_lt_tag_by_ix_12%(String json, Int ix) =
+  let p =
+     %_json_lt_next_tag_pos%(json, ix<13, 
+       %_json_lt_next_tag_pos%(json, ix<12,
+         %_json_lt_next_tag_pos%(json, ix<11,
+           %_json_lt_next_tag_pos%(json, ix<10,
+             %_json_lt_next_tag_pos%(json, ix<9,
+               %_json_lt_next_tag_pos%(json, ix<8,
+                 %_json_lt_next_tag_pos%(json, ix<7,
+                   %_json_lt_next_tag_pos%(json, ix<6,
+                     %_json_lt_next_tag_pos%(json, ix<5,
+                       %_json_lt_next_tag_pos%(json, ix<4,
+                         %_json_lt_next_tag_pos%(json, ix<3,
+                           %_json_lt_next_tag_pos%(json, ix<2, 2)
+     ) ) ) ) ) ) ) ) ) ) ),
+      e = locate(":",json,p);
+   if p=0 or ix>12 or e=0 then void_string
+   else substr(json,p+1, e-p-2);
+
+export %json_lt_type%(String json, String tag) =
+  let s = locate(concat("\"",tag,"\":"), json),
+      p = s + length(tag) +3;
+  if s=0 then "miss"
+  else if substr(json, p, 1)="\"" then "strg"
+  else if substr(json, p, 4) ="null" then "null"
+  else if substr(json, p, 4) = "true" or substr(json, p, 5) = "false" then "bool"
+  else if substr(json, p, 1) >="0" and substr(json, p, 1) <= "9" then "intg"
+  else "undf";
+
+
+/* Number of tags in json string (max 12) */
+export %json_lt_tag_count%(String json) =
+  max(times(12), %ti0%)
+  where (not void(%json_lt_tag_by_ix_12%(json, %ti0%)));
+
+

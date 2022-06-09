@@ -1,0 +1,243 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   Definitions needed to read from the rule exception etab 
+ *
+ * Created by:
+ *   Extracted from the Carmen Standard User, 07-Dec-2005
+ *
+ * Major changes:
+ *   2006-11-01, Jonas Carlsson, Jeppesen
+ *               Module created, redefining module rule_exceptions for use
+ *               in CCR and CCT
+ *
+ *
+ */
+
+module rule_exceptions_ccr inherits rule_exceptions
+import fundamental;
+import crew;
+import leg;
+import duty;
+import trip;
+
+%sort_order% = departure;
+
+%use% = 
+  parameter true
+  remark "RULE EXCEPTIONS: Use rule exceptions";
+
+export %etab_name% = %etab_path%(%rule_exception_table_p%);
+
+%rule_exception_table_p% = 
+  parameter "rule_exception"
+  remark "ETAB: Etable for rule exceptions";
+
+%current_rule_id% = current_rule_id;
+/* Currently we only allow rule_exception on crew */
+%resource_id% = crew.%id%;
+
+redefine export %rule_on%(Abstime SDate) =
+  not %rule_off%(SDate);
+redefine export %rule_on_activity%(string ActivityKey) =
+  not %rule_off_activity%(ActivityKey);
+
+redefine export %rule_off%(Abstime SDate) = %rule_s_off%(%current_rule_id%, SDate);
+redefine export %rule_s_off%(String RuleId, Abstime SDate) =
+  %use% and default(%rule_turned_off_tab%(RuleId,SDate), false);
+redefine export %rule_off_activity%(string ActivityKey) =
+  %rule_s_off_activity%(%current_rule_id%, ActivityKey);
+redefine export %rule_s_off_activity%(String RuleId, string ActivityKey) =
+  %use% and default(%rule_turned_off_tab_activity%(RuleId,ActivityKey), false);
+
+
+redefine export %overshoot_int%(Abstime SDate) =
+  %overshoot_s_int%(%current_rule_id%, SDate);
+redefine export %overshoot_s_int%(String RuleId, Abstime SDate) =
+  if %use% then default(%overshoot_int_tab%(RuleId,SDate), 0) else 0;
+
+redefine export %overshoot_rel%(Abstime SDate) = 
+  %overshoot_s_rel%(%current_rule_id%, SDate);
+redefine export %overshoot_s_rel%(String RuleId, Abstime SDate) =
+  if %use% then default(%overshoot_rel_tab%(RuleId,SDate), 0:00) else 0:00;
+
+redefine export %overshoot_int_activity%(string ActivityKey) =
+  %overshoot_s_int_activity%(%current_rule_id%, ActivityKey);
+redefine export %overshoot_s_int_activity%(String RuleId, string ActivityKey) =
+  if %use% then default(%overshoot_int_tab_activity%(RuleId,ActivityKey), 0) else 0;
+
+redefine export %overshoot_rel_activity%(string ActivityKey) =
+  %overshoot_s_rel_activity%(%current_rule_id%, ActivityKey);
+redefine export %overshoot_s_rel_activity%(String RuleId, string ActivityKey) =
+  if %use% then default(%overshoot_rel_tab_activity%(RuleId,ActivityKey), 0:00) else 0:00;
+
+table rule_exceptions(String ruleid, Abstime starttime) =
+  %resource_id%, ruleid, starttime ->
+    String %rule_exception_exist%,
+    Int %overshoot_int_tab%,
+    Reltime %overshoot_rel_tab%;
+  external %etab_name%;
+  crew, ruleid, starttime -> ruleid, overint, overrel;
+  -,-,- ->  void_string, 0, 0:00;
+end
+
+table rule_exceptions_activity(String ruleid, string activityid) =
+  %resource_id%, ruleid, activityid ->
+    Int %overshoot_int_tab_activity%,
+    Reltime %overshoot_rel_tab_activity%,
+    String %rule_exception_exist_activity%;
+  external %etab_name%;
+  crew, ruleid, activitykey -> overint, overrel, ruleid;
+  -,-,- ->  0, 0:00, void_string;
+end
+  
+%rule_turned_off_tab%(String RuleId, Abstime SDate) =
+  not void(%rule_exception_exist%(RuleId,SDate));
+
+%rule_turned_off_tab_activity%(String RuleId, string ActivityKey) =
+  not void(%rule_exception_exist_activity%(RuleId,ActivityKey));
+
+/* Crew has any rule exceptions */
+redefine export %crew_has% =
+  default(%_crew_has% <> "",false);
+table crew_has =
+  crew.%id%, %pp_end% -> String %_crew_has%;
+  external %etab_name%;
+  crew, >starttime -> crew;
+  -, - -> "";
+end
+
+/* 
+** Table for defining what rules rule exceptions cannot be used for.
+** This table is used by the rule exception form defined in the CARMSYS.
+**
+** NOTE !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! NOTE
+** NOTE                                                             NOTE
+** NOTE If you remove an entry here, make sure that the rule has    NOTE
+** NOTE rule_exception mechanism implemented.                       NOTE
+** NOTE                                                             NOTE
+** NOTE !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! NOTE
+** 
+** N.B. rules must be all lower case, otherwise this doesn't work in alert generator!
+*/
+table non_except_regexps(Int entry_nr) =
+   entry_nr -> %non_except_regexp%;
+   1  ->     ".*caa_max_duty_time_in_calendar_year_all";       /* r11 */
+   2  ->     ".*caa_min_freedays_in_month_all";                /* r12 */
+   3  ->     ".*caa_min_freedays_in_year_all";                 /* r13 */
+   4  ->     ".*qln_absence_ground_training_performed_all";
+   5  ->     ".*qln_recurrent_training_performed_all";
+   6  ->     ".*trng_all_training_flights_performed_all";
+   7  ->     ".*qln_min_60_days_from_requal_if_2_within_12_months_cc"; /* r37 */
+   8  ->     ".*qln_recency_ok_all";                           /* r43 */
+   9 ->     ".*trng_new_pilots_must_perform_icrm_within_first_year_all"; /* r77 */
+   10 ->     ".*trng_fly_below_rank_not_allowed_fc";           /* r81 */
+   11 ->     ".*trng_min_block_time_for_two_first_lifus_legs_all";  /* r81 */
+   12 ->     ".*trng_max_days_between_lifus_legs_all";  /* r85 */
+   13 ->     ".*trng_crew_must_have_flight_exp_for_no_new_restr_all";  /* r90 */
+   14 ->     ".*trng_dispensation_date_set_for_new_restr_all";  /* r97 */
+   15 ->     ".*trng_min_experience_before_new_training_all";  /* r101 */
+   16 ->     ".*qln_airport_ok_fc";  /* r103 */
+   17 ->     ".*qln_recurrent_training_must_not_be_planned_too_early_all";  /* r147 */
+   18 ->     ".*qln_ast_required_before_last_pc_opc_fc"; /* r153 */
+   19 ->     ".*gui_2_lc_legs_reqired_fc_all"; /* r179 */
+   20 ->     ".*qln_asf_on_fr_only_fc"; /* r185 */
+   21 ->     ".*gui_maximum_number_of_assists_fc_all"; /* r204 */
+   22 ->     ".*comp_max_restricted_crew_any_kind_on_flight_all"; /* n68 */
+   23 ->     ".*qln_temporary_crew_must_be_recent_all"; /* n81 */
+   24 ->     ".*qln_all_required_recurrent_dates_registered_all"; /* n82 */
+   25 ->     ".*trng_initial_flight_training_performed_all"; /* n87 */
+   26 ->     ".*comp_crew_with_training_flight_has_good_companion_all"; /* n94 */
+   27 ->     ".*trng_special_distribution_of_training_flights_all"; /* n174 */
+   28 ->     "rules_notifications.*";
+   29 ->     ".*sft_activity_not_allowed_on_day_all" /*RFI 45*/;
+   30 ->     ".*caa_oma16_max_home_hotel_standby_all";
+   31 ->     ".*caa_oma16_max_time_between_weekly_rest_all";
+   32 ->     ".*caa_oma16_min_prolonged_rest_per_month_all";
+   33 ->     ".*caa_oma16_rest_length_after_disruptive_duties_all";
+   34 ->     ".*caa_oma16_rest_in_east_west_transition_all";
+   35 ->     ".*caa_oma16_rest_transition_late_early_all";
+   36 ->     ".*caa_oma16_rest_after_lh_sub_trip_all";
+   37 ->     ".*caa_oma16_max_extended_fdps_in_7_days_all";
+   38 ->     ".*caa_oma16_rest_after_duty_period_all";
+   39 ->     ".*caa_oma16_consecutive_night_duties_all";
+   40 ->     ".*caa_oma16_max_airport_callout_all";
+   41 ->     ".*caa_oma16_max_standby_callout_all";
+   42 ->     ".*caa_oma16_checkin_after_single_freeday_all";
+   43 ->     ".*caa_oma16_max_standby_callout_rob_all";
+   44 ->     ".*caa_oma16_max_airport_callout_rob_all";
+   45 ->     ".*caa_oma16_max_standby_callout_split_duty_all";
+   46 ->     ".*caa_oma16_ci_not_after_standby_end_all";
+   47 ->     ".*no_medical_restriction_on_zftt_lifus_instructor";
+   48 ->     ".*no_medical_restriction_on_tflight_instructor";
+   49 ->     ".*caa_oma16_max_time_btw_standby_end_and_check_in";
+   50 ->     ".*qln_ac_type_ok_ALL";
+
+   - -> void_string;
+ end
+ 
+/*
+** Used for Rule Exceptions report
+*/
+
+table report_table(int ix) =
+  ix, %resource_id% ->
+    String %etab_crew_id%,
+    String %etab_rule_id%,
+    String %etab_rule_text%,
+    Abstime %etab_start%,
+    String %etab_activitykey%,
+    String %_etab_limit%,
+    String %etab_actual%,
+    Reltime %etab_overrel%,
+    Int %etab_overint%,
+    String %etab_reason%,
+    String %etab_system_user%,
+    Abstime %etab_exception_time%;
+
+  external %etab_name%;
+  match_number, crew ->
+    crew, ruleid, ruleremark, starttime, activitykey,
+    limitval, actualval, overrel, overint, reason, username, ctime;
+  -, - -> "", "", "", 1jan86, "", "", "", 00:00, 0, "none", "none", 1jan86;
+end
+
+%etab_limit%(int ix) = default(%_etab_limit%(ix), "");
+
+table report_table_count =
+  crew.%id%, %pp_end% -> Int %_total_number%; 
+  external %etab_name%;
+  crew, >starttime -> count(row_number);
+end
+%total_number% = default(%_total_number%, 0);
+%ix_is_item% = default(%py_index% <= %total_number%, false);
+
+%overshoot_string%(int ix) =
+  if %etab_overint%(ix) = 0 then
+    format_time(%etab_overrel%(ix),"%02h:%02M")
+  else
+    format_int(%etab_overint%(ix),"%d");
+
+/*
+** Used for rudobs
+*/
+
+/* Old Comment: This is wrong, must be "trip.%start_utc%" or activity_id 
+          We should see if we want these trip rudobs at all */
+
+export %leg_has% = %_has%(leg.%activity_scheduled_start_time_utc%) = %resource_id%;
+export %duty_has% = %_has%(duty.%start_UTC%) = %resource_id%;
+export %trip_has% = %_has%(trip.%start_UTC%) = %resource_id%;
+
+table is_waived(Abstime start_time) =
+  %resource_id%, 
+  start_time -> 
+  export String %_has%;
+  external %etab_name%;
+  crew, starttime -> crew;
+  -, - -> "";
+end
+
+/* end of file */

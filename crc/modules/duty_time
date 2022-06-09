@@ -1,0 +1,919 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   This module contains duty time calculations and limits for both cabin crew 
+ *   and flight crew. This module defines the limits for duty pass, 1x24 and 7x24.
+ *   The other limits are defined in the child module duty_time_ccr.
+ *   Some limits are redefined in duty_time_ccr as they are dependant on crew
+ *   properties not available in CCP.
+ *
+ * Sections:
+ *   1. Duty time variables
+ *   2. Duty time limits - Flight crew
+ *   3. Duty time limits - Cabin crew
+ *   4. Duty time calculations
+ *
+ * Created by:
+ *   Henrik Albertson, 31-Mar-2005
+ *
+ * Major changes:
+ *
+ */
+
+root module duty_time
+
+import base_product;
+import fundamental;
+import base_utils;
+import system_db_parameters;
+import parameters;
+import crew_pos;
+import levels;
+import leg;
+import duty;
+import duty_period;
+import trip;
+import rest;
+import meal;
+import oma16;
+
+/****************************************************************
+ * Section 1: Duty time variables
+ ***************************************************************/
+export %max_in_duty_period% =
+  if %flight_crew% then 
+    %max_in_duty_period_fc%
+  else 
+    %max_in_duty_period_cc%;
+
+export %max_in_1x24_hrs% =
+  if %flight_crew% then
+    %max_in_1x24_hrs_fc%
+  else 
+    %max_in_1x24_hrs_cc%(true);
+    
+export %max_in_1x24_hrs_fwd% = %max_in_1x24_hrs%;
+    
+export %max_in_1x24_hrs_bwd% =
+  if %flight_crew% then
+    %max_in_1x24_hrs_fc%
+  else
+    %max_in_1x24_hrs_cc%(false);
+
+export %max_in_2x24_hrs% =
+  if %flight_crew% then
+    %max_in_2x24_hrs_fc%
+  else
+    %max_in_2x24_hrs_cc%;
+
+export %max_in_7x24_hrs% =
+  if %flight_crew% then
+    %max_in_7x24_hrs_fc%
+  else 
+    %max_in_7x24_hrs_cc%;
+    
+/* Redefined in CCT submodule */
+export %soft_limit_reduction_fc_skd% = 0:00;
+
+export %max_in_4_weeks% =
+  if %flight_crew% then 
+    %max_in_4_weeks_fc%
+  else 
+    %max_in_4_weeks_cc%;
+
+export %max_in_month% =
+  if %flight_crew% then 
+    %max_in_month_fc%
+  else
+    %max_in_month_cc%;
+
+
+/*
+** Duty time in 7 days backwards from a duty's start day 
+** using oma16 calculation for indust
+*/
+export %7_days_start_day% =
+  let s = duty_period.%last_7_days_start_day_start%,
+      e = duty_period.%last_7_days_start_day_end%;
+  %7_days_calc%(s, e);
+
+export %7_days_calc%(abstime s, abstime e) = 
+  oma16.%duty_time_in_interval_indust%(s, e) -
+  %passive_plus_reduction%(s, e);
+
+/*
+** Duty time in 7 days backwards from a duty's end day for 4ExNG,
+** using Subpart Q calculation rules.
+*/
+export %7_days_end_day% =
+  let s = duty_period.%last_7_days_start_day_start% + 24:00,
+      e = duty_period.%last_7_days_start_day_end% + 24:00;
+  %7_days_calc%(s, e);
+
+
+export %ends_on_day_after_start_hb% =
+  duty_period.%start_day_hb% <> duty_period.%end_day_hb%;
+
+
+/****************************************************************
+ * Section 2: Duty time limits - Flight crew
+ *            Agreement: FC 13:49
+ ***************************************************************/
+/* 
+** Duty period
+*/
+table duty_time_duty_period_limits_fc =
+  duty.%is_long_haul%, duty.%active_pilots%,
+  parameters.%k12_fc_sp4_2_valid%(duty.%start_hb%),
+  %is_any_sim_instr_scand_dp% ->
+    %max_in_duty_period_fc%;
+  true,  2, true,   -   -> 14:00; /* LH 2 active pilots, SKI K12 6.2.5 */
+  true,  2, false,  -   -> 12:00; /* LH 2 active pilots, SKI K06 p.3 */
+  false, -,   -  , true -> 14:00; /* Simulator instructor duty, K12 Instr. �7 */
+  -, -, -, - -> 0:00;
+end
+
+/* Redefined for CCR */
+export %is_any_sim_instr_scand_dp% = false;
+
+/*
+** 1x24 hrs
+*/
+/* XXYY
+table duty_time_1x24_limits_fc =
+  duty.%is_skn%, duty.%is_long_haul%, duty.%active_pilots%,
+  parameters.%k12_fc_sp4_2_valid%(duty.%start_hb%) ->
+    %max_in_1x24_hrs_fc%;
+  -,     true,  2, true  -> 17:00; /* LH 2 active pilots, SKI K12 6.2.5 
+  -,     true,  2, false -> 14:00; /* LH 2 active pilots, SKI K06 p.3 
+  -,  false, 2,   -   -> 17:00;
+  -,  false, 3,   -   -> 17:00;
+  -,  false, 4,   -   -> 18:00;
+  -,     -,     -,   -   -> 24:00;
+end
+*/
+%_is_ac_employer_qa_or_ski% = duty.%is_ac_employer_qa% or
+                              duty.%is_ac_employer_ski%;
+
+table duty_time_1x24_limits_fc =
+  %_is_ac_employer_qa_or_ski%, 
+  duty_time.%crew_or_duty_skd_fd%,
+  duty.%is_long_haul%,
+  parameters.%K15_1x24_SKD_FD_AG_valid%(duty.%start_UTC%),
+  parameters.%K15_jan16_valid%(duty.%start_UTC%),
+  duty.%active_pilots% ->
+    %max_in_1x24_hrs_fc%;
+  false,  false,  -,	-,    false,  2 ->	17:00;
+  false,  false,  -,    -,    false,  3 ->	17:00;
+  false,  false,  -,	-,    false,  4 ->	18:00;
+  false,  false,  -,	-,    true,   - ->	20:00;
+  false,  true,	  -,  false,	  -,  2 ->	17:00;
+  false,  true,	  -,  false,	  -,  3	->	17:00;
+  false,  true,	  -,  false,	  -,  4	->	18:00;
+  false,  true,	  -,  true,	  -,  -	->	20:00;
+  true,	    -,	false,	  -,	  -,  2	->	17:00;
+  true,	    -,	false,	  -,	  -,  3	->	17:00;
+  true,	    -,	false,	  -,	  -,  4	->	18:00;
+  true,	    -,	 true,	  -,	  -,  2	->	17:00;
+    -,	    -,	   -,	  -,	  -,  -	->	24:00;
+end
+
+/*
+** 2x24 hrs
+*/
+%max_in_2x24_hrs_fc% = 0:00; /* Not used by flight crew */
+
+/*
+** 7x24 hrs
+*/
+%max_in_7x24_hrs_fc% = 
+  %_max_in_7x24_hrs_fc%;
+
+/*
+** Calendar day, only valid for FC SKS and SKN
+*/
+export %max_duty_time_in_calendar_day_sks_skn% = 17:00;
+
+table daily_duty_limits_qa =
+  fundamental.%flight_crew%,
+  parameters.%K15_qa_FD_feb16_valid%(duty.%start_UTC%),
+  parameters.%K15_qa_CC_daily_duty_hours_valid%(duty.%start_UTC%) ->
+    export %max_daily_duty_qa%;
+
+  true,	  true,	  -     -> 16:00; /* Flight crew and K15 in place */
+  true,	  false,  -     -> 40:00; /* Flight crew and not K15 in place */
+  false,      -,  true	-> 16:00; /* CC and K15 in place */
+  false,      -,  false -> 40:00; /* CC and not K15 in place */
+  -, -, - -> 100:00;
+end
+
+                      
+/* Redefined in child module in order to cover for pilot education limits. */
+%crew_has_training_restr_trip_start% = false;
+
+
+%_max_in_7x24_hrs_fc% =
+     47:30;
+
+
+/* Only for tracking */
+%delayed_check_out_7x24_fwd% = 
+    %product% = "CCT" and
+    %any_delayed_check_out_in_7x24_hrs_fwd%;
+
+/* Redefined */
+export %any_delayed_check_out_in_7x24_hrs_fwd% = false;
+
+/* Redefined in child module to cover for trips 7 days backwards or forwards */
+%production_with_long_haul_ac% = trip.%with_long_haul_ac%;
+%production_is_intercont% = trip.%is_intercont%;
+
+/*
+** 4 weeks
+*/
+%max_in_4_weeks_fc% = 0:00; /* Redefined in child module */
+
+/*
+** Month
+*/
+%max_in_month_fc% = 0:00;   /* Redefined in child module */
+
+/*
+** Extensions
+*/
+
+%delayed_check_out% = parameter true;
+
+/****************************************************************
+ * Section 3: Duty time limits - Cabin crew
+ *            Agreement: SKD C.1.2, D.1.2, NKF/SBK 1.1-1.3, 7.4
+ *                       NKF/SBK qual F5 2.3.1
+ ***************************************************************/
+/*
+** Duty period
+*/
+%max_in_duty_period_sh_skd% = 10:00;           /* SKD */
+%max_in_duty_period_lh_skd% = 14:00;           /* SKD */
+%max_in_duty_period_sh_skn_basic% = 10:30;     /* SKN */
+%max_in_duty_period_sh_skn_short_rest% = 9:00; /* SKN */
+%max_in_duty_period_sh_skn_f50% = 11:00;       /* SKN */
+%max_in_duty_period_lh_skn% = 14:00;           /* SKN */
+%max_in_duty_period_sh_sks% = 10:30;           /* SKS */
+%max_in_duty_period_lh_sks% = 12:00;           /* SKS */
+
+/* Redefined in child module since temporary cabin crew skd has a different
+ * limit than permanently employed crew. The module crew must be used to know
+ * whether a crew is temp or permanently, hence duty_time_ccr is used. */
+%max_in_duty_period_cc% =
+  if duty.%region% = "SKD" and
+     duty.%is_training% and
+     duty.%departs_from_homebase% then 8:00
+  else if %is_sks_charter_exception% then
+    10:30
+  else
+    default(%_max_in_duty_period_override_cc%, %_max_in_duty_period_cc%);
+
+%is_sks_charter_exception% =
+  any(leg(duty), duty.%region% = "SKS" and is_first(leg(duty)) and not leg.%is_active_flight% 
+      and default(next(leg(duty), leg.%is_active_flight% and leg.%is_charter%), false));
+
+/* Redefined in child module since crew properties must be used,
+ * thus always void in CCP. */
+%_max_in_duty_period_override_cc% = void_reltime;
+
+/* Get correct limit */
+table duty_time_duty_period_limits_cc =
+  duty.%region%, duty.%is_long_haul%, 
+  %_is_long_haul_or_charter_or_has_long_leg%  ->
+    %_max_in_duty_period_cc%;
+  
+  /* SKD */
+  "SKD", false, -   -> %_max_in_duty_period_sh_skd%;
+  "SKD", true,  -   -> %max_in_duty_period_lh_skd% +
+                       %passive_extension%(false);
+  
+  /* SKN */
+  "SKN", false, -  -> %max_in_duty_period_sh_skn%;
+  "SKN", true,  -  -> %max_in_duty_period_lh_skn% +
+                             %passive_extension%(false);
+  /* SKS */
+  "SKS", -, false   -> %max_in_duty_period_sh_sks%;
+  "SKS", -, true    -> %max_in_duty_period_lh_sks%;
+  
+  /* SKJ - Japanese CC */
+  "SKJ", -, -         -> 16:00;
+
+  -, -, - -> 0:00;
+end
+
+export %_is_long_haul_or_charter_or_has_long_leg% = 
+  duty.%is_long_haul% or
+  duty.%is_charter% or
+  all(leg(duty), leg.%is_active_flight% and
+                 leg.%block_time% > 4:00);
+
+%_max_in_duty_period_sh_skd% =
+  %max_in_duty_period_sh_skd% +
+  nmax(%passive_extension%(false),
+       rest.%add_hrs%(%extended_duty%, 2:00));
+
+/* Agreement: CAU K06 C.1.2a, C.1.2b */
+
+export %extended_duty% =
+  rest.%duty_followed_by_minimum_scheduled_rest%(duty.union)  and
+  not duty.%is_long_haul% and
+  %planned_extended_duty%;
+
+%planned_extended_duty% =
+  %in_duty_period_scheduled%(duty.union,True) > 10:00 + rest.%add_hrs%(%last_is_deadhead%, 1:00) and
+  (%num_legs_in_duty_period%(duty.union) <= 3 or
+  (%num_legs_in_duty_period%(duty.union) = 4 and %any_meal_stop_in_duty_period%));
+
+
+%extended_duty_overtime% =
+  rest.%duty_followed_by_minimum_scheduled_rest%(duty.overtime)  and
+  %in_duty_period_scheduled%(duty.overtime, True) > 10:00 + rest.%add_hrs%(%last_is_deadhead%, 1:00) and
+  not duty.%is_long_haul% and
+  (%num_legs_in_duty_period%(duty.overtime) <= 3 or
+  (%num_legs_in_duty_period%(duty.overtime) = 4 and %any_meal_stop_in_duty_period%));
+
+
+%extended_dutypass% =
+  any(duty(trip), %extended_duty_overtime% or duty.%is_long_haul_charter_skd%)
+  from (current) forwards
+  while (rest.%duty_period_end_UTC%(duty.overtime)>= duty.%end_utc_private%);
+ 
+
+%num_legs_in_duty_period%(DutyCalculation dutycalc) =
+  let start = rest.%duty_period_start_UTC%(dutycalc),
+      stop  = rest.%duty_period_end_UTC%(dutycalc);
+  count(leg(trip))
+  where (leg.%start_UTC% >= start and
+         leg.%start_UTC% < stop and
+         leg.%is_flight_duty% and
+         not leg.%returned_to_ramp%);
+  
+
+/*  Definition of meal stop changed to only consider a long enough break 
+ * somewhere in the dutypass. SASCMS-2687 */
+%any_meal_stop_in_duty_period% =
+  let start = rest.%duty_period_start_UTC%(duty.union),
+      stop  = rest.%duty_period_end_UTC%(duty.union);
+  any(leg(trip),leg.%scheduled_connection_time% >= meal.%meal_stop_min_duration%)
+  where (leg.%start_UTC% >= start and
+         leg.%start_UTC% < stop);
+
+/* SKN CC */
+%max_in_duty_period_sh_skn% =
+  if %short_rest_prev_duty% then
+    %max_in_duty_period_sh_skn_short_rest%
+  else
+    if %max_in_duty_period_sh_skn_prev_duty_long% > 0:00 then
+      %max_in_duty_period_sh_skn_prev_duty_long%
+    else
+      %max_in_duty_period_sh_skn_basic% +
+      %long_leg_extension% +
+      %passive_extension%(%long_leg_in_duty%);
+
+ 
+/* Agreement: NKF/SBK 7.4
+ *
+ * NB! No longer applies after K11.
+ */
+export %short_rest_prev_duty% =
+  not parameters.%k11_skn_cc_sp10_8_valid%(%pp_start%) and
+  default(prev(duty(trip), last(leg(duty), rest.%is_short_scheduled_skn%)), false);
+  
+/*
+** Agreement: NKF K12
+**
+** If previous duty includes  flight duty and DP > 10:30 and < 13:00,
+** then maximum DP is 9:00
+**
+** If previous duty includes  flight duty and DP > 13:00,
+** then maximum DP is 8:00
+**
+*/
+
+export %max_in_duty_period_sh_skn_prev_duty_long% =
+  let prev_duty_time =
+  default(if prev(duty(wop),duty.%has_flight_duty%)
+               where (rest.%duty_followed_by_minimum_scheduled_rest%(duty.union)) then
+            prev(duty(wop),%in_duty_period%(duty.union,false))
+              where (rest.%duty_followed_by_minimum_scheduled_rest%(duty.union))
+          else
+            0:00,
+          0:00);
+                
+  if duty.%is_short_haul% and
+     parameters.%k12_skn_cc_sp4_1_valid%(duty.%start_day%) and
+     not %sh_skn_long_duty_standby_call_out% then
+    if prev_duty_time > %max_in_duty_period_sh_skn_basic% and
+       prev_duty_time <= 13:00 then
+      9:00
+    else
+      if prev_duty_time > 13:00 then
+        8:00
+      else
+        0:00
+  else
+    0:00;
+
+/* redefined in CCT - rule doesn't apply for standby call-out */
+%sh_skn_long_duty_standby_call_out% =
+  false;
+/*
+** 1x24 hrs
+*/
+%max_in_1x24_sh_skd% = 14:00;     /* SKD */
+%max_in_1x24_lh_skd% = 14:00;     /* SKD */
+%max_in_1x24_sh_skn_f50% = 13:00; /* SKN */
+
+/* Get correct limit */
+table duty_time_1x24_limits_cc(Bool fwd) =
+  duty.%region%, duty.%is_long_haul% ->
+    %max_in_1x24_hrs_cc%;
+  
+  /* SKD */
+  "SKD", false   -> %max_in_1x24_sh_skd% +
+                         %passive_transfer_extension_1x24%(fwd);
+  "SKD", true    -> %max_in_1x24_lh_skd% +
+                         %passive_transfer_extension_1x24%(fwd); /* NB! No limit in Tracking */
+  
+  -, - -> 0:00;
+end
+
+/* Max duty time 1x24
+** If the 24hr period ends with a passive transfer,
+** the max time can be extended.
+*/
+
+%passive_transfer_extension_1x24%(Bool fwd) =
+  let start = if fwd then duty.%start_utc%
+              else duty.%end_utc% - 24:00,
+      stop = if fwd then duty.%start_utc% + 24:00
+             else duty.%end_utc%;
+  %_passive_transfer_extension_1x24%(start, stop, fwd);
+  
+table passive_extension_1x24(Abstime start, Abstime stop, Bool fwd) =
+  duty.%region% -> %_passive_transfer_extension_1x24%;
+  /* SKD */
+  "SKD"   -> if %passive_transfer_ends_1x24_period%(start, stop, fwd) then
+                  1:00 else 0:00;
+  /* SKN */
+  "SKN"   -> if %passive_transfer_ends_1x24_period%(start, stop, fwd) then
+                  1:30 else 0:00;
+    -     -> 0:00; 
+end
+
+    
+%passive_extension_1x24%(Abstime start, Abstime stop, Bool fwd) =
+  %last_co_in_1x24%(stop, fwd) - 
+  %last_active_co_in_1x24%(start, stop, fwd);
+
+%passive_transfer_ends_1x24_period%(Abstime start, Abstime stop, Bool fwd) =
+  if fwd then
+    %passive_transfer_ends_period_fwd%(start, stop)
+  else
+    %passive_transfer_ends_period_bwd%(start, stop);
+  
+/* Assuming function is called from the first duty in 1x24 period */
+%passive_transfer_ends_period_fwd%(Abstime start, Abstime stop) =
+  any(duty(wop), last(leg(duty), leg.%is_deadhead% and
+                                  default(prev(leg(chain), leg.%co_end_utc% < stop), true)))
+  from(current)
+  while(duty.%start_utc% < stop)
+  where(default(next(duty(wop), duty.%start_utc% >= stop), true));
+  
+/* Assuming function is called from the last duty in 1x24 period */
+%passive_transfer_ends_period_bwd%(Abstime start, Abstime stop) =
+  last(leg(duty), leg.%is_deadhead%);
+
+/* If only passive in period, start will be returned */
+%last_active_co_in_1x24%(Abstime start, Abstime stop, Bool fwd) =
+  if fwd then
+    default(%last_active_co_in_1x24_fwd%(stop), start)
+  else 
+    default(%last_active_co_in_1x24_bwd%(start), start);
+    
+%last_active_co_in_1x24_fwd%(Abstime stop) =
+  first(duty(wop), 
+        last(leg(duty), nmin(leg.%co_end_utc%, stop))
+        where(leg.%is_active_flight%))
+  where(default(next(duty(wop), duty.%start_utc% >= stop), true));
+
+%last_active_co_in_1x24_bwd%(Abstime start) =
+  last(leg(duty),
+       prev(leg(wop), nmax(leg.%co_end_utc%, start))
+       while(leg.%co_end_utc% >= start)
+       where(leg.%is_active_flight%));
+                         
+  
+%last_co_in_1x24%(Abstime stop, Bool fwd) =
+  if fwd then
+    %last_co_in_1x24_fwd%(stop)
+  else
+    duty.%end_utc%;
+    
+%last_co_in_1x24_fwd%(Abstime stop) =
+  first(duty(wop), nmin(stop, duty.%end_utc%))
+  where(default(next(duty(wop), duty.%start_utc% >= stop), true));
+  
+    
+/* If duty ends with a passive transfer, the max duty in
+** 1x24 can be extended up till 2 hours (depending on agreement). 
+*/
+/*%passive_transfer_extension%(Abstime start, Abstime stop) =
+  if last(leg(duty), leg.%is_deadhead%)*/
+
+/*
+** 2x24 hrs
+*/
+/* Agreement: Greenland 2 */
+%max_in_2x24_hrs_cc% = 21:00; /* One-day Greenland return */
+
+/*
+** 7x24 hrs
+*/
+%max_in_7x24_sh_skd% =
+  if parameters.%k12_skd_cc_sp4_3_valid%(duty.%start_hb%) then
+    44:00
+  else
+    42:00; /* SKD */
+
+%max_in_7x24_lh_skd% = 
+  if parameters.%k12_skd_cc_sp4_3_valid%(duty.%start_hb%) then
+    44:00
+  else
+    42:00; /* SKD */
+
+%max_in_7x24_sh_skn% = 42:00; /* SKN */
+%max_in_7x24_lh_skn% = 42:00; /* SKN */
+%max_in_week_sks% = 42:00;    /* SKS */
+
+/* Redefined in duty_time_cct */
+%max_in_7x24_skj% = 35:00;    /* Japanese CC */
+
+/* Get correct limit */
+table duty_time_7x24_limits_cc =
+  duty.%region%, %production_is_long_haul% ->
+    %max_in_7x24_hrs_cc%;
+  
+  /* SKD */
+  "SKD", false     -> %max_in_7x24_sh_skd%;
+  "SKD", true      -> %max_in_7x24_lh_skd%;
+  
+  /* SKN */
+  "SKN", false     -> %max_in_7x24_sh_skn%;
+  "SKN", true      -> %max_in_7x24_lh_skn%;  
+  
+  /* SKS */
+  "SKS",   -       -> %max_in_week_sks%;
+  
+  /* Japanese CC */
+  "SKJ",   -       -> %max_in_7x24_skj%;
+  
+  -, - -> 0:00;
+end
+
+/* Redefined in child module to cover for trips 7 days forwards. */
+export %production_is_long_haul% =
+  if duty.%region% = "SKD" then /* Only forward values */
+    %any_duty_is_long_haul_in_7x24_fwd%
+  else if duty.%region% = "SKN" then
+    %any_duty_is_long_haul_in_7x24_fwd% and
+    %any_duty_is_long_haul_in_7x24_bwd%
+  else
+    duty.%is_long_haul%;
+    
+export %production_is_long_haul_not_bought_day% = 
+  if duty.%region% = "SKD" then /* Only forward values */
+    %any_duty_is_long_haul_in_7x24_fwd_not_bought_day%
+  else if duty.%region% = "SKN" then
+    %any_duty_is_long_haul_in_7x24_fwd_not_bought_day% and
+    %any_duty_is_long_haul_in_7x24_bwd_not_bought_day%
+  else
+    duty.%is_long_haul% and not duty.%is_bought%;
+
+export %any_duty_is_long_haul_in_7x24_fwd% =
+  let stop = duty.%start_UTC% + 7*24:00;
+  any(duty(chain), duty.%is_long_haul%)
+  from (current) forwards
+  while (duty.%start_UTC% < stop)
+  where (duty.%has_flight_duty%);
+
+export %any_duty_is_long_haul_in_7x24_bwd% =
+  let stop = duty.%end_UTC% - 7*24:00;
+  any(duty(chain), duty.%is_long_haul%)
+  from (current) backwards
+  while (duty.%end_UTC% > stop)
+  where (duty.%has_flight_duty%);
+  
+export %any_duty_is_long_haul_in_7x24_fwd_not_bought_day% =
+  let stop = duty.%start_UTC% + 7*24:00;
+  any(duty(chain), duty.%is_long_haul%)
+  from (current) forwards
+  while (duty.%start_UTC% < stop)
+  where (duty.%is_flight_duty% and not
+         duty.%is_bought%);
+
+export %any_duty_is_long_haul_in_7x24_bwd_not_bought_day% =
+  let stop = duty.%end_UTC% - 7*24:00;
+  any(duty(chain), duty.%is_long_haul%)
+  from (current) backwards
+  while (duty.%end_UTC% > stop)
+  where (duty.%is_flight_duty% and not
+         duty.%is_bought%);
+
+/* 
+** 4 weeks
+*/
+%max_in_4_weeks_cc% = 0:00; /* Redefined in child module */
+
+/*
+** Month
+*/
+%max_in_month_cc% = 0:00;   /* Redefined in child module */
+
+/*
+** Extensions
+*/
+/*
+**
+** Agreement: CAU C.1.2, D.1.2, NKF/SBK 1.3.1, 1.3.2
+**
+** NB! SKN K11 - the max duty rule 1.3.2 (long legs) doesn't apply unless
+**     the duty ends with passive, so the passive extension is in relation to
+**     the basic max duty 10:30
+*/
+
+table passive_extension(Bool long_leg) =
+  duty.%region%,
+         duty.%is_long_haul%,
+               long_leg,
+                      %last_is_deadhead%,
+                            oma16.%is_extended_fdp%
+                                  -> export %passive_extension%;
+  /* SKD */
+  "SKD", -,    false, true, -     -> 1:00;
+  
+  /* SKN */
+  "SKN", true, -,     true, -     -> 2:00;
+  &
+  "SKN", -,    false, true, -     -> 1:30;
+  "SKN", -,    true,  true, true  -> 1:00;
+  "SKN", -,    true,  true, false -> 2:00;
+
+  -,     -,    -,     -,    -     -> 0:00;
+
+end
+
+/* The contribution from the passive transfer is from a fictive c/o
+** from last active to c/o from last passive */
+export %last_leg_duty_time% = 
+  default(
+    duty.%end_utc% -
+    last(leg(duty), prev(leg(duty), leg.%co_end_utc%) where
+                    (leg.%is_active_flight%)),
+    0:00);
+
+export %long_leg_in_duty% = any(leg(duty), %long_leg%);
+%long_leg% =
+  leg.%is_active_flight% and
+  leg.%is_short_haul% and
+  leg.%block_time_scheduled% > 3:00;
+
+export %last_is_deadhead% =
+  default(last(leg(duty), leg.%is_deadhead%)
+          where (rest.%duty_followed_by_minimum_rest%),
+  false);
+
+/*  Agreement: NKF/SBK 1.3.2  */
+
+%long_leg_extension% =
+  if %long_leg_in_duty% then
+    if parameters.%k11_skn_cc_sp10_8_valid%(duty.%start_month_start%) then
+      if oma16.%is_extended_fdp% then
+        3:30
+      else
+        2:30
+    else
+      3:30
+  else
+    0:00;
+
+export %trip_has_extended_duty% = any(duty(trip), %duty_is_extended%);
+export %duty_is_extended% =
+  %_duty_is_extended% and
+  %in_duty_period_scheduled%(duty.union,True) > %_basic_duty_time_limits%;
+
+export %dutypass_is_extended% =
+  %_dutypass_is_extended% and
+  %in_duty_period_scheduled%(duty.overtime,True) > %_basic_duty_time_limits%;
+
+table duty_is_extended =
+  %flight_crew%, duty.%region% ->
+    %_duty_is_extended%, %_dutypass_is_extended%,
+    %_basic_duty_time_limits%;
+  false, "SKD" -> %extended_duty% or duty.%is_long_haul_charter_skd%,
+                  %extended_dutypass%, %__basic_duty_time_limits%;
+  false, "SKN" -> %long_leg_in_duty%, %long_leg_in_duty%,
+                  %max_in_duty_period_sh_skn_basic% + %passive_extension%(false);
+  -, - -> false, false, 0:00;
+end
+
+%__basic_duty_time_limits% =
+  %max_in_duty_period_sh_skd% + rest.%add_hrs%(%last_is_deadhead%, 1:00);
+
+export %trip_has_long_leg_extended_duty% = any(duty(trip), %duty_is_long_leg_extended%);
+
+export %duty_is_long_leg_extended% =
+  %long_leg_in_duty% and
+  duty.%is_short_haul% and
+  %in_duty_period_scheduled%(duty.union,True) > 
+    (%max_in_duty_period_sh_skn_basic% + %passive_extension%(false));
+
+export %trip_has_long_leg_extended_duty_not_bought% = 
+  any(duty(trip), %duty_is_long_leg_extended% and not duty.%is_bought%);
+
+/* Agreement: CAU D.1.2 */
+%tracking_extension% = if %product% = "CCT" then 2:00 else 0:00;
+
+/* Agreement: NKF/SBK qual F5 2.3.1a */
+%night_upg_extension%(Reltime extension) =
+  if (%1x24_hrs% - %1x24_hrs_no_night_upg%) >= extension then extension else 0:00;
+
+/****************************************************************
+ * Section 4: Duty time calculations
+ ***************************************************************/
+/*
+** Duty pass
+*/
+export %in_duty_period%(DutyCalculation dutycalc, Bool night_upg) =
+  trip.%duty_time_in_period%(rest.%duty_period_start_UTC%(dutycalc),
+                             rest.%duty_period_end_UTC%(dutycalc),
+                             night_upg,
+                             dutycalc);
+
+export %in_duty_period_scheduled%(DutyCalculation dutycalc, Bool night_upg) =
+  trip.%duty_time_in_period_scheduled%(rest.%duty_period_scheduled_start_UTC%(dutycalc),
+                                       rest.%duty_period_scheduled_end_UTC%(dutycalc),
+                                       night_upg,
+                                       dutycalc,
+                                       true);
+
+/* Redefined for CCT% */
+export %duty_time_reduction_sby_callout_skn_cc% = 0:00;
+
+
+/* 
+** 1x24 hrs 
+*/
+export %1x24_hrs_fwd_trip% = trip.%duty_time_in_period%(duty.%start_UTC%,
+                                                        duty.%start_UTC% + 1*24:00,
+                                                        fundamental.%night_upg%,
+                                                        duty.union);
+export %1x24_hrs_bwd_trip% = trip.%duty_time_in_period%(duty.%end_UTC% - 1*24:00,
+                                                        duty.%end_UTC%,
+                                                        fundamental.%night_upg%,
+                                                        duty.union);
+
+export %calendar_day_end_day_trip% = 
+                     trip.%duty_time_in_period%(duty.%end_day_hb_utc%,
+                                                duty.%end_day_hb_utc% + 24:00,
+                                                fundamental.%night_upg%,
+                                                duty.union);
+
+export %calendar_day_start_day_trip% = 
+                     trip.%duty_time_in_period%(duty.%start_day_hb_utc%,
+                                                duty.%start_day_hb_utc% + 24:00,
+                                                fundamental.%night_upg%,
+                                                duty.union);
+
+
+
+export %1x24_hrs_trip% = nmax(%1x24_hrs_bwd_trip%, %1x24_hrs_fwd_trip%);
+/* Redefined to roster level in duty_time_crr */
+export %1x24_hrs% = %1x24_hrs_trip%;
+export %1x24_hrs_fwd% = %1x24_hrs_fwd_trip%;
+export %1x24_hrs_bwd% = %1x24_hrs_bwd_trip%;
+export %duty_time_calendar_day_end_day% = %calendar_day_end_day_trip%;
+export %duty_time_calendar_day_start_day% = %calendar_day_start_day_trip%;
+
+%1x24_hrs_fwd_no_night_upg_trip% = 
+	trip.%duty_time_in_period%(duty.%start_UTC%, duty.%start_UTC% + 1*24:00, false, duty.union);
+%1x24_hrs_bwd_no_night_upg_trip% = 
+	trip.%duty_time_in_period%(duty.%end_UTC% - 1*24:00, duty.%end_UTC%, false, duty.union);
+export %1x24_hrs_no_night_upg_trip% = nmax(%1x24_hrs_bwd_no_night_upg_trip%, %1x24_hrs_fwd_no_night_upg_trip%);
+/* Redefined to roster level in duty_time_crr */
+export %1x24_hrs_no_night_upg% = %1x24_hrs_no_night_upg_trip%;
+export %1x24_hrs_fwd_no_night_upg% = %1x24_hrs_fwd_no_night_upg_trip%;
+export %1x24_hrs_bwd_no_night_upg% = %1x24_hrs_bwd_no_night_upg_trip%;
+
+/* next definitions are only valid in rostering or tracking */
+export %1x24_hrs_caa% = %1x24_hrs%;
+export %1x24_hrs_fwd_caa% = %1x24_hrs_fwd%;
+export %1x24_hrs_bwd_caa% = %1x24_hrs_bwd%;
+export %1x24_hrs_no_night_upg_caa% = %1x24_hrs_no_night_upg%;
+export %1x24_hrs_fwd_no_night_upg_caa% = %1x24_hrs_fwd_no_night_upg%;
+export %1x24_hrs_bwd_no_night_upg_caa% = %1x24_hrs_bwd_no_night_upg%;
+
+/* 
+** 7x24 hrs
+*/
+export %7x24_hrs_in_period%(Abstime start_utc, Abstime stop_utc, Bool night_upg, DutyCalculation dutycalc) =
+  trip.%duty_time_in_period%(start_utc, stop_utc, night_upg, dutycalc);
+
+export %7x24_hrs% =
+  if duty.%is_skj% then
+    %7_calendar_days%
+  else
+    nmax(%_7x24_hrs_fwd%, %7x24_hrs_bwd%);
+
+%_7x24_hrs_fwd% =
+  if duty.%k4exng_cc_sp5_1_valid%(duty.%start_hb% + 7*24:00) or
+     parameters.%k4exng_fc_sp5_1_valid%(duty.%start_hb% + 7*24:00) then
+    0:00
+  else
+    %7x24_hrs_fwd%;
+
+/* Net duty time in 7 calendar days for Japanese CC */
+export %7_calendar_days% =
+  trip.%duty_time_in_period%(duty.%end_day_hb_utc% - 6*24:00, duty.%end_day_hb_utc% + 24:00,
+                             fundamental.%night_upg%, duty.net_skj);
+
+export %7x24_hrs_fwd% = 
+ trip.%duty_time_in_period%(duty.%start_UTC%, duty.%start_UTC% + 7*24:00, fundamental.%night_upg%, duty.union);
+export %7x24_hrs_bwd% = 
+  trip.%duty_time_in_period%(duty.%end_UTC% - 7*24:00, duty.%end_UTC%, fundamental.%night_upg%, duty.union);
+export %7x24_hrs_until_now% =
+  if leg.%is_SKS% and %cabin_crew% then
+    duty.%duty_time_in_period%(leg.%end_UTC% - 7*24:00, leg.%end_UTC%, false, duty.union)
+  else
+    duty.%duty_time_in_period%(leg.%end_UTC% - 7*24:00, leg.%end_UTC%, fundamental.%night_upg%, duty.union);
+export %trip_7x24_hrs_fwd% = 
+  trip.%duty_time_in_period%(duty.%start_UTC%, duty.%start_UTC% + 7*24:00, fundamental.%night_upg%, duty.union);
+export %calendar_week% =
+  trip.%duty_time_in_period%(duty.%start_week_start%, duty.%start_week_end%, false, duty.union);
+
+
+/* Different limit in Tracking acc to CAU E.1.4 */
+export %max_duty_day_before_lh_skd% = 
+  if %product% = "CCT" then
+    %max_duty_day_before_lh_skd_CCT%
+  else
+    %max_duty_day_before_lh_skd_CCR%;
+
+/* %max_duty_day_before_lh_skd_CCT% = 10:00;*/
+export %max_duty_day_before_lh_skd_CCT% = 8:00;
+export %max_duty_day_before_lh_skd_CCR% = 8:00; /* WP FAT Legal.: 405 */
+export %max_duty_day_before_lh_skn% = 
+  if any(duty(trip), duty.%departs_from_homebase% and duty.%is_long_haul%) and 
+     parameters.%k11_skn_cc_valid%(%pp_start%) and %cabin_crew% then
+    9:00
+  else
+    10:30;
+
+/* Redefined in duty_time_ccr */
+export %passive_plus_reduction%(Abstime a1, Abstime a2) =
+  0:00;
+
+/****************************************************************
+ * Section 5: Definitions 
+** redfined in duty_time_ccr and uses
+** agreement groups
+ ***************************************************************/
+
+export %crew_or_duty_sks_fd% =
+%flight_crew% and duty.%is_ac_employer_sks%;
+
+export %crew_or_duty_sks_cc% =
+%cabin_crew% and duty.%is_ac_employer_sks%;
+
+export %crew_or_duty_skd_fd% =
+%flight_crew% and duty.%is_ac_employer_skd%;
+
+export %crew_or_duty_skd_cc% =
+%cabin_crew% and duty.%is_ac_employer_skd%;
+
+export %crew_or_duty_skn_fd% =
+%flight_crew% and duty.%is_ac_employer_skn%;
+
+export %crew_or_duty_skn_cc% =
+%cabin_crew% and duty.%is_ac_employer_skn%;
+
+export %crew_or_duty_qa_cc% =
+%cabin_crew% and duty.%is_ac_employer_qa%;
+
+export %crew_or_duty_ski_fd% =
+%flight_crew% and duty.%is_ac_employer_ski%;
+
+export %crew_or_duty_svs_fd% =
+%flight_crew% and duty.%is_ac_employer_svs%;
+
+export %crew_or_duty_svs_cc% =
+%cabin_crew% and duty.%is_ac_employer_svs%;
+
+
+
+/* end of file */

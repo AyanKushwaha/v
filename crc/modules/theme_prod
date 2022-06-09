@@ -1,0 +1,345 @@
+/* -*- crc -*-
+ *
+ * Purpose:
+ *   The module describes the 'theme' level module handling production,
+ *   that is, common calculations regarding production rules for different rules and such.
+ *   It should be usable in roster optimizer as well as in studio rules.
+ *   It's a kind of mirror to "freedays" with no clear division in between.
+ *
+ *   The initial need was to get support for "virtual duties", making space for ground duties like WBTR in optimizer,
+ *   which in many senses shares decisions with duty time rules etc
+ *
+ * Sections:
+ *
+ * Created by:
+ *   Lars Westerlind 2016-11-07
+ *
+ */
+
+module theme_prod
+
+
+import freedays;
+import training;
+import oma16;
+import duty_time;
+import crew;
+import wop;
+import trip;
+import duty;
+import leg;
+import oma16_defs;
+import model_crew;
+import levels;
+import parameters;
+import system_db_parameters;
+import base_calendar;
+import base_utils;
+import fundamental;
+
+
+/****************************************************************
+ * Section 1: Basic stuff 
+ ***************************************************************/
+
+export %max_days_btw_freedays% =
+    if crew.%has_agmt_group_qa_cc% or wop.%is_qa_fd% then
+        %max_days_btw_freedays_qa_cc%
+    else if all(trip(wop), (trip.%has_only_flight_duty% and trip.%is_long_haul%) or trip.%is_standby_line%) then
+        %max_days_btw_freedays_lh%
+    else
+        nmin(%max_days_btw_freedays_sh%, freedays.%max_days_after_singlef%);
+
+/* Both long and short haul limits for CAU and SCCA was found in the agreements,
+ * Only short haul limit was found in the FC agreement. Neither was found for NKF. */
+export %max_days_btw_freedays_lh% = 12;
+export %max_days_btw_freedays_qa_cc% = 7;
+export %max_days_btw_freedays_sh% =
+  if %flight_crew% then %max_days_btw_freedays_sh_fc%
+  else if any(trip(wop), trip.%is_one_day_greenland_return%) then
+    3
+  else
+    5;
+
+/*
+** Rule: Max working days between freedays
+*/
+table max_days_btw_freedays_fc =
+  crew.%part_time_factor_wop_start%,
+       crew.%in_5_4_flex_group_wop_start% 
+            -> %max_days_btw_freedays_sh_fc%;
+
+   80, true -> 4;
+   83, true -> 5;
+  100, true -> 5;
+
+   -,  -    -> 5;
+end
+
+
+/****************************************************************
+ * Section 2: duty_time in 7 days
+ ***************************************************************/
+
+export %max_duty_time_in_7_days% =
+  %_max_duty_time_in_7_days% -
+  (if %is_flight_crew_training_7_days% then
+     0:00
+   else
+     %p_buffer_max_duty_time_7_days%);
+
+export %_max_duty_time_in_7_days% =
+  if %is_flight_crew_training_7_days% then
+    %max_in_7_days_training_fc%
+  else
+    %max_in_7_days%;
+
+/* SKCMS-579 */
+export %max_in_7_days% =
+    let
+        is_sks =
+            (crew.%has_agmt_group_sks_fd%
+                or (crew.%has_agmt_group_ski_fd% and crew.%homebase% = "STO"))
+            and not duty.%is_ac_employer_qa%,
+        is_winter =
+            %within_01oct_30apr%(duty.%start_UTC%);
+
+    if is_sks and is_winter then
+        %max_in_7_days_01oct_to_30apr%
+    else
+      if crew.%has_agmt_group_qa_cc% then
+        /* Rule is not valid for Cimber crew */
+        900:00
+      else
+        if    (crew.%has_agmt_group_qa_fd% or
+               (fundamental.%flight_crew% and duty.%is_ac_employer_qa%))
+           and parameters.%K15_qa_FD_feb16_valid%(duty.%start_utc%) then
+          /* K15: For Cimber FD and SK pilots flying CJ the rule is not valid*/
+            900:00
+        else
+           /* Not sks winter and not Cimber i.e. all others */
+           %max_in_7_days_normal%;
+
+
+%within_01oct_30apr%(Abstime date) =
+    let
+        month_number = base_calendar.%month_number%(date);
+    month_number >= 10 or month_number <= 4;
+
+export %max_in_7_days_normal% =
+  parameter 47:30
+  remark "Max duty time 7 days normal production";
+
+export %max_in_7_days_01oct_to_30apr% =
+  parameter 47:00
+  remark "Max duty time 7 days 01Oct-30Apr for certain FD crew (SKCMS-641)";
+
+%max_in_7_days_training_fc% =
+  parameter 45:00
+  remark "Max duty time 7 days FC training";
+
+export %p_buffer_max_duty_time_7_days% =
+  parameter 0:00
+  remark "Max duty time 7 days buffer";
+
+export %is_flight_crew_training_7_days% =
+  %flight_crew% and duty_time.%crew_has_training_restr_trip_start% and
+  training.%trip_is_in_school_period_min_7x24%;
+
+
+/****************************************************************
+ * Section 3: Virtual duties.
+ * 
+ * A virtual duty is a concept trying to handle rules on duty that
+ * don't yet exist. Typical question: "would it fit to put a duty
+ * of a kind just after this trip?
+ ***************************************************************/
+
+/* first start position of a course after a vduty. Checks rest time and that vduty not interfers with 00:00 - 06:00 */
+export %vduty_start_after_time%(Int vduty_id, Abstime t) =
+  let r = t + oma16.%rest_after_duty_buffer% + oma16_defs.%min_rest_before_duty_starting_at_homebase%,
+      z = round_down(r, 24:00);
+  if r + %vduty_duration%(vduty_id) >= z + 24:00 then z+ 30:00 /* don't end a vduty after midight */
+  else nmax(r, z + 06:00); /* don't start a course before 6:00 */
+
+/* first start position of a vduty of any kind (longest duration) */
+export %vduty_any_start_after_time%(Abstime t) =
+  %vduty_start_after_time%(%vduty_max_duration_wt_id%, t);
+
+/* first start position of a vduty after current wop, assumed on duty */
+export %vduty_start_after_wop%(Int vduty_id) =
+  %vduty_start_after_time%(vduty_id, wop.%end_hb%);
+
+/* first start position of a vduty of any kind (longest duration) */
+export %vduty_any_start_after_wop% =
+  %vduty_start_after_time%(%vduty_max_duration_wt_id%, wop.%end_hb%);
+
+/* end of vduty after a wop */
+export %vduty_end_after_wop%(Int vduty_id) =
+  %vduty_start_after_wop%(vduty_id) + %vduty_duration%(vduty_id);
+
+/* end of longest vduty after a wop */
+export %vduty_any_end_after_wop% =
+  %vduty_end_after_wop%(%vduty_max_duration_wt_id%);
+
+%vduty_end_after_day%(Int vduty_id) =
+  round_down(%vduty_end_after_wop%(vduty_id), 24:00);
+
+/* latest end of vduty before on duty wop */
+export %vduty_end_before_wop%(Int vduty_id) =
+  let r = wop.%start_hb% - oma16_defs.%min_rest_before_duty_starting_at_homebase%,
+      z = round_down(r,24:00);
+  if r - %vduty_duration%(vduty_id) < z + 06:00 then z /* don't assing course during midnight, end before previous midnight */
+  else r; 
+
+/* latest end of vduty of any kind before on duty wop */
+export %vduty_any_end_before_wop% =
+  %vduty_end_before_wop%(%vduty_max_duration_wt_id%);
+
+/* start of vduty before on duty wop */
+export %vduty_start_before_wop%(Int vduty_id) =
+  %vduty_end_before_wop%(vduty_id) - %vduty_duration%(vduty_id);
+
+/* start of any course before on duty wop */
+export %vduty_any_start_before_wop% =
+  %vduty_start_before_wop%(%vduty_max_duration_wt_id%);
+
+export %vduty_wt_id% = 1; /* web training course required before pc */
+export %vduty_max_duration_wt_id% = 1; /* ix for an vduty id with longest duration */
+
+table vduty_tbl(Int vduty_id) =
+  vduty_id
+     -> export %vduty_descr%,
+           export %vduty_duration%;
+  1  -> "WTxx web training",
+           10:00;
+end
+
+%needed_freedays_after_wop% =
+  last(duty(wop), freedays.%min_required_freedays_after_duty_all%);
+
+%needed_freedays_before_wop% =
+  default(
+    prev(wop(chain), if wop.%has_production% then %needed_freedays_after_wop% else 0),
+    0
+  );
+
+%having_freedays_after_wop% =
+  last(duty(wop), freedays.%freedays_after_duty%);
+
+%having_freedays_before_wop% =
+  default(
+    prev(wop(chain), %having_freedays_after_wop%),
+    99
+  );  
+
+%is_fg% = 
+  crew.%in_fixed_group_at_date%(wop.%start_hb%);
+
+%wop_next_allowed_prod% =
+  if wop.%is_rest% then wop.%end_hb%
+  else wop.%end_hb% + oma16_defs.%min_rest_before_duty_starting_at_homebase%;
+
+%wop_prev_allowed_prod% =
+  if wop.%is_rest% then wop.%start_hb%
+  else wop.%start_hb% - oma16_defs.%min_rest_before_duty_starting_at_homebase%;
+
+/*
+** These conditions are suitable immediately after optimization, before blank day script.
+** The table could be regarded as a simplified ruleset to be regarded when guessing that assignment will
+** probably be OK of an activity of type vduty_id.
+**
+**
+*/
+table vduty_cond_tbl(Int vduty_id, Int vd_cond_id, Bool after) =
+  vd_cond_id,
+     after,
+            %is_fg% 
+                  -> %vdc_descr%,
+                        %vdc_ok%;
+  1, -,    -      -> "Wop is production",
+                        wop.%has_production%;
+  2, false, -     -> "Start in pp",
+                        wop.%start_day% > %pp_start% and wop.%start_day% < round_up_month(%pp_start% + 0:01);
+  2, true,  -     -> "End in pp month",
+                        wop.%end_day% + 24:00 < round_up_month(%pp_start% + 0:01) and wop.%end_day% + 24:00 >= %pp_start%;
+  3, -,     false -> "Days in working period",
+                        wop.%days% < %max_days_btw_freedays%;
+  4, true,  -     -> "Rest after LH",
+                        not last(trip(wop), trip.%is_long_haul%);
+  5, false, false -> "Enough freedays",
+                        %having_freedays_before_wop% > %needed_freedays_before_wop%;
+  5, true,  false -> "Enough freedays",
+                        %having_freedays_after_wop% > %needed_freedays_after_wop%;
+  5, false, true  -> "In prod block",
+                        wop.%start_day% > crew.%activity_block_start%(wop.%start_day%);
+  5, true,  true  -> "In prod block",
+                        wop.%end_day% < crew.%activity_block_end%(wop.%start_day%);
+  6, false, -     -> "Not planned",
+                        default(
+                           %vduty_start_before_wop%(vduty_id) >= prev(wop(chain), %wop_next_allowed_prod%),
+                           true);
+  6, true,  -     -> "Not planned",
+                        default(
+                           %vduty_end_after_wop%(vduty_id) <= next(wop(chain), %wop_prev_allowed_prod%),
+                           true);
+  7, false, -     -> "Duty time 7 days",
+                           last(duty(wop),
+                              oma16.%duty_time_in_interval_indust%(wop.%end_day% - 6*24:00, wop.%end_day% + 24:00) 
+                              + %vduty_duration%(vduty_id)
+                              <= %max_in_7_days%);
+  7, true,  -     -> "Duty time 7 days",      
+                           last(duty(wop),
+                              oma16.%duty_time_in_interval_indust%(%vduty_end_after_day%(vduty_id) - 6*24:00, %vduty_end_after_day%(vduty_id) + 24:00)
+                              + %vduty_duration%(vduty_id)
+                              <= %max_in_7_days%);
+  -, -,     -     -> void_string, true;
+end
+
+%vduty_cond_wop_isprod% = 1;
+%vduty_cond_in_pp% = 2;
+%vduty_cond_wop_days% = 3;
+%vduty_cond_after_lh% = 4;
+%vduty_cond_freedays_btw% = 5;
+%vduty_cond_wop_notplanned% = 6;
+%vduty_cond_wop_dutytime% = 7;
+
+%vduty_cond_max_id% = 7;
+
+%vduty_allowed_before_wop%(Int vduty_id) =
+  all(times(%vduty_cond_max_id%), %vdc_ok%(vduty_id, base_utils.%ti0%, false));
+
+%vduty_allowed_after_wop%(Int vduty_id) =
+  all(times(%vduty_cond_max_id%), %vdc_ok%(vduty_id, base_utils.%ti0%, true));
+
+%vduty_failed_cond_ix%(Int vduty_id, Bool after) =
+  first(times(%vduty_cond_max_id%), base_utils.%ti0%)
+  where (not %vdc_ok%(vduty_id, base_utils.%ti0%, after));
+
+%vduty_failed_cond_text%(Int vduty_id) =
+  %vdc_descr%(vduty_id, %vduty_failed_cond_ix%(vduty_id, true), true); 
+
+%first_vduty_in_interval%(Int vduty_id, Abstime s, Abstime e) =
+  first(wop(chain), if %vduty_allowed_before_wop%(vduty_id) then %vduty_start_before_wop%(vduty_id) else %vduty_start_after_wop%(vduty_id))
+  where (wop.%end_hb%>= s and wop.%start_hb% < e and (%vduty_allowed_before_wop%(vduty_id) or %vduty_allowed_after_wop%(vduty_id)));
+
+%first_vduty_in_pp%(Int vduty_id) =
+  %first_vduty_in_interval%(vduty_id, %pp_start%, round_up_month(%pp_start%+ 0:01)); 
+  
+%first_allowed_wbtr_in_pp% =
+  %first_vduty_in_pp%(%vduty_wt_id%);
+
+%prod_wop_allows_vduty%(Int vduty_id) =
+  %vduty_allowed_before_wop%(vduty_id)
+  or %vduty_allowed_after_wop%(vduty_id);
+
+export %prod_wop_allows_wt% =
+  %prod_wop_allows_vduty%(%vduty_wt_id%);
+
+export %any_prod_wop_allows_wt% =
+  any(wop(chain), %prod_wop_allows_wt%);
+
+export %cannot_add_missing_wt% = 
+  training.%missing_any_self_trg% and not %any_prod_wop_allows_wt%;
+
+/* eof */

@@ -1,0 +1,1040 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains soft (quality) rules used in Carmen Crew Pairing and as
+ *   studio only in Carmen Crew Rostering and Carmen Crew Tracking.
+ *
+ * Sections:
+ *   1. Functional rules
+ *
+ * Created by:
+ *   Henrik Albertson, 17-Feb-2005
+ *
+ * Major changes:
+ *
+ */
+
+root module rules_soft_ccp
+import fundamental;
+import base_utils;
+import levels;
+import leg;
+import duty;
+import trip;
+import fdp;
+import duty_period;
+import oma16;
+import base_product;
+import rest;
+import rule_exceptions;
+import connection;
+import rules_indust_ccp;
+import parameters;
+import rules;
+import duty_time;
+
+/****************************************************************
+ * Section 1: Functional rules
+ ***************************************************************/
+
+/*
+** Rule:
+**    Not two duties beginning on the same day
+**
+** Description:
+**    It is not allowed for two duties within a trip to begin on the
+**    same day.
+*/
+rule (off) sft_not_two_duties_begin_on_same_day_ALL = 
+  valid trip.%check_rules% and
+        not is_first(duty(trip)) and
+        duty.%start_hb% >= %pp_start%;
+  duty.%start_day% >= prev(duty(trip), duty.%start_day% + 24:00) - 
+		      rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+  startdate = duty.%start_UTC%;
+  failobject = duty.%failobject_start%;
+  failtext(Abstime value, Abstime limit) =
+    concat(format_time(value, "Duty begins on %a %d %b, "),
+           format_time(limit, "earliest allowed is %a %d %b"));
+  remark "(CCP) Soft: No two duties in trip can begin on the same day";
+end
+
+/*
+** Rule: 
+**    Minimum rest after duty pass with parameterized extension
+** 
+** Description:
+**    The rule checks that the rest time at station, both short haul and
+**    long haul is greater than the minimum rest time. If the night stop at station
+**    is less than min required it is defined as a short stop and there are other rules
+**    limit the production after the short stop. A short stop can only occur in 
+**    short haul production
+**
+**    This rule mimicks the general minimum rest rule (ind_min_rest_after_duty_period_ALL) 
+**    except for that it doesnt validate duty pass'es ending at homebase.
+**    The purpose of this soft rule is to extend the minimum rest demands to ensure stability
+**    and it is modelled after the old code. The rule is only implemented for CCP.
+**
+**    Suggestion: evaluate possibility to integrate into minimum rest rules
+**
+** Agreement:
+**    Functional rule
+*/
+rule (off) sft_min_rest_after_duty_period_extension_ALL =
+  valid %sft_min_rest_after_duty_period_extension_all_valid%;
+
+  leg.%rest_time% >= %minimum_rest% - 
+		     rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%);
+
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  failobject = leg.%failobject_departure%;
+  failtext(Reltime value, Reltime limit) = %min_rest_failtext%(value, limit);
+  remark "(CCP). Soft Extended minimum rest after duty period.",
+  planner "The rule checks that the rest after a duty period is satisfied. The rule"
+          " is only checked inside trips, rest between trips is checked in CCR. "
+          " The rule is not checked if it is the first short stop at station, since"
+          " this is allowed. There are other rules to limit production regarding"
+          " short stops.";
+end
+
+%sft_min_rest_after_duty_period_extension_all_valid% =
+    trip.%check_rules% and
+    trip.%in_pp% and
+    duty.%is_on_duty% and
+    /* Short stop at homebase allowed for sby call-outs */
+    not %duty_is_standby_callout% and
+    not leg.%arrives_at_homebase% and
+    leg.%is_last_in_duty% and
+    (not duty_period.%is_on_duty% or
+       (not (duty_period.%is_split% and duty_period.%is_first_duty_in_duty_period%) and
+        not next(duty(trip),duty.%is_deadhead%)));
+
+/* Note: Ugly fix, variables in module standby cannot be used since the 
+ * module is only availble in CCT 
+ * Also variables are copied directly from rules_indust_ccp 
+ */
+%duty_is_standby_callout% =
+  any(leg(duty), leg.%is_standby%) and
+  any(leg(duty), leg.%is_flight_duty%);
+
+%is_first_short_stop_in_trip% =
+  is_first(leg(trip)) where (rest.%is_short%);
+
+%min_rest_failtext%(Reltime value, Reltime limit) =
+  if leg.%is_flight_duty% and not rest.%short_haul_rest% then
+    concat(format_time(value, "Soft: Slipping is %h:%02M hrs, "),
+           format_time(limit, "extended min required is %h:%02M hrs"))
+  else
+    concat("Soft: Rest time at ", 
+           if leg.%arrives_at_homebase% then "homebase " else "station ",
+           format_time(value, "is %h:%02M hrs, "),
+           format_time(limit, "extended min required is %h:%02M hrs"));
+
+%minimum_rest% =
+   oma16.%min_rest_after_sh_dp_followed_by_fdp%;
+
+%extension% =
+  parameter 0:15
+  remark "Extension of minimum rest";  
+
+/*
+** Rule: 
+**    Only allow day short stops at day short stop stations
+** 
+** Description:
+**    This soft rule checks if day short stops are held at parameterized
+**    day short stop stations only. A day short stop is considered a period
+**    between two duty pass'es of length [5:00;8:00] hours, that doesnt overlap 
+**    local night time interval [2:00;3:00]
+**
+**    Suggestion: Sync terminology with short stop code in minimum rest rules 
+**          Modelled from old code
+**
+** Agreement:
+**    Functional rule
+*/
+rule sft_day_short_stop_station_valid_ALL =
+  valid trip.%check_rules% and
+        trip.%in_pp% and
+        not trip.%has_long_haul_aircraft% and
+        duty.%is_on_duty% and
+        /* Short stop at homebase allowed for sby call-outs */
+        not %duty_is_standby_callout% and
+        %is_day_short_stop% and
+        not leg.%arrives_at_homebase% and
+	rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+
+  leg.%end_station% in valid_day_short_stop_stations_set;
+
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  failobject = leg.%failobject_departure%;
+  failtext concat("Soft: Station ",  leg.%end_station%,  " not approved for day short stop");
+  remark "(CCP) Soft: Station not approved for day short stop",
+  planner "The rule checks that a day short stop only takes place"
+          "at a day short stop approved station.";
+end
+
+set valid_day_short_stop_stations_set =
+  parameter ""
+  remark "Stations approved for day short stops";
+
+/*
+** Old Comment:
+** This is old def of day short stop
+** current defs consider interval [02:00 04:00]
+** a night stop (see rest) sync everything 
+*/
+%is_day_short_stop% =
+  leg.%is_last_in_duty% and 
+  not is_last(leg(trip)) and
+  rest.%is_short% and
+  scale_time(leg.%end_hb%,next(leg(trip),leg.%start_hb%),0,02:00,03:00,1) = 0:00;
+
+/*
+** Rule: 
+**    No deadhead roundtrips allowed.
+** 
+** Description:
+**    Prevent creation of deadhead roundtrips.
+**
+**    Note: Possibly cost
+**
+** Agreement:
+**    Functional rule
+*/
+rule (off) sft_no_deadhead_round_trip_ALL =
+  valid trip.%check_rules% and
+        trip.%in_pp% and
+        trip.%has_deadhead% and
+	rule_exceptions.%rule_on%(trip.%start_UTC%);
+
+  not %trip_has_deadhead_round_trip%;
+
+  startdate  = trip.%start_UTC%;
+  failobject = trip.%failobject_start%;
+  failtext "Soft: Trip has deadhead round trips";
+  remark "(CCP) Soft: Trip has deadhead roundtrips.",
+  planner "The rule checks that a trip doesnt contain deadhead round trips.";
+end
+
+%trip_has_deadhead_round_trip% =
+  any(leg(trip), not is_last(leg(trip)) and
+                 leg.%is_deadhead% and
+                 next(leg(trip), leg.%is_deadhead%) and
+                 leg.%start_station% = next(leg(trip), leg.%end_station%));
+
+/*
+** Rule: 
+**    Maximum connection time
+** 
+** Description:
+**    The rule checks the connection time against
+**    a number of parameters.
+**
+** Agreement:
+**    Functional
+*/
+rule (on) sft_max_connection_time_ALL =
+  valid trip.%check_rules% and
+        trip.%in_pp% and
+        duty.%has_flight_duty% and
+        (leg.%arrives_at_homebase% or leg.%is_ac_change%) and 
+        not leg.%is_last_in_duty% and
+        (leg.%is_flight_duty% or leg.%is_deadhead%) and
+        next(leg(duty), leg.%is_flight_duty% or leg.%is_deadhead%);
+
+  leg.%connection_time% <= %maximum_connection_time% + 
+			   rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%);
+  startdate = leg.%activity_scheduled_start_time_UTC%;
+  failobject = leg.%failobject_departure%;
+  failtext(Reltime value, Reltime limit) =
+    concat("Soft: Max Cnx at ", %maximum_connection_failtext%,
+           leg.%flight_name%," - ", next(leg(duty), leg.%flight_name%), 
+           " is ", %reltime2str%(value), ", max is ",
+           %reltime2str%(limit));
+  remark "(CCP) Soft: Max connection time between activities",
+  planner "The rule checks that the maximum allowed connection"
+	  " is satisified. The maximum connection times can be"
+          " changed in a table.";
+end
+
+table maximum_connection_time_limit =
+  leg.%arrives_at_homebase%,
+  leg.%arrives_at_SAS_hub% ->
+    export %maximum_connection_time%,
+    %maximum_connection_failtext%;
+
+  true,     - -> %maximum_connection_time_at_base%, %max_cnx_base_failtext%;
+  false, true -> %maximum_connection_time_at_hub%, %max_cnx_hub_failtext%;
+  -,        - -> %maximum_connection_time_at_station%, %max_cnx_station_failtext%;
+end
+
+%max_cnx_base_failtext% =
+  "homebase, between";
+
+%maximum_connection_time_at_hub% =
+  if leg.%is_domestic% and 
+     next(leg(duty), leg.%is_domestic%) then
+    %maximum_connection_time_at_domestic_hub%
+  else
+    %maximum_connection_time_at_non_domestic_hub%;
+
+%max_cnx_hub_failtext% =
+  if leg.%is_domestic% and 
+     next(leg(duty), leg.%is_domestic%) then
+    "domestic hub, between " 
+  else
+    "non-domestic hub, between ";
+
+%maximum_connection_time_at_station% =
+  if (leg.%is_domestic% and 
+     next(leg(duty), leg.%is_domestic%)) or 
+     (leg.%is_domestic% and 
+     next(leg(duty), leg.%is_interscand%)) or
+     (leg.%is_interscand% and 
+      next(leg(duty), leg.%is_domestic%)) then
+    %maximum_connection_time_at_station_same_legtypes%
+  else
+    %maximum_connection_time_at_station_diff_legtypes%;
+
+%max_cnx_station_failtext% =
+  if (leg.%is_domestic% and 
+     next(leg(duty), leg.%is_domestic%)) or 
+     (leg.%is_domestic% and 
+     next(leg(duty), leg.%is_interscand%)) or
+     (leg.%is_interscand% and 
+      next(leg(duty), leg.%is_domestic%)) then
+    "station with same legtypes, between "
+  else
+    "station with different legtypes, between ";
+
+%maximum_connection_time_at_base% =
+  parameter 4:59
+  remark "Maximum connection time at homebase";
+    
+%maximum_connection_time_at_domestic_hub% =
+  parameter 1:00
+  remark "Maximum connection time at SAS hub D<->D";
+
+%maximum_connection_time_at_non_domestic_hub% =
+  parameter 4:59
+  remark "Maximum connection time at SAS hub not D<->D";
+
+%maximum_connection_time_at_station_same_legtypes% =
+  parameter 1:00
+  remark "Maximum connection time at station D<->D or D<->S";
+
+%maximum_connection_time_at_station_diff_legtypes% =
+  parameter 4:59
+  remark "Maximum connection time at station not D<->D or D<->S";
+  
+/*
+** Rule:
+** Min connection time before a charter from homebase
+**
+** Description:
+** The rule checks the connection time against
+** %minimum_connection_time_before_charter_from_homebase% 
+**
+** Agreement:
+*/
+
+export rule sft_min_cnx_time_before_charter_from_homebase_ALL =
+  valid %is_pairing% and
+        trip.%check_rules% and 
+        duty.%in_pp_extended% and
+        duty.%has_flight_duty% and
+        connection.%connection_before_charter_from_homebase%; 
+        
+  connection.%connection_time% >= 
+    %minimum_connection_time_before_charter_from_homebase% - 
+    rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%);
+    
+  startdate = leg.%activity_scheduled_start_time_UTC%; /* NOTE: The failobject is next(leg)! */
+  severity = %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = next(leg(duty), leg.%failobject_departure%);
+  failtext(Reltime value, Reltime limit) =
+    concat("Soft: Min cnx before charter from homebase ", 
+            leg.%flight_name%, " - ", 
+            next(leg(duty), leg.%flight_name%),
+            %reltime2str%(value), %reltime2str%(limit));
+    
+  remark "(CCP). Soft Min connection before charter from homebase",
+  planner "The rule checks that the minimum allowed connection"
+	        " before charter is satisified. The minimum connection"
+            " times can be changed by a paramter.";
+end
+
+%minimum_connection_time_before_charter_from_homebase% = 
+    parameter 1:00
+    remark "Min connection before charter from homebase";
+
+/*
+** Rule: 
+**    Maximum layover time
+** 
+** Description:
+**    The rule checks the layover time to the maximum value of 
+**    a set of parameters.
+**    Layover in this context is defined as connection time btw
+**    two duty passes. A duty pass is bounded by at least 5:00 
+**    connection.
+**
+**    NB! This rule also handles 'multi-trip' trips, i.e. a duty arriving at
+**    homebase is not necessarily the last duty in a trip!
+**
+** Agreement:
+**    Functional
+*/
+
+rule sft_max_layover_time_ALL =
+  valid trip.%check_rules% and
+        (apc_pac_is_active or trip.%in_pp%) and
+        not trip.%is_long_haul% and
+        not is_last(duty(trip)) and
+        last(leg(duty),leg.%is_flight_duty%);
+
+  duty.%connection_time% <= %maximum_layover_time% + 
+			   rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+
+  startdate = duty.%start_UTC%;
+  failobject = last(leg(duty),leg.%failobject_departure%);
+  failtext(Reltime value, Reltime limit) =
+    concat("Soft: Layover between ", last(leg(duty),leg.%flight_name%)," - ",
+           next(duty(trip), first(leg(duty),leg.%flight_name%)),
+           " is ", %reltime2str%(value), ", max is ",
+           %reltime2str%(limit));
+  remark "Soft: Max layover time between duty passes",
+  planner "The rule checks that the maximum allowed layover"
+	  " is satisified. The maximum layover times can be"
+          " changed in a table.";
+end
+
+/*
+** Rule: 
+**    Minimum layover time
+** 
+** Description:
+**    The rule checks the layover time to the minimum value of 
+**    a set of parameters.
+**    Layover in this context is defined as connection time btw
+**    two duty passes. A duty pass is bounded by at least 5:00 
+**    connection.
+**
+**    NB! This rule also handles 'multi-trip' trips, i.e. a duty arriving at
+**    homebase is not necessarily the last duty in a trip!
+**
+** Agreement:
+**    Functional
+*/
+rule (off) sft_min_layover_time_ALL =
+  valid trip.%check_rules% and
+        (apc_pac_is_active or trip.%in_pp%) and
+        not trip.%is_long_haul% and
+        not is_last(duty(trip)) and
+        duty.%arrives_at_homebase% and
+        last(leg(duty),leg.%is_flight_duty%);
+
+  duty.%connection_time% >= %minimum_layover_time% - 
+		     rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+  startdate = duty.%start_UTC%;
+  failobject = last(leg(duty),leg.%failobject_departure%);
+  failtext(Reltime value, Reltime limit) =
+    concat("Soft: Layover between ", last(leg(duty),leg.%flight_name%)," - ",
+           next(duty(trip), first(leg(duty),leg.%flight_name%)), 
+           " is ", %reltime2str%(value), ", min is ",
+           %reltime2str%(limit));
+  remark "(CCP) Soft: Min layover time between duty passes",
+  planner "The rule checks that the minimum allowed layover"
+          " is satisified. The minimum layover times can be"
+          " changed in a table.";
+end
+
+table layover_time_limits =
+  %layover_in_exception_station%,
+  %layover_in_exception_weekday%,
+  duty.%arrives_at_homebase% ->
+    %maximum_layover_time%,
+    %minimum_layover_time%;
+  true, true, - -> %maximum_layover_time_at_exception_station_p%, 0:00;
+  &
+  -, -, true  -> %maximum_layover_time_at_base_p%, %minimum_layover_time_at_base_p%;
+  -, -, false -> %maximum_layover_time_at_station_p%, 0:00;
+
+  -, -, - -> 100:00, 0:00;		/* never reached but just in case */
+end
+
+%maximum_layover_time_at_base_p% =
+  parameter 22:00
+  remark "Maximum layover time at base";
+
+%minimum_layover_time_at_base_p% =
+  parameter 13:14
+  remark "Minimum layover time at base";
+
+%maximum_layover_time_at_station_p% =
+  parameter 36:00
+  remark "Maximum layover time at station";
+
+%maximum_layover_time_at_exception_station_p% =
+  parameter 36:00
+  remark "Maximum layover time at exception station";
+
+set layover_exception_station_p =
+  parameter ""
+  remark "Layover exception stations";
+  
+set layover_exception_weekday_p =
+  parameter 0
+  remark "Layover exception weekdays";
+
+%layover_in_exception_station% =
+  duty.%end_station% in layover_exception_station_p;
+  
+%layover_in_exception_weekday% =
+  fundamental.%day_of_week%(duty.%start_day%) in layover_exception_weekday_p;
+  
+/*
+** Rule: 
+**    A long stop must overlap fixed night time limits.
+**
+** Description:
+**    The rules check that a long stop overlaps night time interval [1:00;4:00] 
+**    A long stop in this context is considered a period between two 
+**    duties that exceed minimum rest.
+**
+** Agreement:
+**    Functional rule
+*/
+/* Outstanding: sync terminology and functionality with min rest defs 
+                this rule will replace rule sft_not_two_duties_begin_on_same_day_all */
+
+rule (off) sft_valid_long_stop_ALL =
+  valid trip.%check_rules% and
+        duty.%in_pp% and
+        not is_last(duty(trip)) and
+        rest.%duty_followed_by_minimum_rest% and
+	rule_exceptions.%rule_on%(duty.%start_UTC%);
+
+  %valid_long_stop%;
+       
+  startdate  = duty.%start_UTC%;
+  failobject = duty.%failobject_start%;
+  failtext "Soft: Long stop must overlap night time interval"; 
+  remark "(CCP) Soft: Long stop must overlap night time interval";
+end
+
+%valid_long_stop% =
+  scale_time(duty.%end_hb%,next(duty(trip),duty.%start_hb%),0,01:00,04:00,1) > 0:00;
+
+/*
+** Rule: 
+**    Limit number of aircraft changes per duty pass.
+**
+** Description:
+**    Rule must be implemented at leg level because of level definition of duty.
+**
+** Agreement:
+**    Functional rule
+*/
+
+rule (off) sft_max_ac_change_ALL =
+  valid trip.%check_rules% and
+        duty.%in_pp% and
+        duty.%is_flight_duty% and
+        not is_last(leg(trip)) and
+        leg.%is_first_in_duty%;
+
+  %ac_changes_in_duty% <= %maximum_ac_changes_in_duty_pass_p% + 
+			       rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%);
+       
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  failobject = leg.%failobject_departure%;
+  failtext(Int value, Int limit) =
+    concat(format_int(value, "Soft: Number of ac-changes in duty pass is: %i, "),
+           format_int(limit, "max is %i."));
+  remark "(CCP) Soft: Maximum number of ac changes in duty pass exceeded";
+end
+
+%ac_changes_in_duty% = 
+  count(leg(duty))
+  where (leg.%is_ac_change% and
+         duty.%is_short_ac_change% and
+         not (leg.%is_deadhead% or next(leg(duty), leg.%is_deadhead%)));
+
+%maximum_ac_changes_in_duty_pass_p% = 
+  parameter 2
+  remark "Maximum ac-changes in duty pass";
+  
+  
+/*
+**** Rule: 
+**    No ac-change at certain stations
+**
+** Description:
+**    Ac-change not allowed on european stations and some charter stations.
+**
+** Agreement:
+**    Functional rule 
+*/
+
+rule (off) sft_no_aircraft_change_europe_and_charter_area_ALL =
+	valid trip.%check_rules% and
+          duty.%in_pp% and
+          duty.%is_flight_duty% and
+          not leg.%is_last_in_duty% and
+	  not (leg.%end_station% in AC_change_exception_stations_p) and
+          (leg.%arrival_is_european% or leg.%arrival_is_intercont%) and
+          rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+
+  not leg.%is_ac_change%;
+
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  failobject = leg.%failobject_departure%;
+  failtext  concat("Ac-change not allowed at station ", leg.%end_station%);
+	remark "(CCP) Soft: No aircraft change european stations and charter airports south of longitude 34";
+	end
+
+set AC_change_exception_stations_p = 
+  parameter ""
+  remark "Exceptions European airports where ac-change are allowed";
+  
+/*
+** Rule:
+**    Night stop at homebase must terminates trip.
+**
+** Description:
+**    Quality rule
+*/
+
+rule sft_night_stop_hb_terminates_trip_ALL =
+  valid trip.%check_rules% and
+        trip.%in_pp% and
+        trip.%days% > 1 and
+        rule_exceptions.%rule_on%(trip.%start_UTC%) and
+        /* To place parameters correctly in parameter form. */
+        %allow_early_night_stop_hb_p% or not %allow_early_night_stop_hb_p%;
+  not %trip_has_night_stop_hb%;
+  startdate = trip.%start_UTC%;
+  failtext "Soft: Night stop at hb must terminate trip";
+  remark "Soft: Night stop at homebase terminates trip";
+end
+  
+%trip_has_night_stop_hb% =
+  any(leg(trip), %leg_has_terminating_night_stop%);
+
+%leg_has_terminating_night_stop% =
+  %leg_is_night_stop_hb% and %night_stop_is_terminating%;
+
+%leg_is_night_stop_hb% =
+  leg.%is_flight_duty% and
+  rest.%night_stop% and leg.%arrives_at_homebase% and
+  leg.%rest_time% >= rest.%minimum_time% and
+  not is_last(leg(trip));
+
+%night_stop_is_terminating% =
+  duty.%end_od% > %night_stop_is_terminating_before_p% and
+  duty.%end_od% < %night_stop_is_terminating_after_p% or
+  not %allow_early_night_stop_hb_p%;
+
+%night_stop_is_terminating_after_p% = parameter 23:50
+remark "Allow nightstop at homebase later than CO time parameter";
+
+%night_stop_is_terminating_before_p% = parameter 02:00
+remark "Allow nightstop at homebase earlier than CO time parameter";
+
+%allow_early_night_stop_hb_p% = parameter false 
+  remark "Allow night stops at homebase between 23:50-02:00";
+
+/*
+** Rule:
+**    No passive transfer on charter legs
+**
+** Descriptione:
+**    Charter flights are defined checking if flight is in the 7000-series.
+**    Passive transfer is checked using deadhead. Passive transfer
+**    must however be allowed on charter flights when flying without
+**    pax but then the flight numbers will belong to the 9000-series.
+**
+** Agreement:
+**    Quality rule
+*/
+rule sft_no_passive_transfer_on_charter_flights_ALL =
+  valid trip.%check_rules% and
+        duty.%in_pp% and
+        duty.%has_charter_inclusive_passive_legs% and
+        duty.%has_deadhead% and
+	rule_exceptions.%rule_on%(duty.%start_UTC%);
+  not %passive_transfer_on_charter%;
+  startdate  = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = first(leg(duty), leg.%failobject_departure%)
+               where (%leg_is_deadhead_charter%);
+  failtext "Soft: No passive transfer on charter flights is allowed";
+  remark "Soft: No passive transfer on charter flights",
+  planner "The rule checks that no passive transfers occur on charter legs."
+          " A charter leg is defined as flights in the 7000-series.";
+end
+
+%passive_transfer_on_charter% = 
+  any(leg(duty), %leg_is_deadhead_charter%);
+%leg_is_deadhead_charter% = 
+  leg.%is_deadhead% and leg.%is_charter%;
+
+/*
+** Rule:
+**    No passive transfer on ferry flights
+**
+** Descriptione:
+**    Ferry flights are defined checking if flight is in the 9000-series.
+**    Passive transfer is checked using deadhead. **
+** Agreement:
+**    Quality rule
+*/
+rule sft_no_passive_transfer_on_ferry_flights_ALL =
+  valid trip.%check_rules% and
+        duty.%in_pp% and
+        duty.%has_ferry% and
+        duty.%has_deadhead% and
+	rule_exceptions.%rule_on%(duty.%start_UTC%);
+  not %passive_transfer_on_ferry_flight%;
+  startdate  = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = first(leg(duty), leg.%failobject_departure%)
+               where (%leg_is_deadhead_ferry%);
+  failtext "Soft: No passive transfer on ferry flights is allowed";
+  remark "Soft: No passive transfer on ferry flights",
+  planner "The rule checks that no passive transfers occur on ferry legs."
+          " A ferry leg is defined as flights in the 9000-series.";
+end
+
+%passive_transfer_on_ferry_flight% = 
+  any(leg(duty), %leg_is_deadhead_ferry%);
+%leg_is_deadhead_ferry% = 
+  leg.%is_deadhead% and leg.%is_ferry_flight%;
+  
+  
+rule (off) sft_no_duty_rest_at_station_ALL =
+  VALID trip.%check_rules% and
+        duty.%in_pp% and
+        not is_last(duty(trip)) and
+        rule_exceptions.%rule_on%(duty.%end_UTC%);
+  not (duty.%rest_station% in sft_no_duty_rest_stations);
+  startdate = duty.%end_UTC%;
+  failobject = last(leg(duty), leg.%failobject_departure%);
+
+  failtext concat("Soft: ", duty.%rest_station%, " disallowed for rest");
+  remark "Soft: No rest periods at some stations",
+  planner "The rule checks that no rest periods exists within"
+          "the parameter set defining which stations that are not allowed";
+end
+
+set sft_no_duty_rest_stations =
+  parameter ""
+  remark "Soft: Stations where rest periods are not allowed";
+
+/*
+** Rule: 
+**    Maximum duty time in a duty ending with deadhead
+** 
+** Description:
+**    The rule checks that the duty time in a duty period ending with deadhead
+**    doesn't exceed the maximum allowed.
+**
+**    This rule is mainly to help solve an APC problem that appeared when 4ExNG
+**    removed the union agreement checking DPs ending with deadhead. Subpart Q 
+**    only has a restriction on an FDP, so the APC was able to add deadhead
+**    after an FDP almost unrestricted (20hrs rule), creating in the process
+**    some very long DPs, which caused the APC to run out of memory and crash!
+**
+** Agreement:
+**    Functional rule, accepted by Ove Alstrup and J�rgen Nystrup. 
+*/
+rule sft_max_duty_time_in_duty_period_ending_deadhead_ALL =
+  valid trip.%check_rules% and
+        duty_time.%last_is_deadhead% and
+        duty.%is_short_haul% and
+        duty.%start_hb% >= %pp_start% and
+        rest.%duty_followed_by_minimum_scheduled_rest%(duty.union);
+
+  oma16.%duty_period_duty_time_caa% <= %max_in_duty_period_ending_deadhead% + 
+  	rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+
+  startdate  = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %sft_max_duty_time_in_duty_period_ending_deadhead_all_failoject%;
+  failtext(Reltime value, Reltime limit) =
+    rules.%failtext_rel%("Soft: Duty time in DP ending with deadhead", value, limit);
+  remark "Soft: Max duty time in duty period ending with deadhead",
+  planner "The rule checks that the maximum duty time in a duty period"
+          " ending with deadhead is not exceeded."
+          " A duty period is surrounded by minimum rest."
+          " The rule is used in the APC only!";
+end
+
+%sft_max_duty_time_in_duty_period_ending_deadhead_all_failoject% =
+  let duty_period_start = rest.%duty_period_start_UTC%(duty.union),
+      overshoot = rule_exceptions.%overshoot_rel%(duty.%start_UTC%) ;
+  first(leg(trip), leg.%failobject_departure%)
+  where(leg.%start_utc% >= duty_period_start and
+        %leg_duty_time_until_now% > 
+          %max_in_duty_period_ending_deadhead% + overshoot);
+
+%max_in_duty_period_ending_deadhead% =
+  oma16.%max_daily_fdp% + %maximum_deadhead_extension_p%;
+  
+%maximum_deadhead_extension_p% =
+  parameter 2:00
+  remark "Maximum DP extension for deadhead";
+
+%leg_duty_time_until_now% =
+  oma16.%duty_time_in_interval%( rest.%duty_period_start_UTC%(duty.union),
+                                 leg.%co_end_utc%);
+
+/*
+**** Rule: 
+**    No AC-change at specific stations(SKCMS-1117)
+**
+** Description:
+**    AC-change not allowed at specific stations.
+**
+** Agreement:
+**    Functional rule 
+*/
+
+rule (off) sft_AC_change_not_allowed_at_station =
+ valid
+       trip.%check_rules% and
+       duty.%in_pp% and
+       duty.%is_flight_duty% and
+       not leg.%is_last_in_duty% and
+       (leg.%end_station% in AC_change_NOT_allowed_at_station) and
+       rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+  
+  	   not leg.%is_ac_change%;
+
+  startdate = leg.%activity_scheduled_start_time_UTC%;
+  failobject = leg.%failobject_departure%;
+  failtext concat("Ac-change not allowed at station ", leg.%end_station%);
+  remark "(CCP) Soft:No aircraft change station";
+end
+
+set AC_change_NOT_allowed_at_station =
+parameter ""
+remark "airports where ac-changes NOT allowed";
+
+
+/* New soft rule in pairing - SKCMS-2301
+/*
+** Rule: 
+**    Maximum number of sectors in daily duty
+** 
+** Description:
+**    The rules checks that the no of sectors within a daily duty is not 
+**    exceeded
+**                               
+*/
+
+
+export rule (off) sft_max_active_sectors_in_daily_duty =
+  valid trip.%check_rules%
+    and duty.%in_pp_extended%
+    and duty.%has_active_flight%
+    and duty_period.%is_first_duty_in_duty_period%;
+    
+
+        fdp.%num_sectors% <= 
+                        %soft_max_nr_of_sectors_in_duty_p%
+                       + rule_exceptions.%overshoot_int%(duty.%start_utc%);   
+
+  startdate  = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(Int value, Int limit) =
+          rules.%failtext_int%("Soft: Max active sectors in duty period", value, limit);
+
+  remark "Soft: Max active serctors in duty period",
+  planner "This is a soft rule that regulates the number of active sectors in a duty"
+          "  depending on parameter setting. Valid for CC and FD in Pairing";
+
+end
+
+export %soft_max_nr_of_sectors_in_duty_p% =
+parameter 6
+remark "Max number of active sectors in duty";
+
+
+export rule (off) sft_max_duty_period_before_heavy_dest =
+  valid trip.%check_rules%
+    and not base_product.%is_tracking%  
+    and duty.%in_pp_extended%
+    and duty.%has_active_flight%
+    and %duty_to_heavy_destination%;
+    
+
+        %duty_time_prev_duty% <= %soft_max_duty_before_heavy_destination_p%
+                       + rule_exceptions.%overshoot_rel%(duty.%start_hb%);   
+
+  startdate  = duty.%start_hb%;
+  failobject = duty.%failobject_start%;
+  failtext(Reltime value, Reltime limit) =
+          rules.%failtext_rel%("Soft: Max duty period before heavy destinations", value, limit);
+
+  remark "(CCP) Soft: Max duty period before heavy destination";
+
+end
+
+export rule (off) sft_max_duty_period_after_heavy_dest =
+  valid trip.%check_rules%
+    and not base_product.%is_tracking%  
+    and duty.%in_pp_extended%
+    and duty.%has_active_flight%
+    and %prev_duty_is_heavy%;
+    
+
+        duty.%time% <= %soft_max_duty_after_heavy_destination_p%
+                       + rule_exceptions.%overshoot_rel%(duty.%start_hb%);   
+
+  startdate  = duty.%start_hb%;
+  failobject = duty.%failobject_start%;
+  failtext(Reltime value, Reltime limit) =
+          rules.%failtext_rel%("Soft: Max duty period after heavy destinations", value, limit);
+
+  remark "(CCP) Soft: Max duty period after heavy destination";
+
+end
+
+%duty_time_prev_duty% = default(prev(duty(trip), duty.%time%), 0:00);
+%prev_duty_is_heavy% = default(prev(duty(trip), %duty_to_heavy_destination%),false);
+%trip_to_heavy_destination% = any(duty(trip), %duty_to_heavy_destination%);
+%duty_to_heavy_destination% = any(leg(duty), %leg_to_heavy_destination%);
+%leg_to_heavy_destination% = leg.%end_station% in heavy_destinations_set_p;
+
+
+set heavy_destinations_set_p = parameter "LPA", "TFS", "FUE"
+    remark "Soft: Heavy destinations to limit per trip and to limit duty period before and after";
+    
+%soft_max_duty_before_heavy_destination_p% = parameter 09:30
+    remark "Soft: Max duty period before heavy destination";
+%soft_max_duty_after_heavy_destination_p% = parameter 09:30
+    remark "Soft: Max duty period after heavy destination";
+
+export rule (off) sft_max_heavy_destinations_per_trip =
+  valid trip.%check_rules%
+    and not base_product.%is_tracking%  
+    and trip.%in_pp_extended%
+    and trip.%has_only_flight_duty%
+    and %trip_to_heavy_destination%;
+    
+
+        %nr_of_heavy_dest_in_trip% <= %limit_heavy_destinations_per_trip_p%
+                       + rule_exceptions.%overshoot_int%(trip.%start_hb%);   
+
+  startdate  = trip.%start_hb%;
+  failobject = trip.%failobject_start%;
+  failtext(Int value, Int limit) =
+          rules.%failtext_int%("Soft: Max heavy destinations per trip", value, limit);
+
+  remark "(CCP) Soft: Max heavy destinations per trip";
+
+end
+
+%nr_of_heavy_dest_in_trip% = 
+
+count(duty(trip)) where (%duty_to_heavy_destination%);
+
+%limit_heavy_destinations_per_trip_p% = parameter 1
+    remark "Soft: Max heavy destinations per trip";
+
+
+export rule (off) sft_max_legs_to_northern_norway =
+  valid trip.%check_rules%
+    and not base_product.%is_tracking%  
+    and duty.%in_pp_extended%
+    and duty.%has_active_flight%
+    and duty.%start_station% = "OSL"
+    and %duty_to_northern_norway%    
+    and not %duty_end_in_northern_norway%;
+    
+        %nr_legs_to_northern_norway% <= %limit_legs_to_northern_norway_p%
+                       + rule_exceptions.%overshoot_int%(duty.%start_hb%);   
+                       
+  startdate  = duty.%start_hb%;
+  failobject = duty.%failobject_start%;
+  failtext(Int value, Int limit) =
+          rules.%failtext_int%("Soft: Max legs in duty to Northern Norway from OSL", value, limit);
+  remark "(CCP) Soft: Max legs in duty to Northern Norway from OSL";
+end
+
+%duty_end_in_northern_norway% = duty.%end_station% in northern_norway_airports_set_p;
+%duty_to_northern_norway% = any(leg(duty), %leg_to_northern_norway%);
+%leg_to_northern_norway% = leg.%end_station% in northern_norway_airports_set_p 
+                            or leg.%start_station% in northern_norway_airports_set_p;
+
+%nr_legs_to_northern_norway% = count(leg(duty)) where (%leg_to_northern_norway% and leg.%is_active_flight%);
+                                                        
+
+set northern_norway_airports_set_p = parameter "EVE", "BDU", "TOS", "ALF", "LKL", "KKN", "LYR"
+    remark "Soft: Northern Norway destinations to limit per duty";
+
+%limit_legs_to_northern_norway_p% = parameter 3
+    remark "Soft: Max nr legs including Northern Norway from OSL";
+
+    
+export rule (off) sft_max_fdp_at_landing =
+  valid trip.%check_rules%
+    and not base_product.%is_tracking%
+    and fundamental.%flight_crew%
+    and duty.%in_pp_extended%
+    and duty.%has_active_flight%
+    and %duty_to_destination_to_limit_fdp%;
+       
+        %fdp_at_landing% <= %limit_fdp_at_landing_p%
+                       + rule_exceptions.%overshoot_rel%(duty.%start_hb%);   
+                       
+  startdate  = duty.%start_hb%;
+  failobject = duty.%failobject_start%;
+  failtext(Reltime value, Reltime limit) =
+          rules.%failtext_rel%("Soft: Max FDP at landing", value, limit);
+  remark "(CCP) Soft: Max FDP at landing";
+end    
+
+%duty_to_destination_to_limit_fdp% = any(leg(duty),%leg_to_destination_to_limit_fdp%); 
+%leg_to_destination_to_limit_fdp% = leg.%end_station% in limit_fdp_set_p;
+set limit_fdp_set_p = parameter "ALF"
+    remark "Soft: Stations to limit FDP when landing";
+    
+%fdp_at_landing% = 
+if %leg_to_destination_to_limit_fdp% and leg.%is_active_flight% then
+default(fdp.%time_in_interval%(fdp.%start_utc%, leg.%end_utc%), 0:00)   
+else 0:00;
+
+%limit_fdp_at_landing_p% = parameter 10:00
+    remark "Soft: Max FDP when landing at certain destinations";
+
+    
+group soft_rule_params =
+  %minimum_connection_time_before_charter_from_homebase%,
+  %maximum_connection_time_at_base%,
+  %maximum_connection_time_at_domestic_hub%,
+  %maximum_connection_time_at_non_domestic_hub%,
+  %maximum_connection_time_at_station_same_legtypes%,
+  %maximum_connection_time_at_station_diff_legtypes%,
+  %maximum_deadhead_extension_p%,
+  %maximum_layover_time_at_base_p%,
+  %minimum_layover_time_at_base_p%,
+  %maximum_layover_time_at_station_p%,
+  %maximum_layover_time_at_exception_station_p%,
+  layover_exception_station_p,
+  layover_exception_weekday_p,
+  %extension%,
+  rules_indust_ccp.%max_days_in_trip_sh%,
+  %soft_max_nr_of_sectors_in_duty_p%,
+  heavy_destinations_set_p,
+  %soft_max_duty_before_heavy_destination_p%,
+  %soft_max_duty_after_heavy_destination_p%,
+  %limit_heavy_destinations_per_trip_p%;
+
+/* end of file */

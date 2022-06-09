@@ -1,0 +1,998 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   This module contains basic variables for calculating the crew need and conversions
+ *   between rank name and position. 
+ *   File contains:
+ *      1. crew categories etable
+ *      2. crew position -> crew function
+ *      3. crew function -> crew position
+ *      4. assigned crew position lookups
+ *      5. crew need lookups and calculations
+ *
+ * Created by:
+ *   Extracted from the Carmen Standard User, 07-Dec-2005
+ *
+ * Major changes:
+ *   Implemented the logic around Jar-Ops and service manning, HenrikA 13-Dec-2005
+ *
+ */
+
+root module crew_pos
+
+import leg;
+import model_crew;
+import levels;
+import base_utils;
+import base_product;
+import parameters;
+import fundamental;
+import system_db_parameters;
+
+
+/*
+** Crew position set etable
+**
+*/
+%crew_pos_table% = %etab_path%(%crew_pos_table_p%);
+%crew_pos_table_p% =
+  parameter "crew_position_set"
+  remark "ETAB: Crew position set table";
+  
+/*
+** Crew complement etable
+**
+*/
+%crew_comp_table% = %etab_path%(%crew_comp_table_p%);
+%crew_comp_table_p% =
+  parameter "crew_complement"
+  remark "ETAB: Crew complement table";
+  
+table no_of_positions_t =
+    true -> export Int %no_of_positions%;
+    external %crew_comp_table%;
+    row_number -> count(row_number);
+end
+
+  
+/*
+** Crew position -> crew function
+**
+** Takes a position nr. and returns the current crew function.
+*/
+/* This variable is only used by lib/python/carmusr/Assign.py in an unused
+   function. /EKG 081009 */
+export %index2func% = %pos2func%(%py_index%);
+
+/* The assigned function is the actual assigned position or the first one
+   left in open time */
+export %assigned_pos% = 
+  if %is_roster% then %assigned_pos_crew%
+  else
+    default(first(times(10), %times_index_0%) 
+            where (%leg_assigned_pos%(%times_index_0%) > 0),
+            -1);
+
+%_assigned_pos_ix%(Int ix) = 
+  if (%leg_assigned_pos%(ix) > 0) then
+    ix
+  else
+    -1;
+    
+export %assigned_pos_ix%(Int ix) =
+ first(leg(trip),%pos2func%(%_assigned_pos_ix%(ix)));
+            
+export %assigned_pos_crew% =
+  assigned_function + 1;
+
+export %assigned_function% = %pos2func%(%assigned_pos%);
+export %assigned_cat% = %pos2cat%(%assigned_pos%);
+
+export %trip_assigned_function% =
+  first(leg(trip), %assigned_function%);
+  
+/* Ugly fix for %pos2cat% to emulate the "old" lookup from crew_categories.
+   crg_crew_pos.%etab_other_end_pos% needs to have an 'end' when determine end position.
+   In crew_complement table the positions 9 and 10 returns VOID.
+   When index > etab_cabin_end_pos and index and index+1 gives different function the end is reached.
+   If defaulting to "" there is no difference compared to pos2func table's default row.
+   Janne C
+*/
+export %pos2cat%(Int Pos) =
+  default(%_pos2cat%(Pos), "T");
+  
+table pos2func(Int Pos) =
+  Pos -1 ->
+    string %_pos2cat%,
+    export string %pos2func%;
+  external %crew_comp_table%;
+  idx -> maincat, pos;
+  - -> "", "";
+end
+
+/* %pos2used% used to get its value from crew_categories.%used_in_fleet%.
+** 
+** Implemented as a first approach by looking at crew_position_set.%typ%
+** I don't know if this is a valid use of the column. /Janne C 2008-01-22
+*/
+set used_in_fleet_set = "FLYING", "EXTRA";
+
+export %pos2used%(Int Pos) =
+  %pos2type%(Pos) in used_in_fleet_set;
+
+
+table pos2funcname(Int Pos) =
+  %pos2func%(Pos) ->
+    export string %pos2func_name%,
+    string %pos2type%;
+  external %crew_pos_table%;
+  id -> si, typ;
+  - -> "", "";
+end
+
+/*
+** Crew function -> crew position
+** 
+** Takes a crew function and returns corresponding position.
+*/
+
+export %func2pos%(string Func) = %_func2pos%(Func) + 1;
+
+table func2pos(String Func) =
+  Func -> 
+    export string %func2cat%, 
+    int %_func2pos%;
+  external %crew_comp_table%;
+  pos -> maincat, idx;
+  - -> "", -1;
+end
+
+table func2funcname(String Func) =
+  Func ->
+    export string %func2func_name%; 
+  external %crew_pos_table%;
+  id -> si;
+  - -> "";
+end
+/*
+**  Booked lookups
+*/
+export %trip_booked% = sum(times(12), %trip_booked_pos%(%times_index_0%));
+export %trip_booked_pos%(Int Pos) = first(leg(trip), %leg_booked_pos%(Pos));
+
+export %duty_booked% = sum(times(12), %duty_booked_pos%(%times_index_0%));
+export %duty_booked_pos%(Int Pos) = first(leg(duty), %leg_booked_pos%(Pos));
+
+export %leg_booked% = sum(times(12), %leg_booked_pos%(%times_index_0%));
+
+/*
+** Assigned crew position lookups
+*/
+
+export %trip_assigned% = sum(times(12),%trip_assigned_pos%(%times_index_0%));
+export %trip_assigned_pos%(Int Pos) = first(leg(trip),%leg_assigned_pos%(Pos));
+export %trip_assigned_func%(String Func) = 
+  first(leg(trip),%leg_assigned_func%(Func));
+export %trip_has_assigned_fc% = first(leg(trip),%leg_assigned_fc%)>0;
+export %trip_has_assigned_cc% = first(leg(trip),%leg_assigned_cc%)>0;
+export %trip_has_assigned_trtl% = first(leg(trip), %leg_assigned_trtl%)>0;
+
+export %leg_assigned% = sum(times(12),%leg_assigned_pos%(%times_index_0%));
+export %leg_assigned_fc% = sum(times(4),%leg_assigned_pos%(%times_index_0%));
+export %leg_assigned_cc% = sum(times(4),%leg_assigned_pos%(%times_index_0% + 4));
+export %leg_assigned_trtl% = %leg_assigned_pos%(9) + %leg_assigned_pos%(10);
+
+/* Define rostered here due to compilation issues with rule
+** sft_booked_greater_than_max_crew_seats_ALL 
+*/
+export %total_leg_rostered_fc% = void_int;
+export %total_leg_rostered_cc% = void_int;
+export %leg_rostered_pos%(Int pos) = void_int;
+export %leg_rostered_fc% = void_int;
+
+export %leg_has_assigned% = any(times(12), %leg_assigned_pos%(%times_index_0%) > 0);
+export %leg_has_assigned_fc% = any(times(4), %leg_assigned_pos%(%times_index_0%) > 0);
+export %leg_has_assigned_cc% = any(times(4), %leg_assigned_pos%(%times_index_0%+4) > 0);
+export %leg_has_assigned_fc_or_trtl% = %leg_has_assigned_fc% or %leg_assigned_trtl% > 0;
+
+export %leg_assigned_func%(String Func) = %leg_assigned_pos%(%func2pos%(Func));
+table leg_assigned_pos(Int Pos)= 
+  Pos -> export %leg_assigned_pos%;
+  1 -> assigned_crew_position_1;
+  2 -> assigned_crew_position_2;
+  3 -> assigned_crew_position_3;
+  4 -> assigned_crew_position_4;
+  5 -> assigned_crew_position_5;
+  6 -> assigned_crew_position_6;
+  7 -> assigned_crew_position_7;
+  8 -> assigned_crew_position_8;
+  9 -> assigned_crew_position_9;
+  10 -> assigned_crew_position_10;
+  - -> 0;
+end
+
+/* Flight crew has position 1-4, but supernum position (4) is not interesting,
+ * and cabin crew has position 5-8, but supernum position (8) is not interesting */
+export %leg_booked_fc% = sum(times(3), %leg_booked_pos%(%times_index_0%));
+export %leg_booked_cc% = sum(times(3), %leg_booked_pos%(%times_index_0% + 4));
+
+export %leg_has_booked_fc% = any(times(3), %leg_booked_pos%(%times_index_0%) > 0);
+export %leg_has_booked_cc% = any(times(3), %leg_booked_pos%(%times_index_0% + 4) > 0);
+
+export %leg_booked_func%(String Func) = %leg_booked_pos%(%func2pos%(Func));
+table leg_booked_pos(Int Pos)= 
+  Pos -> export %leg_booked_pos%;
+  1 -> booked_crew_position_1;
+  2 -> booked_crew_position_2;
+  3 -> booked_crew_position_3;
+  4 -> booked_crew_position_4;
+  5 -> booked_crew_position_5;
+  6 -> booked_crew_position_6;
+  7 -> booked_crew_position_7;
+  8 -> booked_crew_position_8;
+  9 -> booked_crew_position_9;
+  10 -> booked_crew_position_10;
+  - -> 0;
+end
+
+
+/*
+** Crew need in position
+**
+** %need_in_pos%(Pos)
+**    Pos: Position to calculate the need for.
+**    Returns: Crew need in relevant position
+**
+** Calculates crew need for one position.
+**    Flight duty need:
+**      Calculated as the sum of ac crew need plus service crew need:  
+**        - Ac crew need (Jar-Ops manning)
+**          An external table contains the Jar-Ops minimum requirement, 
+**          derived from the aircraft type
+**        - Service crew need
+**          An internal table determines the additional flight crew need 
+**          whereas an external table determines the additional cabin crew need.
+**          (See the code below for details)
+**
+**    Task need:
+**      Calculated via en external table (task_crew_need_table),
+**      which contains crew need for non-flights, i.e. tasks.
+*/
+
+/*
+ * These are used by the require file "crew_pos_mappings" in order to map 
+ * the need calculation to the optimizer and the user interface.
+ */
+export %n_pos1_map% = %need_in_pos%(1);
+export %n_pos2_map% = %need_in_pos%(2);
+export %n_pos3_map% = %need_in_pos%(3);
+export %n_pos4_map% = %need_in_pos%(4);
+export %n_pos5_map% = %need_in_pos%(5);
+export %n_pos6_map% = %need_in_pos%(6);
+export %n_pos7_map% = %need_in_pos%(7);
+export %n_pos8_map% = %need_in_pos%(8);
+export %n_pos9_map% = %need_in_pos%(9);
+export %n_pos10_map% = %need_in_pos%(10);
+
+/* 
+ * In case a cahced value of the need calculation (derived from Studio) exists, it
+ * is used instead of the variable that was used to map the crew need variables towards
+ * Studio.
+*/ 
+export %n_pos1% = %n_pos1_map%;
+export %n_pos2% = %n_pos2_map%;
+export %n_pos3% =  %n_pos3_map%;
+export %n_pos4% =  %n_pos4_map%;
+export %n_pos5% =  %n_pos5_map%;
+export %n_pos6% =  %n_pos6_map%;
+export %n_pos7% =  %n_pos7_map%;
+export %n_pos8% =  %n_pos8_map%;
+export %n_pos9% =  %n_pos9_map%;
+export %n_pos10% =  %n_pos10_map%;
+
+
+
+export %any_need% =
+  %n_pos1% > 0 or
+  %n_pos2% > 0 or
+  %n_pos3% > 0 or
+  %n_pos4% > 0 or
+  %n_pos5% > 0 or
+  %n_pos6% > 0 or
+  %n_pos7% > 0 or
+  %n_pos8% > 0 or
+  %n_pos9% > 0 or
+  %n_pos10% > 0;
+
+export %need_in_pos%(Int Pos) =
+  if leg.%is_flight_duty% then
+    if leg.%is_school_flight% then 
+      %school_flight_need_in_pos%(Pos)
+    else if leg.%is_ferry_flight% then 
+      %ferry_flight_need_in_pos%(Pos)
+    else if leg.%is_test_flight% then 
+      %test_flight_need_in_pos%(Pos)
+    else
+      %flight_need_in_pos%(Pos)
+  else if leg.%is_ground_duty_leg% then
+    if leg.%is_simulator% then
+        %sim_need_in_pos%(Pos)
+    else
+        %task_need_in_pos%(Pos)
+  else if leg.%is_standby% then
+    %task_need_in_pos%(Pos)/*%leg_booked_pos%(Pos)*/
+  else
+    0;
+
+table school_flight_need_in_pos(Int Pos) = 
+  Pos -> %school_flight_need_in_pos%;
+  1 -> 1;
+  2 -> 2;
+  /*4 -> 1;*/
+  - -> 0;  
+end 
+  
+table ferry_flight_need_in_pos(Int Pos) = 
+  Pos -> %ferry_flight_need_in_pos%;
+  1 -> %flight_need_in_pos1%;
+  2 -> %flight_need_in_pos2%;
+  3 -> %flight_need_in_pos3%;
+  4 -> %flight_need_in_pos4%;
+  - -> 0;
+end
+  
+table test_flight_need_in_pos(Int Pos) = 
+  Pos -> %test_flight_need_in_pos%;
+  1 -> %flight_need_in_pos1%;
+  2 -> %flight_need_in_pos2%;
+  3 -> %flight_need_in_pos3%;
+  4 -> %flight_need_in_pos4%;
+  - -> 0;
+end
+  
+export %flight_need_in_pos%(Int Pos) =
+  if not leg.%is_oag% then 
+    %default_flight_need_in_pos%(Pos) + %need_exc_in_pos%(Pos)
+  else
+    0;
+
+%default_flight_need_in_pos%(Int Pos) =
+  %ac_need_in_pos%(Pos) + %service_need_in_pos%(Pos);
+  
+/* In order to assign AS on a trip with both SH and LH we need to be able to redefine
+   the need for AS and AH pos on a leg */    
+%move_need_from_AH_to_AS% =
+    parameter false
+    remark "Allow need to be transferred from AH to AS for short-before-long trips";
+    
+%need_exc_in_pos%(Int Pos) =
+    if %product% = "CCT" then 
+        0
+    else if %move_need_from_AH_to_AS% and
+        (Pos = 6 or Pos = 7) and %default_flight_need_in_pos%(6) = 0 then
+        %_need_exc_in_pos%(Pos)
+    else
+        0;
+
+
+%_need_exc_in_pos%(Int Pos) =
+  let booked_AS = if Pos = 6 or Pos = 7 then booked_crew_position_6 else 0;
+
+  if Pos = 7 then -booked_AS else booked_AS;
+
+
+export %jar_need_in_pos%(Int Pos) =
+  if not leg.%is_flight_duty% then 
+    if leg.%is_simulator% then
+        %sim_need_in_pos%(Pos)
+    else
+        %task_need_in_pos%(Pos)
+  else if leg.%is_ferry_flight% then 
+    %ferry_flight_need_in_pos%(Pos)
+  else if leg.%is_school_flight% then 
+    %school_flight_need_in_pos%(Pos)
+  else if leg.%is_test_flight% then 
+    %test_flight_need_in_pos%(Pos)
+  else
+    %ac_need_in_pos%(Pos);
+
+/*
+** Ac crew need 
+**
+** The minimum required Jar Ops manning for each ac type.
+**
+** %ac_need_in_pos%(Pos)
+**    Pos: Position to calculate the need for, depending of ac.
+**    Returns: The need from crew_need_ac_table, or 0 if not in table
+*/
+
+/* 
+ * Try first to match both ac-family and ac-type, if no match is found
+ * try with only ac-family and last try if there is a default value.
+ */
+export %ac_need_in_pos%(Int Pos) =
+  default(
+    default(%_ac_need_in_pos%(Pos, leg.%ac_family%, leg.%ac_type%),
+      default(%_ac_need_in_pos%(Pos, leg.%ac_family%, "*"),
+              %_ac_need_in_pos%(Pos, "*", "*"))), 0);
+
+/* Flight crew has position 1-4, but supernum position (4) is not interesting,
+ * and cabin crew has position 5-8, but supernum position (8) is not interesting */
+export %ac_need_fc% = sum(times(3), %ac_need_in_pos%(%times_index_0%));
+export %ac_need_cc% = sum(times(3), %ac_need_in_pos%(%times_index_0% + 4));
+
+table ac_need_in_pos(Int Pos, String AcFamily, String AcType) =
+  leg.%fd_employer_is_sas%, leg.%cc_employer_is_sas%, Pos -> %_ac_need_in_pos%;
+
+  true , -   ,     1  -> %ac_need_in_pos1%(AcFamily, AcType);
+  true , -   ,     2  -> %ac_need_in_pos2%(AcFamily, AcType);
+  true , -   ,     3  -> %ac_need_in_pos3%(AcFamily, AcType);
+  true , -   ,     4  -> %ac_need_in_pos4%(AcFamily, AcType);
+  -    , true,     5  -> %ac_need_in_pos5%(AcFamily, AcType);
+  -    , true,     6  -> %ac_need_in_pos6%(AcFamily, AcType);
+  -    , true,     7  -> %ac_need_in_pos7%(AcFamily, AcType);
+  -    , true,     8  -> %ac_need_in_pos8%(AcFamily, AcType);
+  -    , true,     9  -> %ac_need_in_pos9%(AcFamily, AcType);
+  -    , true,     10 -> %ac_need_in_pos10%(AcFamily, AcType);
+  -    , -   ,     -  -> 0;
+end
+
+table ac_crew_need_period(String AcFamily, String AcType) =
+  AcFamily, AcType, leg.%start_utc% -> 
+    Int %ac_need_in_pos1%,
+    Int %ac_need_in_pos2%,
+    Int %ac_need_in_pos3%,
+    Int %ac_need_in_pos4%,
+    Int %ac_need_in_pos5%,
+    Int %ac_need_in_pos6%,
+    Int %ac_need_in_pos7%,
+    Int %ac_need_in_pos8%,
+    Int %ac_need_in_pos9%,
+    Int %ac_need_in_pos10%;
+  external "crew_need_jarops_period";
+  acfamily, actype, (validfrom, validto( -> 
+    pos1, pos2, pos3, pos4, pos5,
+    pos6, pos7, pos8, pos9, pos10;
+  -,-,- -> 
+    void_int, void_int, void_int, void_int, void_int,
+    void_int, void_int, void_int, void_int, void_int;
+end
+
+/*
+** Service crew need
+**
+** The minimum additional need according to SAS service manning concept. 
+** For flight crew the need is static and calculated via an internal table,
+** whereas for cabin crew the need is dynamic and thus the additional need
+** is entered in an external table.
+**
+** Exceptions for pos 6 and 7 (AS and AH)
+**
+** For specific flight legs, exceptions to the additional need can be made in
+** an external exception table. This table is maintained from the trip window,
+** by making leg-level menu selections.
+**
+** %service_need_in_pos%(Int pos)
+**    Pos: Position to calculate the need for.
+**    Returns: The additional service need.
+**             If an exception exists, that value is returned instead.
+**
+** %service_need_raw_in_pos%(Int pos)
+**    Pos: Position to calculate the need for.
+**    Returns: The additional service need, not affected by exceptions.
+*/
+
+export %service_need_in_pos%(Int Pos) = %_service_need_in_pos%(Pos);
+table service_need_in_pos(Int Pos) =
+  leg.%fd_employer_is_sas%, leg.%cc_employer_is_sas%, Pos -> %_service_need_in_pos%;
+
+  true , -   ,     1   -> %service_need_in_pos1%;
+  true , -   ,     2   -> %service_need_in_pos2%;
+  true , -   ,     3   -> %service_need_in_pos3%;
+  -    , -   ,     4   -> 0;
+  -    , true,     5   -> %service_need_in_pos5%;
+  -    , true,     6   -> %service_need_in_pos6%;
+  -    , true,     7   -> %service_need_in_pos7%;
+  -    , true,     8   -> 0;
+  -    , true,     9   -> 0;
+  -    , true,     10  -> 0;
+  -    , -   ,     -   -> 0;
+end
+
+export %service_need_raw_in_pos%(Int Pos) = %_service_need_raw_in_pos%(Pos);
+table service_need_raw_in_pos(Int Pos) =
+  Pos -> %_service_need_raw_in_pos%;
+  1   -> %service_need_in_pos1%;
+  2   -> %service_need_in_pos2%;
+  3   -> %service_need_in_pos3%;
+  5   -> %service_need_in_pos5%;
+  6   -> %service_need_raw_in_pos6%;
+  7   -> %service_need_raw_in_pos7%;
+  - -> 0;
+end
+
+/*
+ * Additional flight crew need
+ *
+ * The number of additional flight crew need is stated in the flight crew 
+ * agreement 13:49, 1:9. This means that it is somewhat static and therefore 
+ * implemented as an internal table
+ */
+ 
+/* K08 states that only 2 pilots are needed on defined destinations */
+
+%service_need_in_pos3% = 
+  if %leg_touches_excepted_airport% then
+    0
+  else
+    %_service_need_in_pos3%;
+
+/*
+* SKCMS-2189  K19: remove MIA from set two_pilot_destinations_set
+* From 01Nov2020 MIA will not be part of the two pilot operation.
+* Since it is not possible to modify sets after creation we had to create two
+* separate sets with different elements so that MIA is part of two_pilot_destinations_set
+* This code can be cleaned up after 01Nov2020 because MIA will not be part of two pilot operation 
+*/
+
+set two_pilot_destinations_set_MIA =
+        /* Will be valid upto  01Nov2020 */
+        parameter "BOS", "EWR", "IAD", "ORD", "DEL", "DXB", "PEK", "MIA"
+        remark "Exception airports NOT needing LH relief pilots before 01Nov2020";
+
+set two_pilot_destinations_set_no_MIA =
+        /* Will be valid from 01Nov2020 */
+        parameter "BOS", "EWR", "IAD", "ORD", "DEL", "DXB", "PEK"
+        remark "Exception airports NOT needing LH relief pilots after 01Nov2020";
+
+export %leg_touches_excepted_airport% =
+    if system_db_parameters.%3_pilots_MIA%(leg.%start_UTC%) then
+        (leg.%start_station% in two_pilot_destinations_set_no_MIA or
+        leg.%end_station% in two_pilot_destinations_set_no_MIA) and
+        leg.%flight_nr% not in two_pilot_destinations_flight_exceptions
+    else
+        (leg.%start_station% in two_pilot_destinations_set_MIA or
+        leg.%end_station% in two_pilot_destinations_set_MIA) and
+        leg.%flight_nr% not in two_pilot_destinations_flight_exceptions;
+
+export %leg_touches_PEK% =
+  (leg.%start_station%= "PEK" or
+   leg.%end_station% = "PEK");
+
+set two_pilot_destinations_flight_exceptions =
+  parameter 0
+  remark "Exception flights to/from 2 pilot airports needing LH relief pilots";
+
+/* This table gives the service need for position 1, 2 and 3. */
+/* Uses %time% instead of %block_time% to work correctly for deadheads. */
+table additional_flight_crew_need =
+  leg.%is_long_haul%, %leg_touches_excepted_airports%, leg.%scheduled_time% -> 
+    %service_need_in_pos1%, %service_need_in_pos2%, %_service_need_in_pos3%;
+  true,  false, )6:30,12:30) -> 0, 0, 1;
+  true,  false, >12:30	     -> 0, 0, 2;
+  false, false, )6:30,12:30) -> 0, 1, 0;
+  false, false, >12:30	     -> 0, 2, 0;
+  -, -, - -> 0, 0, 0;
+end
+
+%leg_touches_excepted_airports% =
+  parameters.%param_table%("additional_flight_crew_need_excepted_airports",
+                           leg.%start_station%, leg.%start_hb%) or
+  parameters.%param_table%("additional_flight_crew_need_excepted_airports",
+                           leg.%end_station%, leg.%start_hb%);
+
+/*
+ * Additional cabin crew need
+ *
+ * The number of additional cabin crew need is typically determined from the in-flight service
+ * department in each company. The number of additional cabin crew members can be 
+ * edited in an external table.
+ *
+ * The priority order can be entered in the table. The algorithim loops through all the
+ * keytypes (e.g. flight, route) and returns its priority, if no match is found it will default to 0.
+ *
+ * If there, for some reason, is desirable that a specific aircraft type always will require minimum
+ * crew this must be entered in the table, i.e. not just the flight or ac-types etc. with additional
+ * crew need.
+ *
+ * The algorithm works as follows:
+ *   1. Loop over all possible keytypes to find the lowest priority
+ *   2. Make another lookup to get the service need for the lowest priority
+ *   3. If no match is found the service need is set to 0.
+ *
+ * Please note, that the values calculated above can be completely overriden
+ * by entries in the crew service need exception table.
+ */
+
+%crew_need_service_table% = %etab_path%(%crew_need_service_table_p%);
+%crew_need_service_table_p% =
+  parameter "crew_need_service"
+  remark "ETAB: Crew need - Service";
+  
+%crew_need_exception_table% = %etab_path%(%crew_need_exception_table_p%);
+%crew_need_exception_table_p% =
+  parameter "crew_need_exception"
+  remark "ETAB: Crew need - Service Exceptions";
+
+
+/* Currently no service need is added for crew position 5 = AP */
+export %service_need_in_pos5% = default(%_service_need_in_pos5%,0);
+/* %_service_need_in_pos5% = 0; */
+
+export %service_need_in_pos6% =
+  if %service_need_exception_in_pos6% >= 0 then 
+    %service_need_exception_in_pos6%
+  else 
+    %service_need_raw_in_pos6%;
+  
+export %service_need_in_pos7% =
+  if %service_need_exception_in_pos7% >= 0 then 
+    %service_need_exception_in_pos7%
+  else 
+    %service_need_raw_in_pos7%;
+  
+export %temp_crew_service_need_in_pos7% =
+  if %service_need_exception_in_pos7% >= 0 then 
+    %service_need_exception_in_pos7%
+  else 
+    %temp_crew_service_need_raw_in_pos7%;
+
+export %service_need_exception_in_pos6% =
+  default(%_service_need_exception_in_pos6%,-1);
+
+export %service_need_exception_in_pos7% =
+  default(%_service_need_exception_in_pos7%,-1);
+
+table service_need_exception =
+  leg.%udor%, leg.%flight_descriptor%, leg.%start_station% ->
+    Int %_service_need_exception_in_pos6%,
+    Int %_service_need_exception_in_pos7%;
+  external %crew_need_exception_table%;
+  flight_udor, flight_fd, flight_adep ->
+    pos6, pos7;
+  -, -, - -> -1,-1;
+end
+
+export %service_need_raw_in_pos5% = default(%_service_need_in_pos5%,0);
+export %service_need_raw_in_pos6% = default(%_service_need_in_pos6%,0);
+export %service_need_raw_in_pos7% = default(%_service_need_in_pos7%,0);
+export %temp_crew_service_need_raw_in_pos7% = default(%_temp_crew_service_need_in_pos7%,0);
+
+%_service_need_in_pos5% =
+  if leg.%is_flight_duty% then
+    %_pos_prio%(leg.%ac_region%, %min_priority5%(leg.%ac_region%), 5)
+  else
+    0;
+%_service_need_in_pos6% =
+  if leg.%is_flight_duty% then
+    %_pos_prio%(leg.%ac_region%, %min_priority6%(leg.%ac_region%), 6)
+  else
+    0;
+%_service_need_in_pos7% =
+  if leg.%is_flight_duty% then
+    %_pos_prio%(leg.%ac_region%, %min_priority7%(leg.%ac_region%), 7)
+  else
+    0;
+
+/* Variables used exclusively by roster_constraint */
+export %service_need_constraint_raw_in_pos5%(String region) =
+  default(%_service_need_constraint_in_pos5%(region), 0);
+
+export %service_need_constraint_raw_in_pos6%(String region) =
+  default(%_service_need_constraint_in_pos6%(region), 0);
+
+export %service_need_constraint_raw_in_pos7%(String region) = 
+  default(%_service_need_constraint_in_pos7%(region), 0);
+
+%_service_need_constraint_in_pos5%(String region) =
+  if leg.%is_flight_duty% then
+    %_pos_prio%(region, %min_priority5%(region), 5)
+  else
+    0;
+
+%_service_need_constraint_in_pos6%(String region) =
+  if leg.%is_flight_duty% then
+    %_pos_prio%(region, %min_priority6%(region), 6)
+  else
+    0;
+
+%_service_need_constraint_in_pos7%(String region) =
+  if leg.%is_flight_duty% then
+    %_pos_prio%(region, %min_priority7%(region), 7)
+  else
+    0;
+  
+%_temp_crew_service_need_in_pos7% =
+  if leg.%is_flight_duty% then
+    %_pos_prio%(leg.%ac_region%, %temp_crew_min_priority7%, 7)
+  else
+    0;
+    
+/* Gets the lowest priority from the existing service need keytypes */
+%min_priority5%(String region) = min(times(9), %_prio_key_pos%(region, %times_index_0%, 5))
+    where (%is_valid_weekday%(%_weekdays_key_pos%(region, %times_index_0%, 5)));
+
+%min_priority6%(String region) = min(times(9), %_prio_key_pos%(region, %times_index_0%, 6))
+    where (%is_valid_weekday%(%_weekdays_key_pos%(region, %times_index_0%, 6)));
+
+%min_priority7%(String region) = min(times(9), %_prio_key_pos%(region, %times_index_0%, 7))
+    where (%is_valid_weekday%(%_weekdays_key_pos%(region, %times_index_0%, 7)));
+
+%temp_crew_min_priority7% =  min(times(9), %_prio_key_pos%(leg.%ac_region%, %times_index_0%, 7))
+    where (%is_valid_weekday_for_temp_crew_arn%(%_weekdays_key_pos%(leg.%ac_region%, %times_index_0%, 7)));
+
+%leg_start_weekday% = 
+  format_int(time_of_week(homebase_departure_summer) / 24:00 + 1, "%d");
+
+%is_valid_weekday%(String weekdays) =
+  locate(%leg_start_weekday%, weekdays) > 0;
+  
+%is_valid_weekday_for_temp_crew_arn%(String weekdays) =
+  locate(format_int(leg.%start_weekday_arn%, "%d"), weekdays) > 0;
+
+/* Get the different possible types */
+table service_need_types(Int ix) =
+  ix -> 
+    %_service_need_keytype%, %_service_need_keyvalue%;
+  1 -> "AcType",       leg.%ac_type%;
+  2 -> "Flight",       %flight_keyvalue%;
+  3 -> "Route",        %route_keyvalue%;
+  4 -> "Area",         leg.%area%;
+  5 -> "STC",          service_type;
+  6 -> "Route+AcType", %route_actype_keyvalue%;
+  7 -> "Area+AcType",  %area_actype_keyvalue%;
+  8 -> "STC+Area",     %stc_area_keyvalue%;
+  9 -> "STC+AcType",   %stc_actype_keyvalue%;
+  -	    -> "", "";
+end
+
+/* Get the keyvalue from the keytype */
+table service_need_keyvalue(String region, Int prio, Int pos) =
+  %_type_prio%(region, prio, pos) -> 
+    %_type_str%;
+  "AcType"         -> leg.%ac_type%;
+  "Flight"         -> %flight_keyvalue%;
+  "Route"          -> %route_keyvalue%;
+  "Area"           -> leg.%area%;
+  "STC"		         -> service_type;
+  "Route+AcType"   -> %route_actype_keyvalue%;
+  "Area+AcType"    -> %area_actype_keyvalue%;
+  "STC+Area"	     -> %stc_area_keyvalue%;
+  "STC+AcType"	   -> %stc_actype_keyvalue%;
+  -	    -> "";
+end
+
+%route_keyvalue% = concat(leg.%start_station%,"-",leg.%end_station%);
+%flight_keyvalue% = %int2str%(leg.%flight_nr%);
+%route_actype_keyvalue% = concat(%route_keyvalue%, "+", leg.%ac_type%);
+%area_actype_keyvalue% = concat(leg.%area%, "+", leg.%ac_type%);
+%stc_area_keyvalue% = concat(service_type, "+", leg.%area%);
+%stc_actype_keyvalue% = concat(service_type, "+", leg.%ac_type%);
+
+/* Get the priority and weekdays */
+table priority_weekends_lookup(String region, Int ix, Int pos) =
+  region, %_service_need_keytype%(ix), %_service_need_keyvalue%(ix), pos, leg.%start_UTC% ->
+    Int %_prio_key_pos%,
+    String %_weekdays_key_pos%;
+  external %crew_need_service_table%;
+  region, keytype, keyvalue, pos, (validfrom,validto) ->
+    prio, weekdays;
+  -, -, -, -, - -> 0, "";
+end
+
+/* Get the service need */
+table service_need_lookup(String region, Int prio, Int pos) =
+  region, prio, %_type_prio%(region, prio, pos), %_type_str%(region, prio, pos), pos, leg.%start_UTC% ->
+    Int %_pos_prio%,
+    String %valid_weekdays_prio%;
+  external %crew_need_service_table%;
+  region, prio, keytype, keyvalue, pos, (validfrom,validto) ->
+    posval, weekdays;
+  -, -, -, -, -, - -> 0, "";
+end
+
+/* Get keytype from region and priority */
+table type_prio(String region, Int prio, Int pos) =
+  region, prio, pos ->
+    String %_type_prio%;
+  external %crew_need_service_table%;
+  region, prio, pos -> keytype;
+  -, -, - -> "";
+end
+
+/*
+** Task crew need
+**
+** %task_need_in_pos%(Pos)
+**    Pos: Position to calculate the task need for.
+**    Returns: The need as described in task_need_table, or 0 if not in table
+**
+** For the moment we do a simplistic modelling to solve a few overbooked 
+** Woodpeckers. /EKG 080905
+*/
+table task_need_pos(Int pos) =
+    pos     -> export %task_need_in_pos%;
+    (1,10)  -> 99;
+    -       -> void_int;
+end
+
+table sim_need_pos(Int pos) =
+    pos     -> %_sim_need_in_pos%;
+    1       -> %sim_need_pos1%;
+    2       -> %sim_need_pos2%;
+    3       -> %sim_need_pos3%;
+    9       -> %sim_need_pos9%;
+    10      -> %sim_need_pos10%;
+    &
+    (1,10)  -> 0;
+    -       -> void_int;
+end
+
+export %sim_need_in_pos%(Int pos) =
+  if leg.%has_sim_exception% then
+    leg.%sim_comp_exc%(pos)
+  else
+    %_sim_need_in_pos%(pos);
+
+%sim_need_pos1% = %_sim_need_pos1%(leg.%group_code%, %simulator_is_special%, leg.%start_utc%);
+%sim_need_pos2% = %_sim_need_pos2%(leg.%group_code%, %simulator_is_special%, leg.%start_utc%);
+%sim_need_pos3% = %_sim_need_pos3%(leg.%group_code%, %simulator_is_special%, leg.%start_utc%);
+%sim_need_pos9% = %_sim_need_pos9%(leg.%group_code%, %simulator_is_special%, leg.%start_utc%);
+%sim_need_pos10% = %_sim_need_pos10%(leg.%group_code%, %simulator_is_special%, leg.%start_utc%);
+
+table simulator_composition(string group_code, bool extra_condition, Abstime date) =
+    group_code, extra_condition, date -> Int %_sim_need_pos1%,
+                                         Int %_sim_need_pos2%,
+                                         Int %_sim_need_pos3%,
+                                         Int %_sim_need_pos9%,
+                                         Int %_sim_need_pos10%;
+    external "simulator_composition";
+    grp, special, (validfrom, validto( -> fc, fp, fr, tl, tr;
+    - , -, -                           -> 99,99,99,99,99;
+end
+
+%simulator_is_for_two_fc% = 
+    default(leg.%pc_opc_intended_for_two_fc%,false);
+
+%simulator_is_special% = 
+    if leg.%group_code% = "OPC" 
+      then %simulator_is_for_two_fc%
+    else if leg.%group_code% = "SIM" or leg.%group_code% = "FFS"
+      then %sim_has_external_instructor%(leg.%code%)
+    else
+      false;
+
+/* Variable used by python script */
+export %sim_has_external_instructor%(String code) = code in sim_external_instructor_codes;
+
+/* Simulator activities with the following codes have external instructor*/
+set sim_external_instructor_codes =  "C2", "C3", "C4", "C5", "C6", "C7", "C8", 
+  "C9", "CG2", "CG3", "CG4", "CG5", "CG6", "CG7", "CG8", "CG9";
+
+
+
+/*
+** Booking degree
+** 
+** A booking degree more than or equal to Jar-Ops requirements but less than 
+** the service level. Since only cabin crew have service manning it is only
+** interesting for these positions. 
+*/
+
+/*
+ * How should this work for LH trips?
+ * Should we compare to the regional share?, HenrikA 16-Dec-2005
+ */
+export %jar_booked% =
+  %total_cabin_crew_booked% >= %total_cabin_crew_jar_need% and
+  %total_cabin_crew_booked% < %total_cabin_crew_need%;
+
+export %total_flight_crew_booked% =
+  booked_crew_position_1 +
+  booked_crew_position_2 +
+  booked_crew_position_3 +
+  booked_crew_position_4;
+
+export %total_cabin_crew_booked% =
+  booked_crew_position_5 +
+  booked_crew_position_6 +
+  booked_crew_position_7 +
+  booked_crew_position_8 +
+  booked_crew_position_9 +
+  booked_crew_position_10;
+
+%ac_need_in_pos_1% = %ac_need_in_pos%(1);
+%ac_need_in_pos_2% = %ac_need_in_pos%(2);
+%ac_need_in_pos_3% = %ac_need_in_pos%(3);
+%ac_need_in_pos_4% = %ac_need_in_pos%(4);
+%ac_need_in_pos_5% = %ac_need_in_pos%(5);
+%ac_need_in_pos_6% = %ac_need_in_pos%(6);
+%ac_need_in_pos_7% = %ac_need_in_pos%(7);
+
+%jar_need_in_pos_1% = %jar_need_in_pos%(1);
+%jar_need_in_pos_2% = %jar_need_in_pos%(2);
+%jar_need_in_pos_3% = %jar_need_in_pos%(3);
+%jar_need_in_pos_4% = %jar_need_in_pos%(4);
+%jar_need_in_pos_5% = %jar_need_in_pos%(5);
+%jar_need_in_pos_6% = %jar_need_in_pos%(6);
+%jar_need_in_pos_7% = %jar_need_in_pos%(7);
+
+export %total_flight_crew_jar_need% = 
+  %jar_need_in_pos_1% +
+  %jar_need_in_pos_2% +
+  %jar_need_in_pos_3% +
+  %jar_need_in_pos_4%;
+
+export %total_cabin_crew_jar_need% =
+  %jar_need_in_pos_5% +
+  %jar_need_in_pos_6% +
+  %jar_need_in_pos_7%;
+
+export %total_cabin_crew_service_need% =
+  %service_need_in_pos5% +
+  %service_need_in_pos6% +
+  %service_need_in_pos7%;
+
+%flight_need_in_pos1% = %flight_need_in_pos%(1);
+%flight_need_in_pos2% = %flight_need_in_pos%(2);
+%flight_need_in_pos3% = %flight_need_in_pos%(3);
+%flight_need_in_pos4% = %flight_need_in_pos%(4);
+
+export %flight_crew_need% =
+  %n_pos1% +
+  %n_pos2% +
+  %n_pos3%;
+
+export %total_flight_crew_need% =
+  %n_pos1% +
+  %n_pos2% +
+  %n_pos3% +
+  %n_pos4%;
+
+export %total_cabin_crew_need% =
+  %n_pos5% +
+  %n_pos6% +
+  %n_pos7%;
+  
+export %relief_pilot% = false; 
+export %overrostered_cabin_crew% = %total_flight_crew_booked% - 2;
+
+/* 
+ * Extra flight deck crew is the crew that are more than the mandatory 
+ * captain and first officer 
+*/
+
+export %number_of_booked_flight_deck_crew% =
+   /*
+    * SKCMS-2213 oma16.%rest_on_board_allowed% should count nbr of assigned FD
+    * Since the number of booked positions might not always match the number of assigned positions.
+    * In such cases the two assigned FD crew get an incorrect max FDP limit.
+    * in Tracking the assigned active positions should be counted.
+  */
+
+   if base_product.%is_tracking% then
+        %leg_rostered_fc%
+   else
+        booked_crew_position_1  +
+        booked_crew_position_2  +
+        booked_crew_position_3;
+
+export %number_of_booked_cabin_crew% = %leg_booked_cc%;
+
+  	
+export %leg_has_open_pos%(int pos) = False;
+
+export %no_upper_assigned% = %trip_assigned_pos%(fundamental.%upper_assigned_vector_pos%);
+export %no_lower_assigned% = %trip_assigned_pos%(fundamental.%lower_assigned_vector_pos%);
+
+export %is_FR_booked% = booked_crew_position_3 > 0;
+
+export %leg_has_open_pos_fd% =
+  %leg_has_open_pos%(1) or
+  %leg_has_open_pos%(2) or
+  %leg_has_open_pos%(3) or
+  %leg_has_open_pos%(4);
+
+/* end of file */
+
+

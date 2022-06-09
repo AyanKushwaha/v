@@ -1,0 +1,86 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains common document rules for flight and cabin crew 
+ *   used in Crew Tracking.
+ *
+ * Sections:
+ *   1. Passport rules
+ *
+ * Created by:
+ *   Christer Gustavsson, 2017-08-10
+ *
+ * Major changes:
+ *
+ */
+
+root module rules_doc_cct
+import fundamental;
+import levels;
+import leg;
+import duty;
+import trip;
+import wop;
+import roster;
+import rule_exceptions;
+import crew;
+
+/****************************************************************
+ * Section 1: Passport rules
+***************************************************************/
+
+/*
+** Rule:
+**    Valid passport
+**
+** Description:
+**    The rule checks that crew has valid passport.
+** 
+** Agreement:
+**    None.
+**
+*/
+export rule has_valid_passport =
+  valid roster.%check_rules% and
+        leg.%in_pp_extended% and
+	    %leg_checks_passport% and
+        rule_exceptions.%rule_on%(leg.%start_utc%);
+  
+  not %first_leg_without_passport%;
+  startdate  = leg.%start_UTC%;
+  severity = %severity_filter_int%(leg.%start_hb%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %no_valid_passport_failtext%;
+  remark "(CCT) No valid passport";
+end
+
+%passport_valid_to_hb% = crew.%doc_max_validto_date%("PASSPORT", "", leg.%start_hb%);
+%trip_ends_after_passport_validity% = default(trip.%end_hb% > %passport_valid_to_hb%, true);
+%leg_ends_in_the_future% = leg.%end_utc% > fundamental.%now%;
+%leg_checks_passport% = leg.%is_flight_duty% or leg.%is_blank_day% or leg.%is_standby%;
+%first_leg_without_passport% = default(is_first(leg(chain)) where (%leg_ends_in_the_future% and %trip_ends_after_passport_validity% and %leg_checks_passport%), false);
+
+%no_valid_passport_failtext% = "Crew does not have a valid passport";
+
+%touches_china% = leg.%start_country% = "CN" or leg.%end_country% = "CN";
+
+export rule (off) has_valid_passport_China =
+  valid roster.%check_rules% and
+        leg.%in_pp_extended% and
+        %touches_china% and
+	    %leg_checks_passport% and
+        rule_exceptions.%rule_on%(leg.%start_utc%);
+
+  trip.%end_hb% < add_months(%passport_valid_to_hb%,-6);
+
+  startdate  = leg.%start_UTC%;
+  severity = %severity_filter_int%(leg.%start_hb%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext "Passport must be valid for 6 months";
+  remark "(CCT) No valid passport for 6 months";
+end
+
+/* end of file */
+

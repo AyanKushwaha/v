@@ -1,0 +1,210 @@
+/* -*- crc -*-
+ * 
+ * 
+ *
+ * Functions for identifying overlapping legs.
+ * Main use is to remove legs in "environment" period before Matador is run.
+ * Matador can't handle overlaps...
+ *
+ * [acosta:07/355@16:05] Created
+ * [acosta:08/007@14:20] Changed best_guess, so that flights get higher precedence.
+ */
+
+module studio_overlap
+
+import iterators;
+import leg;
+import levels;
+import fundamental;
+import trip;
+
+
+/* identify overlaps ************************************************* {{{1 */
+export %leg_overlap% =
+  let this_leg_start = leg.%start_utc%,
+      this_leg_end = leg.%end_utc%,
+      this_leg_id = %leg_id%;
+  any(leg(chain), 
+      overlap(leg.%start_utc%, leg.%end_utc%, this_leg_start, this_leg_end) > 0:00) 
+  where (%leg_id% <> this_leg_id);
+  
+export %leg_entirely_overlapped% =
+  let this_leg_start = leg.%start_utc%,
+      this_leg_end = leg.%end_utc%,
+      this_leg_id = %leg_id%;
+  sum(leg(chain), 
+      overlap(leg.%start_utc%, leg.%end_utc%, this_leg_start, this_leg_end)) where (%leg_id% <> this_leg_id) >= (this_leg_end-this_leg_start);
+
+%leg_critical_overlap% =
+  let this_leg_start = leg.%start_utc%,
+      this_leg_end = leg.%end_utc%,
+      this_leg_id = %leg_id%;
+  any(leg(chain), 
+      leg.%start_utc%>this_leg_start and leg.%end_utc%<this_leg_end) 
+  where (%leg_id% <> this_leg_id);
+
+export %duty_overlap% =
+  any(leg(duty), %leg_overlap%);
+
+export %trip_overlap% =
+  any(duty(trip), %duty_overlap%);
+
+export %wop_overlap% =
+  any(trip(wop), %trip_overlap%);
+
+export %roster_overlap% =
+  any(wop(roster), %wop_overlap%);
+
+export %plan_overlap% =
+  any(chain_set, %roster_overlap%);
+
+export %chain_overlap% =
+  any(leg(chain), %leg_overlap%);
+
+export %area_overlap% =
+  any(chain_set, %chain_overlap%);
+
+
+/* before PP start */
+export %leg_overlap_before_pp% =
+  %leg_overlap% and %before_pp%;
+
+export %duty_overlap_before_pp% =
+  any(leg(duty), %leg_overlap_before_pp%);
+
+export %trip_overlap_before_pp% =
+  any(duty(trip), %duty_overlap_before_pp%);
+
+export %wop_overlap_before_pp% =
+  any(trip(wop), %trip_overlap_before_pp%);
+
+export %roster_overlap_before_pp% =
+  any(wop(roster), %wop_overlap_before_pp%);
+
+export %plan_overlap_before_pp% =
+  any(chain_set, %roster_overlap_before_pp%);
+
+/* before PP start */
+export %leg_overlap_after_pp% =
+  %leg_overlap% and %after_pp%;
+
+export %duty_overlap_after_pp% =
+  any(leg(duty), %leg_overlap_after_pp%);
+
+export %trip_overlap_after_pp% =
+  any(duty(trip), %duty_overlap_after_pp%);
+
+export %wop_overlap_after_pp% =
+  any(trip(wop), %trip_overlap_after_pp%);
+
+export %roster_overlap_after_pp% =
+  any(wop(roster), %wop_overlap_after_pp%);
+
+export %plan_overlap_after_pp% =
+  any(chain_set, %roster_overlap_after_pp%);
+
+
+/* find "removable" legs by "best guess" ***************************** {{{1 */
+/*
+ * [acosta:07/357@01:44] This expression should mark overlapping legs, except
+ * for one leg in each overlapping group:
+ * (1) Non-flight legs are chosen before flight legs.
+ * (2) If legs of same kind (flight/flight or non-flight/non-flight chose shortest.
+ * (3) If legs in (2) of same length, chose latest.
+ */
+export %best_guess% =
+  let this_leg_start = leg.%start_utc%,
+      this_leg_end = leg.%end_utc%,
+      this_leg_id = %leg_id%,
+      this_duration = %duration%,
+      this_is_flight_duty = leg.%is_flight_duty%,
+      this_legno_in_chain = %legno_in_chain%;
+  any(leg(chain), 
+      overlap(leg.%start_utc%, leg.%end_utc%, this_leg_start, this_leg_end) > 0:00
+    and
+      %_best_guess%(this_is_flight_duty, this_duration, this_legno_in_chain))
+  where (%leg_id% <> this_leg_id);
+
+
+export %best_guess_interval%(abstime start, abstime stop) =
+  %best_guess% and overlap(start, stop, leg.%start_hb%, leg.%end_hb%) > 0:00;
+
+export %best_guess_before_pp% =
+  %best_guess% and %before_pp%;
+
+export %best_guess_after_pp% =
+  %best_guess% and %after_pp%;
+
+
+/* Matador Overlap v *3 *********************************************** {{{1 */
+/* The lower the value, the better chance to survive. */
+table dignity_table(string category) =
+  category ->
+    int %dignity%;
+  /* Winners */
+  "REC" ->  0;
+  "EDU" ->  0;
+  "SIM" ->  0;
+
+  /* Losers */
+  "OFF" -> 99;
+
+  /* Intermediate */
+  - -> 1;
+end
+
+export %leg_dignity% = %dignity%(leg.%category_code%);
+export %trip_dignity% = %dignity%(trip.%category_code%);
+
+export %leg_is_pact_or_off% = leg.%is_pact%;
+
+export %trip_is_pact_or_off% = trip.%is_off_duty%;
+
+/* Can a leg be adjusted or split into pieces? */
+export %leg_is_adjustable% = leg.%is_pact%;
+
+export %trip_is_adjustable% = all(leg(trip), %leg_is_adjustable%);
+
+export %trip_id% = crr_identifier;
+
+
+/* private variables ************************************************** {{{2 */
+%before_pp% =
+  leg.%starts_before_pp%;
+
+%after_pp% =
+  leg.%start_hb% >= fundamental.%pp_start%;
+
+table best_guess_table(bool is_flight_duty, reltime duration, int legno_in_chain) =
+  alias 
+    other = leg.%is_flight_duty%,
+    this = is_flight_duty,
+    l_or_e = %longer_or_earlier%(duration, legno_in_chain);
+
+  other, this,  l_or_e -> bool %_best_guess%;
+
+  true,  true,  true   -> true;    /* Other and this leg are both flights:     */
+  true,  true,  false  -> false;   /* ... let "longest/earliest" decide.       */
+  true,  false, true   -> true;    /* Other leg is a flight, but this not:     */
+  true,  false, false  -> true;    /* ... so mark this leg.                    */
+  false, true,  true   -> false;   /* Other leg is not a flight, but this is:  */
+  false, true,  false  -> false;   /* ... so don't mark this leg.              */
+  false, false, true   -> true;    /* Other and this leg are both non-flights: */
+  false, false, false  -> false;   /* ... let "longest/earliest" decide.       */
+end
+
+%duration% = 
+  leg.%end_utc% - leg.%start_utc%;
+
+%leg_id% = leg_identifier;
+
+%legno_in_chain% =
+  leg.%no_in_chain%;
+
+%longer_or_earlier%(reltime duration, int legno_in_chain) =
+    (%duration% > duration)
+  or
+    ((%duration% = duration) and (%legno_in_chain% < legno_in_chain));
+
+
+/* end of file */

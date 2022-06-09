@@ -1,0 +1,172 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains standby rules used for Cabin Crew in Carmen Crew Tracking
+ *
+ * Sections:
+ *   Standby rules
+ *
+ * Created by:
+ *   Mikael Jensen, 09-Sep-2016
+ *
+ * Major changes:
+ *
+ */
+
+module rules_standby_cct_cc inherits rules_standby_cct
+import levels;
+import fundamental;
+import base_utils;
+import roster;
+import wop;
+import trip;
+import duty;
+import leg;
+import crew;
+import freedays;
+import rules;
+import rule_exceptions;
+import accumulators;
+import parameters;
+import standby;
+import duty_time;
+import hotel;
+import system_db_parameters;
+import duty_time;
+
+
+
+/****************************************************************
+ * Section 1: Standby rules
+ ***************************************************************/
+
+/*
+** Rule:
+**    Hotel Standby duration must not exceed 6 hours.
+**
+** Description:
+**    Check that hotel standby duration does not exceed 6 hours.
+**
+** Agreement:
+**    CBA16
+**    Agreement Groups: SNK_CC_AG & NKF_CC_AG
+**    Valid from November 2016
+**
+** Jira:
+**    SKCMS-1102
+*/
+
+rule sby_max_hotel_standby_duration =
+  valid roster.%check_rules%
+        and system_db_parameters.%cba16_nov_valid%(leg.%start_hb%)
+        and (crew.%has_agmt_group_snk_cc_at_date%(leg.%start_UTC%) or crew.%has_agmt_group_nkf_cc_at_date%(leg.%start_UTC%))
+        and leg.%is_standby_at_hotel%
+        and leg.%in_pp_extended%;
+
+  leg.%time% <= %_max_hotel_standby_duration_snk_nkf_cc%
+               + rule_exceptions.%overshoot_rel%(leg.%start_UTC%);
+
+  startdate = leg.%start_UTC%;
+  severity = %severity_filter_int%(leg.%start_hb%, %duty_lh_region%);
+  failobject = duty.%failobject_start%;
+  failtext(Reltime val, Reltime limit) =
+    concat("SBY: Hotel standby duration ", %reltime2str%(val),
+           " must not exceed ", %reltime2str%(limit),
+           " (SNK NKF CC).");
+  remark "(CCT) SBY: Hotel standby duration SNK NKF CC",
+  planner "The rule checks hotel standby duration SNK NKF CC";
+end
+
+%_max_hotel_standby_duration_snk_nkf_cc% = 6:00;
+
+/*
+** Rule:
+**    Duty related to hotel standby must not exceed 17 hours for short haul.
+**
+** Description:
+**    Check that duty related to hotel standby does not exceed 17 hours.
+**
+** Agreement:
+**    CBA16
+**    Agreement Groups: SNK_CC_AG & NKF_CC_AG
+**    Valid from November 2016
+**
+** Jira:
+**    SKCMS-1102
+*/
+
+
+rule sby_max_duty_related_to_hotel_sby =
+  valid roster.%check_rules%
+        and system_db_parameters.%cba16_nov_valid%(duty.%start_hb%)
+        and duty.%is_short_haul%
+        and (crew.%has_agmt_group_snk_cc_at_date%(duty.%start_UTC%) or crew.%has_agmt_group_nkf_cc_at_date%(duty.%start_UTC%) )
+        and duty.%has_standby_at_hotel%
+        and duty.%in_pp_extended%
+        and duty_time.%standby_call_out%;
+
+   duty.%time% <= %_max_duty_related_to_hotel_standby%
+                + rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%, %duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext "SBY: Duty related to hotel sby must not exceed 17hrs for SH SNK NKF CC";
+  remark "(CCT) SBY: Duty related to hotel sby must not exceed 17hrs for SH SNK NKF CC",
+  planner "The rule checks that duty related to hotel sby does not exceed 17hrs for SH SNK NKF CC";
+end
+
+%_max_duty_related_to_hotel_standby% = 17:00;
+
+
+/*
+** Rule:
+**    Latest check-in for call-out duty related to hotel standby
+**    must be no later than 1 hours + transport time after hotel
+**    standby end.
+**
+** Description:
+**    Check that duty related to hotel standby does not have check-in
+**    no later than 1 hours + transport time after hotel stand-by end.
+**
+** Agreement:
+**    CBA16
+**    Agreement Groups: SNK_CC_AG & NKF_CC_AG
+**    Valid from November 2016
+**
+** Jira:
+**    SKCMS-1102
+*/
+
+rule sby_latest_checkin_related_to_hotel_standby_call_out =
+  valid roster.%check_rules%
+        and system_db_parameters.%cba16_nov_valid%(duty.%start_hb%)
+        and (crew.%has_agmt_group_snk_cc_at_date%(duty.%start_UTC%) or crew.%has_agmt_group_nkf_cc_at_date%(duty.%start_UTC%) )
+        and duty.%has_standby_at_hotel%
+        and duty.%in_pp_extended%
+        and duty_time.%standby_call_out%;
+
+   %_time_between_hotel_sby_end_to_callout_duty_ci% <= %_max_time_between_hotel_sby_end_to_callout_duty_ci%
+                                  + rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext "SBY: C/I no later than 1hr+transp after hotel sby (SNK NKF CC)";
+  remark "(CCT) SBY: Duty C/I no later than 1hr+transport after hotel sby end for SNK NKF CC.",
+  planner "C/I no later than 1:00+trans after hotel sby end for SNK NKF CC.";
+end
+
+%_time_between_hotel_sby_end_to_callout_duty_ci% =
+  if leg.%is_standby_at_hotel%
+  then next(leg(duty), leg.%start_utc%) - leg.%end_utc%
+  else void_reltime;
+
+%_max_time_between_hotel_sby_end_to_callout_duty_ci% =
+   1:00 + first(leg(duty), hotel.%leg_transport_time_hotel_to_apt%) where (leg.%is_standby_at_hotel%);
+
+
+/* end of file */
+

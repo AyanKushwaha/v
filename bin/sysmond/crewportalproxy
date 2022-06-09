@@ -1,0 +1,158 @@
+#!/usr/bin/env python
+
+# Routing table can be changed in case of too high load as described in
+# $CARMUSR/data/doc/word_src/manuals/SystemAdministratorManual.docx
+routing = {"cp_publish":    "portal_publish",
+           "cp_latest":     "portal_latest",
+           "cp_manpower_f": "portal_manpower_f",
+           "cp_manpower_c": "portal_manpower_c"}
+
+import urlparse, os, sys
+from subprocess import *
+from time import strftime, localtime, mktime, time
+from jinja2 import Template
+from utils import ServiceConfig
+
+__C = None
+def _C():
+    global __C
+    if __C == None: __C = ServiceConfig.ServiceConfig()
+    return __C
+    
+def timestr(t=None):
+    if t is None: t = time()
+    return strftime("%Y-%m-%d %H:%M:%S", localtime(t))
+    
+def relstr(dt):
+    return "%d:%02d:%02d" % (int(dt)/3600, (int(dt)/60)%60, int(dt)%60)
+
+def log(string):
+    try:
+        tim = timestr()
+    except:
+        tim = "????-??-?? ??:??:??"
+    try:
+        print >>sys.stderr, "CREWPORTALPROXY:",tim,string
+        sys.stdout.flush()
+    except: pass
+  
+haproxy_config_template = """global
+  #daemon
+  maxconn       256               # total max connections (dependent on ulimit)
+  nbproc        1                 # number of processing cores
+  log		127.0.0.1:514 	local0	info
+
+defaults
+  mode              http
+  clitimeout        60s           # maximum inactivity time on the client side
+  srvtimeout        1000s         # maximum inactivity time on the server side
+  timeout connect   500ms         # maximum time to wait for a connection attempt to a server to succeed
+
+  option            httpclose     # disable keepalive (HAProxy does not yet support the HTTP keep-alive mode)
+  option            abortonclose  # enable early dropping of aborted requests from pending queue
+  #option            httpchk       # enable HTTP protocol to check on servers health
+  option            forwardfor    # enable insert of X-Forwarded-For headers
+  
+  option            httplog    
+  option            dontlognull    
+  # log-format        %ci:%cp\ [%t]\ %ft\ %b/%s\ %Tw/%Tc/%Tt\ %B\ %ts\ %ac/%fc/%bc/%sc/%rc\ %sq/%bq
+  log-format 	    %f/%H/%fi:%fp\ client:%ci:%cp\ GMT:%T\ body:%[capture.req.hdr(0)]\ request:%r
+
+listen cp_publish_proxy {{ cp_publish.url_hostname }}:{{ cp_publish.url_port }}
+  server portal_publish_server {{ cp_publish_target.url_hostname }}:{{ cp_publish_target.url_port }} maxconn {{ cp_publish.maxconn }} check inter 20000
+  log global
+
+listen cp_latest_proxy {{ cp_latest.url_hostname }}:{{ cp_latest.url_port }}
+  server portal_latest_server {{ cp_latest_target.url_hostname }}:{{ cp_latest_target.url_port }} maxconn {{ cp_latest.maxconn }} check inter 20000
+  log global
+  
+listen cp_manpower_f_proxy {{ cp_manpower_f.url_hostname }}:{{ cp_manpower_f.url_port }}
+  server portal_manpower_f_server {{ cp_manpower_f_target.url_hostname }}:{{ cp_manpower_f_target.url_port}} maxconn {{ cp_manpower_f.maxconn }} check inter 20000
+  log global
+  
+listen cp_manpower_c_proxy {{ cp_manpower_c.url_hostname }}:{{ cp_manpower_c.url_port }}
+  server portal_manpower_c_server {{ cp_manpower_c_target.url_hostname }}:{{ cp_manpower_c_target.url_port}} maxconn {{ cp_manpower_c.maxconn }} check inter 20000
+  log global
+  
+listen stats :9000  # Listen on localhost:9000
+mode http
+stats enable  # Enable stats page
+# stats hide-version  # Hide HAProxy version
+stats realm Haproxy\ Statistics  # Title text for popup window
+stats uri /status  # Stats URI
+stats auth hiqadm:sas123  # Authentication credentials
+
+"""
+
+def getUrlForService(servicename):
+    url = None
+    for service in _C().getServices():
+        if service[0] == servicename:
+        	url = service[3]
+        	break
+    srv = {}
+    if url:
+        u = urlparse.urlparse(url)
+        srv['url_path'] = u.path
+        srv['url_scheme'] = u.scheme
+        srv['url_hostname'] = u.hostname
+        srv['url_port'] = u.port
+    else:
+        log("Failed to get URL for %s" % (servicename))
+    return srv
+
+def getProxy(servicename):
+    srv =  getUrlForService(servicename)
+    maxconn = _C().getPropertyValue('crewportalproxy/CREWPORTAL_PROXY/%s@max_concurrent_connections' % servicename)
+    if maxconn:
+        srv['maxconn'] = maxconn
+    else:
+        srv['maxconn'] = 1
+    return srv
+    
+def getReportServer(servicename):
+    return getUrlForService(servicename)
+
+def generateHAProxyConfig(configvalues):
+    template = Template(haproxy_config_template)
+    return template.render(configvalues)
+
+def readConfigValues():
+	config = {}
+	config['cp_publish'] = getProxy('cp_publish')
+        config['cp_latest'] = getProxy('cp_latest')
+        config['cp_manpower_f'] = getProxy('cp_manpower_f')
+        config['cp_manpower_c'] = getProxy('cp_manpower_c')
+	config['portal_publish'] = getReportServer('portal_publish')
+        config['portal_latest'] = getReportServer('portal_latest')
+        config['portal_manpower_f'] = getReportServer('portal_manpower_f')
+        config['portal_manpower_c'] = getReportServer('portal_manpower_c')
+
+        for (x,y) in routing.items():
+            config[x+"_target"] = config[y]
+
+	return config
+	
+def saveHAConfigFile(haconfig):
+    filename = os.path.join(os.environ['CARMTMP'], 'crewportalproxy.conf')
+    try:
+	    conf = open(filename, 'w')
+	    conf.write(haconfig)
+	    conf.close
+    except:
+		log("Failed to generate HAProxy config file for crewportalproxy")
+    return filename
+	
+def startHAProxy(haconfigfile):
+    log("Starting HAProxy ...")
+    # log("Starting HAProxy ... with config file at: ")
+    # log(haconfigfile)
+    return call("haproxy -f %s" % (haconfigfile), shell=True)
+
+if __name__ == "__main__":
+    log("About to start crewportalproxy ...")
+    config = readConfigValues()
+    haconfig = generateHAProxyConfig(config)
+    haconfigfile = saveHAConfigFile(haconfig)
+    startHAProxy(haconfigfile)
+

@@ -1,0 +1,375 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains studio only rules used for Cabin Crew Rostering
+ *
+ * Sections:
+ *   1. Lower rank rules
+ *   2. PC/OPC optimization (corresponds to constraints)
+ *   3. Simulators
+ *   4. Standby rules
+ *   5: Composition rules
+ *
+ * Created by:
+ *   Henrik Mouritsen, 10-May-2007
+ *
+ * Major changes:
+ *
+ */
+
+module rules_studio_ccr_fc inherits rules_studio_ccr
+
+import crew_pos;
+import oma16;
+import duty_period;
+import wop;
+import rules;
+import standby;
+import training;
+import accumulators;
+import duty;
+import qualification;
+import base_product;
+import duty_time;
+import freedays;
+import parameters;
+
+/****************************************************************
+ * Section 1: Lower rank rules
+ ***************************************************************/
+/* FD_SKS_* uses last lower date, the rest uses seniority */
+
+redefine %date_based_fbr% =
+  crew.%is_pilot% and
+  crew.%is_sks_at_date%(trip.%start_day%) and
+  not crew.%is_long_haul_trip_start%;
+
+redefine %date_based_fbr_scheduled_correct% =
+  if %same_prev_lower_rank_date% then
+    %prev_lower_rank_date_2% = %oldest_lower_rank_for_current_function_2%
+  else
+    %prev_lower_rank_date% = %oldest_lower_rank_for_current_function%;
+
+%prev_lower_rank_date% =
+  default(round_down(accumulators.%prev_lower_rank_date%(trip.%start_UTC% - 0:01),
+                     24:00), 01jan1986); 
+    
+%prev_lower_rank_date_2% =
+  default(round_down(accumulators.%prev_lower_rank_date%(%prev_lower_rank_date% - 0:01),
+                     24:00), 01jan1986);
+  
+%fc_fbr_valid_leg% = 
+  crew_pos.%current_function% = "FC" and %leg_valid_for_lower_check%;
+
+%same_prev_lower_rank_date% =
+  let a_date = %prev_lower_rank_date%;
+  all(equal_legs, %prev_lower_rank_date% = a_date) 
+  where (%fc_fbr_valid_leg%);
+  
+%oldest_lower_rank_for_current_function% =
+  min(equal_legs, %prev_lower_rank_date%) 
+  where (%fc_fbr_valid_leg%);
+  
+%oldest_lower_rank_for_current_function_2% =
+  min(equal_legs, %prev_lower_rank_date_2%) 
+  where (%fc_fbr_valid_leg%);
+
+/****************************************************************
+ * Section 2: PC/OPC optimization (corresponds to constraints)
+ ***************************************************************/
+/*
+** Rule:
+**    Min required crew on OPC (corresponds to Constraint in roster_constraints)
+**
+** Description:
+**    Check that the number of crew assigned to an OPC
+**    is at least as many as required. Dependent on simulator type.
+**
+** Agreement:
+**    Functional
+*/
+rule gui_min_reqd_crew_on_opc_FC_ALL =
+  valid roster.%check_rules% and
+        not crew.%is_leased_trip_start% and
+        %valid_min_reqd_crew_on_opc% and
+        rule_exceptions.%rule_on%(trip.%start_utc%);
+  %value_min_reqd_crew_on_opc%;
+  startdate = trip.%start_utc%;
+  severity =  %severity_filter_int%(trip.%start_utc%, first(duty(trip), %duty_lh_region%));
+  failobject = %gui_min_reqd_crew_on_opc_FC_ALL_failobject%;
+  failtext "Soft: Min req. crew on OPC";
+  remark "(CCR) Soft: Min required crew on OPC";
+end
+
+%gui_min_reqd_crew_on_opc_FC_ALL_failobject% =
+   first(leg(trip),leg.%failobject_departure%)
+         where (not %value_min_reqd_crew_on_opc%);
+
+%valid_min_reqd_crew_on_opc% = 
+    trip.%in_pp_extended% and trip.%is_pc_or_opc% and not trip.%is_sim_instr% 
+    and training.%sim_is_fully_assigned%;
+
+%value_min_reqd_crew_on_opc% =
+  %crew_on_opc% >= first(leg(trip), leg.%min_reqd_crew_on_opc%)
+                   where (leg.%is_simulator%);
+  
+%crew_on_opc% = 
+    2 - %crew_on_pc%;
+
+%crew_on_pc% =
+    first(leg(trip),count(equal_legs)
+                    where (%is_roster% and training.%leg_is_pc% and not leg.%is_sim_instr%))
+    where (leg.%is_pc_or_opc%);
+
+/* Corresponds to constraint soft_max_crew_on_pc_on_trip  */
+rule (off) gui_min_reqd_crew_on_opc_2x2h_FC_ALL =
+  valid roster.%check_rules% and
+        trip.%starts_in_extended_pp% and
+        not crew.%is_leased_trip_start% and
+        %valid_min_reqd_crew_on_opc_2x2h% and
+        rule_exceptions.%rule_on%(first(leg(trip),leg.%activity_scheduled_start_time_UTC%));
+  %crew_on_pc% <= 1;
+  startdate = first(leg(trip),leg.%activity_scheduled_start_time_UTC%);
+  severity =   %severity_filter_int%(trip.%start_utc%, first(duty(trip), %duty_lh_region%));
+  failobject = %gui_min_reqd_crew_on_opc_2x2h_FC_ALL_failobject%;
+  failtext "Soft: Max allowed crew on 2x2h PC";
+  remark "(CCR) Soft: Max allowed crew on 2x2h PC";
+end
+
+%gui_min_reqd_crew_on_opc_2x2h_FC_ALL_failobject% =
+   first(leg(trip),leg.%failobject_departure%)
+         where (not %value_min_reqd_crew_on_opc_2x2h% and
+                leg.%is_pc_or_opc%);
+         
+%value_min_reqd_crew_on_opc_2x2h% = 
+    %crew_on_opc% >= 1;
+
+%valid_min_reqd_crew_on_opc_2x2h% = 
+    default(first(leg(trip), leg.%is_2x2h_opc%) where (leg.%is_pc_or_opc% and
+                                                        not leg.%is_skill_test%), 
+            false);
+
+rule (off) gui_sim_fully_assigned_FC_ALL =
+  valid roster.%check_rules% 
+        and trip.%starts_in_pp%
+        and not crew.%is_leased_trip_start%
+        and trip.%is_simulator% 
+        and %is_roster%
+        and not trip.%is_pact%
+        and rule_exceptions.%rule_on%(trip.%start_UTC%);
+  training.%crew_on_sim% = training.%reqd_crew_on_sim%;
+  startdate = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %gui_sim_fully_assigned_FC_ALL_failobject%;
+  failtext "Soft: Sim. not fully assigned";
+  remark "(CCR) Soft: Simulators should be fully assigned";
+end
+
+%gui_sim_fully_assigned_FC_ALL_failobject% =
+ first(leg(trip),leg.%failobject_departure%) where
+      (leg.%is_simulator% and
+       training.%crew_on_sim% mod 2 = 0);
+
+/***************************************************************
+  * Section 3: Simulators
+ ***************************************************************/ 
+
+rule gui_maximum_number_of_assists_FC_ALL =
+  valid roster.%check_rules% and
+        trip.%starts_in_pp% and
+        not crew.%is_leased_trip_start% and
+        trip.%is_simulator% and
+        %is_roster% and
+        not trip.%is_pact% and
+        training.%trip_is_sim_assist% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+  training.%assists_on_sim% <= 1; /*training.%crew_on_sim%;*/
+  startdate = trip.%start_UTC%;
+  severity =  first(leg(trip), %severity_filter_int%(leg.%start_utc%,%duty_lh_region%));
+  failobject = %gui_maximum_number_of_assists_FC_ALL_failobject%;
+  failtext(Int value, Int limit) = 
+    rules.%failtext_int%("Soft: Nr of assist on sim", value, limit);
+  remark "(CCR) Soft: Only assists assigned to simulator";
+end
+
+%gui_maximum_number_of_assists_FC_ALL_failobject% =
+ first(leg(trip),leg.%failobject_departure%) where
+      (leg.%is_simulator% and
+       training.%assists_on_sim% > 1);
+        
+rule gui_2_lc_legs_reqired_FC_ALL =
+  valid roster.%check_rules% and
+        trip.%starts_in_pp% and
+        not crew.%is_leased_trip_start% and
+        any(leg(trip),leg.%is_lc%) and
+        %is_roster% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+  %no_consecutive_lc_legs% >= 2;
+  startdate = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %gui_2_lc_legs_required_FC_ALL_failobject%;
+  failtext(Int value, Int limit) = 
+    rules.%failtext_int%("Soft: Consecutive LC legs", value, limit);
+  remark "(CCR) Soft: Number of consecutive LC legs";
+end
+
+%gui_2_lc_legs_required_FC_ALL_failobject% =
+ first(leg(trip),leg.%failobject_departure%) where
+      (leg.%is_lc% and
+       %no_consecutive_lc_legs% < 2);
+
+/* Checking for deadhead in difibnition below is done because flight attributes 
+ * remains on the leg even if it is changed to deadhead. */
+%no_consecutive_lc_legs%=
+    1 + count(leg(trip)) 
+    where (leg.%is_lc% and not leg.%is_deadhead% and 
+           next(leg(trip), leg.%is_lc% and not leg.%is_deadhead%));
+
+
+/****************************************************************
+ * Section 4: Composition rules
+ ***************************************************************/  
+/*
+** Rule:
+**    No over/under crewed cockpits are allowed
+**
+** Description:
+**    Any roster containing over/under crewed cockpits in flights is considered
+**    illegal.
+**    An (almost) identical rule exists in rules_studio_ccr_cc
+**
+** Functional rule:
+*/
+export rule (off) sft_comp_ok_FC =
+  valid %product% = "CCR" and 
+        %is_roster% and trip.%in_pp_extended% and
+        leg.%is_active_flight% and
+        not crew.%is_leased_duty_start% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+
+  crew_pos.%leg_booked_fc% = crew_pos.%flight_crew_need% and
+  %_all_positions_ok%;
+
+  startdate = leg.%activity_scheduled_start_time_UTC%;
+  failtext %sft_comp_ok_FC_failtext%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  remark "Soft: No over/under crewed cockpits are allowed",
+  planner "The rule checks that no cockpits are over/under crewed. "
+          "The rule checks that the booked number of crew is "
+          "equal to the need for the first three "
+          "crew positions.";
+end
+
+%_all_positions_ok% =
+  all(times(3), 
+      crew_pos.%leg_booked_pos%(%times_index_0%) = 
+      crew_pos.%need_in_pos%(%times_index_0%));
+
+%sft_comp_ok_FC_failtext% =
+  cat(times(3),
+      (if crew_pos.%leg_booked_pos%(%times_index_0%) <> crew_pos.%need_in_pos%(%times_index_0%) then
+        concat(crew_pos.%pos2func%(%times_index_0%),":",
+               format_int(crew_pos.%leg_booked_pos%(%times_index_0%) - 
+                          crew_pos.%need_in_pos%(%times_index_0%), "%+i")," ")
+        else
+          ""));
+  
+/*
+** Rule:
+**    Crew with restriction not allowed to fly with anyone.
+**
+** Description:
+**   Any crew with restriction TRAINING+CAPT, TRAINING+DCT should
+**   be checked to not fly with another restricted pilot.
+**
+** Only first three positions will be checked since instructor
+** position legality is checked by another rule.
+** Agreement:
+**   OM-A 4.1.1.5
+*/
+
+rule caa_comp_restr_ok_FC =
+  valid roster.%check_rules% and
+        not crew.%is_leased%(leg.%start_date_utc%) and
+        leg.%is_active_flight% and
+        not leg.%is_school_flight% and
+        %any_restriction_leg_start% and
+        not training.%has_leg_instructor_duty_code% and
+        leg.%in_pp_extended% and
+        not crew_pos.%is_supernum% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+        
+  not %any_dct_or_capt_with_restricted_companion%;
+  
+  startdate = leg.%activity_scheduled_start_time_UTC%;
+  failtext %comp_restr_ok_FC_failtext%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  remark "OMA: Restricted crew cannot fly together",
+  planner "The rule checks that composition is OK according to " 
+          " OM-A table 4.1.1.5 "
+          " Instructor position and legality is checked in other "
+          " rules";
+end
+ 
+%comp_restr_ok_FC_failtext% =
+  let restriction_capt = crew.%has_restr_training_capt_leg_start%,
+      crew_func = crew_pos.%current_function%,
+      main_cat = crew.%main_func%,
+      crew_id = crew.%id%,
+      restr_type = max(equal_legs, 
+                       concat(crew.%any_restriction_subtype_ix%(leg.%start_hb%, 1, leg.%qual%),
+                              "(",crew.%employee_number%,")")) where
+                         (leg.%is_active_flight% and
+                          crew_id <> crew.%id% and
+                          crew.%main_func% = main_cat and
+                          crew_pos.%current_pos% <= 3 and
+                          %restricted_companion%(crew_func, restriction_capt));
+  concat("OMA: Illegal to fly with: ", restr_type);
+
+%any_dct_or_capt_with_restricted_companion% =
+ let restriction_capt = crew.%has_restr_training_capt_leg_start%,
+      crew_func = crew_pos.%current_function%,
+      main_cat = crew.%main_func%,
+      crew_id = crew.%id%;
+   if crew.%has_restr_training_capt_leg_start% or
+      crew.%has_restr_training_dct_foc_refr_leg_start%
+   then
+   any(equal_legs, %restricted_companion%(crew_func, restriction_capt)) where
+    (not void(crew.%id%) and
+     leg.%is_active_flight% and
+     not training.%has_leg_instructor_duty_code% and
+     crew.%main_func% = main_cat and
+     crew_pos.%current_pos% <= 3 and
+     crew.%id% <> crew_id)
+   else
+     false;
+     
+/* Argument true=CAPT, false=DCT */
+table comp_restriction_table(String func, Bool capt) =
+  func, capt -> %restricted_companion%;
+  /* FC during TRAINING+CAPT */
+  "FC",  true  -> %any_restriction_leg_start%;
+  /* FC during TRAINING+DCT */
+  "FC", false  -> %any_restriction_leg_start%;
+  /* FP during TRAINING+DCT */
+  "FP", false  -> %any_restriction_leg_start%;
+  /* FP during TRAINING+CAPT (is this possible) */
+  "FP",  true  -> %any_restriction_leg_start%;
+  -,        -  -> false;
+end
+
+%any_restriction_leg_start% =
+  crew.%has_restr_training_capt_leg_start% or
+  crew.%has_restr_new_new_leg_start% or
+  crew.%has_restr_new_rank_leg_start% or
+  crew.%has_restr_training_dct_foc_refr_leg_start% or
+  crew.%has_restr_medical_medic_leg_start% or
+  crew.%has_qual_restr_new_actype_on_leg%;
+
+
+/* end of file */
+

@@ -1,0 +1,89 @@
+/* -*- crc -*- */
+module leave_reduction
+import system_db_parameters;
+import leave_entitlement;
+import leave_params;
+import levels;
+import leave_crewinfo;
+import leave_tables;
+
+
+/********************
+*
+* Dates and amounts
+*
+**********************/
+
+
+/* The entitlement date isn't propagated from leave module. 
+ * The date can be somewhere before the reduction date  
+ * Reduction period start and end dates depend on if the entitlement is done in advance or not. 
+ * Since reduction reference to entitlement, the reduction dates are the same as the entitlement dates */
+
+
+export %next_reduction_date%(string actcode, abstime date) = 
+   leave_entitlement.%next_entitlement_date%(actcode, date);
+
+
+export %next_reduction_transaction_date%(string actcode, abstime date) = 
+  %next_reduction_date%(actcode, date);
+
+
+
+/*Exporting for test puposes..*/
+/* We need to have a tentative_roster for RAVE to build the chains somehow.. Calculation is done in leave_tables */
+/* @result: int number of reducing days x100 */
+export %reduction_days_after_offset_in_a_row%(string taskgroup, abstime reduction_start, abstime reduction_end, 
+						abstime contract_start, abstime contract_end, int offset, bool advance) =
+  min(tentative_roster, 
+      leave_tables.%number_of_activities_exceeding_offset_in_a_row%(taskgroup, reduction_start, contract_start, contract_end, offset, advance));
+
+/* After a specific number in total 
+ * @result: int number of reducing days x100 */
+export %reduction_days_after_offset_in_total%(string taskgroup, abstime reduction_start, abstime reduction_end, 
+						abstime contract_start, abstime contract_end, int offset, bool partfromcontract) =
+  min(tentative_roster, 
+      %_reduction_after_offset_in_total%(taskgroup,reduction_start,reduction_end,
+					contract_start, contract_end, offset, partfromcontract));
+
+
+%_reduction_after_offset_in_total%(string taskgroup, abstime reduction_start, abstime reduction_end, 
+			abstime contract_start, abstime contract_end, int offset, bool partfromcontract) =
+  /* We need to know both the number from reduction start and the number in the current reduction period (contract period), 
+   * since the offset is from the reduction start. */  
+  let number_from_reductionstart = %sum_number_of_activities_in_total_over_contracts%(taskgroup, reduction_start, contract_end, partfromcontract), 
+      number_in_contractperiod = leave_tables.%number_of_activities_in_total%(taskgroup, contract_start, contract_end, partfromcontract);
+  /* If (the number from reduction start - the offset) is more than the number of days in our contractperiod, 
+   * all days in the contract period are reducing, since all offset days are in the period from reduction start 
+   * to our contract period start. If it is less, all offset days has not been before the start of the period. Therefore
+   * we take (the number from reduction start - the offset). All those days are in our period */
+  nmax(nmin(number_in_contractperiod, number_from_reductionstart-offset),0);
+
+
+%sum_number_of_activities_in_total_over_contracts%(string taskgroup, abstime reduction_start, abstime contract_end, bool partfromcontract) = 
+  sum(times(20),leave_tables.%number_of_activities_in_total%(taskgroup, 
+                nmax(leave_crewinfo.%contract_start_dates%(reduction_start, contract_end, times_index(0)),
+				     reduction_start),
+				nmin(leave_crewinfo.%contract_end_dates%(reduction_start, contract_end, times_index(0)),
+				     contract_end), partfromcontract))
+
+   /* If crew has no employment, we stop. They have a contract even when they are retired.  */
+   while ((not void(leave_crewinfo.%contract_start_dates%(reduction_start, contract_end, times_index(0)))));
+
+/*for test only */
+%number_in_total%(string taskgroup, abstime redstart, abstime redend) = 
+  min(tentative_roster, leave_tables.%number_of_activities_in_total%(taskgroup, redstart, redend, false));
+/*end*/
+
+
+
+
+%_number_of_activities_in_total%(string taskgroup, abstime starttime, abstime endtime, bool partfromcontract) = 
+  default(min(tentative_roster, %sum_number_of_activities_in_total_over_contracts%(taskgroup, starttime, endtime, partfromcontract)),0);
+
+
+/* Jira SKCMS-940 */
+export %va_days_rounding_SKD_CC_AG_valid%(Abstime start) =
+  /* VA days rounding to 2 decimals for SKD_CC_AG */
+  %agreement_valid%("va_days_rounding_SKD_CC_AG", start);
+

@@ -1,0 +1,611 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ * Contains rave functions needed for the publish functionality
+ *
+ * Sections:
+ *   1. Miscellaneous
+ *   2. Publish day start
+ *   3. Do Not Publish
+ *   4. Published state
+ *
+ * Created by:
+ *   Yaser Mohamed 19-Jul-2007
+ *
+ * Major changes:
+ *
+ */
+root module publish
+
+import levels;
+import crew;
+import crew_pos;
+import wop;
+import trip;
+import duty;
+import leg;
+import iterators;
+import fundamental;
+import studio_overlap;
+import model_crew;
+ /****************************************************************
+ * Section 1: Miscellaneous
+ ***************************************************************/
+
+%leg_start_utc% = leg.%ci_start_utc%;
+%leg_end_utc% = leg.%co_end_utc%;
+
+export %leg_is_last_in_trip% = leg.%is_last_in_trip%;
+
+export %view_type% = 
+    parameter " "
+    remark "[Script] View type. Set by Publication script";
+
+/* For CrewNotificationFunctions::FlightDescriptor:
+*    Leg activity code or flight descriptor.
+*/
+export %leg_act_code% = 
+  if leg.%is_flight_duty% or leg.%is_ground_transport% then
+    leg.%flight_descriptor%
+  else
+    leg.%code%;
+
+/* Crew position in the same format as retrieved via CuiDiffPublishedRoster().
+*/
+%leg_cuidiff_pos% =
+  if leg.%is_deadhead%
+  then "DH"
+  else if leg.%is_flight_duty%
+       then crew_pos.%assigned_function%
+  else "";
+  
+/* Entity key in the same format as str(<diffset item>.getEntityI())
+*  of an item retrieved via CuiDiffPublishedRoster().
+*/
+export %leg_cuidiff_key% =
+  if leg.%is_pact% or leg.%is_ground_transport%
+  then concat(format_time(departure, "%Y%02m%02d %02H:%02M"), "+",
+              crew.%id%, "+",
+              leg.%code%)
+  else if leg.%is_ground_duty_leg%
+       then concat(format_time(gdor, "%Y%02m%02d"), "+",
+                   leg.%uuid%, "+",
+                   crew.%id%)
+  else concat(format_time(gdor, "%Y%02m%02d"), "+",
+              leg.%flight_descriptor%, "+",
+              departure_airport_name, "+",
+              crew.%id%);
+/*
+** A period intended for generating input to the CuiPublishRosters
+** is normally internally expressed in crew homebase time.
+** Before passing the it to the Cui function, we need to:
+** 1) convert to utc time.
+** 2) adjust the period so legs that overlap the start or end point
+**    are NOT included in the period.
+*/
+
+export %crew_adjusted_period_start_utc%(AbsTime period_start_hb) =
+  default(max(leg(roster), leg.%activity_scheduled_end_time_UTC%)
+            where(leg.%activity_scheduled_start_time_hb% < period_start_hb
+                  and leg.%activity_scheduled_end_time_hb% > period_start_hb),
+          crew.%utc_time%(period_start_hb));
+
+export %crew_adjusted_period_end_utc%(AbsTime period_end_hb) =
+  default(min(leg(roster), leg.%activity_scheduled_start_time_UTC%)
+            where(leg.%activity_scheduled_start_time_hb% < period_end_hb
+                  and leg.%activity_scheduled_end_time_hb% > period_end_hb),
+          crew.%utc_time_end%(period_end_hb));
+ 
+/* (For the roster-publish process.)
+* Will be an AbsTime > fundamental.%publ_period_end_utc% if there is
+* pre-published activity that will be split when roster-published (the process
+* always splits pacts at the planning period end, in order to avoid problems
+* with 'published_roster' data conflicts. In order to properly handle the case
+* when a roster-publish is aborted and only partially saved, the case when the
+* activity already has been split is also considered.
+*
+* If there is no such activity, the value will be void.
+*/
+export %crew_pp_tracking_published_extension_end_utc% =
+  if any(leg(roster), %_leg_is_pact_crossing_publ_period_end%)
+  then max(times(9999), %pubend_ix%(crew.%id%, %tracking_published_type%, %times_index_0%))
+       where(%pubstart_ix%(crew.%id%, %tracking_published_type%, %times_index_0%) <= %publ_period_end_utc%
+             and %pubend_ix%(crew.%id%, %tracking_published_type%, %times_index_0%) > %publ_period_end_utc%)
+       while(not void(%pubstart_ix%(crew.%id%, %tracking_published_type%, %times_index_0%)))
+  else void_abstime;
+
+/* (%crew_pp_tracking_published_extension_end_utc% helper.)
+* This leg is a pact that overlaps fundamental.%publ_period_end_utc%, either
+* by itself (meaning that it will be split during roster-publish), or when it
+* is the second leg from a previous leg split (starts at ppe, and previous leg
+* ends at ppe and has the same activity code and station).
+*/
+%_leg_is_pact_crossing_publ_period_end% =
+  let pact_code = leg.%code%,
+      pact_stn = leg.%start_station%;
+  leg.%is_pact%
+  and leg.%end_utc% > %publ_period_end_utc%
+  and (leg.%start_utc% < %publ_period_end_utc%
+       or (leg.%start_utc% = %publ_period_end_utc%
+           and prev(leg(chain), leg.%is_pact%
+                                and leg.%end_utc% = %publ_period_end_utc%
+                                and leg.%code% = pact_code
+                                and leg.%start_station% = pact_stn
+                    )
+           )
+       );
+
+/*(Debug) True if crew has pre-published activity (PUBLISH end > SCHEDULED). */   
+%cprep% =
+  default(%_crew_tracking_published_end% > %publ_period_end_utc%, false);
+  
+/*(Debug) True if the PUBLISHED period is extended to after SCHEDULED end */
+%cppext% =
+  not void(%crew_pp_tracking_published_extension_end_utc%);
+  
+/*(Debug) True if %cprep%, but there is a gap from SCHEDULED end. */
+%cppgap% =
+  %cprep% and not %cppext%;
+  
+/* (Debug) True for a non-PUBLISHED pact in a pre-publish extension period.
+*          Note: Assumes that the currently loaded period starts with
+*                most recently roster-published month. */
+%leg_nonpub_prepub% =
+  default(leg.%is_pact%
+          and void(leg.%published_time%)
+          and leg.%start_utc% >= %publ_period_end_utc%
+          and leg.%start_utc% < %crew_pp_tracking_published_extension_end_utc%
+  , false);
+
+/* In a tracking-Studio save, we aim at keeping published_roster entries
+* from spanning over months. A published_roster entry cannot start or end
+* within a leg, so it is desirable to split legs at month ends. At least that
+* can be done for PACT:s...
+* This variable is used in tracking/Publish.py::split_pacts_at_period_end()
+* in order to find legs that are to be split at save.
+*/
+export %split_pact_at_month_ends% =
+  leg.%is_pact%
+  and leg.%days% > 1
+  and round_down_month(leg.%start_hb%) <> round_down_month(leg.%end_hb% - 0:01)
+  and %leg_in_scheduled_period%;
+  
+/* At roster-publish, we don't want activity that overlaps pp end (the roster
+* will only be SCHEDULED up to that time).
+* This variable is used in rostering/Publish.py::split_pacts_at_period_end()
+* in order to find legs that are to be split at save.
+*/
+export %split_pact_at_period_end% =
+  leg.%is_pact%
+  and leg.%days% > 1
+  and leg.%start_utc% < %publ_period_end_utc%
+  and leg.%end_utc% > %publ_period_end_utc%;
+  
+/* At roster-publish, we don't want activity that overlaps pp start. 
+* Otherwise the part in the pp will not be published at all.
+* This variable is used in rostering/Publish.py::split_pacts_at_period_start()
+* in order to find legs that are to be split at save.
+*/
+export %split_pact_at_period_start% =
+  leg.%is_pact%
+  and leg.%days% > 1
+  and leg.%start_utc% < %publ_period_start_utc%
+  and leg.%end_utc% > %publ_period_start_utc%;
+
+/****************************************************************
+* Section 2: Publish day start
+***************************************************************/
+
+%_home_airport_at_date%(Abstime hbTime) =
+  let hb = default(crew.%station_at_date%(hbTime), "CPH");
+  if hb = "STO" then "ARN" else hb;
+
+%_home_airport_at_date_by_id%(String crewid, Abstime hbTime) =
+  let hb = default(model_crew.%base_at_date_by_id%(crewid, hbTime), "CPH");
+  if hb = "STO" then "ARN" else hb;
+ 
+%_utc_time%(Abstime hb) =
+  station_utctime(%_home_airport_at_date%(hb), hb);
+
+export %crew_loaded_data_start_utc% =
+  station_utctime(%_home_airport_at_date%(%loaded_data_period_start%),
+                  %loaded_data_period_start%);
+export %crew_loaded_data_end_utc% =
+  station_utctime(%_home_airport_at_date%(%loaded_data_period_end%),
+                  round_up(%loaded_data_period_end%, 24:00));
+  
+export %notification_valid_start% =
+  publish.%crew_loaded_data_start_utc%;
+
+export %notification_valid_end% =
+  nmin(%crew_loaded_data_end_utc%, %crew_rostering_published_end%);
+
+/* Used by carmusr/tracking/Publish.py to determine where to split separate
+* entries written to 'published_roster'.
+* (The goal is to avoid entries that span over several roster-publish periods.)
+*/
+%crew_loaded_month_ends_utc% =
+  let en = %_utc_time%(%loaded_data_period_end%);
+  cat(times(999),
+    format_time(%_crew_loaded_month_end_utc_ix%, "%02d%02b%Y %02H:%02M"), ",")
+  while(%_crew_loaded_month_end_utc_ix% < en);
+%_crew_loaded_month_end_utc_ix% =
+  let    st_hb = round_down_month(%loaded_data_period_start%),
+    mend_hb_ix = round_up_month(st_hb + 0:01 + (%times_index_0%  * 27 * 24:00));
+  default(%crew_adjusted_period_start_utc%(mend_hb_ix),
+          station_utctime("CPH", mend_hb_ix));
+
+%_pp_day_ix% =
+  let day_start_hb = %pp_start% + 24:00*(%times_index_0% - 1);
+  station_utctime(%_home_airport_at_date%(day_start_hb), day_start_hb);
+  
+%crew_hb_date_to_utc_time%(Abstime hbt) =
+  %hb_date_to_utc_time%(crew.%id%, hbt);
+  
+%hb_date_to_utc_time%(String crewid, Abstime hbt) =
+  let hbd = round_down(hbt, 24:00);
+  station_utctime(%_home_airport_at_date_by_id%(crewid, hbd), hbd);
+
+%pre_studio_publish_leg_start_time% =   
+    station_utctime(%_home_airport_at_date_by_id%(crew.%id%,leg.%start_utc%),
+                    round_down(leg.%start_hb%,24:00));
+%pre_studio_publish_leg_end_time% =
+    station_utctime(%_home_airport_at_date_by_id%(crew.%id%,leg.%end_utc%),
+                    round_up(leg.%end_hb%,24:00));
+    
+%roster_ok_for_publish%(Abstime start_hbt, Abstime end_hbt) =
+    not %has_empty_holes_in_period%(start_hbt,end_hbt) and
+    not %has_any_overlap%(start_hbt,end_hbt) and
+    not %has_activity_without_employment%(start_hbt, end_hbt) and
+    not %has_extra_seat_in_period%(start_hbt,end_hbt);
+
+
+%has_activity_without_employment%(Abstime start_hbt, Abstime end_hbt) =
+ any(leg(chain),void(crew.%employment_start%(leg.%start_hb%))) 
+ where (leg.%start_hb% >= start_hbt and leg.%start_hb% <= end_hbt);
+                                
+%has_any_overlap_in_publ_period% = 
+ %has_any_overlap%(%publ_period_start%, %publ_period_end%);
+
+%has_any_overlap%(Abstime start_hbt, Abstime end_hbt) =
+    any(trip(chain),studio_overlap.%trip_overlap%) where 
+        (overlap(trip.%start_hb%,trip.%end_hb%, start_hbt, end_hbt)>00:00);
+        
+%has_empty_holes_in_publ_period% =
+    %has_empty_holes_in_period%(%publ_period_start%, %publ_period_end%);
+    
+%has_empty_holes_in_period%(Abstime start_hbt, Abstime end_hbt) =
+    let days = (end_hbt-start_hbt)/24:00;
+    any(times(days),not %_activity_on_date%(start_hbt+(%times_index_0%-1)*24:00));
+    /*any(times(days),not %_activity_on_date%(%_utc_time%(start_hbt+(%times_index_0%-1)*24:00)));*/
+    
+%has_extra_seat_in_period%(Abstime start_hbt, Abstime end_hbt) =
+    any(trip(chain), trip.%has_extra_seat%) where 
+        (overlap(trip.%start_hb%,trip.%end_hb%, start_hbt, end_hbt)>00:00);
+        
+%has_extra_seat_in_publ_period% =
+    %has_extra_seat_in_period%(%publ_period_start%, %publ_period_end%);
+
+%_activity_on_date%(Abstime start_hb) =
+    let end_hb = start_hb + 24:00;
+    any(trip(chain), overlap(trip.%start_hb%,
+                             trip.%end_hb%,
+                             start_hb,
+                             end_hb)>00:00)
+    where (trip.%start_hb% < end_hb and trip.%end_hb% > start_hb);
+
+%nr_empty_holes_in_publ_period% =
+    let days = (%publ_period_end%-%publ_period_start%)/24:00;
+        count(times(days)) where(not %_activity_on_date%(%publ_period_start%+(%times_index_0%-1)*24:00));
+
+%nr_overlaps_in_publ_period% =
+    count(trip(chain)) where 
+        (overlap(trip.%start_hb%,trip.%end_hb%, %publ_period_start%, %publ_period_end%)>00:00 and
+                studio_overlap.%trip_overlap%);
+        
+/****************************************************************
+* Section 3: Do Not Publish / Published Not Informed
+***************************************************************/
+
+/* Used by the do_not_publish rudob
+*/
+table rudob_do_not_publish_table(Int match) =
+  crew.%id%, %loaded_data_period_start%, match ->
+    export AbsTime %do_not_publish_start%, 
+    export AbsTime %do_not_publish_end%;
+  external "do_not_publish";
+  crew, <end_time, match_number -> start_time, end_time;
+  - , -, -                      -> void_abstime, void_abstime;
+end
+  
+/* Lookup: If 'check_time' occurs within a do-not-publish period for the
+* specified crew, then the period start and end times (utc) are returned.
+* Otherwise, the start and end times are void.
+*/
+table do_not_publish_lookup(String crew_id, AbsTime check_time) =
+  crew_id,
+  check_time -> export AbsTime %dnp_start%,
+                export AbsTime %dnp_end%;
+    external "do_not_publish";
+  crew,
+  ("start_time","end_time"( -> "start_time", "end_time";
+  -, - -> void_abstime, void_abstime;
+end
+  
+/*
+** Lookup: Select crew with do-not-inform period(s) after now.
+** For use in Studio selections.
+**
+** Added another view against this table with the assumption that it won't
+** grow that big, since entries will be deleted during the tracking process.
+*/
+
+table do_not_publish_select =
+  crew.%id%,
+  %now%    -> export AbsTime %do_not_publish_after_now_sort%;
+    external "do_not_publish";
+  crew,
+  <"end_time" -> min("start_time");
+end
+
+export %do_not_publish_after_now% =
+  not void(%do_not_publish_after_now_sort%);
+  
+/*
+** Activity that will turn into PUBLISHED when saved from Studio.
+*/
+
+export %leg_will_be_published% =
+  (not %leg_is_published%)
+  and leg. %starts_in_pp%
+  and void(%dnp_start%(crew.%id%, leg.%start_utc%));
+  
+export %duty_will_be_published% = any(leg(duty), %leg_will_be_published%);
+export %trip_will_be_published% = any(duty(trip), %duty_will_be_published%);
+
+
+/*
+** Used by the do_not_publish rudob, and for Studio selects.
+*/
+table rudob_pubnotinf_table(Int matchno) =
+  crew.%id%,
+  1Jan1901,
+  %notification_valid_end%,
+  "Automatic",
+  "Assignment",
+  matchno -> export Abstime %pubnotinf_firstmodst%,
+             export Abstime %pubnotinf_st%,
+             export Abstime %pubnotinf_lastmodet%,
+             export AbsTime %pubnotinf_deadline%,
+             export String %pubnotinf_failmsg%;
+  External "crew_notification";
+  "crew",
+  > "delivered",  /* "1Jan1901>delivered" matches void, i.e. non-delivered */
+  > "st", /* "%notification_valid_end%>st": in loadperiod (st is non-voidy!) */
+  "typ_typ",
+  "typ_subtype",
+  match_number -> "firstmodst",
+                  "st",
+                  "lastmodet",
+                  "deadline",
+                  "failmsg";
+  -, -, -, -, -, -
+  -> void_abstime, void_abstime, void_abstime, void_abstime, void_string;
+end
+
+/* %pubnotinf_start/end%: for backwards compatibility, we use 'st' as default
+* for 'firstmodst' and 'lastmodet', because they will only be valid in
+* crew_notification entries created after the published-not-informed
+* functionality (SASCMS-2491) has been taken in production at SAS.
+* This way we will at least get a rudob marker on the st-day, and the Studio
+* selects will work.
+*/
+export %pubnotinf_start%(Int matchno) =
+  default(%pubnotinf_firstmodst%(matchno), %pubnotinf_st%(matchno));
+export %pubnotinf_end%(Int matchno) =
+  default(%pubnotinf_lastmodet%(matchno), %pubnotinf_st%(matchno) + 0:01);
+  
+/*
+* Studio selects: "Published-not-informed after now/tomorrow"
+*/
+
+export %pubnotinf_after_now% =
+  not void(%pubnotinf_after_now_sort%);
+export %pubnotinf_after_now_sort% =
+  %min_pubnotinf_after_time%(%now_hb_day_utc%);
+export %pubnotinf_after_tomorrow% =
+  not void(%pubnotinf_after_tomorrow_sort%);
+export %pubnotinf_after_tomorrow_sort% =
+  %min_pubnotinf_after_time%(%tomorrow_hb_day_utc%);
+  
+%min_pubnotinf_after_time%(Abstime limit) =
+  min(times(9999), %pubnotinf_start%(%times_index_0%))
+  where(%pubnotinf_end%(%times_index_0%) > limit)
+  while(not void(%pubnotinf_deadline%(%times_index_0%)));
+
+%now_hb_day_utc% = crew.%hb_date_as_utc_time%(%now%);
+%tomorrow_hb_day_utc% = crew.%hb_date_end_as_utc_time%(%now%);
+
+/* Used in Publish.py::markDoNotPublish to check if a marked period overlaps
+* with published changes (which is a potential risk). */
+export %any_pubnotinf_in_period_hb%(Abstime st_hb, Abstime et_hb) =
+  let st = crew.%utc_time%(st_hb), et = crew.%utc_time%(et_hb);
+  any(times(9999), overlap(st, et,
+                           %pubnotinf_start%(%times_index_0%),
+                           %pubnotinf_end%(%times_index_0%)) >  0:00)
+  while(not void(%pubnotinf_deadline%(%times_index_0%)));
+
+
+/*******************************************************************************
+* Section 4: Published state
+*******************************************************************************/
+
+/*
+** These are the possible 'pubtype' tags that can exist in 'published_roster'.
+** When the next months' rosters are released for a planning area,
+** 'published_roster' entries will be written for each crew. There will be one
+** for each of the tags. During the tracking process, the entries will be
+** updated to indicate the proper dave revision of legs within the period.
+** Note:
+** - %rostering_published_type% entries are not modified after roster-publish.
+** - There should be no gaps or overlaps between entries with the same tag.
+** - Any roster-published point in time should be covered by all four tags. 
+** - Exception: In the non-roster-published period (after the latest roster
+**      publish period), scattered  %tracking_published_type% tagged entries
+**      may exist for activity that have been published by manpower/pre-studio.
+*/ 
+export %rostering_published_type% = "SCHEDULED";
+export %tracking_published_type% =  "PUBLISHED";
+export %tracking_informed_type% =   "INFORMED";
+export %tracking_delivered_type% =  "DELIVERED";
+
+export %crew_rostering_published_end% =
+  default(max(times(9999), %pubend_ix%(crew.%id%, %rostering_published_type%, %times_index_0%))
+          while (not void(%pubstart_ix%(crew.%id%, %rostering_published_type%, %times_index_0%)))
+         ,1Jan1901);
+
+/* Not fully relevant (for the PUBLISHED tag, there may be gaps between
+* published_roster entries). Nevertheless. the variable is useful for debugging.
+*/
+%_crew_tracking_published_end% =
+  default(max(times(9999), %pubend_ix%(crew.%id%, %tracking_published_type%, %times_index_0%))
+          while (not void(%pubstart_ix%(crew.%id%, %tracking_published_type%, %times_index_0%)))
+         ,1Jan1901);
+
+/* For times(...) iterations 
+   Called from the Publish.py function. */
+export %t_pubcid%(string crewid, string pt) = 
+  %pubcid_ix%(crewid, pt, %py_index%);
+export %t_pubstart%(string crewid, string pt) = 
+  %pubstart_ix%(crewid, pt, %py_index%);
+export %t_pubend%(string crewid, string pt) = 
+  %pubend_ix%(crewid, pt, %py_index%);
+
+export %t_pubcount%(string crewid, string pt) =
+  count(times(10000) while (not void(%pubstart_ix%(crewid, pt, %times_index_0%))));
+
+table t_crew_published_roster_lookup
+    (string crew_id, string published_type, int seq) =
+  crew_id, published_type, seq -> 
+    export int %pubcid_ix%,
+    export abstime %pubstart_ix%,
+    export abstime %pubend_ix%;
+  external "published_roster";
+  "crew", "pubtype", match_number
+  ->
+  "pubcid", "pubstart", "pubend";
+  -, -, - -> 0, void_abstime, void_abstime;
+end
+
+export %leg_in_scheduled_period% =
+  %is_roster%
+  and leg.%activity_scheduled_start_time_utc% < %crew_rostering_published_end%;
+  
+export %duty_in_scheduled_period% = all(leg(duty), %leg_in_scheduled_period%);
+export %trip_in_scheduled_period% = all(duty(trip), %duty_in_scheduled_period%);
+export %wop_in_scheduled_period% = all(trip(wop), %trip_in_scheduled_period%);
+                                                          
+export %leg_is_published% =
+  %is_roster%
+  and %leg_in_scheduled_period%
+  and not void(leg.%published_time%);
+  
+export %duty_is_published% = all(leg(duty), %leg_is_published%);
+export %trip_is_published% = all(duty(trip), %duty_is_published%);
+export %wop_is_published% = all(trip(wop), %trip_is_published%);
+
+
+/* Tables used for lookup in temporary model table (Memory table). */
+table rudob_inform_table(Int match) =
+  crew.%id%, fundamental.%loaded_data_period_start%, match
+    ->
+    export AbsTime %inform_start%, 
+    export AbsTime %inform_end%,
+    export String %inform_si%;
+  external %tmp_inform_table%;
+
+  crew, <=end_time, match_number ->  start_time, end_time, si;
+  - , -, - -> void_abstime, void_abstime, void_string;
+end
+  
+
+table inform_lookup(String crew_id, AbsTime check_time) =
+  crew_id, check_time -> export AbsTime %info_p_start%,
+                         export AbsTime %info_p_end%,
+                         export String %info_p_si%;
+    external %tmp_inform_table%;
+  crew, ("start_time","end_time"( -> "start_time", "end_time", "si";
+  -, - -> void_abstime, void_abstime, void_string;
+end
+
+export %tmp_inform_table% = 
+  parameter "tmp_inform_table" 
+  remark "Temporary table";
+
+/*
+** For merging of adjacent same-type pacts within the planning period.
+** Main use is for the rostering publish process, in order to handle pacts
+** that have been imported as single-day legs. Merging can greatly reduce the
+** number of trips in the plan, which has a performance impact.
+**
+** See also: carmusr.rostering.Publish.py::join_pacts_in_period.
+*/
+
+export %leg_is_pact_merge_start% =
+  not %_pact_can_be_merged_with_previous%
+  and next(leg(chain), %_pact_can_be_merged_with_previous%);
+  
+export %leg_pact_merge_end_utc% =
+  next(leg(chain), leg.%end_utc%)
+  where(%_pact_can_be_merged_with_previous%
+        and (is_last(leg(chain))
+             or next(leg(chain), not %_pact_can_be_merged_with_previous%)));
+
+%_leg_pubcid%(String pubtype) =
+  let leg_st = leg.%activity_scheduled_start_time_utc%;
+  max(times(9999), %pubcid_ix%(crew.%id%, pubtype, %times_index_0%))
+  where(leg_st >= %pubstart_ix%(crew.%id%, pubtype, %times_index_0%)
+        and leg_st < %pubend_ix%(crew.%id%, pubtype, %times_index_0%))
+  while(not void(%pubstart_ix%(crew.%id%, pubtype, %times_index_0%)));
+
+%_leg_pubend%(String pubtype) =
+  let leg_st = leg.%activity_scheduled_start_time_utc%;
+  max(times(9999), %pubend_ix%(crew.%id%, pubtype, %times_index_0%))
+  where(leg_st >= %pubstart_ix%(crew.%id%, pubtype, %times_index_0%)
+        and leg_st < %pubend_ix%(crew.%id%, pubtype, %times_index_0%))
+  while(not void(%pubstart_ix%(crew.%id%, pubtype, %times_index_0%)));
+
+%_leg_scheduled_pubcid% =
+  %_leg_pubcid%(%rostering_published_type%);
+%_leg_published_pubcid% =
+  %_leg_pubcid%(%tracking_published_type%);
+%_leg_published_pubend% =
+  %_leg_pubend%(%tracking_published_type%);
+%_leg_informed_pubcid% =
+  %_leg_pubcid%(%tracking_informed_type%);
+%_leg_delivered_pubcid% =
+  %_leg_pubcid%(%tracking_delivered_type%);
+
+%_pact_can_be_merged_with_previous% =
+  let st = leg.%start_utc%,
+      code = leg.%code%,
+      stn = leg.%start_station%;
+  leg.%is_pact%
+  and leg.%completely_in_pp%
+  and prev(leg(chain), leg.%completely_in_pp%
+                       and leg.%end_utc% = st
+                       and leg.%code% = code
+                       and leg.%start_station% = stn)
+  and %_prev_leg_is_identically_published%;
+
+%_prev_leg_is_identically_published% =
+  let spubcid = %_leg_scheduled_pubcid%,
+      ipubcid = %_leg_informed_pubcid%,
+      ppubcid = %_leg_published_pubcid%,
+      dpubcid = %_leg_delivered_pubcid%;
+  prev(leg(chain),     spubcid = %_leg_scheduled_pubcid%
+                   and ipubcid = %_leg_informed_pubcid%
+                   and ppubcid = %_leg_published_pubcid%
+                   and dpubcid = %_leg_delivered_pubcid%); 
+  
+/*end of file*/

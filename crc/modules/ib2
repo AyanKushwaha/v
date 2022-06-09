@@ -1,0 +1,513 @@
+/* -*- crc -*- 
+
+ib2
+---------------------------------------------------------
+ This file contains all reports and filter variables in use
+ by InterBids version 2. Also used by the python scripts.
+ It will need an adjusment for each customer and user.
+
+Contents:
+  RAVE definitions for the Roster Report
+
+*******************************************************/
+
+
+module ib2
+import pp;
+import levels;
+import crew;
+import duty;
+import trip;
+import leg;
+
+import bid;
+import fundamental;
+
+import planning_area;
+import qualification;
+import crew_pos;
+import crew_contract;
+
+/* Date & Time */
+%to_date%(Abstime Abs1) = format_time(Abs1,"%02d%ub%Y");
+%to_date_sql%(Abstime Abs1) = format_time(Abs1,"%02d-%ub-%Y");
+%to_time%(Abstime Abs1) = format_time(Abs1,"%02H:%02M");
+%to_datetime%(Abstime Abs1) = format_time(Abs1,"%02d%ub%Y %02H:%02M");
+%to_ymdt%(Abstime Abs1) = format_time(Abs1,"%02y%02m%02d%02H:%02M");
+
+
+%to_end_date%(Abstime Abs1) =
+  if (time_of_day(Abs1) = 0:00) 
+  then %to_date%(Abs1-0:01)
+  else %to_date%(Abs1);
+
+%to_end_date_sql%(Abstime Abs1) =
+  if (time_of_day(Abs1) = 0:00) 
+  then %to_date_sql%(Abs1-0:01)
+  else %to_date_sql%(Abs1);
+
+%to_end_time%(Abstime Abs1) =
+  if (time_of_day(Abs1) = 0:00) 
+  then %to_time%(Abs1-0:01)
+  else %to_time%(Abs1);
+
+%to_end_datetime%(Abstime Abs1) =
+  if (time_of_day(Abs1) = 0:00) 
+  then %to_datetime%(Abs1-0:01)
+  else %to_datetime%(Abs1);
+    
+%to_end_ymdt%(Abstime Abs1) =
+  if (time_of_day(Abs1) = 0:00) 
+  then %to_ymdt%(Abs1-0:01)
+  else %to_ymdt%(Abs1);
+
+
+/*
+
+  The following definitions should be changed when using 
+  a new CARMUSR.
+
+*/
+
+/***************************************
+
+	  PARAMETERS
+
+****************************************/
+export %rpc_hosts% =
+  parameter "localhost:8000"
+  remark "INTERBIDS: The xml-rpc hosts (host:port[,host:port]) (required)";
+
+export %rpc_subplan_name% =
+  parameter ""
+  remark "INTERBIDS: The xml-rpc subplan to be used (optional)";
+
+export %rpc_rule_set% =
+  parameter ""
+  remark "INTERBIDS: The xml-rpc ruleset to be used (optional)";
+
+export %rpc_parameter_set% =
+  parameter ""
+  remark "INTERBIDS: The xml-rpc parameterset to be used (required)";
+
+export %crr_filter_start_index% =
+  parameter 1
+  remark "INTERBIDS: Start index of crr when filtering (used by InterBids )";
+
+export %crr_filter_max_crrs% = 
+  parameter 50
+  remark "INTERBIDS: Max number of CRRs to send to InterBids (used by InterBids)";
+
+export %subplan_group_name% = 
+  parameter ""
+  remark "INTERBIDS: The name of the InterBids group (used by InterBids SQL report)";
+
+/***************************************
+
+  REPORT ITERATORS and CONTEXTS
+
+****************************************/
+
+export iterator chain_set =
+  partition (chain);
+end
+
+export iterator crr_set =
+  partition (trip);
+end
+
+export iterator crr_awarded_set =
+  partition (trip)
+  by (%crr_filter_export% and %crr_awards_bid%);
+end
+
+export iterator assigned_crrs =
+  partition (trip) 
+  by(map(leg(trip),%crr_id%));
+end
+
+export iterator rtd_set =
+  partition (duty);
+end
+
+export iterator compressed_rtd_set =
+  partition (duty)
+  by( map(leg(duty), flight_number,  leg_number, leg.%group_code%, 
+                     flight_carrier,  flight_suffix,  time_of_day(arrival), 
+                     time_of_day(departure), extra_seat, aircraft_type));
+end
+
+export iterator activity_set =
+  partition (leg);
+end
+
+export iterator compressed_leg_set =
+  partition (leg)
+  by( flight_number,  leg_number, leg.%group_code%, 
+      flight_carrier,  flight_suffix,  time_of_day(arrival), 
+      time_of_day(departure), extra_seat, aircraft_type);
+end
+
+
+export iterator stations_set =
+  partition (leg)
+  by (departure_airport_name);
+end
+
+
+/***************************************
+
+          REPORT VARIABLES 
+
+****************************************/
+
+
+/*
+  Variables to be used in headers and in report informations.
+*/
+
+/* MOVED FORMAT TO REPORT
+export %current_time% = %to_datetime%(time); 
+*/
+export %current_time% = time;
+
+export %file_revision% = 3;
+export %planner_alias% = default(user,"UNDEFINED");
+
+/*
+  CRR Filter variables
+*/
+
+export %crr_filter_matching_crrs% = default(
+  context(sp_crrs, count(crr_set) 
+    where (%crr_filter_export% and %crr_awards_bid%)), 0);
+
+export %crr_filter_available_crrs% = default(
+  context(sp_crrs, count(crr_set)
+    where (%crr_filter_export%)), 0);
+
+export %crr_filter_include_crr_by_index% = 
+  %crr_filter_start_index% <= %py_index% and
+  %py_index% < (%crr_filter_start_index% + %crr_filter_max_crrs%);
+
+
+/*
+  Sub-plan information variables
+*/
+export %plan_name_context% = 
+  context (current_context,
+  concat(fp_name,"/",fp_version,"/",lp_name,"/",sp_name));
+export %plan_name% = concat(fp_name,"/",fp_version,"/",lp_name,"/",sp_name);
+export %plan_comment% = 
+  parameter "InterBids data"
+  remark "INTERBIDS: Comment to be written in the InterBids xml file";
+export %plan_type% = "NYI";
+export %plan_group% = default(%subplan_group_name%,"UNDEFINED");
+export %plan_group_desc% = "";
+
+export %plan_start_date% = %to_date%(%pp_start%);
+export %plan_start_tod% = %to_datetime%(%pp_start%);
+export %plan_end_date% = %to_end_date%(%pp_end%);
+export %plan_end_tod% = %to_end_datetime%(%pp_end%);
+
+
+/* 
+  Period dependant variables
+*/
+
+export %rostering_period_start% = %pp_start%;
+export %rostering_period_end% = %pp_end%;
+
+/* 
+  Chain (roster) dependant variables
+*/
+
+export %chain_id% = 
+  concat(default(crr_crew_id, "UNDEFINED"),"#",format_int(index,"%05d"));
+export %chain_dutytime% = pp.%block_time%;
+export %chain_blocktime% = pp.%duty_time%;
+export %chain_local_timezone% =
+  parameter true
+  remark "INTERBIDS: Send all times in Local times";
+export %chain_timezone% = 
+  if %chain_local_timezone%
+  then "Local"
+  else "Utc";
+
+/* 
+  Crew dependant variables
+*/
+
+export %crew_id% = crew.%id%;
+export %crew_userid% = crew.%id%;
+export %crew_alias% = default(crew.%signature%,"UNDEFINED");
+export %crew_userlevel% = 1;
+export %crew_firstname% = default(crew.%firstname%, "UNDEFINED");
+export %crew_lastname% = "UNDEFINED";
+export %crew_seniority% = default(crew.%seniority%,0);
+export %crew_main_func% = crew.%main_func%;
+export %crew_period_dutytime% = pp.%duty_time%;
+export %crew_period_blocktime% = pp.%block_time%; 
+
+/* 
+  CRR (pairing) dependant variables
+*/
+
+/* This variable contains information which crrs that should be
+   looked at when filter. 
+   Includes if only homebase trips should be accounted for*/
+export %crr_filter_export% = default(
+  /* Only trips in planning area */
+  planning_area.%trip_is_in_planning_area%
+  /* Only trips with active flights in open time */
+  and trip.%has_active_flight% and not %is_roster%
+  /* No hidden trips */
+  and not hidden
+  /* Starting in planning period */
+  and trip.%starts_in_pp%
+  /* Only trips with matching homebase, in case there are multiple bases
+     in the planning area (cabin SKN) */
+  and any(crr_base_variants, trip.%homebase% = %crew_homebase%)
+  /* Only trips that crew is qualified for */
+  and %ib2_trip_has_valid_ac_type%
+  /* Only match trips with open positions matching crew function */ 
+  and crew_pos.%trip_assigned_pos%(%ib2_assign_pos%) > 0
+  
+  , false);
+
+/* Tripserver qualification lookup */
+export %ib2_trip_has_valid_ac_type% =
+  all(duty(trip), %ib2_duty_has_valid_ac_type%);
+
+export %ib2_duty_has_valid_ac_type% =
+  all(leg(duty), %ib2_leg_has_valid_ac_type%);
+
+export %ib2_leg_has_valid_ac_type% =
+  leg.%is_deadhead% or
+  not leg.%is_flight_duty% or
+  %ib2_crew_has_qln_leg_start%;
+  
+%ib2_crew_has_qln_leg_start% = %ib2_crew_qln_expiry_date% > 1Jan1986;
+
+table ib2_qln_expiry_date =
+  bid.%crew_id%, "ACQUAL", leg.%qual%, leg.%start_date% ->
+    Abstime %ib2_crew_qln_expiry_date%;
+  external crew.%qln_table%;
+  crew, qual_typ, qual_subtype, (validfrom,validto( -> validto;
+  -, -, -, - -> 1Jan1986;
+end
+
+/* Tripserver assign position check, handles the AS on short haul case */
+%ib2_trip_active_start% = crew_pos.%trip_active_start_homebase%;
+
+%ib2_assign_pos% =
+    let rank = crew_contract.%crewrank_at_date_by_id%(bid.%crew_id%, 
+                                             %ib2_trip_active_start%);
+    if rank = "AS" and not trip.%has_long_haul_aircraft% then 7 
+    else crew_pos.%func2pos%(rank);
+    
+    
+export %crr_roster_export% =
+  not hidden
+  and %crr_end% >= %rostering_period_start%;
+export %crr_id% = 
+  if default(length(crr_name),0) > 0
+  then crr_name
+  else if not void(%crr_crew_id%)
+  then concat(%crr_crew_id%,%to_ymdt%(%crr_start%))
+  else "UNDEFINED";
+export %crr_awards_bid% = bid.%trip_grants_any%;
+export %crr_crew_id% = default(crr_crew_id, "UNDEFINED");
+export %crr_assigned_position% = default(crew.%main_func%, "UNDEFINED");
+export %crr_group% = %plan_group%;
+export %crr_start% = 
+  if %chain_local_timezone%
+  then trip.%start_lt%
+  else trip.%start_utc%;
+export %crr_end% = 
+  if %chain_local_timezone%
+  then trip.%end_lt%
+  else trip.%end_utc%;
+
+/* MOVED INTO THE REPORT
+export %crr_startdate% = %to_date%(%crr_start%);
+export %crr_starttime% = %to_time%(%crr_start%);
+export %crr_enddate% = %to_date%(%crr_end%);
+export %crr_endtime% = %to_time%(%crr_end%);
+*/
+
+export %crr_onduty% = trip.%is_on_duty%;
+export %crr_onduty_sql_string% = 
+  if (trip.%is_on_duty%)
+  then "Y"
+  else "N";
+export %crr_dutytime% = trip.%duty_time%(duty.union, True);
+export %crr_blocktime% = trip.%block_time%;
+export %crr_dutytime_int% = trip.%duty_time%(duty.union, True) / 0:01;
+export %crr_blocktime_int% = trip.%block_time% / 0:01;
+
+export %crr_is_flight% = 
+  default(trip.%has_only_flight_duty%,false);
+export %crr_is_personal% = 
+  default(first(leg(trip), personal_activity),false);
+export %crr_is_ground% = 
+  default(trip.%is_ground_duty%,false);
+export %crr_is_standby% = 
+  default(trip.%is_standby%,false);
+export %crr_typestring% =
+  if %crr_is_standby% then "standby"
+  else if %crr_is_flight% then "flight"
+  else if %crr_is_ground% then "ground"
+  else if %crr_is_personal% then "personal"
+  else "UNDEFINED";
+export %crr_include_qual% = false;
+export %crr_sort_order% = %crr_start%;
+
+/* 
+  RTD (duty) dependant variables
+*/
+
+export %rtd_start% = 
+  if %chain_local_timezone%
+  then duty.%start_lt%
+  else duty.%start_utc%;
+export %rtd_end% = 
+  if %chain_local_timezone%
+  then duty.%end_lt%
+  else duty.%end_utc%;
+
+/* MOVED INTO THE REPORT
+export %rtd_startdate% = %to_date%(%rtd_start%);
+export %rtd_starttime% = %to_time%(%rtd_start%);
+export %rtd_enddate% = %to_date%(%rtd_end%);
+export %rtd_endtime% = %to_time%(%rtd_end%);
+*/
+
+export %rtd_onduty% = 
+  if any(leg(duty),%activity_onduty%) then "True" else "False";
+export %rtd_onduty_sql_string% = 
+  if any(leg(duty),%activity_onduty%) then "Y" else "N";
+export %rtd_dutytime% = duty.%duty_time%(duty.union, True);
+export %rtd_blocktime% = duty.%block_time%;
+export %rtd_dutytime_int% = duty.%duty_time%(duty.union, True) / 0:01;
+export %rtd_blocktime_int% = duty.%block_time% / 0:01;
+
+/* 
+  ACTIVITY (leg) dependant variables
+*/
+
+export %activity_is_flight% = flight_duty;
+export %activity_is_ground% = ground_duty;
+export %activity_is_personal% = personal_activity;
+export %activity_is_standby% = leg.%group_code% = "SBY";
+export %activity_is_deadhead% = default(deadhead,false);
+export %activity_type% = 
+  if %activity_is_standby% then "standby"
+  else if %activity_is_deadhead% then "deadhead"
+  else if %activity_is_flight% then "flight"
+  else if %activity_is_personal% then "personal"
+  else if %activity_is_ground% then "ground"
+  else "UNDEFINED";
+export %activity_start% = 
+  if %chain_local_timezone%
+  then leg.%start_lt%
+  else leg.%start_utc%;
+export %activity_end% = 
+  if %chain_local_timezone%
+  then leg.%end_lt%
+  else leg.%end_utc%;
+export %activity_startstation% = departure_airport_name;
+
+/* MOVED INTO THE REPORT
+export %activity_startdate% = %to_date%(%activity_start%);
+export %activity_starttime% = %to_time%(%activity_start%);
+export %activity_enddate% = %to_date%(%activity_end%);
+export %activity_endtime% = %to_time%(%activity_end%);
+export %activity_starttz% = departure_time_zone;
+*/
+
+export %activity_endstation% = arrival_airport_name;
+export %activity_endtz% = arrival_time_zone;
+export %activity_blocktime% = leg.%block_time%;
+export %activity_stoptime% = 
+  if is_last(leg(trip)) or not %activity_is_flight%
+  then 00:00
+  else next(leg(trip),%activity_start%) - %activity_end%;
+export %activity_blocktime_int% = leg.%block_time% / 0:01;
+export %activity_stoptime_int% = %activity_stoptime% / 0:01;
+
+export %activity_carrier% = default(flight_carrier, "UNDEFINED");
+export %activity_number% = format_int(default(flight_number, 0000),"%04d");
+export %activity_suffix% =   
+  if %activity_is_flight%
+  then default(flight_suffix, "UNDEFINED")
+  else default(ground_duty_code_suffix, "UNDEFINED");
+
+export %activity_craft% = default(aircraft_type, "UNDEFINED");
+export %activity_code% =
+  if %activity_is_flight% 
+  then concat(%activity_carrier%, %activity_number%)
+  else if (leg.%group_code% = "PTO") then "Paid time off"
+  else if (leg.%group_code% = "NPS") then "Non pay status"
+  else if (leg.%group_code% = "CIN") then "Carry-in"
+  else if (leg.%group_code% = "TRD") then "Training day"
+  else if (leg.%group_code% = "F")   then "Free day"
+  else if (leg.%group_code% = "OD")  then "Open reserve day"
+  else if (leg.%group_code% = "NFS") then "Non flying status"
+  else leg.%group_code%;
+export %activity_subcode% = default(leg.%code%, "UNDEFINED");
+export %activity_onduty% = leg.%group_code% = "FLT";
+export %activity_onduty_sql_string% = 
+  if(leg.%group_code% = "FLT")
+  then "Y"
+  else "N";
+export %activity_location% = default(departure_airport_name, "UNDEFINED");
+
+export %activity_description% = 
+  if %activity_is_standby% then "This is a standby"
+  else if %activity_is_deadhead% then "This is a deadhead"
+  else if %activity_is_flight% then "This is a flight"
+  else if %activity_is_personal% then "This is a personal activity"
+  else if %activity_is_ground% then "This is a ground activity"
+  else "";
+
+
+
+/******************************************
+  IMPLEMENTATION SPECIFIC VARIABLES
+******************************************/
+
+
+/*
+  STANDARD
+
+export %crew_has_qual_index% = false;
+export %crew_qual_name_index% = "UNDEFINED";
+
+export %crew_qual_start_index% = "01JAN1986";
+export %crew_qual_end_index% = "01JAN1986";
+
+table crew_qualifications(String CrewId, int SeqNo) = 
+  CrewId, SeqNo -> 
+    export String %crew_qual_name%,
+    export Abstime %crew_qual_start%,    
+    export Abstime %crew_qual_end%;
+  External crew.%preferences_table%;
+  CrewId, SeqNo -> Preference, PeriodStart, PeriodEnd;
+  - , -         -> "", 01JAN1986, 01JAN1986;
+end
+
+
+*/
+
+/* Look up crew home base in the crew table. This is needed for filtering
+** trip from the same base as the crew.
+**/
+/* Redefine base to actually mean station, because station is from where
+   crew fly production */
+export %crew_homebase% = 
+    default(crew_contract.%station_at_date_by_id%(bid.%crew_id%, 
+                                         %crr_start%), "");
+    
+
+

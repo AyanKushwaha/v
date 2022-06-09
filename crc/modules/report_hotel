@@ -1,0 +1,358 @@
+/* -*- crc -*-
+ *
+ * 
+ *
+ * Purpose:
+ *   This file containes hotel variables needed for reports.
+ *
+ * Created by:
+ *   Leo Wentzel; 17-Oct-2006
+ *
+ * Major changes:
+ *
+ */
+
+module report_hotel
+
+import fundamental;
+import base_utils;
+import report_common;
+import trip;
+import duty;
+import leg;
+import task;
+import levels;
+import hotel;
+import crew;
+import crew_pos;
+import rest;
+import iterators;
+import base_break;
+import attributes;
+import parameters;
+
+/* Mappings to other modules */
+
+export %crew_id% = crew.%id%;
+export %crew_employee_number% = crew.%employee_number%;
+export %crew_rank% = crew.%rank_trip_start%;
+export %crew_firstname% = crew.%firstname%;
+export %crew_surname% = crew.%surname%;
+export %crew_pos%(string rank) = crew_pos.%func2pos%(substr(rank,1,2));
+
+export %leg_end_hotel% = %leg_end_lt%;
+export %adjusted_leg_end_hotel% = %leg_end_lt% - hotel.%hotel_time_of_day_change%;
+
+export %next_leg_start_hotel% =
+  if not %crew_is_ill_out_homebase% then
+    if (duty.%is_first_in_b2b_subtrip%) then
+      default(next(leg(chain), %leg_start_lt%)
+               where (leg.%is_on_airport% or leg.%is_ground_transport%),
+               last(leg(trip), %leg_end_lt%))
+    else
+      default(next(leg(wop), %leg_start_lt%)
+               where (leg.%is_on_airport% or leg.%is_ground_transport%),
+               last(leg(wop), %leg_end_lt%))
+  else
+    default(next(leg(chain), %leg_start_lt%)
+             where (leg.%is_on_airport% or leg.%is_ground_transport%),
+             31Dec2099);
+    /* if crew is ill or is in a training activity, and hasn't booked
+    yet a flight back to homebase, the hotel check out is unknown*/
+export %adjusted_next_leg_start_hotel% = %next_leg_start_hotel% - hotel.%hotel_time_of_day_change%;
+
+%_leg_connected% =
+ let st = leg.%end_station%;
+ default(next(leg(wop), (leg.%start_station% = st)
+                          and not base_break.%is_break_before%)
+         where (leg.%is_hotel_flight_duty%),
+         false);
+
+/* start and end of flights are considered from scheduled times in hotel */
+%leg_start_lt% = leg.%activity_scheduled_start_time_lt%;
+%leg_end_lt% = leg.%activity_scheduled_end_time_lt%;
+
+%is_ground_transport_arr% = leg.%is_ground_transport%;
+%is_ground_transport_dep% =
+  if %crew_is_ill_out_homebase% 
+  then 
+    next(leg(chain),leg.%is_ground_transport%)
+    where(leg.%is_hotel_flight_duty%)
+  else 
+    next(leg(trip), leg.%is_ground_transport%)
+    where (leg.%is_hotel_flight_duty%); 
+
+/* Variables needed for no of nights calculation. */
+%transport_time% = hotel.%transport_time%(leg.%end_station%,
+                                          default(%layover_hotel_id%, ""),
+                                          %leg_end_lt%);
+%early_check_in% = default(hotel.%early_checkin%(default(%layover_hotel_id%, ""),
+                                                 %leg_end_lt%),
+                          hotel.%default_early_checkin%);
+%late_check_out% = default(hotel.%late_checkout%(default(%layover_hotel_id%, ""),
+                                                 %leg_end_lt%),
+                          hotel.%default_late_checkout%);
+%check_in% =
+  round_down(%leg_end_hotel% + %transport_time% - %early_check_in%, 24:00);
+%check_out% =
+  round_down(%next_leg_start_hotel% - %transport_time% + (24:00 - %late_check_out%), 24:00);
+
+/* Calculates number of nights. If duty pass and nightstop nights are 1. */
+export %nights% =
+  if %need_hotel%
+  then default(nmax((%check_out% - %check_in%) / 24:00, 1), 1)
+  else 0;
+
+export %arr_flight_nr% =
+  if not %is_ground_transport_arr% 
+  then %_flight_descriptor%
+  else task.%code%;
+%_flight_descriptor% =
+  let passive_str = if leg.%is_deadhead% then " P" else "";
+  concat(leg.%flight_carrier%, " ", 
+         format_int(leg.%flight_nr%,"%04d"), 
+         passive_str);
+export %arr_flight_end% = %leg_end_lt%;
+export %arr_flight_arr_stn% = leg.%end_station%;
+export %arr_flight_passive% = leg.%is_deadhead%;
+/* for all departures, we consider the possibility of being ill out
+   of homebase, so departure flight would be unknown, but hotel needed*/
+export %dep_flight_nr% =
+  if %crew_is_ill_out_homebase% 
+  then 
+    if %_leg_connected%
+    then
+      next(leg(chain),%arr_flight_nr%)
+      where(leg.%is_on_airport% or leg.%is_ground_transport%)
+    else "?"
+  else 
+    if (duty.%is_first_in_b2b_subtrip%) then
+      next(leg(chain), %arr_flight_nr%)
+      where (leg.%is_on_airport% or leg.%is_ground_transport%)
+    else
+      next(leg(wop), %arr_flight_nr%)
+      where (leg.%is_on_airport% or leg.%is_ground_transport%);
+
+export %dep_flight_start% =
+  if %crew_is_ill_out_homebase% 
+  then 
+    if %_leg_connected%
+    then
+      next(leg(chain), %leg_start_lt%)
+      where (leg.%is_on_airport% or leg.%is_ground_transport%)
+    else 31Dec2099
+  else 
+    next(leg(wop), %leg_start_lt%)
+    where(leg.%is_on_airport% or leg.%is_ground_transport%);
+
+export %dep_flight_dep_stn% =
+  if %crew_is_ill_out_homebase% 
+  then 
+    if %_leg_connected%
+    then
+      next(leg(chain), leg.%start_station%)
+      where (leg.%is_on_airport% or leg.%is_ground_transport%)
+    else "?"
+  else
+    next(leg(wop), leg.%start_station%)
+    where(leg.%is_on_airport% or leg.%is_ground_transport%);
+
+export %dep_flight_passive% =
+  if %crew_is_ill_out_homebase% 
+  then
+    if %_leg_connected%
+    then
+      next(leg(chain), leg.%is_deadhead%)
+      where(leg.%is_on_airport% or leg.%is_ground_transport%)
+    else false
+  else 
+    next(leg(wop), leg.%is_deadhead%)
+    where (leg.%is_on_airport% or leg.%is_ground_transport%);
+
+export %ac_region% = hotel.%crew_region%;
+        
+export %region% = hotel.%region%;
+ 
+export %has_layover_hotel_id% = not void(%layover_hotel_id%);
+
+%has_depart_flight% = 
+  if %crew_is_ill_out_homebase%
+    then True
+  else if %is_b2b_rest% 
+    then True
+  else
+    default(next(leg(wop), leg.%is_hotel_flight_duty%)
+            where(leg.%is_hotel_flight_duty%),
+            false);
+
+  
+export %crew_is_ill_out_homebase% =
+  default(not %_crew_arrives_at_homebase%
+          and is_last(leg(trip))
+          and next(leg(chain), (leg.%is_illness%)),
+          false);
+
+%_crew_arrives_at_homebase% =
+  leg.%arrival_airport_base% = leg.%homebase%;
+
+/* Currently hotel is only booked when crew fly to and from an airport. */
+%need_hotel% =
+   leg.%is_hotel_flight_duty%
+   and not hotel.%is_cancelled_booking%
+   and not crew.%is_leased%(leg.%activity_scheduled_end_time_hb%)
+   and (%hotel_layover% or %_ground_duty_hotel_layover%) 
+   and not (base_break.%is_break_after% 
+            or default(next(leg(trip), base_break.%is_break_before%), 
+                       false))
+   and %has_depart_flight%;
+   
+%is_b2b_rest% = 
+  is_last(leg(trip)) and duty.%is_first_in_b2b_subtrip% and parameters.%oma16_b2b_valid%(leg.%start_utc%);
+   
+export %hotel_layover% =
+  if %crew_is_ill_out_homebase%
+    then default((next(leg(chain), %leg_start_lt%)
+                where (leg.%is_hotel_flight_duty%) - %leg_end_lt%) >= 5:00, true)
+  else if %is_b2b_rest%
+    then True
+  else 
+    default(%_leg_hotel_layover%,
+            default(%_leg_hotel_layover_split_duty_hb%, false));
+
+
+%_leg_hotel_layover% =
+  let end_hotel = next(leg(trip), %leg_start_lt%)
+                  where (leg.%is_hotel_flight_duty%),
+      start_hotel = %leg_end_lt%;
+  any(leg(trip), (next(leg(trip), %leg_start_lt%) - %leg_end_lt%) >= 5:00)
+  where (%leg_end_lt% >= start_hotel and %leg_start_lt% < end_hotel);
+
+%_leg_hotel_layover_split_duty_hb% =
+  let end_hotel = next(leg(wop), %leg_start_lt%)
+                  where (leg.%is_hotel_flight_duty%),
+      start_hotel = %leg_end_lt%,
+      leg_start_day = leg.%start_date%;
+  any(leg(wop), (next(leg(wop), %leg_start_lt%) - %leg_end_lt%) >= 6:00)
+  where (%leg_end_lt% >= start_hotel and %leg_start_lt% < end_hotel and leg_start_day = next(leg(wop), leg.%start_date%));
+ 
+%_ground_duty_hotel_layover% =
+  default(next(leg(duty), not leg.%is_hotel_flight_duty%)
+          and last(leg(duty), not leg.%is_hotel_flight_duty%)
+              where (%hotel_layover%),
+          false);
+            
+/*
+** Retrieves hotel id.
+** Day hotel for duty pass and simulator training away from base.
+*/
+export %layover_hotel_id% =
+  if %need_hotel% then
+    %hotel_id%
+  else
+    void_string;
+
+/* Retrieves overridden hotel id. */    
+export %layover_hotel_id_override% =
+  if %need_hotel% then
+    default(%hotel_id_override%, "default")
+  else
+    void_string;
+  
+/* Retrieves "normal" hotel id. */
+%hotel_id% = default(hotel.%leg_hotel_id%, %default_hotel%);
+
+/* Retrieves overridden hotel id. */
+%hotel_id_override% =
+	if hotel.%is_cancelled_booking% then void_string
+	else default(hotel.%leg_hotel_id_override%, %default_hotel%);
+
+/* Retrieves default hotel id used when no hotel is found */
+%default_hotel% =
+	first(times(%airport_hotel_count%), %airport_hotel%(times_index(0))) where (not void(hotel.%hotel_contract_hotel_id%(%airport_hotel%(times_index(0)), leg.%end_utc%)));
+
+table airport_hotel_table(int seq) =
+  leg.%end_station%, seq -> string %airport_hotel%;
+  External hotel.%airport_hotel_table_p%;
+  "airport", match_number -> "hotel";
+  -,-                     -> "default";
+end
+
+table airport_hotel_table_count =
+  leg.%end_station% -> export int %airport_hotel_count%;
+  External hotel.%airport_hotel_table_p%;
+  "airport" -> count(row_number);
+end
+
+%_not_cancelled% = not default(hotel.%is_cancelled_booking%, false);
+
+/* Used to calculate the amount of crew so that right amount of hotel rooms can be booked. */
+export %assigned% = sum(leg_set, crew_pos.%leg_assigned%) where (%_not_cancelled%);
+export %assigned_fc% = sum(leg_set, crew_pos.%leg_assigned_fc%) where (%_not_cancelled%);
+export %assigned_cc% = sum(leg_set, crew_pos.%leg_assigned_cc%) where (%_not_cancelled%);
+
+/* Used in hotel booking report for iterate over legs in trips not assigned to crew. */
+export iterator layover_set =
+  partition(leg)
+  by(%has_layover_hotel_id%,
+     %layover_hotel_id%,
+     %region%,
+     %arr_flight_nr%,
+     %arr_flight_end%,
+     %arr_flight_arr_stn%,
+     %dep_flight_start%,
+     %dep_flight_nr%,
+     %dep_flight_dep_stn%,
+     report_common.%is_open_trip_all%);
+end
+
+/* Used to iterate over each flight for each hotel and region. Used in forecast. */
+export iterator forecast_layover_set =
+  partition(leg)
+  by(%has_layover_hotel_id%,
+     %crew_id%,
+     %layover_hotel_id_override%,
+     %region%,
+     %arr_flight_nr%,
+     %arr_flight_end%,
+     %arr_flight_arr_stn%,
+     %dep_flight_start%,
+     %dep_flight_nr%,
+     %dep_flight_dep_stn%);
+end
+
+/* Performed hotel report variables. */
+export %formatted_arrival_day% = format_time(%arrival_day%, "%a %02d%b");
+export %arrival_day% = round_down(%leg_end_hotel% - hotel.%hotel_time_of_day_change%, 24:00);
+export %departure_day% = round_down(%next_leg_start_hotel% - hotel.%hotel_time_of_day_change%, 24:00);
+export %arrival_time% = time_of_day(%leg_end_hotel%);
+export %formatted_departure_day% = 
+  let dep = %departure_day%;
+  if dep >= 30Dec2099 then "?" else format_time(dep, "%a %02d%b");
+  
+export %departure_time% = 
+  if not %crew_is_ill_out_homebase%
+  then %reltime2str%(time_of_day(next(leg(trip), %leg_start_lt%)))
+  else 
+    if %_leg_connected%
+    then %reltime2str%(time_of_day(next(leg(chain), %leg_start_lt%)
+                                               where (leg.%is_hotel_flight_duty%)))
+    else "?";
+export %is_airport_hotel% = 
+  hotel.%use_airport_hotel% and not %crew_is_ill_out_homebase%;
+  
+/* Used to iterate over all flights for an airport. */
+export iterator performed_layover_set =
+  partition(leg)
+  by(%has_layover_hotel_id%,
+     %layover_hotel_id_override%,
+     %region%,
+     %arrival_day%,
+     %arr_flight_nr%,
+     %arr_flight_end%,
+     %arr_flight_arr_stn%,
+     %dep_flight_start%,
+     %dep_flight_nr%,
+     %dep_flight_dep_stn%);
+end
+
+/* end of file */

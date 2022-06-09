@@ -1,0 +1,860 @@
+/* -*- crc -*- 
+ * 
+ * Purpose:
+ *    This module contains the logic for compensation days and
+ *    maintenance of the leave accounts
+ *
+ * Sections:
+ *     1. Fundamental definitions
+ *     2. Definitions of account balance
+ *     3. Bidding and assignment of compensation days
+ *     4. Select for forcing assignment of days
+ *     5. Duty time definitions
+ *
+ * Created by:
+ *    Erik Gustafsson 12-Dec-2006
+ *
+ */
+
+root module compdays
+import fundamental;
+import base_product;
+import base_utils;
+import levels;
+import roster;
+import trip;
+import duty;
+import wop;
+import crew;
+import iterators;
+import leg;
+import bought_days;
+import parameters;
+import calendar;
+import system_db_parameters;
+
+/****************************************************************
+ * Section 1: Fundamental definitions.
+ ***************************************************************/
+
+set in_use =
+  "F0","F3","F3S","F31","F32","F33","F35","F38","F7S","F89", "F9", "F15","F16"
+  remark "Compdays in use";
+
+set grants_duty_time =
+  "F3","F33","F35","F38","F0","F7S"
+  remark "Compdays that grants duty-time";
+  
+set to_assign_p =
+  parameter "F3","F3S","F32","F33","F38" 
+  remark "Compdays to assign";
+  
+/* Table lookup */
+export %leave_account_entry_table% = %etab_path%(%leave_account_entry_table_p%);
+/* [acosta:07/155@12:36] Should we not remove parameters to table names ?? */
+%leave_account_entry_table_p% =
+  parameter "account_entry"
+  remark "ETAB: Table with leave account postings";
+
+%account_set_table_name% = %etab_path%("account_set");
+
+%accumulator_int_run_table% = %etab_path%(%accumulator_int_run_table_p%);
+%accumulator_int_run_table_p%=
+  parameter "accumulator_int_run"
+  remark "ETAB: Table with current crew account baseline ";
+
+
+%account_baseline_table% = %etab_path%(%account_baseline_table_p%);
+%account_baseline_table_p% =
+  parameter "account_baseline"
+  remark "ETAB: Table with compday account baselines ";
+
+/****************************************************************
+ * Section 2: Definitions of account balance
+ ***************************************************************/
+
+/********************** 2.1 Use accumulated baseline in accout_baseline ********/
+
+table account_baseline_accend_lookup(String acckey)=
+      "balance", acckey -> AbsTime %_acc_int_date%, 
+                          AbsTime %_acc_int_lastrun_date%;
+      external %accumulator_int_run_table%;
+      "accname", "acckey" -> accstart, lastrun;
+      - , - -> void_abstime, void_abstime;
+end
+
+
+table account_baseline_val_lookup(String daytype, String crew_id, Abstime acc_tim)=
+      daytype, crew_id, acc_tim -> Int %_acc_balance%;
+      external %account_baseline_table%;
+      id, crew, tim ->  val;
+      -,-,- -> 0;
+end
+export %acc_balance%(String daytype) = 
+    %_acc_balance%(daytype, crew.%id%, %acc_end%);
+                     
+%account_migration_date% = default(%_acc_int_lastrun_date%("MIGRATION"),
+                                   2jun2008);
+
+%baseline_exists_for_period%= %acc_end% <> 1Jan1901;
+
+%_acc_end% = default(%_acc_int_date%("DAILY"),
+                      default(default(%_acc_int_date%("F"),
+                                      %_acc_int_date%("C")),
+                                      %account_migration_date%)); 
+
+%acc_end%=
+  if   %_acc_end% < %plan_start% 
+      then %_acc_end%
+  else if %account_migration_date% < %plan_start% 
+      then %account_migration_date%
+   else 1jan1901 ;
+
+%plan_start% = fundamental.%plan_start%;/*pp_start_time;*/
+%plan_end% = fundamental.%plan_end%;/*pp_end_time;*/
+%trip_in_active_plan% = trip.%start_utc% >= %plan_start% and
+                        trip.%start_utc% < %plan_end%;
+                        
+%leg_in_active_plan% = leg.%start_utc% >= %plan_start% and
+                       leg.%start_utc% < %plan_end%;
+                        
+
+/* These operations are slow and should not be used to much 
+   GUI legality should probably do some caching on chain level for the rules
+*/
+
+/* Balance at date is the balance at a timepoint including all transactions
+   booked on that time-point. A block of vacation days are booked on the first
+   minute of the block and the reduction in balance is included in the balance
+   of that minute.
+*/
+
+export %balance_at_date%(String daytype, Abstime date) =
+  /* Balance is calculated from accumulated carry-in,
+     Transactions from account_entry outside the active plan,
+     Transactions from the roster in the active plan.
+     Roster activities outside the active plan does not affect the
+     balance directly. When they were saved corresponding transactions
+     would have been created. 
+     Date is used in following lookup
+     ACCOUNT BASELINE      TABLE BEFORE      ROSTER      TABLE AFTER
+          <              |  <=    <      |  <=     <   |  <=   < 
+     */
+  
+  if date <= %plan_start% then
+    %balance_before_plan_start%(daytype, date)
+  else
+    if date <= %plan_end% then
+      %balance_between_plan_start_end%(daytype, date)
+    else
+      %balance_after_plan_end%(daytype, date); 
+
+%balance_before_plan_start%(String daytype, Abstime date) =
+    %acc_balance%(daytype) +
+    %leave_account_entries_sum%(daytype, %acc_end%, nmin(date,%plan_start%));
+%balance_between_plan_start_end%(String daytype, Abstime date) =
+  %balance_before_plan_start%(daytype, date) +
+  %leave_account_roster_change%(daytype, %plan_start%, nmin(date,%plan_end%+00:01))+
+  %leave_account_entries_non_roster_change%(daytype, %plan_start%, nmin(date,%plan_end%+00:01))
+  ;
+%balance_after_plan_end%(String daytype, Abstime date) =
+  %balance_between_plan_start_end%(daytype, date) +
+  %leave_account_entries_change_auto%(daytype, %plan_end%+00:01, date);
+  
+%available_balance%(String daytype) =
+  %available_balance_at_date%(daytype, %pp_start%);
+
+/* Available balance is the minimum balance for the account from now on
+ * and into the future. The balance is calculated at all times where it is 
+ * changed (either on the roster or in the posting log).
+ */
+export %available_balance_at_date%(String daytype, Abstime date) =
+  /* The current available balance is the minimum of balance today and
+     minimum of balance at all future account activities. This check is
+     needed since there are events that increase balance */
+  nmin(%_available_balance_at_date%(daytype, date),
+       %balance_at_date%(daytype, date));
+/* Returns the minimum balance from events in the future */
+%_available_balance_at_date%(String daytype, Abstime date) =
+  if void(%min_balance_at_date_from_entries%(daytype, date)) and 
+     void(%min_balance_at_date_from_plan%(daytype, date)) then
+    %balance_at_date%(daytype, date)
+  else
+    if void(%min_balance_at_date_from_plan%(daytype, date)) then
+      %min_balance_at_date_from_entries%(daytype, date)
+    else if void(%min_balance_at_date_from_entries%(daytype, date)) then
+      %min_balance_at_date_from_plan%(daytype, date)
+    else
+      nmin(%min_balance_at_date_from_entries%(daytype, date), %min_balance_at_date_from_plan%(daytype, date));
+%min_balance_at_date_from_entries%(String daytype, Abstime date) =
+  min(times(%nr_leave_account_entries%(daytype, date, date + 365*24:00)),
+      %balance_at_date%(daytype, 
+                        %leave_account_entry_time%(daytype, date, date+365*24:00, %times_index_0%)+00:01));
+%min_balance_at_date_from_plan%(String daytype, Abstime date) =
+  min(leg(roster), %balance_at_date%(daytype, leg.%start_date%+00:01)) 
+      where (%leg_affects_account%(daytype) and %leg_in_active_plan%);
+
+%leave_account_roster_change%(String daytype, Abstime ivalstart, Abstime ivalend) =
+  sum(leg(roster), %leg_affects_amount%(daytype)) 
+  where (leg.%start_hb% >= ivalstart and leg.%start_hb% < ivalend and %leg_affects_account%(daytype));
+  
+%leave_account_entries_non_roster_change%(String daytype, Abstime ivalstart, Abstime ivalend) =
+    sum(times(%nr_leave_account_entries%(daytype, ivalstart, ivalend)),
+        %leave_account_entry_amount%(daytype, ivalstart, ivalend, %times_index_0%))
+    where (not %_roster_reason%(%leave_account_entry_reasoncode%(daytype, ivalstart, ivalend, %times_index_0%)));
+
+export %nr_leave_account_entries%(String daytype, Abstime ivalstart, Abstime ivalend) = 
+  count(times(500))
+  while(not void(%leave_account_entry_time%(daytype, ivalstart, ivalend, %times_index_0%)));
+
+/* crew.%id% made part of call for preload */
+export %leave_account_entry_amount%(String daytype, Abstime ivalstart, Abstime ivalend, Int ix) =
+    %_leave_account_entry_amount%(crew.%id%, daytype, ivalstart, ivalend, ix);
+export %leave_account_entry_time%(String daytype, Abstime ivalstart, Abstime ivalend, Int ix) =
+    %_leave_account_entry_time%(crew.%id%, daytype, ivalstart, ivalend, ix);
+export %leave_account_entry_source%(String daytype, Abstime ivalstart, Abstime ivalend, Int ix) =
+    %_leave_account_entry_source%(crew.%id%, daytype, ivalstart, ivalend, ix);
+%leave_account_entry_reasoncode%(String daytype, Abstime ivalstart, Abstime ivalend, Int ix) =
+    %_leave_account_entry_reasoncode%(crew.%id%, daytype, ivalstart, ivalend, ix);
+table leave_account_entry(String crewid, String daytype, Abstime ivalstart, Abstime ivalend, Int ix) =
+  crewid, daytype, ivalstart, ivalend, ix ->
+  Int %_leave_account_entry_amount%,
+  Abstime %_leave_account_entry_time%,
+  String %_leave_account_entry_source%,
+  String %_leave_account_entry_reasoncode%;
+  external %leave_account_entry_table%;
+  crew, account, <=tim, >=tim, match_number -> amount, tim, source, reasoncode;
+  -, -, -, -, - -> 0, void_abstime, void_string, void_string;
+end
+
+table account_set_table(int ix) =
+  "", ix -> export string %account_id%;
+  external %account_set_table_name%;
+  <=id, match_number -> id;
+  -, - -> void_string;
+end
+
+export %nr_account_set_entries% =
+    count(times(100))
+    while (not void(%account_ix_rave%));
+    
+%account_ix_rave% = %account_id%(%times_index_0%);
+%account_ix_python% = %account_id%(%py_index%);
+/* 
+ * This table accumulates the change for an account 
+ * The excludesource could be used to exclude all roster-entries when mixing
+ * with activities in a loaded plan
+ */
+
+%leave_account_entries_change_manual%(String daytype, Abstime ivalstart, Abstime ivalend) = 
+  %leave_account_entries_change%(true, daytype, ivalstart, ivalend);
+
+%leave_account_entries_change_auto%(String daytype, Abstime ivalstart, Abstime ivalend) = 
+  %leave_account_entries_change%(false, daytype, ivalstart, ivalend);
+
+export %leave_account_entries_sum%(String daytype, Abstime ivalstart, Abstime ivalend) = 
+  %leave_account_entries_change_manual%(daytype, ivalstart, ivalend) + 
+  %leave_account_entries_change_auto%(daytype, ivalstart, ivalend);
+
+/*To minimize number of lookups we have two tables*/
+/* To preload table, crew.%id% is a variable */
+%leave_account_entries_change%(Bool manual, String daytype, Abstime ivalstart, Abstime ivalend) =
+    %_leave_account_entries_change%(manual, crew.%id%, daytype, ivalstart, ivalend);
+table leave_account_entry_change_table(Bool manual, String crewid, String daytype, Abstime ivalstart, Abstime ivalend) =
+  manual, crewid, daytype, ivalstart, ivalend ->  Int %_leave_account_entries_change%;
+  external %leave_account_entry_table%;
+  man, crew, account, <=tim, >tim -> sum(amount);
+end
+
+export %account_extension%(String type, Abstime tim) =
+  if crew.%is_pilot% and 
+     type = "F31" and 
+     not crew.%is_long_haul%(tim)
+  then 100
+  else 0;
+
+/* CR 257B set of "new" codes */
+set skn_highrate_va_codes = "VAD", "VAH", "VA1D", "VA1H" , "VA", "VA1";
+
+/* This variable checks for already booked rates first.
+   the help function %_trip_affects_amount% only checks for unbooked rates */
+%leg_affects_amount%(String account) = 
+  /* Make a lookup for the perfect match, if perfect match then return the booked amount */
+  /* remove highrate skn vacation if we go from VA to VAD etc.*/
+  /* Rest of online search is to prevent recalculating compdays with different rates in CCR and CCT */
+  /* I.e. if it is booked leave it be, otherwise we would recalculate amount (eg. 1.6 vs 3.2) */ 
+  if not (crew.%region_at_date%(leg.%start_hb%) = "SKN" and %_leg_code% in skn_highrate_va_codes) and
+    %online_transaction_entry_search_id%(crew.%id%, account, leg.%start_hb%) <> "" and
+     %online_transaction_entry_search_rate%(crew.%id%, account, leg.%start_hb%) <> 0 and
+     %online_transaction_entry_search_amount%(crew.%id%, account, leg.%start_hb%) /
+     %online_transaction_entry_search_rate%(crew.%id%, account, leg.%start_hb%) = %_leg_days% and
+     abs(%_leg_affects_amount%(account)) > 0 and
+     /* Check sign, multiply with 100 to avoid truncation */
+     (100 * %online_transaction_entry_search_amount%(crew.%id%, account, leg.%start_hb%)) /
+     %_leg_affects_amount%(account) > 0 then
+     /* Ok, we had no voidy values and the days matched and the sign on the transaction matches */
+     %online_transaction_entry_search_amount%(crew.%id%, account, leg.%start_hb%)
+  else
+    %_leg_affects_amount%(account);
+
+%_leg_affects_amount%(String account) = 
+    %amount_by_start_date%(account, leg.%start_hb%, %_leg_code%, %_leg_days%);
+                
+    
+%amount_by_start_date%(string account, abstime start_date, string code, int days) =
+  let fc = crew.%is_pilot%,
+      fg = crew.%in_fixed_group%(start_date),
+      region = crew.%region_at_date%(start_date),
+      cct = (%product% = "CCT" and not parameters.%is_request_bidding%),
+      patprod = crew.%pattern_prod_ratio_at_date%(start_date);
+   %activity_affects_amount%(account, code, days, fc, region, fg, cct, patprod, start_date);
+   
+export %bought_days_in_calendar_month%(Abstime a1) =
+  bought_days.%bought_days_in_period%(round_down_month(a1), round_up_month(a1));
+
+export %bought_days_in_calendar_year%(Abstime a1) =
+  bought_days.%bought_days_in_period%(round_down_year(a1), %bought_days_period_end%);
+
+export %bought_va_days_in_calendar_year%(Abstime a1) =
+  bought_days.%bought_type_days_in_period%("VA", round_down_year(a1), %bought_days_period_end%);
+
+export %bought_va_days_in_period%(Abstime a1) =
+  bought_days.%bought_type_days_in_period%("VA", round_down_year(a1), a1); 
+
+/*
+** NB! %PP-end% seems to end at 23:59 in CCT, so round-up to ensure that the
+** last day in the period is also counted.
+*/
+%bought_days_period_end% =
+  round_up(%pp_end%, 24:00);
+
+%_bought_va% = bought_days.%nr_of_type_in_trip%("VA"); /* Vacation */
+%_bought_f7% = bought_days.%nr_of_type_in_trip%("F7"); /* F7 Compensation day */
+%_bought_f% = bought_days.%nr_of_type_in_trip%("F"); /* Free day */
+
+%_leg_code% =
+    leg.%code%;
+
+%_leg_days% =
+    leg.%days%;
+
+%leg_affects_rate%(String account) =
+  if  %_leg_days% = 0 then
+    0
+  else  %leg_affects_amount%(account)/ %_leg_days%;
+
+%leg_affects_account%(String account) = 
+/* If crew has no region and is SKN, the high rate vacations will be missed! */
+  %activity_affects_account%(account, %_leg_code%, %_leg_days%, 
+                             crew.%is_pilot%, default(crew.%region_at_date%(leg.%start_hb%),""),
+                             false, %is_tracking%, 100, leg.%start_hb%);
+%leg_affects_reason%(String account) =
+/* If crew has no region and is SKN, the high rate vacations will be missed! */
+  %activity_affects_reason%(account, %_leg_code%, %_leg_days%, 
+                            crew.%is_pilot%, default(crew.%region_at_date%(leg.%start_hb%),""), 
+                            false, %is_tracking%, 100, leg.%start_hb%);
+%leg_affects_source%(String account) =
+/* If crew has no region and is SKN, the high rate vacations will be missed! */
+    %activity_affects_source%(account, %_leg_code%, %_leg_days%, 
+                              crew.%is_pilot%, default(crew.%region_at_date%(leg.%start_hb%),""), 
+                              false, %is_tracking%, 100, leg.%start_hb%);
+
+%leg_affects_comment%(String account) =
+  if account = bought_days.%account_name% then
+    if %_leg_code% = "VX" or %_leg_code% = "F7X" or %_leg_code% = "FX" then
+      bought_days.%comments_in_trip%
+    else
+      " "
+  else
+    " ";
+
+/* Mirror of the definition above, used for bid fits balance calculations */
+/* Note: cannot see any effect in this variable, not taken care of in table below. */
+/* QA"SKD": the table should use %agr_code%(code) instead. */
+%bid_affects_amount%(String account, String code, Int days, Abstime tim, 
+                     Bool is_fc, Bool is_fg, Bool is_sh, Bool is_skd, Int patprod) =
+  if is_fc then
+    %activity_affects_amount%(account, code, days, is_fc, 
+                              "", is_fg, false, 100, base_utils.%abstimemin%)
+  else
+    if is_skd then
+      %activity_affects_amount%(account, code, days, false, 
+                                "SKD", is_fg, false, patprod, base_utils.%abstimemin%)
+    else
+      %activity_affects_amount%(account, code, days, false, 
+                                "", is_fg, false, 100, base_utils.%abstimemin%);
+
+
+
+
+/*DEV ... */
+
+/*
+%_vacation_period_overlaps_freedays%(AbsTime this_day) =
+    let
+        wop_start = wop.%start_utc%,
+        wop_end = wop.%end_utc%;
+    any(leg(chain), overlap(wop_start, wop_end, leg.%start_utc%, leg.%end_utc%) > 0:00)
+    where (leg.%is_freeday%);
+*/
+
+
+
+/*
+%vacation_period_overlaps_freedays%(AbsTime this_day) =
+    false;
+*/
+
+
+table lookup_va_cost_pr_day(int percent) =
+
+    percent
+        -> %lookup_va_cost_pr_day%;
+
+    100   ->  160;
+     /* 94.2% */
+     94   ->  180;
+     80   ->  200;
+     /* 75.8% */
+     76   ->  225;
+     75   ->  210;
+     60   ->  260;
+     /* 59.5% */
+     59   ->  300;
+     50   ->  320;
+
+end
+
+
+
+table do_va_day_cost_lookup(bool is_valid, bool is_snkcc_or_nkfcc, bool is_published_period, bool is_vg, bool overlaps_freedays_totally) =
+    is_valid,
+        is_snkcc_or_nkfcc,
+            is_published_period,
+                is_vg,
+                    overlaps_freedays_totally
+                        -> %do_va_day_cost_lookup%;
+    y,  y,  y,  -,  -   -> true;
+    y,  y,  n,  y,  -   -> false;
+    y,  y,  n,  n,  n   -> true;
+    -,  -,  -,  -,  -   -> false;
+end
+
+
+set VA_set =
+ parameter "VA", "VA1", "F7"
+ remark "";
+
+
+%is_VAx_at_date%(Abstime date) =
+  any(leg(chain), overlap(date, date + 24:00, leg.%start_hb%, leg.%end_hb%) > 0:00)
+  where (leg.%code% in VA_set);
+
+/*
+%duty_is_VAx% =
+  any(leg(duty), leg.%code% in VA_set);
+*/
+
+%date_offset_by_days%(Abstime date, Int offset_days) =
+    date + (offset_days  * 24:00);
+
+
+%VAx_block_start%(Abstime date) =
+    let
+        date_floor = round_down(date, 24:00),
+        cnt = count(times(30))
+              while(%is_VAx_at_date%(%date_offset_by_days%(date_floor, -%times_index_0%)));
+
+    date_floor - cnt * 24:00;
+
+
+%VAx_block_length%(Abstime start_date) =
+    let start_date_floor = round_down(start_date, 24:00);
+    count(times(30))
+    while(%is_VAx_at_date%(%date_offset_by_days%(start_date_floor, %times_index_0% - 1 )));
+
+
+%va_day_cost%(int days, abstime this_day) =
+
+    let
+        start_day = %VAx_block_start%(this_day),
+        len = %VAx_block_length%(start_day),
+
+        is_valid = system_db_parameters.%agreement_valid%("cba16_VA_cost", start_day),
+        is_snkcc_or_nkfcc = crew.%has_agmt_group_snk_cc% or crew.%has_agmt_group_nkf_cc%,
+        is_published_period = calendar.%is_in_published_period%(this_day),
+        is_vg = crew.%in_variable_group%(this_day),
+        /*
+        overlaps_freedays_totally = %vacation_period_overlaps_freedays%(this_day),
+        */
+        overlaps_freedays_totally = false,
+
+        agreement = crew.%agreement_at_date_name%(crew.%id%, this_day),
+        percent = crew.%ccs_dutypercent%(agreement);
+
+    if %do_va_day_cost_lookup%(is_valid, is_snkcc_or_nkfcc, is_published_period, is_vg, overlaps_freedays_totally)
+        and len > 0 and len < 6 /* The spec table only defines 1-5 days. Otherwise behavious is undefined. */
+    then
+        - %lookup_va_cost_pr_day%(percent) * days
+    else
+        -100 * days;
+
+
+
+table account_changes_all(String account, String code, Int days, Bool fc, 
+                          String region, Bool fg, Bool cct, Int patprod, Abstime day_start_day) = 
+  fc, region, account, code, days, fg, cct, patprod -> %activity_affects_account%,
+                                                       %activity_affects_amount%,
+                                                       %activity_affects_reason%,
+                                                       %activity_affects_source%;
+
+  /* Flight crew specific rates and accounts */
+  y, -,  "F0",    "F0",  -,  -,  -, - -> true, -100*days, %_out_roster_reason%,  "F0 on Roster";
+  y, -, "F3",    "F3",   -,  -,  -,  - -> true, -100*days, %_out_roster_reason%, "F3 on Roster";
+  y, -, "F3",    "F61",  -,  -,  -,  - -> true,  100*days, %_in_roster_reason%,  "F61 on Roster";
+  y, -, "F3S",   "F3S",  -,  -,  -,  - -> true, -100*days, %_out_roster_reason%, "F3S on Roster";
+  y, -,  "F38", "F38",  -,  -,  -, - -> true, -100*days, %_out_roster_reason%,  "F38 on Roster";
+  y, -, "F7S",   "F7S",  -,  -,  -,  - -> true, -100*days, %_out_roster_reason%, "F7S on Roster";
+  y, -, "F15",    "F15",   -,  -,  -,  - -> true, -100*days, %_out_roster_reason%, "F15 on Roster";
+  y, -, "F16",    "F16",   -,  -,  -,  - -> true, -100*days, %_out_roster_reason%, "F16 on Roster";
+
+  /* Table lookup for days, as the agreement follows as seemingly random roundoff formula */
+  y, -, "F31",   "F31",  -,  false,false,  - -> true, -100*days, %_out_roster_reason%, "F31 on Roster";
+  y, -, "F31",   "F31",  -,  false,true    ,  - -> true, -100*%_f31_day_lookup%(days), %_out_roster_reason%, "F31 on Roster";
+  y, -, "F31",   "F31",  -,  true,    -    ,  - -> true, -100*%_f31_day_lookup%(days), %_out_roster_reason%, "F31 on Roster";
+
+  /* F32 is FC only */   /* TODO: F32 should also be SENIOR SKD CC */
+  y, -, "F32",   "F32",  -,  -,  -, - -> true, -100*days, %_out_roster_reason%, "F32 on Roster";
+  /* F33 is FC VG */
+  y, -, "F33",   "F33",  -,  -,  -, - -> true, -100*days, %_out_roster_reason%, "F33 on Roster";
+  /* F9 is FC VG */
+  y, -,  "F9",    "F9",  -,  false,  -, - -> true, -100*days, %_out_roster_reason%,  "F9 on Roster";
+
+  /* Cabin crew specific rates and accounts */
+  
+  n, -,  "F0",    "F0",  -,  -,  -, - -> true, -100*days, %_out_roster_reason%,  "F0 on Roster";
+  n, -,  "F3",    "F3",  -,  -,  -, - -> true, -100*days, %_out_roster_reason%,  "F3 on Roster";
+  n, -,  "F36",   "F36",  -,  -,  -, - -> true, -100*days, %_out_roster_reason%, "F36 on Roster";
+  n, -,  "F38", "F38",  -,  -,  -, - -> true, -100*days, %_out_roster_reason%,  "F38 on Roster";
+
+  /* non SKD is simpler */
+  n, <>"SKD", "F3S",   "F3S",  -,  -,  -, - -> true, -100*days, %_out_roster_reason%, "F3S on Roster";
+  n, <>"SKD", "F7S",   "F7S",  -,  -,  -, - -> true, -100*days, %_out_roster_reason%, "F7S on Roster";
+  n, <>"SKD", "F35",   "F35",  -,  -,  -, - -> true, -100*days, %_out_roster_reason%, "F35 on Roster";
+  n, <>"SKD", "F31",   "F31",  -,  -,  -, - -> true, -100*days, %_out_roster_reason%, "F31 on Roster";
+  /* This one is IN, no SKD conversion factor on in */
+  n, -,       "F3",    "F61",  -,  -,  -,  - -> true,  100*days, %_in_roster_reason%,  "F61 on Roster";
+
+  n, "SKD", "F3S",   "F3S", -,  true,  false, - -> true, -patprod*days, %_out_roster_reason%, "F3S on Roster";
+  n, "SKD", "F3S",   "F3S", -,  false, false, - -> true, -100*days,     %_out_roster_reason%, "F3S on Roster";
+  n, "SKD", "F3S",   "F3S", -,  -,     true, - -> true, -patprod*days,  %_out_roster_reason%, "F3S on Roster";  
+  n, "SKD", "F7S",   "F7S", -,  true,  false, - -> true, -patprod*days, %_out_roster_reason%, "F7S on Roster";
+  n, "SKD", "F7S",   "F7S", -,  false, false, - -> true, -100*days,     %_out_roster_reason%, "F7S on Roster";
+  n, "SKD", "F7S",   "F7S", -,  -,     true, - -> true, -patprod*days,  %_out_roster_reason%, "F7S on Roster";  
+  n, "SKD", "F31",   "F31",  -,  true,  false, - -> true, -patprod*days,%_out_roster_reason%, "F31 on Roster";
+  n, "SKD", "F31",   "F31",  -,  false, false, - -> true, -100*days,    %_out_roster_reason%, "F31 on Roster";
+  n, "SKD", "F31",   "F31",  -,  -,     true, - -> true, -patprod*days, %_out_roster_reason%, "F31 on Roster";
+  n, "SKD", "F32",   "F32",  -,  true,  false, - -> true, -100*days,%_out_roster_reason%, "F32 on Roster";
+  n, "SKD", "F32",   "F32",  -,  false, false, - -> true, -100*days,    %_out_roster_reason%, "F32 on Roster";
+  n, "SKD", "F32",   "F32",  -,  -,     true, - -> true, -100*days, %_out_roster_reason%, "F32 on Roster";
+  n, "SKD", "F35",   "F35",  -,  true,  false, - -> true, -patprod*days,%_out_roster_reason%, "F35 on Roster";
+  n, "SKD", "F35",   "F35",  -,  false, false, - -> true, -100*days,    %_out_roster_reason%, "F35 on Roster";
+  n, "SKD", "F35",   "F35",  -,  -,     true, - -> true, -patprod*days, %_out_roster_reason%, "F35 on Roster";
+  n, "SKD", "F89",   "F89",  -,  -,     -,    - -> true, -100*days,    %_out_roster_reason%, "F89 on Roster";
+  
+  /* Vacation accounts */
+  -, -, "VA",    "VA",   -,  -,  -, - -> true, %va_day_cost%(days, day_start_day), %_out_roster_reason%, "VA on Roster";
+  -, -, "VA1",   "VA1",  -,  -,  -, - -> true, %va_day_cost%(days, day_start_day), %_out_roster_reason%, "VA1 on Roster";
+  -, -, "F7",    "F7",   -,  -,  -, - -> true, %va_day_cost%(days, day_start_day), %_out_roster_reason%, "F7 on Roster";
+  /* New codes to handle the increased rate of norwegian short vacations */
+  -, "SKN", "VA", "VAD",   -,  -,  -, - -> true, -200*days, %_out_roster_reason%, "VAD on Roster"; 
+  -, "SKN", "VA", "VAH",   -,  -,  -, - -> true, (10*(-167*days)+5)/10, %_out_roster_reason%, "VAH on Roster";  
+  -, "SKN", "VA1","VA1D",   -,  -,  -, - -> true, -200*days, %_out_roster_reason%, "VA1D on Roster";  
+  -, "SKN", "VA1","VA1H",   -,  -,  -, - -> true, (10*(-167*days)+5)/10, %_out_roster_reason%, "VA1H on Roster";   
+  
+  /*-, -, "F7",    "F7X",  -,  -,  -, - -> true, -100*days, %_out_roster_reason%, "F7X on Roster";*/
+  
+  /* Bought and sold-days */
+  -, -, "SOLD",  "F22",  -,  -,  -, - -> true, -100*days, %_sold_roster_reason%, "F22 on Roster";
+ /*Bought days handled in python code - pergr 17Sep2008 */
+ /* -, -, "BOUGHT","FX",   -,  -,  -, - -> true, 100*days, %_bought_roster_reason%, "FX on Roster";
+  -, -, "BOUGHT","F7X",  -,  -,  -, - -> true, 100*days, %_bought_roster_reason%, "F7X on Roster";
+  -, -, "BOUGHT","VX",   -,  -,  -, - -> true, 100*days, %_bought_roster_reason%, "VX on Roster";
+  -, -, "BOUGHT","J7X",  -,  -,  -, - -> true, 100*days, %_bought_roster_reason%, "J7X on Roster";*/
+  
+  -, -, -, -, -, -, -, - -> false, 0, "", "";
+end
+
+%bought_day_convert_code%(string in_string) = 
+  default(%_bought_day_convert_code%(in_string), in_string);
+  
+table F31_day_map(int days) =
+  alias rc = crew.%is_fdrc_pp_start%;
+  days, rc    -> %_f31_day_lookup%;
+  < 1,  -     -> 0;
+    1,  -     -> 2;
+    2,  -     -> 3;
+    3,  -     -> 5;
+    4,  false -> 7;
+    4,  true  -> 6;
+  >=5,  false -> 9;
+  >=5,  true  -> 8;
+end
+  
+table bought_day_code(string in_string) = 
+    in_string -> export string %_bought_day_convert_code%;
+    "VA"  -> "VX";
+    "F"   -> "FX";
+    "F7"  -> "F7X";
+    "VX"  -> "VA";
+    "FX"  -> "F";
+    "F7X" -> "F7";
+    - -> void_string;
+end
+%bought_day_source%(string day_type)=
+  concat(%bought_day_convert_code%(day_type)," ","on Roster"); /*Space is important*/
+%_bought_day_code_from_source%(string source) =
+  %bought_day_convert_code%(substr(source,1,locate(" ",source)-1));
+
+/* account_entry reason possibilities in RAVE below, do not modify */
+/* No, seriously, don't change! */
+%_in_roster_reason% = "IN Roster";   /* DO NOT CHANGE!! */
+%_out_roster_reason% = "OUT Roster"; /* DO NOT CHANGE!! */
+%_sold_roster_reason% = "SOLD";      /* DO NOT CHANGE!! */
+%_bought_roster_reason% = "BOUGHT";  /* DO NOT CHANGE!! */
+
+/*
+ * Validation of online transactions, assumes context crew chain
+ *
+ * All the data for a specific transaction is already fetched in AccountHandler.py
+ * The reason for all the arguments is so we don't have to fetch them again
+ */
+ 
+%online_transaction_valid%(String crew, AbsTime start, String acc, Int amount, String reason, Int rate, String source) =
+    /* Entries before this date must'n be touched! */
+    start < %acc_end% or
+    crew.%id% = crew and
+    %_online_transaction_valid%(start, acc, amount, reason, rate, source);
+
+%_online_transaction_valid%(AbsTime start, String acc, Int amount, String reason, Int rate, String source) =
+    let days = if rate = 0 then 0 else amount / rate;
+    if %_roster_reason%(reason) or 
+        %_sold_reason%(reason)
+        then
+            any(leg(roster), leg.%start_hb% = start and
+	        	             %_leg_days% = days and
+                             %leg_affects_account%(acc) and
+                             %leg_affects_amount%(acc) = amount)
+            or                                       
+            /* Bought VA or F7 is marked as OUT Roster */
+            %_roster_reason%(reason) and 
+            default(bought_days.%matching_bought_period_exists%(acc, start, days, "*"), false) 
+    else if  %_bought_reason%(reason)
+        then
+          default(bought_days.%matching_bought_period_exists%(%_bought_day_code_from_source%(source), 
+                                                      start, days, acc), false)
+    else if %_manpower_reason%(reason) 
+        then true
+    else  true; /* Keep transaction if no matching test was found! */
+
+/* Make sure these match lib/python/carmusr/account_reasons.py */
+%_manpower_reason%(String reason)=
+  locate("Entitlement", reason)+
+  locate("Reduction", reason)+
+  locate("Saved", reason)+
+  locate("Unsaved", reason)+
+  locate("Unused", reason)+
+  locate("Transfer", reason)>0;
+  
+%_bought_reason%(String reason)=
+  reason = %_bought_roster_reason%;
+  
+%_sold_reason%(String reason)= 
+  reason = %_sold_roster_reason%;
+  
+%_roster_reason%(string reason) =
+    (locate("Roster",reason)+
+    locate("ROSTER",reason)+
+    locate("roster",reason))>0;
+    
+ /* Trip affects account(s) code below
+ * Called from python on account update, instead of asking if trip affects account,
+   trip now gives accounts it affects
+ */
+%leg_has_online_transaction_unbooked% =
+  if not (leg.%is_standby% or leg.%is_active_flight%) and
+     leg.%start_hb% >= %acc_end% /* DO NOT CREATE TRANSACTIONS BEFORE THIS DATE! */
+  then
+      any(times(%nr_account_set_entries%), 
+              %leg_online_transaction_unbooked%(%account_ix_rave%))
+  else false;
+
+%nr_account_affected_by_leg% =
+  count(times(%nr_account_set_entries%)) where 
+       ( %leg_affects_account%(%account_ix_rave%));
+      
+%leg_affects_accounts% = 
+  if   %leg_affects_account%(%account_ix_python%)
+  then %account_ix_python%
+  else "";
+%leg_affects_amounts% = 
+      %leg_affects_amount%(%account_ix_python%);
+%leg_affects_rates% = 
+  %leg_affects_rate%(%account_ix_python%);
+%leg_affects_reasons% = 
+    %leg_affects_reason%(%account_ix_python%);
+%leg_affects_sources% = 
+    %leg_affects_source%(%account_ix_python%);
+%leg_affects_comments% = 
+    %leg_affects_comment%(%account_ix_python%);
+  
+
+/* Leg-level for unbooked activity */
+%leg_online_transaction_unbooked%(String account) =
+    %leg_affects_account%(account) and
+    not %online_transaction_entry_check%(crew.%id%, account, %leg_affects_amount%(account), leg.%start_hb%);
+
+table account_entry_transaction(String transactionid) =
+  transactionid -> String %transaction_account%, String %transaction_crew%, 
+                   Int %transaction_amount%, Int %transaction_rate%,
+                   Abstime %transaction_time%, String %transaction_reason%,
+                   string %transaction_source%;
+  external %leave_account_entry_table%;
+  id -> account, crew, amount, rate, tim, reasoncode, source;
+  - -> void_string, void_string, void_int, void_int, void_abstime, void_string, void_string;
+end
+%online_transaction_entry_check%(String crew, String account, Int amount, Abstime timarg) =
+    if account = "BOUGHT_F3_2" then
+        %_online_transaction_entry_check%(crew, "BOUGHT_F3_2", 2*amount, timarg) <> ""
+    else
+        %_online_transaction_entry_check%(crew, account, amount, timarg) <> "";
+
+table account_entry_check(String crew, String account, Int amount, Abstime timarg) =
+  crew, account, amount, timarg, false -> String %_online_transaction_entry_check%;
+  
+  external %leave_account_entry_table%;
+  crew, account, amount, tim, man -> crew;
+  -,    -,       -,      - , -  -> "";
+end
+table account_entry_search(String crew, String account, Abstime timarg) =
+  crew, account, 0, timarg, false -> String %online_transaction_entry_search_id%,
+                                     Int    %online_transaction_entry_search_rate%,
+                                     Int    %online_transaction_entry_search_amount%;
+  
+  external %leave_account_entry_table%;
+  crew, account, >amount, tim, man -> id, rate, amount;
+  -,    -,       -,      -,    -   -> "", 0, 0;
+end
+   
+export %preload_account_entry_table% =
+    default(%_leave_account_entry_reasoncode%("ABCDE", "ABCDE", 1Jan1986 00:00, 1Jan1986 00:00, 1), " ");
+export %preload_account_entry_change_table% =
+    format_int(default(%_leave_account_entries_change%(false, "ABCDE", "ABCDE", 1Jan1986 00:00, 1Jan1986 00:00), 0), "%d");
+export %preload_account_entry_transaction_table% = default(%transaction_crew%("ABCDE"), " ");
+export %preload_account_entry_search_table% = default(%online_transaction_entry_search_id%("0", "VA", 1Jan1986 00:00), " ");
+export %preload_account_entry_check_table% = default(%_online_transaction_entry_check%("0", "VA",100, 1Jan1986 00:00), " ");
+
+export %preload_leave_account_entry_count% = 
+    default(%nr_leave_account_entries%("VA", 1jan1986, 1jan1986), 0);
+
+                    
+
+/****************************************************************
+ * Section 3: Assignment of compensation days
+ ***************************************************************/
+
+%crew_has_compday_at_date%(String type, Abstime date) =
+  any(trip(roster), trip.%code% = type and trip.%start_day% = date);
+
+export %trip_is_compday% =
+  trip.%code% in in_use;
+  
+export %trip_is_compday_with_duty_time% = 
+  trip.%code% in grants_duty_time;
+
+export %duty_is_compday% =
+  duty.%code% in in_use;
+  
+export %duty_is_compday_with_duty_time% =
+  duty.%code% in grants_duty_time;
+
+export %leg_is_compday_with_duty_time% = 
+  leg.%code% in grants_duty_time;
+  
+export %wop_has_compdays_with_duty_time% = 
+   any(leg(wop),%leg_is_compday_with_duty_time%);
+   
+export %day_is_bidded_for% = void_bool;
+
+/****************************************************************
+ * Section 4: Select for forcing assignment of days
+ ***************************************************************/
+
+export %crew_can_have_compdays_forced% =
+  (crew.%is_pilot% and ((crew.%is_long_haul_pp_start% and
+                         %available_balance%("F3") +
+                         %available_balance%("F3S") +
+                         %available_balance%("F31") > 700) 
+                         or
+                        (crew.%is_short_haul_pp_start% and
+                         %available_balance%("F3") +
+                         %available_balance%("F3S") > 500)
+                         or
+                         %available_balance%("F33") > 300))
+  or
+  (crew.%is_cabin% and (%available_balance%("F0") +
+                                 %available_balance%("F3") > 700));
+  
+/****************************************************************
+ * Section 5: Duty time
+ ***************************************************************/
+
+/** Duty time calculations
+**    Compdays add 9 hours of duty-time for SKS CC, 
+**    and 8 hours for SKN/SKD CC.
+**
+**  4ExNG: no longer applies.
+*/
+export %use_compday_duty_time%(Abstime time_hb) = 
+    default(%is_roster% and
+            %cabin_crew% and 
+            not crew.%k4exng_cc_sp5_1_valid%(time_hb) and
+            (crew.%is_sks_at_date%(time_hb) or
+             crew.%is_skn_at_date%(time_hb) or
+             %use_compday_duty_time_skd_cc%(time_hb)),false);
+
+/* redefined for CCT */
+%use_compday_duty_time_skd_cc%(Abstime time_hb) = 
+    default(parameters.%k12_skd_cc_sp4_3_valid%(time_hb) and
+            crew.%is_skd_at_date%(time_hb) and
+            crew.%in_fixed_group%(time_hb),false);
+
+export %compday_duty_time%(Abstime time_hb) =
+  if crew.%is_sks_at_date%(time_hb) then
+    %compday_duty_time_sks_cc%
+  else
+    %compday_duty_time_skn_cc%;
+
+%compday_duty_time_sks_cc% = 9:00;
+%compday_duty_time_skn_cc% = 8:00; /* also applies for SKD */
+
+export %duty_time_in_period_fwd%(Abstime start_utc, Abstime stop_utc) =
+  /* Duty can be several days. Overlap makes calculation correct. 
+  ** Assumed that start and stop is midnight */
+  let time_hb = crew.%hb_time%(start_utc);
+  if %use_compday_duty_time%(time_hb) then
+    sum(duty(chain),
+        (overlap(duty.%start_utc%, duty.%end_utc% + %_duty_daylight_save_hour%, 
+                 start_utc, stop_utc + %_duty_daylight_save_hour%)/ 24:00)
+        * %compday_duty_time%(time_hb))
+    from (current) 
+    while(duty.%start_utc% < stop_utc)
+    where(%duty_is_compday_with_duty_time%) 
+  else
+    0:00;
+
+%_duty_daylight_save_hour% = 
+    %period_daylight_save_hour%(duty.%start_utc%, duty.%end_utc%);  
+ 
+/* end of file */
+

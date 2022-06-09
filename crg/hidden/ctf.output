@@ -1,0 +1,502 @@
+/* -*- crg -*- 
+* $Header$
+********************************************************
+CTF file
+--------------------------------------------------------
+
+Use: Export data from Carmen in Carmen Transfer Format - CTF
+     This report is used to generate an export file from 
+     a subplan. The file will include pairings, pacts 
+     and rosters and optionally the flight leg section.
+
+     Note that ground duty legs must be in a separate etable 
+     and cannot be included in a CTF file.
+
+     This report is used to generate a CTF file from a subplan
+
+File structure:
+     FILE HEADER
+     CREW section
+     PAIRING Section
+     LEG section
+     MAIN BOX
+*******************************************************/
+
+options
+    text = noframe;
+    ascii = asctrimpage asctrimline;
+    ascwidth = 1024;
+end
+
+
+/*---------------------------
+ FILE HEADER
+----------------------------*/
+
+FileHeader:
+box
+    column
+	(text "PERIOD: %s - %s", 
+	    crg_ctf.%ctf_period_start%,
+	    crg_ctf.%ctf_period_end%),
+	(text "PLAN TYPE: %s",
+	    crg_ctf.%plan_type%),
+        /* is copied to keyword sp_comment */
+	(text "FILE COMMENT: \"Plan: %s/%s\"", lp_name, sp_name),
+        /* crr_name + start date (UTC) defines a unique pairing */
+	(text "PAIRING KEY: PAIRING_ID/START_DATE"),
+        /* default unless giving a time mode is mixed mode, 
+           ie flight UTC, gnd local */
+	(text "TIME MODE: UTC");
+end
+
+
+/*---------------------------
+ CREW section
+----------------------------*/
+
+AssignedActivity:
+box
+    /* A real PACT can only have one leg... */
+    repeat foreach crg_ctf.unique_leg_set;
+    make
+	assigned_act:row
+	    (text "%s %s %s ", 
+                crg_ctf.%studio_trip_lock_code%,
+		crg_ctf.%on_off_duty%,
+		crg_ctf.%environment_code%),
+	    (box PactDeparture),
+            (text "%s * %s ", 
+	        crg_ctf.%pact_code%,
+	        crg_ctf.%pact_sub_code%),
+	    (box PactArrival),
+	    *;
+    relate
+	column +assigned_act, page,assigned_act;
+    end
+end
+
+
+PairingAssignments:
+box
+  repeat 11 times;
+  make
+    if crew_pos.%pos2cat%(fundamental.%py_index% + 1) <> "" then
+      a: text "/%i", crew_pos.%leg_assigned_pos%(fundamental.%py_index% + 1);
+    end
+  relate
+    row +a, a;
+  end
+
+  row (text "%i", crew_pos.%leg_assigned_pos%(1)), -+a;
+end
+
+/* Print one crew member */
+OneCrew:
+box
+    column
+	(row 
+	    (text "CREW: "),
+	    (text "%i ",
+		crg_ctf.%number_of_trips%),
+	    (text "\"%s\"  ", crr_crew_id),
+	    *),
+        (column -+crew_activity),
+	(text "EOCREW");
+
+	
+    /* Each GPC pairing or PACT in a crew roster */
+    repeat foreach iterators.trip_set;
+    where crg_ctf.%trip_is_for_CTF%;
+    make
+        if not crg_ctf.%is_pact% then
+	    crew_activity: row 
+		(box PairingID),
+                (text "%s ", crg_ctf.%studio_trip_lock_code%),
+		(text "%s ", crg_ctf.%environment_code%),
+                /* Base this on crew_catergories !!!*/
+                (box PairingAssignments),
+ 		(text " %s ", crg_ctf.%trip_departure_date%),
+		*;	    
+	else
+	    crew_activity: column (box AssignedActivity);
+	end
+
+    relate
+	column +crew_activity,page,crew_activity;
+    end
+end
+
+OneEmptyCrew:
+box
+    column
+	(row 
+	    (text "CREW: 0 "),
+	    (text "\"%s\"  ", crr_crew_id),
+	    *),
+	(text "EOCREW");
+end
+
+
+Crew:
+box
+  repeat foreach sp_crew;
+  make
+    repeat foreach iterators.chain_set;
+    where not void(crr_crew_id), not hidden;
+    make
+	if nothing_scheduled then 
+	    one_crew:column
+		(row (box OneEmptyCrew), *);
+	else
+	    one_crew:column 
+		(row (box OneCrew), *);
+	end
+    relate
+	column +one_crew,page,one_crew;
+    end
+
+    
+    column (text "SECTION: CREW"),
+           page,
+           -+one_crew,
+           (text "EOSECTION");
+  end
+end
+
+
+/*---------------------------
+ PAIRING Section
+----------------------------*/
+
+
+/* Pairing identifier, must be an integer */
+PairingID:
+box
+    text "\"%D\" ", crg_ctf.%trip_id%;
+end
+
+PairingPositions:
+box
+  repeat 11 times;
+  make
+    if crew_pos.%pos2cat%(fundamental.%py_index% + 1) <> "" then
+      a: text "/%i", crg_ctf.%trip_booked_crew_position%(fundamental.%py_index% + 1);
+    end
+  relate
+    row +a, a;
+  end
+
+  row (text "%i", crg_ctf.%trip_booked_crew_position%(1)), -+a;
+end
+
+
+/* Pact departure always in UTC */
+PactDeparture:
+box
+    text "%s \"%s\" %s ", 
+      crg_ctf.%departure_date%,
+      departure_airport_name,
+      crg_ctf.%ctf_time_of_day%(departure);
+end
+
+/* Leg departure always in days from trip start, 1..N */
+LegDeparture:
+box
+    text "%i \"%s\" %s ", 
+      crg_ctf.%departure_day_in_trip%,
+      departure_airport_name,
+      crg_ctf.%ctf_time_of_day%(departure);
+end
+
+/* Pact arrival always in UTC */
+PactArrival:
+box
+    text "%s \"%s\" %s ", 
+      crg_ctf.%ctf_time_of_day%(arrival),
+      arrival_airport_name,
+      crg_ctf.%arrival_date%;
+end
+
+/* Leg arrival always in days from trip start, 1..N */
+LegArrival:
+box
+    text "%s \"%s\" %i ", 
+      crg_ctf.%ctf_time_of_day%(arrival),
+      arrival_airport_name,
+      crg_ctf.%arrival_day_in_trip%;
+end
+
+/* Print one pairing */
+OnePairing:
+box
+    column
+        (row 
+            (text "PAIRING: "),
+            (text "%i ", crg_ctf.%number_of_activities%),
+            (box PairingID),
+            (text "\"%D\"  ", crr_name),
+            (box PairingPositions),
+            (text " %s ",crr_homebase),
+            /* Do not use a real trip period, assume
+               it only works for one pairing at a time */
+            (text "%s %s FREQ(%i)",
+                crg_ctf.%trip_departure_date%, 
+                crg_ctf.%trip_departure_date%,
+                crg_ctf.%trip_departure_day_in_week%),
+            * 
+        ),
+        (column -+activity),
+        (text "EOPAIRING");
+
+    /* Each leg in the pairing */
+    repeat foreach crg_ctf.unique_leg_set;
+    make
+        activity:row 
+            (text "%s %s %s ",
+                crg_ctf.%activity_code%,
+                crg_ctf.%activity_sub_code%,
+                crg_ctf.%horisontal_lock_code%),
+            (box LegDeparture),
+            (text "%3s ", crg_ctf.%activity_description%),
+            (row activity_number),
+            (text "%s ", crg_ctf.%activity_suffix%),
+            (row leg_number),
+            (box LegArrival),
+            *;
+
+        /* -1 and '*' is the same in some parts of Studio... 
+           especially the CTF parser! */
+        if (default(flight_number > -1, false)) then
+            activity_number: text "%6i ", flight_number;
+        else                    
+            activity_number: text "     * ";
+        end
+
+        if flight_duty then
+            leg_number: text "%2i ",leg_number;
+        else                    
+            leg_number: text " 1 ";
+        end
+
+    relate
+        column +activity,page,activity;
+    end
+end
+
+
+PairingsCCP:
+box
+  repeat foreach sp_crrs;
+  make
+    repeat foreach crg_ctf.unique_trip_set;
+    where crg_ctf.%trip_is_for_CTF%, 
+          /* Do not include trips without any (assigned or open) work */
+	  crg_ctf.%trip_has_any_booked_positions%,
+          not crg_ctf.%is_pact%;
+    sort crg_ctf.%trip_departure_date%, 
+         default(crg_ctf.%trip_id%,"");
+    make
+      one_crr:column (row (box OnePairing), *);
+    relate
+        column +one_crr,page,one_crr;
+    end
+    column (text "SECTION: PAIRING"),
+           page,
+           -+one_crr,
+           (text "EOSECTION");
+  end
+end
+
+PairingsCCR:
+box
+  repeat foreach sp_crew_chains;
+  make
+    repeat foreach crg_ctf.unique_trip_set;
+    where crg_ctf.%trip_is_for_CTF%, 
+          /* Do not include trips without any (assigned or open) work */
+	  crg_ctf.%trip_has_any_booked_positions%,
+          not crg_ctf.%is_pact%;
+    sort crg_ctf.%trip_departure_date%, 
+         default(crg_ctf.%trip_id%,"");
+    make
+      one_crr:column (row (box OnePairing), *);
+    relate
+        column +one_crr,page,one_crr;
+    end
+    column (text "SECTION: PAIRING"),
+           page,
+           -+one_crr,
+           (text "EOSECTION");
+  end
+end
+
+/*---------------------------
+ LEG section
+----------------------------*/
+
+Legs:
+box
+  repeat foreach sp_crew_chains;
+  make
+   repeat foreach crg_ctf.booked_trip_set;
+   where crg_ctf.%trip_has_any_booked_positions%;
+   make
+    repeat foreach crg_ctf.unique_leg_set;
+    where crg_ctf.%leg_is_for_CTF%, 
+          crg_ctf.%leg_has_any_booked_positions% or deadhead;
+    sort flight_number, departure; 
+    make
+      one_leg:row 
+        (text "%D %6i %D %2i \"%D\"%D \"%D\"%D %D %D %D %D%D %D %D \"%D\"%D%D %D%D%D",
+          flight_carrier,
+          flight_number,
+          flight_suffix,
+          leg_number,
+          departure_airport_name,
+          if (passenger_terminal_departure_station <> "") then
+            concat(" TERMINAL(", passenger_terminal_departure_station, ")")
+          else
+            "",
+          arrival_airport_name,
+          if (passenger_terminal_arrival_station <> "") then
+            concat(" TERMINAL(", passenger_terminal_arrival_station, ")")
+          else
+            "",
+          crg_ctf.%ctf_time_of_day%(departure),
+          crg_ctf.%ctf_time_of_day%(arrival),
+          crg_ctf.%times_leg_passes_midnight%,
+          crg_ctf.%day_in_week%,
+          crg_ctf.%leg_gdor_offset%,
+          crg_ctf.%leg_period_start%,
+          crg_ctf.%leg_period_end%,
+          aircraft_type,
+          if (aircraft_type_custom <> "") then
+            concat(" \"", aircraft_type_custom, "\"")
+          else
+            "",
+          crg_ctf.%seat_configuration%,
+          service_type,
+          crg_ctf.%onward_reference%,
+          crg_ctf.%employer_reference%);
+    relate
+        column +one_leg,page,one_leg;
+    end
+    column (text "SECTION: LEG"),
+           page,
+           -+one_leg, 
+           (text "EOSECTION");
+  end
+ end
+end
+
+/*---------------------------
+ GND DUTY section
+----------------------------*/
+
+Gndlegs:
+box
+/* Tomas: v11.7.3: sp_crew_chains context appears to be broken... 
+   But to include environment trips we can't use sp_crrs...
+  repeat foreach sp_crrs;
+*/
+  repeat foreach sp_crew_chains;
+  make
+    repeat foreach crg_ctf.unique_leg_set;
+    where crg_ctf.%gnd_leg_is_for_CTF%, 
+          crg_ctf.%leg_has_any_booked_positions%;
+    sort ground_duty_code, ground_duty_code_suffix, departure; 
+    make
+      one_leg:row 
+        (text "\"%D\" %D \"%D\" %D %D %D %D %D %D %D",
+          ground_duty_code,
+          crg_ctf.%activity_suffix%,
+          departure_airport_name,
+          crg_ctf.%ctf_time_of_day%(departure),
+          crg_ctf.%ctf_time%(arrival - departure),
+          crg_ctf.%day_in_week%,
+          crg_ctf.%leg_period_start%,
+          crg_ctf.%leg_period_end%,
+          crg_ctf.%gnd_leg_service_type%,
+          crg_ctf.%gnd_leg_attribute%), *;
+    relate
+        column +one_leg,page,one_leg;
+    end
+    column (text "SECTION: GROUND DUTY"),
+           page,
+           -+one_leg, 
+           (text "EOSECTION");
+  end
+end
+
+
+/*---------------------------
+ MAIN BOX
+----------------------------*/
+
+crew_pos_names:
+box
+  repeat 11 times;
+  make
+    if crew_pos.%pos2cat%(fundamental.%py_index% + 1) <> "" then
+      a: text "/%s", crew_pos.%pos2func%(fundamental.%py_index% + 1);
+    end
+  relate
+    row +a, a;
+  end
+
+  row (text "# CREW COMPL: %s", crew_pos.%pos2func%(1)), -+a;
+end
+
+ctf_main:
+box
+   repeat foreach sp_crew_chains;
+   make
+      if crg_ctf.%include_legs% then
+         legs: row (box Legs),*,page;
+      else                    
+         legs: text 0x0 "";
+      end
+     
+      if crg_ctf.%include_gnd_legs% then
+         gnd_legs: row (box Gndlegs),*,page;
+      else                    
+         gnd_legs: text 0x0 "";
+      end
+
+      /* This is a fix for CRG. If a box is created, though empty, */
+      /* the first pairing will be missing. Problem only in Pac */
+      if crg_ctf.%any_roster% and crg_ctf.%include_rosters% then
+         crew: row (box Crew),*, page;
+      else                    
+         crew: text 0x0 "";
+      end
+      
+      /*Since the sp_crew_chain does not work well with CCP*/
+      /* the pairing section is divided into two parts. One*/
+      /* for CCP and one for CCR*/ 
+      if crg_ctf.%include_trips% and base_product.%product% = "CCP" then
+        trips: row (box PairingsCCP),*,page;
+      elseif crg_ctf.%include_trips% and (base_product.%product% = "CCR" or base_product.%product% = "CCT") then
+        trips: row (box PairingsCCR),*,page;
+      else
+        trips: text 0x0 "";
+      end
+
+      column
+        (text "# START OF FILE (Generated %s by %s)",
+                crg_date.%now_abs%,
+                user
+        ),        
+        (text "#"),
+        (row (box crew_pos_names),*),page,
+        /* This should be the same as in the 
+           crew_categories file!!! */
+        (row (box FileHeader),*),page,
+        crew,
+        trips,
+        legs,
+        gnd_legs;
+   end
+end
+      

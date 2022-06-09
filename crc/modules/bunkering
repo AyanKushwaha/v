@@ -1,0 +1,554 @@
+/* -*- crc -*-
+ *
+ * Purpose:
+ *      This module contains details for the 2020 Bunkering agreement
+ *      for Sweden Based Flight Crew used in CCR.
+ *
+ */
+
+root module bunkering
+
+import accumulators;
+import base_calendar;
+import base_utils;
+import crew;
+import freedays;
+import fundamental;
+import leg;
+import levels;
+import model_crew;
+import model_freedays;
+import wop;
+
+/************************************************
+ * Section 0: Parameter Group
+*************************************************/
+
+group params =
+    %start_global%,
+    %end_global%,
+    %recovered_day_reward_param%;
+
+/*************************************************
+ * Section 1: Global Definitions
+ *************************************************/
+
+/* Global dates for the duration of the Bunkering agreement */
+%start_global% =
+    parameter 1apr2020 0:00
+    remark "Start of Bunkering Agreement";
+%end_global% =
+    parameter 1sep2020 0:00
+    remark "End of Bunkering Agreement";
+
+/* Accumulator functions used */
+%bunkering_banked_days%(abstime start, abstime stop) =
+    accumulators.%bunkering_banked_days%(start, stop);
+%bunkering_reduction_days%(abstime start, abstime stop) =
+    accumulators.%bunkering_reduction_days%(start, stop);
+%bunkering_recovered_days%(abstime start, abstime stop) =
+    accumulators.%bunkering_recovered_days%(start, stop);
+%nr_actual_p_days%(abstime start, abstime stop) =
+    accumulators.%nr_actual_p_days%(start, stop);
+
+/* Base functions for processing agreement strings */
+%cv_location%(string agreement) =
+    locate("-CV", agreement);
+%cv_original%(string agreement) =
+    let location = %cv_location%(agreement);
+    if location > 0 then
+        substr(agreement, 1, location - 1)
+    else
+        agreement;
+%cv_value%(string agreement) =
+    let location = %cv_location%(agreement);
+    if location > 0 then
+        substr(agreement, location + 3, 2)
+    else
+        "";
+
+/*************************************************
+ * Section 2: Crew Definitions
+ *************************************************/
+
+/* Agreement info for start of pp */
+%crew_agreement_pp_start% =
+    model_crew.%agreement_at_date%(crew.%id%, %pp_start%);
+%crew_agreement_cv_value_pp_start% =
+    %cv_value%(%crew_agreement_pp_start%);
+
+/* Agreement info for end of pp
+    Checks -0:01 because we would like to know about the genuine end of this
+    pp and not what next pp's contract is if it changes then */
+%crew_agreement_pp_end% =
+    model_crew.%agreement_at_date%(crew.%id%, %pp_end%-0:01);
+%crew_agreement_cv_value_pp_end% =
+    %cv_value%(%crew_agreement_pp_end%);
+
+/* Set of ix functions to pull out agreement CV values from given ix and times.  */
+%agreement_ix%(int ix, abstime start_time, abstime end_time) =
+    model_crew.%crew_chg_agreement%(crew.%id%, ix, start_time, end_time);
+%cv_location_ix%(int ix, abstime start_time, abstime end_time) =
+    %cv_location%(%agreement_ix%(ix, start_time, end_time));
+%cv_value_ix%(int ix, abstime start_time, abstime end_time) =
+    %cv_value%(%agreement_ix%(ix, start_time, end_time));
+
+/* # of contracts a crew member has had from the start of bunkering to the start of the pp */
+%contracts_to_pp% =
+    model_crew.%crew_chg_agreement_count%(crew.%id%, %start_global%, %pp_start% + 0:01);
+
+/* rix is used to reverse the index number so the below can iterate backwards with times */
+%rix%(int max_ix, int ix) = max_ix - ix + 1;
+/* Iterates 'backwards' through the contracts from pp start to bunkering start
+   Returns earliest ix for the contract with same consecutive CV value as current one.
+   IF they do NOT have -CVxx at the start of the PP, this voids so that it can be handled. */
+%earliest_contract_ix_same_cv_value% =
+    if %crew_agreement_cv_value_pp_start% <> "" then
+        %rix%(%contracts_to_pp%,
+              max(times(%contracts_to_pp%), times_index(0))
+                    while (%cv_value_ix%(%rix%(%contracts_to_pp%,
+                                               times_index(0)),
+                                         %start_global%,
+                                         %pp_start%)
+                        = %crew_agreement_cv_value_pp_start%))
+    else
+        void_int;
+
+/* With the earliest current contract identified, the individual crew bunkering agreement start date
+   is calculated. */
+export %start_crew% =
+    default(nmax(%start_global%,
+                 model_crew.%crew_chg_agm_from%(crew.%id%,
+                                                %earliest_contract_ix_same_cv_value%,
+                                                %start_global%,
+                                                %pp_start% + 0:01)),
+            /* A void earliest contract causes this default to happen.
+               The crew member does NOT have -CVxx at the start of the PP.
+               They _may_ start during the PP instead. */
+            %cv_contract_starting_in_pp_date%);
+
+%cv_contract_starting_in_pp_date% =
+    let contracts_in_pp = model_crew.%crew_chg_agreement_count%(crew.%id%,
+                                                                %pp_start%,
+                                                                %pp_end%);
+    model_crew.%crew_chg_agreement_from%(crew.%id%,
+                                         first(times(contracts_in_pp), times_index(0))
+                                                where (%cv_value_ix%(times_index(0),
+                                                       %pp_start%,
+                                                       %pp_end%) <> ""),
+                                         %pp_start%,
+                                         %pp_end%);
+
+/* Latest contract search start
+     - %pp_start% or %start_crew%, whichever is latest */
+%latest_contract_search_start% =
+    nmax(%pp_start%, %start_crew%);
+/* # of contracts a crew member has from the start to the end of the bunkering agreement */
+%contracts_from_pp% =
+    model_crew.%crew_chg_agreement_count%(crew.%id%, %latest_contract_search_start%, %end_global%);
+
+/* Iterates forwards through contracts in the bunkering period to find the latest contract
+   with the same consecutive CV value as the one at the start of the pp.
+   Can capture changes during the planning period where bunkering would have to be
+   cut off. */
+%latest_contract_ix_same_cv_value% =
+    max(times(%contracts_from_pp%), times_index(0))
+        while (%cv_value_ix%(times_index(0),
+                             %latest_contract_search_start%,
+                             %end_global%)
+               = %cv_value%(model_crew.%agreement_at_date%(crew.%id%, %latest_contract_search_start%)));
+%latest_contract_end_date% =
+    model_crew.%crew_chg_agm_to%(crew.%id%,
+                                 %latest_contract_ix_same_cv_value%,
+                                 %latest_contract_search_start%,
+                                 %end_global%);
+
+/* End of the bunkering calculation is the earliest of:
+        - Global end of bunkering agreement
+        - End of current CVxx contract
+
+   It is possible that the end of bunkering agreement could vary more on a per crew
+   basis in the future */
+%end_crew% =
+    nmin(%latest_contract_end_date%, %end_global%);
+
+/* Number of bunkering agreement days relevant, per crew */
+%days_crew% = %days_touched%(%start_crew%, %end_crew%);
+
+/* If the crew member
+     1 - Is SKS_FD_AG or SKIS_FD_AG group
+     2 - Has a CVxx contract at the start of the planning period
+     3 - The earliest contract with the same CVxx type starts before the end of the
+         agreement period
+   Then they are considered for banking P days and recovering them later as
+   long as all the above continue to apply. */
+export %has_bunkering_agreement_at_pp_start% =
+    default((crew.%has_agmt_group_sks_fd% or crew.%has_agmt_group_skis_fd%)
+                and %crew_agreement_cv_value_pp_start% <> ""
+                and %start_crew% < %end_crew%,
+            false);
+
+export %has_bunkering_agreement_at_pp_end% =
+    default((crew.%has_agmt_group_sks_fd% or crew.%has_agmt_group_skis_fd%)
+                and %crew_agreement_cv_value_pp_end% <> ""
+                and %start_crew% < %end_crew%,
+            false);
+
+export %has_bunkering_agreement_in_pp% =
+    %has_bunkering_agreement_at_pp_start%
+    or %has_bunkering_agreement_at_pp_end%;
+
+/*
+    -CV80 Exceptions
+        737 (ac_qual "38") pilots on -CV80 contract have a pause in their banking of days
+        but can still use days banked from before they changed to -CV80 once they leave -CV80
+        and go back to their previous -CVxx contract
+*/
+%has_cv80_exception_at_pp_start% =
+    %has_bunkering_agreement_at_pp_start%
+    and crew.%has_ac_qln%(%pp_start%, "38")
+    and %crew_agreement_cv_value_pp_start% = "80";
+
+%has_cv80_exception_at_pp_end% =
+    %has_bunkering_agreement_at_pp_end%
+    and crew.%has_ac_qln%(%pp_end%, "38")
+    and %crew_agreement_cv_value_pp_end% = "80";
+
+/* If this is true, no days are banked for the planning period */
+export %has_cv80_exception_whole_pp% =
+    %has_cv80_exception_at_pp_start%
+    and %has_cv80_exception_at_pp_end%;
+
+/* If someone's start is after global and they are not currently CV80
+   then search through previous contracts to see if they have been CV80 */
+%had_previous_cv80_exception% =
+    %has_bunkering_agreement_at_pp_start%
+    and %start_crew% > %start_global%
+    and crew.%has_ac_qln%(%pp_start%, "38")
+    and not %has_cv80_exception_at_pp_start%
+    and any(times(%contracts_to_pp%), %cv_value_ix%(times_index(0), %start_global%, %pp_start%) = "80");
+
+/* Get ix of the first CV80 contract */
+%earliest_contract_ix_cv80_exception% =
+    if %had_previous_cv80_exception% then
+        first(times(%contracts_to_pp%), times_index(0))
+            where (%cv_value_ix%(times_index(0), %start_global%, %pp_start%) = "80")
+    else
+        void_int;
+
+/* Define the previous banking period and get number of days banked during that period
+   from the accumulator */
+%end_of_banking_period_before_cv80_exception% =
+    model_crew.%crew_chg_agreement_from%(crew.%id%,
+                                         %earliest_contract_ix_cv80_exception%,
+                                         %start_global%,
+                                         %pp_start%);
+%start_of_banking_period_ix_before_cv80_exception% =
+    let contracts = %earliest_contract_ix_cv80_exception% - 1;
+    %rix%(contracts,
+          max(times(contracts), times_index(0))
+                while (%cv_value_ix%(%rix%(contracts,
+                                           times_index(0)),
+                                     %start_global%,
+                                     %pp_start%)
+                       = %crew_agreement_cv_value_pp_start%));
+%start_of_banking_period_before_cv80_exception% =
+    model_crew.%crew_chg_agreement_from%(crew.%id%,
+                                         %start_of_banking_period_ix_before_cv80_exception%,
+                                         %start_global%,
+                                         %pp_start%);
+
+/* Confirm there is a through-line between current contract and the one before CV80 */
+%contract_before_cv80_exception_matches_current% =
+    %cv_value_ix%(%earliest_contract_ix_cv80_exception% - 1,
+                  %start_global%,
+                  %pp_start%)
+    = %crew_agreement_cv_value_pp_start%;
+
+/* This value is added to %days_banked% */
+%days_banked_before_cv80% =
+    if %had_previous_cv80_exception%
+       and %contract_before_cv80_exception_matches_current%
+    then
+        default(%bunkering_banked_days%(%start_of_banking_period_before_cv80_exception%,
+                                        %end_of_banking_period_before_cv80_exception%), 0)
+    else
+        0;
+
+/****************************************************
+ * Section 3: Max P
+ ****************************************************/
+
+%contracts_during_bunkering% =
+    model_crew.%crew_chg_agreement_count%(crew.%id%, %start_crew%, %end_crew%);
+
+/* Contract start/end capped by bunkering start/end dates */
+%contract_start_ix%(int ix) =
+    nmax(model_crew.%crew_chg_agm_from%(crew.%id%, ix,
+                                        %start_crew%, %end_crew%),
+         %start_crew%);
+%contract_end_ix%(int ix) =
+    nmin(model_crew.%crew_chg_agm_to%(crew.%id%, ix,
+                                      %start_crew%, %end_crew%),
+         %end_crew%);
+%contract_days_ix%(int ix) =
+    %days_touched%(%contract_start_ix%(ix), %contract_end_ix%(ix));
+
+/* Contract ix part time factor */
+%contract_factor_ix%(int ix) =
+    model_crew.%crew_contract_part_time_factor_at_date%(crew.%id%,
+                                                        %contract_start_ix%(ix));
+
+/* The number of days of ILL, LOA and VAC in the period. */
+%contract_reduction_days_ix%(int ix) =
+    %bunkering_reduction_days%(%contract_start_ix%(ix), %contract_end_ix%(ix));
+
+/* For a crew member who does not change contract at all during the bunkering period
+   the contract calculation is a simple:
+        Factor * (BunkeringDuration - ReductionDays)
+   (Nb. Rave and decimals... such fun. e.g. 30% is done as *30 for now, will /100 later) */
+%contract_calculation_ix%(int ix) =
+    %contract_factor_ix%(ix) *
+    (%contract_days_ix%(ix) - %contract_reduction_days_ix%(ix));
+
+/* As a further step however, if someone changes contract during the period,
+   the contract calculation is a sum of each contract period:
+        (Factor_1 * (BunkeringDuration_1 - ReductionDays_1)) +
+        (Factor_2 * (BunkeringDuration_2 - ReductionDays_2)) +
+                            ...
+        (Factor_n * (BunkeringDuration_n - ReductionDays_n))
+*/
+%contract_calculation_summed% =
+    sum(times(%contracts_during_bunkering%), %contract_calculation_ix%(times_index(0)));
+
+/* Bunkering Max P = 17 days per month, scaled if not all days in each month are
+                     covered by the bunkering agreement.
+        e.g. Bunkering starts 1Apr, ends 15Jul
+                Apr = 17, May = 17, Jun = 17, Jul = 17 * 15/31 = 8 == 59 total
+   This is equivalent to a 100% calculation for the period  */
+%monthly_max_p_days% = 17;
+%bunkering_max_p% =
+    let start_truncated =
+            base_calendar.%month_start%(%start_global%) <> %start_global%,
+        end_truncated =
+            base_calendar.%month_end%(%end_global% - 0:01) <> %end_global%,
+        whole_month_start =
+            if start_truncated then
+                base_calendar.%month_end%(%start_global%)
+            else
+                %start_global%,
+        whole_month_end =
+            if end_truncated then
+                base_calendar.%month_start%(%end_global%)
+            else
+                %end_global%,
+        whole_months =
+            base_calendar.%month_number%(whole_month_end)
+            - base_calendar.%month_number%(whole_month_start),
+        start_factor =
+            if not start_truncated then
+                0
+            else
+                (%days_touched%(%start_global%, base_calendar.%month_end%(%start_global%)) * 100)
+                / base_calendar.%days_in_month%(%start_global%),
+        end_factor =
+            if not end_truncated then
+                0
+            else
+                (%days_touched%(base_calendar.%month_start%(%end_global%), %end_global%) * 100)
+                / base_calendar.%days_in_month%(%end_global%);
+    (start_factor * %monthly_max_p_days%)
+    + (whole_months * 100 * %monthly_max_p_days%)
+    + (end_factor * %monthly_max_p_days%);
+/* As with other variables, all the values are summed at *100 and wil be divided down later. */
+
+%days_global% = %days_touched%(%start_global%, %end_global%);
+
+/* Crew personal Max P is
+        ContractCalculation / BunkeringDays * BunkeringMaxP
+   Another *100 is included to avoid rounding being too harsh until the final result     */
+%max_p% =
+    %div_rounds%(%div_rounds%(100 * %contract_calculation_summed%, %days_global%)
+                 * %bunkering_max_p%, 1000000);
+/* Having done *100 three times now, the final div is 1,000,000 to give a result in days */
+
+/************************************************
+ * Section 4: P Target, Banking and Recovery
+ ************************************************/
+
+/* P target from start of agreement to date d */
+/* This is # days from start of bunkering to given date.
+   Times MaxP divided by total days in bunkering period
+   nmax with 0 incase a d before %start_crew% is provided. */
+%p_target_func%(abstime d) =
+    nmax(%div_rounds%(%max_p% * %days_touched%(%start_crew%, d), %days_crew%), 0);
+
+/* Days banked up to date
+     - Calculation is never done past %end_crew%, regardless of requested stop date
+     - Ptarget - Pactual
+*/
+%days_banked_up_to_date%(abstime stop) =
+    let capped_stop = nmin(stop, %end_crew%);
+    nmax(%p_target_func%(capped_stop) - %nr_actual_p_days%(%start_crew%, capped_stop), 0);
+
+/* For the accumulator, this is calculated as the diff between start and end */
+export %days_banked_in_period%(abstime start, abstime stop) =
+    %days_banked_up_to_date%(stop) - %days_banked_up_to_date%(start);
+
+/*
+   - After the bunkering period, the Ptarget and Pactual stop changing
+     and this value is then reduced by the number of days recovered from
+     the end of the bunkering period to the start of the current planning
+     period
+   - CV80 exception contracts also add days banked before their CV80 period here.
+     (This contributes 0 for any other crew)
+*/
+export %days_banked% =
+    if %pp_start% >= %end_crew% then
+        %days_banked_before_cv80%
+        + %bunkering_banked_days%(%start_crew%, %end_crew%)
+        - %bunkering_recovered_days%(%end_crew%, %pp_start%)
+    else
+        %days_banked_before_cv80%
+        + %bunkering_banked_days%(%start_crew%, %pp_start%);
+
+/* Maximum recoverable days
+    - Recovery period ends before pp_end if -CVxx contract changes.
+*/
+%recovery_end% =
+    nmin(%latest_contract_end_date%, %pp_end%);
+
+%max_recoverable_days_in_pp% =
+    nmin(%days_banked%,
+         %days_touched%(%pp_start%, %recovery_end%));
+
+/* Any P day in the recovery period might be a recovered day,
+   up to the maximum */
+%possible_recovered_days_in_pp% =
+    nmin(%nr_actual_p_days%(%pp_start%, %recovery_end%),
+         %max_recoverable_days_in_pp%);
+
+/* Freeday reduction because of banked days.
+    When reducing F, the minimum F is capped based on the original dutygrade
+    of a crew member's current contract before CV reduction.
+    e.g. "V133-CV60" could not go below a "V133" freeday minimum in the period
+
+    Note: If someone's freeday -CVxx changes during the current period that
+          would also cut off freeday recovery so that needs to be checked.
+
+    The original freeday value is available via model_freedays and is then
+    reduced by VAC, etc using freedays.%fdc15_month_entitled%
+*/
+%original_freeday_minimum%(abstime per_s) =
+    model_freedays.%fdc15_month_entitled_basic_fd_qa%(
+        model_crew.%crew_contract_part_time_factor_direct%(%cv_original%(%crew_agreement_pp_start%)),
+        crew.%id%,
+        per_s);
+%original_fdc15_month_entitled%(abstime per_s, abstime per_e) =
+    freedays.%fdc15_month_entitled%(per_s, per_e, %original_freeday_minimum%(per_s));
+
+/* Wrapper around freedays.%crew_month_entitled%
+        used by rules_indust_ccr.ind_min_freeday_per_month
+
+   For SE CVxx crew, this takes the freedays entitlement and reduces it
+   by any possible recovered days, but not to less than the original entitlement.
+   Also, if the calculation is less than the original entitlement anyway for some reason
+   do not increase the entitlement by accident! */
+export %crew_month_entitled_freedays%(abstime per_s, abstime per_e) =
+    let entitlement = freedays.%crew_month_entitled%(per_s, per_e);
+    if %has_bunkering_agreement_at_pp_start% then
+        nmax(entitlement - %possible_recovered_days_in_pp%,
+             nmin(entitlement,
+                  %original_fdc15_month_entitled%(per_s, per_e)))
+    else
+        entitlement;
+
+/* Wrapper around freedays.%min_required_in_1_month%
+        used by rules_indust_ccr.ind_min_freedays_in_1_month_ALL
+   As above. */
+export %min_required_in_1_month% =
+    let min_required = freedays.%min_required_in_1_month%;
+    if %has_bunkering_agreement_at_pp_start% then
+        nmax(min_required - %possible_recovered_days_in_pp%,
+             nmin(min_required,
+                  %original_fdc15_month_entitled%(wop.%start_month_start%, wop.%start_month_end%)))
+    else
+        min_required;
+
+/* Uses pp start/end unless crew contracts starts/ends within those dates */
+export %recovered_days% =
+    %bunkering_recovered_days%(nmax(%start_crew%, %pp_start%),
+                               nmin(%end_crew%, %pp_end%));
+
+/*******************************
+ * Section 5: Costs
+ ********************************/
+
+/* Recovered days should be distributed as fairly as possible, but it is suggested that the base reward
+   for this is low as to not disturb any other costs.
+
+   Each additional day recovered gives a smaller and smaller reward, meaning that if everything else is
+   equal, it is a cheaper solution to distribute recovered days across crew rather than focus on a single
+   one.
+
+       i.e. 1/1 + 1/2 + 1/3 + .... 1/n
+
+*/
+%recovered_day_reward_param% =
+    parameter -100
+    remark "Reward for recovering a banked Production day";
+
+export %recovered_days_reward% =
+    sum(times(%recovered_days%), %div_rounds%(%recovered_day_reward_param%, times_index(0)));
+
+/*****************************************
+ * Section 6: Reporting Variables
+ *****************************************/
+
+/* Report period
+    - This is set to a whole month
+    - %pp_start% is rounded down (usually start of a month anyway)
+*/
+%report_start% = round_down_month(%pp_start%);
+%report_end% = add_months(%report_start%, 1);
+
+/* Reported targets are to earliest of pp start or crew end of bunkering period */
+%bunkering_end% =
+    nmin(%pp_start%, %end_crew%);
+
+%p_target% =
+    %p_target_func%(%bunkering_end%);
+
+%p_actual% =
+    %nr_actual_p_days%(%start_crew%, %bunkering_end%);
+
+%crew_month_original_freedays_report% =
+    nmax(freedays.%crew_month_entitled%(%report_start%, %report_end%),
+         default(last(wop(chain), freedays.%min_required_in_1_month%)
+                     where (wop.%starts_in_period%(%report_start%, %report_end%)), 0));
+
+/* Report version of minimum freedays                    */
+/* Does not need prod days assigned to reduce the target */
+%crew_month_minimum_freedays_report% =
+    let entitlement = freedays.%crew_month_entitled%(%report_start%, %report_end%);
+    nmax(entitlement - %days_banked%,
+         nmin(%original_fdc15_month_entitled%(%report_start%, %report_end%),
+              entitlement));
+
+%crew_month_scheduled_freedays_report% =
+    freedays.%crew_month_possibly_scheduled%(%report_start%, %report_end%);
+
+/* If crew member cannot bank, report "-" */
+%days_banked_report% =
+    if %has_bunkering_agreement_at_pp_end%
+            and not %has_cv80_exception_whole_pp%
+            and %end_crew% >= %pp_end%
+    then
+        %int2str%(nmax(%bunkering_banked_days%(%report_start%, %report_end%), 0))
+    else
+        "-";
+
+/* Report version of %recovered_days% */
+%recovered_days_report% =
+    %bunkering_recovered_days%(nmax(%start_crew%, %report_start%),
+                               nmin(%end_crew%, %report_end%));

@@ -1,0 +1,315 @@
+<!-- $Header$ -->
+
+<!-- One Rest form
+
+     Purpose: The form used for editing rest periods on a flight.
+
+     Created by: Peter Jonsson 08-2006
+
+     TODO: - How to publish a rest plan? Create a notification to AP and FC? SAS has
+             a discussion and will give us some input...
+
+
+-->
+
+<views>
+<head>
+
+<title>${tmp_cr_form_info[0,form_header]}</title>
+
+<!-- Aliases used to set filters -->
+<alias id="active_crew_fc" source="tmp_cr_active_crew"/>
+<alias id="active_crew_cc" source="tmp_cr_active_crew"/>
+
+<on-opened>
+  setFontSize("status_bar","11");
+  setFilter("active_crew_fc", "(main_func=F)");
+  setFilter("active_crew_cc", "(main_func=C)");
+  check_startup_messages();
+</on-opened>
+
+<on-closing>
+  cancel_or_close();
+</on-closing>
+
+<!-- Close the form, cancelling any changes -->
+<action name="cancel_or_close" args=""><![CDATA[
+if context.sm.resolve("${is_recalculated}") == "true":
+  context.action('model', 'submit_opaq',"Rest Planning: Cancel")
+  context.action('model', 'cr_cancel_rest_form')
+  context.action('setValue', 'is_recalculated', 'false') 
+else:
+  context.action('model', 'cr_close_rest_form')
+context.action('closeForm')
+]]></action>
+
+<!-- Visualize current crew info status -->
+<action name="show_status" args="message_field"><![CDATA[
+context.action('refreshClient')
+context.action('setProperty', 'status_bar', 'style.backgroundColor', 
+               context.sm.resolve("${tmp_cr_form_info[0,background_color]}"))
+context.action('setValue', 'status_bar',
+               context.sm.resolve("${tmp_cr_form_info[0,%s]}" % message_field))
+]]></action>
+
+<!-- Check if any status message is to be displayed at startup.
+If recalculated (i.e. model was updated), make sure Cancel will revert. -->
+<action name="check_startup_messages"><![CDATA[
+context.action('refreshClient')
+msg = context.sm.resolve("${tmp_cr_form_info[0,recalculate_message]}").strip()
+if msg and msg != 'NULL':
+  context.action('show_status', 'recalculate_message')
+  context.action('setValue', 'is_recalculated', 'true')
+]]></action>
+
+</head>
+
+<!-- Top menu -->
+<menu-bar>
+  <menu label="_F_ile">
+    <menu-item ref="recalculate_button" accelerator="alt R"/>
+    <menu-item ref="print_button" accelerator="alt P"/>
+    <menu-item ref="send_button" accelerator="alt O"/>
+    <menu-item ref="cancel_button" accelerator="alt C"/>
+  </menu>
+</menu-bar>
+
+<box visible="false">
+  <check-box id="is_recalculated" value="false"/>
+</box>
+
+<vbox>
+  <box>
+    
+    <!-- Flight Info. Non editable info about the flight. -->
+    <hbox>
+      <vbox style.width="170" label="Flight">
+        <table-cell source="tmp_cr_flight_info" label="No:" id="flight_no"
+                    column="flight_no" row="0" 
+                    visible="true" editable="false"/>
+        <table-cell source="tmp_cr_flight_info" label="AC Type:" id="ac_type"
+                    column="ac_type" row="0" 
+                    visible="true" editable="false"/>
+        <table-cell source="tmp_cr_flight_info" label="Block Time" id="block_time"
+                    column="block_time" row="0" 
+                    visible="true" editable="false"/>
+      </vbox>
+
+      <vbox style.width="240" label="Departure">
+        <table-cell source="tmp_cr_flight_info" label="Time:" id="departure_time"
+                    column="departure_time" row="0" 
+                    visible="true" editable="false"/>
+        <table-cell source="tmp_cr_flight_info" label="Station:" id="departure_station"
+                    column="departure_station" row="0" 
+                    visible="true" editable="false" style.width="200"/>
+        <text> </text>
+      </vbox>
+
+      <vbox style.width="240" label="Arrival">
+        <table-cell source="tmp_cr_flight_info" label="Time:" id="arrival_time"
+                    column="arrival_time" row="0" 
+                    visible="true" editable="false"/>
+        <table-cell source="tmp_cr_flight_info" label="Station:" id="arrival_station"
+                    column="arrival_station" row="0" 
+                    visible="true" editable="false"/>
+        <text> </text>
+      </vbox>
+      
+      <vbox style.width="170" label="Active/Required Crew">
+        <table-cell source="tmp_cr_flight_info" label="FC:" id="ac_rc_fc"
+                    column="ac_rc_fc" row="0"
+                    visible="true" editable="false"/>
+        <table-cell source="tmp_cr_flight_info" label="CC:" id="ac_rc_cc"
+                    column="ac_rc_cc" row="0"
+                    visible="true" editable="false"/>
+        <text> </text>
+      </vbox>
+
+      <vbox style.width="200" label="Crew Bunks">
+        <table-cell source="tmp_cr_flight_info" label="FC:" id="crew_bunks_fc"
+		                column="crew_bunks_fc" row="0"
+                    visible="true" editable="true" style.width="50" 
+		                validate.pattern="[0-9]{1,2}"
+		                validate.failmessage="Only number between 0 and 99"/>
+        <table-cell source="tmp_cr_flight_info" label="CC:" id="crew_bunks_cc"
+                    column="crew_bunks_cc" row="0" 
+                    visible="true" editable="true" style.width="50"
+		                validate.pattern="[0-9]{1,2}"
+		                validate.failmessage="Only number between 0 and 99"/>
+        <table-cell source="tmp_cr_flight_info" label="CC rest class:" id="rest_class_cc"
+                    column="rest_class_cc" row="0" 
+                    visible="true" editable="false" style.width="50"/>
+        <text> </text>
+        
+      </vbox>
+
+    </hbox>
+    
+    <!-- The flight crew table -->
+    <vbox label="Flight Crew">
+      <table source="active_crew_fc"
+             columns="crew,first_name,last_name,rank,assigned_rank,
+                      rest_start_rel,rest_end_rel,
+                      rest_time,fdp_act,fdp_max,fdp_uc,
+                      lock_times" 
+             style.grid="false" style.height="100"
+             sort.column="sort_order">
+        <columninfo column="crew"           label="Emp No" style.display.column="empno" editable="false"/>        
+        <columninfo column="first_name"     label="First Names" width="165" editable="false"/>
+        <columninfo column="last_name"      label="Last Name"   width="165" editable="false"/>
+        <columninfo column="rank"           label="Rank"        width="55"  editable="false"/>
+        <columninfo column="assigned_rank"  label="Op. Rank"    width="90"  editable="false"/>
+        <columninfo column="rest_start_rel" label="Rest Start"  width="135" />
+        <columninfo column="rest_end_rel"   label="Rest End"    width="135" />
+        <columninfo column="rest_time"      label="Rest Time"   width="135" editable="false"/>
+        <columninfo column="fdp_act"        label="FDP Actual"  width="135" editable="false"/>
+        <columninfo column="fdp_max"        label="FDP Max"     width="135" editable="false"/>
+        <columninfo column="fdp_uc"         label="FDP UC"      width="135" editable="false"/>
+        <columninfo column="lock_times"     label="Lock"        width="60"/>
+      </table>
+    </vbox>
+    <hbox>
+      <check-box id="disable_fc" value="false">
+        <on-changed>
+          setTableValue("tmp_cr_form_info", "0", "disable_fc", "${disable_fc}");
+          model("submit_trans");
+        </on-changed>
+      </check-box>
+      <text>Lock Flight Crew</text>
+    </hbox>
+
+    <!-- The cabin crew table -->
+    <vbox label="Cabin Crew">
+      <table source="active_crew_cc"
+             columns="crew,first_name,last_name,rank,assigned_rank,
+                      rest_start_rel,rest_end_rel,
+                      rest_time,fdp_act,fdp_max,fdp_uc,
+                      lock_times" 
+             style.grid="false" style.height="280"
+             sort.column="sort_order">
+        <columninfo column="crew"           label="Emp No" style.display.column="empno" editable="false"/>        
+        <columninfo column="first_name"     label="First Names" width="165" editable="false"/>
+        <columninfo column="last_name"      label="Last Name"   width="165" editable="false"/>
+        <columninfo column="rank"           label="Rank"        width="55"  editable="false"/>
+        <columninfo column="assigned_rank"  label="Op. Rank"    width="90"  editable="false"/>
+        <columninfo column="rest_start_rel" label="Rest Start"  width="135" />
+        <columninfo column="rest_end_rel"   label="Rest End"    width="135" />   
+        <columninfo column="rest_time"      label="Rest Time"   width="135" editable="false"/>
+        <columninfo column="fdp_act"        label="FDP Actual"  width="135" editable="false"/>
+        <columninfo column="fdp_max"        label="FDP Max"     width="135" editable="false"/>
+        <columninfo column="fdp_uc"         label="FDP UC"      width="135" editable="false"/>
+        <columninfo column="lock_times"     label="Lock"        width="60"/>
+      </table>
+    </vbox>
+    <hbox>
+      <check-box id="disable_cc" value="false">
+        <on-changed>
+          setTableValue("tmp_cr_form_info", "0", "disable_cc", "${disable_cc}");
+          model("submit_trans");
+        </on-changed>
+      </check-box>
+      <text>Lock Cabin Crew</text>
+    </hbox>
+  </box>
+
+  <hbox>
+    <hbox label="Allowed rest period">
+      <vbox label="Flight Crew">
+        <table-cell source="tmp_cr_form_info" label="After Departure" row="0"
+                    column="rest_period_start_fc" style.width="50"/>
+        <table-cell source="tmp_cr_form_info" label="Before Arrival" row="0"
+                    column="rest_period_end_fc" style.width="50"/>
+      </vbox>
+      <vbox label="Cabin Crew">
+        <table-cell source="tmp_cr_form_info" label="After Departure" row="0"
+                    column="rest_period_start_cc" style.width="50"/>
+        <table-cell source="tmp_cr_form_info" label="Before Arrival" row="0"
+                    column="rest_period_end_cc" style.width="50"/>
+      </vbox>
+    </hbox>
+  </hbox>
+
+  <box style.orientation="border">
+    <hbox style.constraints="West">
+      <button id="recalculate_button" label="_R_ecalculate">
+        <on-click>
+          progress(true);
+          lockInput(true);
+          model("submit_opaq", "Rest Planning: Recalculate");
+          model("cr_recalculate_rest_times", "${activity_id}");
+          setValue(is_recalculated,true);
+          show_status("recalculate_message");
+          progress(false);
+          lockInput(false);
+        </on-click> 
+      </button>    
+      <button id="print_button" label="_P_rint">
+        <on-click>
+          progress(true);
+          lockInput(true);
+          model("submit_trans");
+          model("cr_generate_report");
+          show_status("print_message");
+          progress(false);
+          lockInput(false);
+        </on-click>
+      </button>
+    </hbox>
+    <hbox style.constraints="East">      
+      <button id="send_button" label="_O_k"
+              filter.enabled="(${is_recalculated}=true)">
+        <on-click>        
+          model("submit_opaq", "Rest Planning: Create Notification");
+          model("cr_ok_rest_form");
+          closeForm();
+        </on-click>
+      </button>
+      <button id="cancel_button" label="_C_ancel" style.width="60">
+        <on-click>
+          cancel_or_close();
+        </on-click>
+      </button>
+    </hbox>
+  </box>
+
+  <box id="statusbox"> 
+    <text-field id="status_bar" value="" editable="false"/>
+  </box>
+</vbox>
+
+
+
+<!-- Debug box -->
+<vbox id="debug_box" visible="false" label="Debug Info"
+      style.border="line" style.border.width="10">
+  <button label="Exit">
+    <on-click>
+      model("cr_close_rest_form");
+      closeForm()
+    </on-click> 
+  </button>
+  <button label="Refresh?">
+    <on-click>
+      refreshClient()
+    </on-click> 
+  </button>
+  <button label="Reload form">
+    <on-click>
+      reloadForm()
+    </on-click> 
+  </button>
+  <text-field id="activity_id" value="${tmp_cr_flight_info[0,activity_id]}"/>
+  <hbox>
+    <table source="tmp_cr_active_crew"/>
+  </hbox>
+  <hbox>
+    <table source="tmp_cr_flight_info"/>
+  </hbox>  
+  <hbox>
+    <table source="tmp_cr_form_info"/>
+  </hbox>
+
+</vbox>
+
+
+</views>

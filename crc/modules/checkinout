@@ -1,0 +1,487 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   Definitions for crew check-in used in the tracking ruleset
+ *
+ * Created by:
+ *   David Lennartsson, 2-May-2006
+ *
+ * Major changes:
+ *   [acosta:08/149@10:13] moved check-in/check-out logic from report_cio
+ *   Also modified the logic heavily to only regard activities really
+ *   needing check-in/check-out.
+ *
+ *   [acosta:08/241@10:12] changed the logic completely after discussions
+ *   with customer.
+ *
+ */
+
+root module checkinout
+
+import fundamental;
+import levels;
+import crew;
+import leg;
+
+
+/* BASICS *************************************************************** {{{1
+ * A crew member can check-in at Scandinavian bases.
+ * 
+ * Mandatory check-in:   Check-in at start of trip
+ * Mandatory check-out:  Check-out at end of trip.
+ * Optional check-in or check-out: Crew member swipes his card
+ *                       at a base to get information.
+ */
+
+/* LIMITS *************************************************************** {{{1
+ * Values taken from CRU80 printout, 209' checkin, 90' checkout
+ */
+export %checkin_window% = 3:29;
+export %checkout_window% = 1:30;
+
+
+/* STATIONS ************************************************************* {{{1
+ * Stations with ACCI terminal that crew can use for check-in/check-out.
+ */
+set acci_stations = "ARN", "CPH", "OSL", "SVG", "TRD";
+set main_stations = "ARN", "CPH", "OSL";
+
+
+/* STATUS CODES ********************************************************* {{{1
+ * 0: indefinite (result of undo)
+ * 1: crew checked-in         5: assisted crew check-in
+ * 2: crew checked-out        6: assisted crew check-out
+ * 3: crew rechecked-in       7: assisted crew rechecked-in
+ * 8: automatic crew check-out (not currently used)
+ * Note: 4 is not used
+ */
+
+/* codes for a valid status */
+set valid_codes = 1, 2, 3, 5, 6, 7;
+
+/* codes used for status currently "checked in" */
+set ci_codes = 1, 3, 5, 7;
+
+/* codes used for status currently "checked in" with assistance */
+set ci_assisted_codes = 5, 7;
+
+/* codes used for status currently "checked in" without assistance */
+set ci_not_assisted_codes = 1, 3;
+
+/* codes used for status currently "checked-out" */
+set co_codes = 2, 6;
+
+/* codes used for status "re-checked-in" */
+set coi_codes = 3, 7;
+
+
+/* FLAGS **************************************************************** {{{1
+ * enumerations of values.
+ */
+
+/* Report types */
+enum cioflag =
+  ci remark "Check-in";
+  co remark "Check-out";
+  coi remark "Checkout + checkin";
+  early4ci remark "Too early for check-in";
+  late4co remark "Too late for check-out";
+  alreadyci remark "Already checked-in";
+  alreadyco remark "Already checked-out";
+  unhandled remark "Unhandled state";
+  remark "Check-in/Check-out status flag";
+end
+
+/* Current status */
+export enum ciostat = 
+  stat_ci remark "Checked-in";
+  stat_co remark "Checked-out";
+  stat_neither remark "Neither checked-in or checked-out";
+  remark "CI/CO status marker";
+end
+
+
+/* TIMES AND TIME FRAMES ************************************************ {{{1
+ * How %now% is related to the roster.
+ */
+%leg_std_utc% = leg.%activity_scheduled_start_time_UTC%;
+%leg_std_lt% = leg.%activity_scheduled_start_time_lt%;
+
+/* Use scheduled time for check-in (start of briefing) */
+export %leg_checkin_utc% =
+  %leg_std_utc% - leg.%check_in%;
+export %leg_checkin_lt% =
+  %leg_std_lt% - leg.%check_in%;
+
+/* Use best available (actual/estimated/scheduled) time for check-out end of
+ * briefing */
+export %leg_checkout_utc% = leg.%co_end_utc%;
+export %leg_checkout_lt% = leg.%co_end_lt%;
+
+/* Earliest possible check-in (using scheduled times) */
+export %leg_ci_min% =
+  %leg_std_utc% - %checkin_window%;
+
+/* Latest possible check-in (using actual times) */
+export %leg_ci_max% =
+  leg.%end_utc%;
+
+/* Earlies possible check-out (using actual times) */
+export %leg_co_min% =
+  leg.%start_utc%;
+
+/* Latest possible check-out (using actual times) */
+export %leg_co_max% =
+  leg.%end_utc% + %checkout_window%;
+
+/* convenience, these are used below */
+%ci_now_valid% =
+  %now% < %leg_ci_max%;
+%co_now_valid% =
+  %now% > %leg_co_min%;
+
+/* Mandatory C/I */
+export %about2ci_m% = %ci_now_valid% and %leg_has_mandatory_ci%;
+%mandatory_ci_min% = first(leg(roster) where (%about2ci_m%), %leg_ci_min%);
+%mandatory_ci_max% = first(leg(roster) where (%about2ci_m%), %leg_ci_max%);
+%can_ci_m% = %ci_m_location_ok% and %ci_m_time_ok%;
+/* location constraint */
+%ci_m_location_ok% =
+  default(any(leg(roster) where (%ci_now_valid%), %leg_has_mandatory_ci%), false);
+/* time constraint */
+%ci_m_time_ok% =
+  default(%mandatory_ci_min% <= %now% and %now% <= %mandatory_ci_max%, false);
+%mandatory_ci_stat% = %cio_status_i%(%mandatory_ci_min%, %mandatory_ci_max%);
+
+/* Mandatory C/O */
+%about2co_m% = %co_now_valid% and %leg_has_mandatory_co%;
+%mandatory_co_min% = last(leg(roster) where (%about2co_m%), %leg_co_min%);
+%mandatory_co_max% = last(leg(roster) where (%about2co_m%), %leg_co_max%);
+%can_co_m% = %co_m_location_ok% and %co_m_time_ok%;
+%co_m_location_ok% = 
+  default(any(leg(roster) where (%co_now_valid%), %leg_has_mandatory_co%), false);
+%co_m_time_ok% =
+  default(%mandatory_co_min% <= %now% and %now% <= %mandatory_co_max%, false);
+%mandatory_co_stat% = %cio_status_i%(%mandatory_co_min%, %mandatory_co_max%);
+
+/* Optional C/I */
+%about2ci_o% = %ci_now_valid% and %leg_has_optional_ci%;
+%optional_ci_min% = first(leg(roster) where (%about2ci_o%), %leg_ci_min%);
+%optional_ci_max% = first(leg(roster) where (%about2ci_o%), %leg_ci_max%);
+%can_ci_o% = %ci_o_location_ok% and %ci_o_time_ok%;
+%ci_o_location_ok% =
+  default(any(leg(roster) where (%ci_now_valid%), %leg_has_optional_ci%), false);
+%ci_o_time_ok% =
+  default(%optional_ci_min% <= %now% and %now% <= %optional_ci_max%, false);
+%optional_ci_stat% = %cio_status_i%(%optional_ci_min%, %optional_ci_max%);
+
+/* Optional C/O */
+%about2co_o% = %co_now_valid% and %leg_has_optional_co%;
+%optional_co_min% = last(leg(roster) where (%about2co_o%), %leg_co_min%);
+%optional_co_max% = last(leg(roster) where (%about2co_o%), %leg_co_max%);
+%can_co_o% = %co_o_location_ok% and %co_o_time_ok%;
+%co_o_location_ok% =
+  default(any(leg(roster) where (%co_now_valid%), %leg_has_optional_co%), false);
+%co_o_time_ok% =
+  default(%optional_co_min% <= %now% and %now% <= %optional_co_max%, false);
+%optional_co_stat% = %cio_status_i%(%optional_co_min%, %optional_co_max%);
+
+
+/* CURRENT CREW STATUS ************************************************** {{{1
+ * The status is valid:
+ *  - if it exists
+ *  - the status is for an activity  inside a trip that requires check-in,
+ *    extended by check-in and check-out window.
+ */
+export %duty_crew_checked_in% =
+  any(leg(duty), %leg_checked_in%);
+
+export %crew_checked_in% =
+  any(duty(roster), %duty_crew_checked_in%);
+
+export %crew_checked_out% =
+  any(leg(roster), %leg_checked_out%);
+
+export %crew_has_valid_status% =
+  any(leg(roster), %leg_valid_status%);
+
+/* Old events will expire where their ciotime is not related to the coming
+ * activities
+ */
+export %leg_checked_in% =
+  default(
+      %leg_ci_min% < %now% and %now% < %leg_ci_max%
+      and
+      %cio_status_i%(%leg_ci_min%, %leg_ci_max%) = stat_ci,
+    false);
+
+export %leg_checked_out% =
+  default(
+      %leg_co_min% < %now% and %now% < %leg_co_max%
+      and
+      %cio_status_i%(%leg_co_min%, %leg_co_max%) = stat_co,
+    false);
+
+export %leg_valid_status% = %leg_checked_in% or %leg_checked_out%;
+
+export %leg_checked_in_with_assist% =
+  default(
+      %leg_ci_min% < %now% and %now% < %leg_ci_max%
+      and
+      %cio_code%(%leg_ci_min%, %leg_ci_max%) in ci_assisted_codes,
+    false);
+
+export %leg_checked_in_without_assist% =
+  default(
+      %leg_ci_min% < %now% and %now% < %leg_ci_max%
+      and
+      %cio_code%(%leg_ci_min%, %leg_ci_max%) in ci_not_assisted_codes,
+    false);
+
+/* MANDATORY / OPTIONAL ************************************************* {{{1
+ * Mandatory check-in will be at:
+ *   - home base at trip start
+ *   - after layover at any of 'ARN', 'CPH', 'OSL'.
+ *   - for SKN: after layover at any Scandinavian base.
+ *
+ * Mandatory check-out will be at:
+ *   - home base at trip end
+ *
+ * Optional check-in / check-out is for any crew at any Scandinavian base.
+ */
+export %leg_has_mandatory_ci% =
+  default(is_first(leg(trip) where (%can_checkin_to_leg%))
+  or %is_mandatory_ci_after_layover%, false);
+
+export %leg_has_mandatory_co% =
+  default(is_last(leg(trip) where (%can_checkout_from_leg%))
+  or %is_mandatory_co_before_layover%, False);
+
+export %leg_has_optional_ci% =
+  %can_checkin_to_leg% and not %leg_has_mandatory_ci%;
+
+export %leg_has_optional_co% =
+  %can_checkout_from_leg% and not %leg_has_mandatory_co%;
+  
+export %leg_starts_at_mandatory_station% =
+  %is_mandatory_station%(leg.%start_station%);
+
+export %leg_ends_at_mandatory_station% =
+  %is_mandatory_station%(leg.%end_station%);
+
+%is_mandatory_station%(string station) =
+  station in main_stations;
+
+%is_mandatory_co_before_layover% =
+  leg.%has_check_out% 
+  and %leg_ends_at_mandatory_station%;
+
+%is_mandatory_ci_after_layover% =
+  leg.%has_check_in%
+  and %leg_starts_at_mandatory_station%;
+
+%can_checkin_to_leg% =
+  leg.%start_station% in acci_stations and leg.%requires_cio%;
+
+%can_checkout_from_leg% =
+  leg.%end_station% in acci_stations and leg.%requires_cio%;
+
+
+/* ETABLE LOOKUPS ******************************************************* {{{1
+ * Current status is stored in 'cio_status'.
+ */
+
+export %cio_status% = %_cio_status%(crew.%id%);
+export %cio_ciotime% = %_cio_ciotime%(crew.%id%);
+export %cio_st% = %_cio_st%(crew.%id%);
+export %cio_et% = %_cio_et%(crew.%id%);
+export %cio_completed% = default(%_cio_completed%(crew.%id%), false);
+export %cio_assisted% = %_cio_assisted%(crew.%id%);
+
+%cio_status_table_p% = "cio_status";
+%cio_status_table% = %etab_path%(%cio_status_table_p%);
+table crew_cio_status(string id) =
+  id
+  ->
+    int %_cio_status%,
+    abstime %_cio_ciotime%,
+    abstime %_cio_st%,
+    abstime %_cio_et%,
+    bool %_cio_completed%,
+    bool %_cio_assisted%;
+  external %cio_status_table%;
+  crew
+  ->
+  status, ciotime, st, et, completed, assisted;
+  - -> void_int, void_abstime, void_abstime, void_abstime, 
+    void_bool, void_bool;
+end
+
+%code2stat%(int code) =
+  if code in ci_codes then
+    stat_ci
+  else if code in co_codes then
+    stat_co
+  else
+    stat_neither;
+
+/* Return status that is valid in the time interval */
+export %cio_status_i%(abstime t1, abstime t2) =
+  default(
+    if t1 <= %cio_ciotime% and %cio_ciotime% <= t2 then
+      %code2stat%(%cio_status%)
+    else
+      stat_neither,
+    stat_neither);
+
+export %cio_code%(abstime t1, abstime t2) =
+  if t1 <= %cio_ciotime% and %cio_ciotime% <= t2 then
+    %cio_status%
+  else
+    0;
+
+/* These values will be entered into the cio_status table when status changes */
+export %estimated_st% =
+  first(leg(roster) where (leg.%duty_debrief_end_utc% > %now%), 
+    leg.%duty_brief_start_utc%);
+
+export %estimated_et% =
+  first(leg(roster) where (leg.%duty_debrief_end_utc% > %now%), 
+    leg.%duty_debrief_end_utc%);
+
+/* For check-in report */
+%leg_cio_stat% = 
+  %cio_status_i%(leg.%start_utc%, leg.%end_utc%);
+export %leg_cio_stat_is_ci% =
+  %leg_cio_stat% = stat_ci;
+export %leg_cio_stat_is_co% =
+  %leg_cio_stat% = stat_co;
+
+
+/* RULES **************************************************************** {{{1
+ * Definitions used by rules.
+ */
+
+/* rules_soft_cct */
+export %check_cio_status% = 
+  %leg_has_mandatory_ci%
+  and leg.%duty_start_utc% <= %now%
+  and leg.%duty_end_utc% + 2:00 >= %now%;
+
+/* rules_soft_cct + studio_select_cct */
+export %leg_crew_late_for_check_in% =
+    %now% < %leg_ci_max%
+    and leg.%ci_start_utc% < %now% 
+    and %leg_has_mandatory_ci%
+    and not %leg_valid_status%;
+
+/* rules_notifications_cct */
+export %crew_last_checkout% =
+  if not void(%cio_completed%) and %cio_completed% then
+    %cio_et%
+  else
+    void_abstime;
+
+
+/* CREW SELECTIONS ****************************************************** {{{1
+ * Used by select filters and studio_fac (find assignable crew)
+ */
+
+/* studio_select_cct */
+export %leg_crew_checked_in_early% =
+  %now% < %leg_ci_max% /* performance */
+  and %now% < %estimated_st% /* IF crew has checked in even earlier ... */
+  and %leg_has_mandatory_ci%
+  and %leg_valid_status%;
+
+/* studio_select_cct */
+export %crew_checked_in_early% =
+  any(leg(roster), %leg_crew_checked_in_early%);
+
+/* studio_select_cct */
+export %crew_late_for_check_in% =
+  any(leg(roster), %leg_crew_late_for_check_in%);
+
+
+/* CREW NOTIFICATIONS *************************************************** {{{1
+ *
+ */
+export %crew_next_visit_at_portal% =
+  if void(%crew_next_checkin_at_portal%)
+  then %crew_next_checkout_at_portal%
+  else if void(%crew_next_checkout_at_portal%)
+    then %crew_next_checkin_at_portal%
+    else nmin(%crew_next_checkin_at_portal%, 
+              %crew_next_checkout_at_portal%);
+
+%crew_next_checkin_at_portal% = 
+  first(leg(roster), %leg_checkin_utc%)
+  where(%leg_checkin_utc% >= %now% and %leg_has_mandatory_ci%);
+
+%crew_next_checkout_at_portal% = 
+  first(leg(roster), %leg_checkout_utc%)
+  where(%leg_checkout_utc% >= %now% and %leg_has_mandatory_co%);
+
+
+/* REPORT TYPES ********************************************************* {{{1
+ * ci:        not already checked in, and within time window for check-in.
+ *
+ * co:        checked-in to any earlier or current activity and not within time
+ *            window for check-in.
+ *
+ * coi:       status is ci for any earlier activity and within time window for
+ *            check-in, but not already checked-in to next.
+ *            OPTIONAL???
+ *
+ * alreadyci: already checked in, not in time window for check-out but within
+ *            check-in zone.
+ *
+ * early4ci:  Not checked-in and not within time window for check-in.
+ *
+ * late4co:   Checked in and not within time window for check-in, nor within
+ *            duty pass or time window for check-out.
+ *
+ * unhandled: Not covered above (Error condition)
+ */
+
+/* late for C/O */
+%max_co_delay% = 05:00;
+%max_co_warn_time% = %mandatory_co_max% + %max_co_delay%;
+%late_for_co% =
+  default(
+      %mandatory_co_max% <= %now% and %now% <= %max_co_warn_time% 
+    and 
+      %mandatory_co_stat% <> stat_co,
+    false);
+
+%cio_report% = default(%_cio_report%, unhandled);
+%_cio_report% =
+  if %can_ci_m% then
+    if %mandatory_ci_stat% = stat_ci then
+      alreadyci
+    else
+      ci
+  else if %can_co_m% then
+    if %mandatory_co_stat% = stat_co then
+      alreadyco
+    else
+      co
+  else if %can_ci_o% then
+    coi
+    /*if %optional_ci_stat% = stat_ci then*/
+    /*  alreadyci*/
+    /*else*/
+    /*  coi*/
+  else if %can_co_o% then
+    coi
+    /*if %optional_co_stat% = stat_co then*/
+    /*  alreadyco*/
+    /*else*/
+    /*  coi*/
+  else if %late_for_co% then
+    late4co
+  else
+    early4ci;
+
+
+/* END OF FILE vim: set fdm=marker: ************************************* {{{1 */

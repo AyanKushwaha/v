@@ -1,0 +1,124 @@
+#!/bin/bash
+
+####investigate_cluster_status############################
+#                                                        #
+# Query Veritas for the status of the two reportserver   #
+# hosts and pass on the relevant portions of the         #
+# response to the set_cluster_state script               #
+#                                                        #
+# ASSUMPTIONS                                            #
+#                                                        #
+# 0. You are either root or carmadm                      #
+# 1. There are exactly two reportworker servers          #
+#    configured in the Veritas cluster.                  #
+# 2. The script is invoked in one of the following       #
+#    two ways:                                           #
+#   2.1 As a polling mechanism configired to be          #
+#       run frequently by the cron daemon of both        #
+#       nodes in the cluster.                            #
+#       2.2 As an event script triggered by the          #
+#       Veritas daemon on one of the following           #
+#       events:                                          #
+#       2.2.1 sysoffline                                 #
+#       2.2.2 postonline                                 #
+#                                                        #
+#                                                        #
+##############arvid.ericsson@jeppesen.com, 2011-12-09#####
+
+
+########### Function definitions ##############################################
+
+function script_help() {
+    echo "`basename $0`: Syntax error"
+    echo -n "Incorrect number of parameters. Password is only applicable for " 
+    echo "non-root users, since only they need to sudo."
+    echo "    `basename $0` [-p sudo-password] [-c CARMUSR path] [-t]"  
+    exit 1
+}
+
+########### Handle command line parameters passed to the script ################
+
+# Min one parameter if we are non-root
+[ "$current_user" = "carmadm" -a $# -lt 1 ] && script_help
+
+while getopts ":p:c:t" opt; do
+    case $opt in
+    p)
+        _passwd=$OPTARG
+        ;;
+    c)
+        _CARMUSR=$OPTARG
+        ;;
+    t)
+        DRYRUN=1 
+        ;;
+    \?)
+        echo "Invalid option: -$OPTARG" >&2
+        script_help
+        ;;
+    :)
+        echo "Missing argument to option -$OPTARG" >&2
+        script_help
+        ;;
+    esac
+done    
+
+
+########### Configure paths, commands and what not #############################
+
+current_user=`/usr/bin/id -nu`
+tmpfile=/tmp/.$RANDOM.hastatus
+ha_extract_cmd="eval cat $tmpfile | head -n6 | tail -n2 | grep RUNNING | awk '{print \$2,\$3}'"
+ha_status_cmd="/opt/VRTS/bin/hastatus -summary"
+
+# If no CARMUSR parameter was provided, we assume that it is 
+# the two levels above the curred working dir.
+[ -z $_CARMUSR ] && _CARMUSR=`readlink -f \`dirname $0\`/../..`
+sysmond_script="$_CARMUSR/bin/admin/set_cluster_state"
+
+########### Perform the actual inspection of the cluster state #################
+
+if [ $current_user = "root" ]; then
+    $ha_status_cmd > $tmpfile
+else
+    # Sudo does strange things to the redirection, hennce the detour via tee.
+    echo $_passwd | sudo -S $ha_status_cmd | tee $tmpfile 2>&1 > /dev/null
+fi
+
+number_of_running_systems=`$ha_extract_cmd | wc -l`
+
+if [ $number_of_running_systems -eq 2 ]; then
+    echo "`basename $0` INFO `date`: Both nodes are running, this is typically good news."
+    _main_host=`$ha_extract_cmd | head -n1 | awk '{print $1}'`
+    _backup_host=`$ha_extract_cmd | tail -n1 | awk '{print $1}'` 
+    if [ $current_user = "root" ]; then
+	su carmadm -c "$sysmond_script $_main_host $_backup_host"
+    else
+	$sysmond_script $_main_host $_backup_host
+    fi
+    _exit_code=$?
+
+elif [ $number_of_running_systems -eq 1 ]; then
+    echo "`basename $0` ERROR `date`: One of the nodes are running, this is typically bad but not disastrous news."
+    _main_host=`$ha_extract_cmd | head -n1 | awk '{print $1}'`
+    if [ $current_user = "root" ]; then 
+        su carmadm -c "$sysmond_script $_main_host"
+    else
+        $sysmond_script $_main_host
+    fi
+    _exit_code=$?
+
+else
+    _msg="Panic! Neither of the reportworker systems are alive. There is nothing we can do with sysmond to compensate for that."
+    echo "`basename $0` FATAL `date`: $_msg"
+    logger $_msg 
+    #echo $_msg | mail -s "$_msg" Carmen-Support-SK-CMS@jeppesen.com
+    _exit_code=1337
+fi
+
+
+########### Clean up and exit ##################################################
+
+/bin/rm $tmpfile
+exit $_exit_code
+

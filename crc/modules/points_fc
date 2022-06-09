@@ -1,0 +1,192 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   Definition of flight crew point calculations.
+ *   This module contains flight crew specific logic to be
+ *   in Pairing and Rostering 
+ *
+ * Created by:
+ *   Henrik Mouritsen Initial, 15-Dec-2005
+ *
+ * Agreement:
+ *   Operations Manual - A OMA chapter 7. 15-Dec-2005
+ *
+ * Major changes:
+ *
+ */ 
+
+module points_fc inherits points
+
+%points_rob_leg_start% = leg.%start_UTC% + 00:45;
+%points_rob_leg_end% = leg.%end_UTC% - 00:45;
+
+%rob_table% = %etab_path%(%rob_table_para_fc%); 
+%rob_table_para_fc% = 
+  parameter "rest_on_board_fc"
+  remark "ETAB: Rest on board table";
+
+/*
+** FC related rest on board 
+*/
+
+%rest_on_board_valid% =
+  leg.%is_active_flight% and 
+  %aircraft_type_with_rest_on_board% and
+  leg.%end_UTC% - leg.%start_UTC% > 1:00 and
+  %rob_1_1_1% and
+  crew_pos.%total_flight_crew_need% > 2;
+
+redefine %rest_on_board_reduction_points_leg%(Abstime start, Abstime stop, Bool points_style) =
+  if not %rest_on_board_valid% then
+    0
+  else
+    ((nmin(%points_rob_leg_end%, stop) - nmax(%points_rob_leg_start%, start)) * 100 /
+     (%points_rob_leg_end% - %points_rob_leg_start%)) * %rest_on_board_reduction_points_leg_full% / 100;
+
+redefine export %rest_on_board_reduction_points_leg_full% =
+  if not %rest_on_board_valid% then
+    0
+  else
+    %rob_1_1_1_points%; 
+
+%aircraft_type_with_rest_on_board% = leg.%crew_bunk_flight_crew%;
+
+%rob_1_1_1% = 
+  %no_of_rob_fc% = 1 and
+  %no_of_rob_fp% = 1 and
+  %no_of_rob_fr% = 1;
+
+/*
+** FC Algorithm for points reduction on rob flight with comp FC FP FR::
+**
+**   Ordinary points in rest period + landing points / 3
+**   - landing points if FR crew
+**   No point reduction is given for the first and last 30 minutes  
+**   of the flight
+*/
+
+%rob_1_1_1_points% =
+   let points = 
+     (if %time_zone_correction% then
+        %time_zone_corrected_points%(%points_rob_leg_start%, %points_rob_leg_end%) 
+      else if not leg.%is_school_flight% then
+        %ordinary_points%(%points_rob_leg_start%, %points_rob_leg_end%)
+      else
+        0) - 
+      (%points_rob_leg_end% - %points_rob_leg_start%) * %rest_points_per_hour% / 1:00;
+
+  (points/3) /* + %landing_points_duty%) / 3*/
+
+  - %relief_pilot_buffer%;
+
+%relief_pilot_buffer% = 0;
+
+table rest_on_board_fc =
+  leg.%flight_carrier%, leg.%flight_nr%, leg.%start_UTC%,
+  leg.%start_station%, leg.%end_station%
+    -> int %no_of_rob_fc%, int %no_of_rob_fp%, int %no_of_rob_fr%;
+  external %rob_table%;
+  carrier, flight_no, (period_start_date, period_end_date),
+  dep_airport_name, arr_airport_name
+    -> fc, fp, fr;
+  -, -, -, -, -  -> 0, 0, 0;
+end
+
+/*
+** Training points for 90 points rule
+** Calculates to 14 points per hour block off - block on
+** as opposed to 270 points rule calculating 6/8 full leg
+*/
+redefine %training_points_leg%(Abstime start, Abstime stop, Bool points_style) = 
+
+  if not leg.%is_school_flight% then
+    0
+  else if points_style = %points_style_90% then
+    %ordinary_points%(%points_leg_start%(points_style), leg.%start_UTC%) + /* briefing + checkin */
+    %school_leg_points% +                                                  /* the school leg */
+    %ordinary_points%(leg.%end_UTC%, nmin(%points_leg_end%(points_style),stop)) /* debriefing + checkout */
+  else
+    %ordinary_points%(nmax(%points_leg_start%(points_style), start), nmin(%points_leg_end%(points_style), stop));
+
+%school_leg_points% =
+
+  /* Not actively flying - thus ordinary duty points */ 
+  if leg.%is_supernum% then
+    %ordinary_points%(leg.%start_UTC%, leg.%end_UTC%)
+  /* pilot under training new or requal - points for not at controls irelevant in pairing */
+  else if %crew_under_pilot_education% then
+    (leg.%time_at_controls% * %training_simulator_points_per_hour% +
+    (leg.%block_time% - leg.%time_at_controls%) * %day_points_per_hour%) / 1:00 
+  else
+    leg.%block_time% * %training_simulator_points_per_hour% / 1:00;
+
+/*
+** Points calculation for a training leg inside a period range.
+** Calculation is rule dependant:
+** 90 points rules: ordinary points for co/ci briefing, school leg 
+**                  points (14) for training leg
+** 7x24 rule:       ordinary points for everything 
+*/
+
+redefine export %training_points_leg_full%(Bool points_style) = 
+
+  if not leg.%is_school_flight% then
+    0
+  else if points_style = %points_style_90% then
+    %ordinary_points%(%points_leg_start%(points_style), leg.%start_UTC%) +         /* briefing + checkin */
+    %school_leg_points% +                                            /* the school leg */
+    %ordinary_points%(leg.%end_UTC%, %points_leg_end%(points_style))               /* debriefing + checkout */
+  else
+    %ordinary_points%(%points_leg_start%(points_style), %points_leg_end%(points_style));
+
+/*
+** Temp stuff - how do we signal this ?? MADS
+*/
+
+%crew_under_pilot_education% = %crew_under_fc_education% or
+			       %crew_under_fp_education% or
+			       %crew_under_fr_education%;
+
+%crew_under_fc_education% = false;
+%crew_under_fp_education% = false;
+%crew_under_fr_education% = false;
+
+
+/*
+** Potentially leg cutoff
+**   90 points style  - 14 points - always cutoff at blockon  
+**   270 points style - 6/8 points 
+*/
+
+redefine %simulator_points_leg%(Abstime start, Abstime stop, Bool points_style) = 
+
+  if not leg.%is_simulator% then
+    0
+  else if points_style = %points_style_90% then
+    leg.%time% * %training_simulator_points_per_hour% / 1:00
+  else
+    %ordinary_points%(nmax(%points_leg_start%(points_style), start), nmin(%points_leg_end%(points_style), stop));
+
+/*
+** full leg 
+**   90 points style        - 14 points 
+**   7x 24 270 points style - 6/8 points 
+**   Must include duty before SIM in case of passive etc before.
+*/
+
+redefine export %simulator_points_leg_full%(Bool points_style) = 
+
+  if not leg.%is_simulator% then
+    0
+  else if points_style = %points_style_90% then
+    %ordinary_points%(%points_leg_start%(points_style), leg.%start_utc%) +
+    leg.%time% * %training_simulator_points_per_hour% / 1:00 +
+    /* Points for sim-debrief is included in 90P rule */
+    (if leg.%has_check_out% then
+       %ordinary_points%(leg.%end_utc%, leg.%co_end_utc%)
+     else
+       0)
+  else
+    %ordinary_points%(%points_leg_start%(points_style), %points_leg_end%(points_style));
+
+/* end of file */

@@ -1,0 +1,320 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module defines roster fundamentals.
+ *
+ * Created by:
+ *   Extracted from the Carmen Standard User, 07-Dec-2005
+ *
+ * Major changes:
+ *
+ */
+root module roster
+
+import base_calendar;
+import fundamental;
+import system_db_parameters;
+import levels;
+import wop;
+import duty;
+import trip;
+import leg;
+import standby;
+import accumulators;
+import crew;
+import calendar;
+import task;
+
+export %check_rules% = %is_roster%;
+export %is_empty% = default(not any(wop(roster), not wop.%is_dummy%), true);
+
+/*
+** Block time
+*/
+export %block_time% = sum(trip(roster),trip.%block_time%);
+
+export %block_time_in_period%(Abstime a1, Abstime a2) =
+  sum(wop(roster), wop.%block_time_in_period%(a1,a2));
+
+export %block_time_in_period_caa%(Abstime a1, Abstime a2) =
+  sum(wop(roster), wop.%block_time_in_period_caa%(a1,a2));
+
+export %block_time_in_period_long_haul%(Abstime a1, Abstime a2) =
+  sum(leg(roster) where (leg.%with_long_haul_ac%),
+      leg.%block_time_in_period%(a1,a2));  
+  
+export %block_time_of_ac_qual_in_period_caa%(Abstime start, Abstime stop, String acqual) =
+    sum(wop(roster), wop.%block_time_of_ac_qual_in_period_caa%(start, stop, acqual));
+
+export %block_time_in_period_during_restr%(Abstime start, Abstime stop) =
+  sum(leg(roster) where (crew.%has_restr_new_leg_start% or
+                         crew.%has_qual_restr_new_actype_on_leg% or
+                         crew.%has_restr_training_dct_foc_refr_leg_start% or
+                         crew.%has_restr_training_capt_leg_start%),
+       leg.%block_time_in_period%(start, stop));
+
+/**** Counting legs with long haul AC and short haul AC ***/ 
+ 
+export %long_haul_legs_in_period% (Abstime start, Abstime stop) =
+    count(leg(roster))
+     where (leg.%start_hb% < stop and
+            leg.%end_hb% > start and
+            leg.%is_active_flight% and
+            leg.%with_long_haul_ac%);
+
+export %short_haul_legs_in_period% (Abstime start, Abstime stop) =
+    count(leg(roster))
+     where (leg.%start_hb% < stop and
+            leg.%end_hb% > start and
+            leg.%is_active_flight% and
+            leg.%with_short_haul_ac_family%);
+
+export %nr_sim_duty_as_tr%(Abstime start, Abstime stop) =
+  count(duty(roster)) 
+    where (duty.%start_hb% < stop and
+           duty.%end_hb% > start and
+           duty.%is_tr%);
+  
+export %nr_lifus_legs_as_instr%(Abstime start, Abstime stop) =
+  count(leg(roster)) 
+    where (duty.%start_hb% < stop and
+           duty.%end_hb% > start and
+           leg.%leg_is_any_instructor_lifus%);    
+
+export %nr_lc_legs_as_instr%(Abstime start, Abstime stop) =
+  count(leg(roster)) 
+    where (duty.%start_hb% < stop and
+           duty.%end_hb% > start and
+           leg.%leg_is_any_instructor_lc%);       
+/*
+** Duty time. ***** POISON *****
+** These duty time functions are not up to date and conform to oma16 defintions. It will take some time to replace
+** the use of them.
+** 
+** Please use oma16 functions instead, the ones with word "indep" in them work well over a hole or part of roster,
+** and uses same duty_calc control allowing for caa or union calculations, and some special. night_upg has no
+** meaning since a while and can be ignored (always false).
+*/
+export %duty_time%(DutyCalculation dutycalc, Bool night_upg) = sum(trip(roster),trip.%duty_time%(dutycalc,night_upg));
+
+export %duty_time_in_period%(Abstime start_utc, Abstime end_utc, Bool night_upg, DutyCalculation dutycalc) =
+  sum(trip(roster),trip.%duty_time_in_period%(start_utc,end_utc,night_upg, dutycalc));
+
+export %duty_time_in_period_scheduled%(Abstime start_utc, Abstime end_utc, Bool night_upg, DutyCalculation dutycalc, Bool include_privately_traded) =
+  sum(trip(roster),trip.%duty_time_in_period_scheduled%(start_utc,end_utc,night_upg, dutycalc, include_privately_traded));
+
+
+/*
+** Standby days
+*/
+export %standby_days_in_period%(Abstime a1, Abstime a2) =
+  sum(wop(roster), standby.%standby_days_in_period%(a1, a2)) 
+  where (wop.%has_standby% and 
+         not wop.%has_standby_line% and 
+         wop.%days_in_period%(a1, a2) > 0 and
+         not (crew.%is_skn% and crew.%is_cabin% and wop.%has_cancellation_standby%));
+
+/**
+** Airport standby
+**/
+
+export %airport_standby_days_in_period%(Abstime a1, Abstime a2) =
+  sum(wop(roster), standby.%airport_standby_days_in_period%(a1, a2)) 
+  where (wop.%has_airport_standby% and 
+         wop.%days_in_period%(a1, a2) > 0);
+
+/*
+** Scattered standby days
+*/
+export %scattered_standby_days_in_period%(Abstime a1, Abstime a2) =
+  sum(wop(roster), standby.%scattered_standby_days_in_period%(a1, a2)) 
+  where ((wop.%has_scattered_standby% or
+          (wop.%has_scattered_standby_at_any_location% and 
+           crew.%is_SKS%)) and
+         wop.%days_in_period%(a1, a2) > 0);
+
+/*
+** Isolated standby days
+*/
+export %isolated_standby_days_in_period%(Abstime a1, Abstime a2) =
+  sum(trip(roster), trip.%days_in_period%(a1, a2)) 
+  where (trip.%is_isolated_standby_SKN% and 
+         trip.%days_in_period%(a1, a2) > 0);
+
+/*
+** standby lines
+*/
+export %standby_lines_in_period%(Abstime a1, Abstime a2) =
+  count(wop(roster)) 
+  where (wop.%is_standby_line% and
+         last(trip(wop), trip.%is_last_in_standby_line%) and
+         wop.%starts_in_period%(a1, a2) and
+         %in_period%(first(leg(wop), standby.%published_wop_start%), a1, a2));
+  
+%in_period%(Abstime point, Abstime start, Abstime stop) =
+  point >= start and
+  point < stop;
+  
+/*
+** standby lines days
+*/
+export %standby_lines_days_in_period%(Abstime a1, Abstime a2) =
+  sum(wop(roster), wop.%days_in_period%(a1, a2)) 
+  where (wop.%has_standby_line_not_bought_day% and 
+         wop.%days_in_period%(a1, a2) > 0);
+
+/*
+** standby blocks
+*/
+export %standby_blocks_in_period%(Abstime a1, Abstime a2) =
+  count(wop(roster)) 
+  where (wop.%is_standby_block% and 
+         wop.%starts_in_period%(a1, a2));
+  
+export %standby_3day_blocks_in_period%(Abstime a1, Abstime a2) =
+  count(wop(roster))
+  where (wop.%is_standby_block% and
+         wop.%days% >= 3 and
+         wop.%starts_in_period%(a1, a2) and
+         %in_period%(first(leg(wop), standby.%published_wop_start%), a1, a2));
+        
+/*
+** blank days
+*/
+export %blank_days_in_period_all%(Abstime a1, Abstime a2) =
+  if %cabin_crew% then
+    %count_days_in_period%(duty.%duty_sel_blank_days_4exng%, a1, a2)
+  else
+    %count_days_in_period%(duty.%duty_sel_blank_days_grp%, a1, a2);
+
+export %blank_days_acc% = 
+  %blank_days_in_period_all%(round_down_year(%pp_start%),%pp_end%);
+
+export %count_days_in_period%(Int duty_selection, Abstime a1, Abstime a2) =
+  sum(trip(roster), trip.%days_in_period%(a1,a2))
+  where (trip.%is_all_duty%(duty_selection) and trip.%days_in_period%(a1, a2)>0);
+        
+export %blank_days_in_period%(Abstime a1, Abstime a2) =
+  sum(trip(roster), trip.%days_in_period%(a1, a2))
+  where (trip.%is_blank_day% and 
+         trip.%days_in_period%(a1, a2) > 0);
+
+/* Note 2016-02-24 Lars Westerlind. 
+** Following code seems very strange
+** 1. The conditions is_special_day matches day before easter monday, which is a
+**    funny way to express easter day, if that's the intension. The dates are matching
+**    as expected IMHO.
+** 2. Maundy Thursday is listed, but is never matching as it's not a holiday in SE.
+** 3. Why holidays in SE are checked in rules regarding SKN, is not understood either.
+** 
+** The conditions are hidden in a way, that makes me suspect other errors. The result is that
+** some blank day rules are not evalueated at these days
+**
+** The change done today is only to use the new date routines. The function is left as it was before.
+*/
+
+/* CR404 */
+export %is_SKN_valid%(abstime start_d, abstime end_d) =
+  crew.%is_SKN% and
+  %SKN_bl_agreement_ok%(start_d, end_d);
+  
+%SKN_bl_agreement_ok%(abstime start_d, abstime end_d) =
+  %agreement_valid_exists%("bl_days_skn_cc") and
+  %agreement_valid%("bl_days_skn_cc", start_d) and
+  not (%is_special_day%(start_d, end_d + 0:01)) and
+  not (%is_special_date%(start_d));
+  
+
+/* CR404 */
+set bl_SKN_spec_days = "Maundy Thursday","Easter Monday";
+set bl_SKN_spec_dates = "1224","1225","1226","1231","0101";
+
+/* CR404 */
+%is_special_day%(abstime start_t, abstime end_t) =
+  let easter_d = base_calendar.%hol_day%(start_t, base_calendar.%easter_day_hnr%);
+  round_down(start_t,24:00) <= easter_d and round_down(end_t-0:02,24:00)+24:00>easter_d;
+/*  count(times(200)) 
+  where ((default(calendar.%weekend_name_ix%(start_t, end_t, %times_index_0%), "") in bl_SKN_spec_days) and 
+        (calendar.%weekend_country_ix%(start_t, end_t, %times_index_0%) = "SE"))> 0;
+*/
+%is_special_date%(abstime start_t) =
+  format_time(start_t, "%02m%02d") in bl_SKN_spec_dates;
+
+/*
+** Activities in period - trips with specific code
+** (Typically single day trips)
+*/
+
+export %activities_in_period%(Abstime a1, Abstime a2, String code) =  
+  sum(trip(roster), trip.%days_in_period%(a1, a2))
+  where (all(leg(trip), leg.%code% = code) and 
+         trip.%days_in_period%(a1, a2) > 0);
+
+export %activity_group_in_period%(Abstime a1, Abstime a2, String code) =
+  sum(trip(roster), trip.%days_in_period%(a1, a2))
+  where (all(leg(trip), task.%group%(leg.%code%) = code) and
+         trip.%days_in_period%(a1, a2) > 0);
+
+/*
+** Trip type
+*/
+export %trip_code_at_date%(Abstime date) =
+  default(
+          first(trip(roster), trip.%code%) 
+          where (trip.%start_day% <= date and trip.%end_day% >= date),
+          "open");   
+  
+export %on_duty_at_date%(Abstime date) =
+  default(
+          first(trip(roster), trip.%is_on_duty%) 
+          where (trip.%start_day% <= date and trip.%end_day% >= date), 
+          false);
+  
+/*****
+ * Sorts
+ *****/
+
+%no_sby_in_pp% =  
+  %standby_days_in_period%(%pp_start%, %pp_end%) +
+  %standby_lines_days_in_period%(%pp_start%, %pp_end%);
+
+%no_sby_in_prev_pp% = 
+  %standby_days_in_period%(round_down_month(%pp_start%-24:00), %pp_start%) +
+  %standby_lines_days_in_period%(round_down_month(%pp_start%-24:00), %pp_start%);
+  
+%no_sby_in_year% =
+  accumulators.%standby_days_in_period%(round_down_year(%pp_start%), round_up_year(%pp_start%)) +
+  (if (crew.%is_skn% and crew.%is_cabin%) then
+    accumulators.%standby_line_days_in_period%(round_down_year(%pp_start%), round_up_year(%pp_start%))    
+  else
+    accumulators.%standby_lines_in_period%(round_down_year(%pp_start%), round_up_year(%pp_start%)));
+
+%first_sby_in_pp% = 
+  default(first(trip(roster), trip.%start_hb%)
+          where((trip.%is_standby% or trip.%is_standby_line%) and trip.%in_pp%),
+          %pp_end%);
+
+%last_sby_in_roster% =
+  default(last(trip(roster), trip.%start_hb%)
+          where(trip.%is_standby%),1jan1986);
+
+%no_bl_in_pp% = 
+  let bdip = %blank_days_in_period%(%pp_start%, %pp_end%);
+  if bdip = 0 then
+    31
+  else
+    bdip;
+
+%first_bl_in_pp% = 
+  default(first(trip(roster), trip.%start_hb%)
+          where(trip.%is_blank_day% and trip.%in_pp%),
+          %pp_end% + 24:00);
+          
+/* CJ Flight Deck sign; (SKCMS-745) */
+%has_ac_employer_qa% = any(wop(roster),wop.%has_ac_employer_qa%);
+export %is_qa_fd% = %has_ac_employer_qa% and fundamental.%flight_crew%;
+  
+/* end of file */
+

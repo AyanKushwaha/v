@@ -1,0 +1,184 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains cabin crew specific soft (quality) rules used in Carmen Crew Pairing 
+ *   and as studio only in Carmen Crew Rostering and Carmen Crew Tracking.
+ *
+ * Sections:
+ *    1. Duty rules
+ *
+ * Created by:
+ *   Henrik Albertson, 17-Feb-2005
+ *
+ * Major changes:
+ *
+ */
+
+module rules_soft_ccp_cc inherits rules_soft_ccp
+
+/****************************************************************
+ * Section 1: Duty rules
+ ***************************************************************/
+/*
+** Rule:
+**    No charter before long haul production
+**
+** Description:
+**    Not allowed with charter production before a long haul trip.
+**
+**    NB! Two implementations are done. One in CCP checking
+**    when doing short-before-long planning and one in CCR.
+*/
+rule sft_no_charter_before_long_haul_trip_SKS =
+  valid trip.%check_rules% and
+        trip.%is_SKS% and
+        duty.%has_charter% and
+        duty.%in_pp% and
+	    rule_exceptions.%rule_on%(duty.%start_UTC%);
+  default(not next(duty(trip), duty.%is_long_haul%), true);
+  startdate = duty.%start_UTC%;
+  remark "(CCP) Soft: No charter before long haul production";
+end
+
+/*
+** This rule is removed because it is less tight than 
+** non leg-dependent rule (10:30)!
+**
+** Rule: 
+**    Max duty time the day before long haul
+**    (leg-dependant for SKS)
+*/
+
+
+/* 
+** Rule: 
+**    Max time block on to block off for duty free break at daytime
+**    at station/base.
+**
+** Description:
+**    The rules check that the time interval between block on and block off
+**    in a short stop not overlapping night interval [2:00;3:00] 
+**    doesnt exceed a given limit.
+**    A day short stop in this context is considered a period between two 
+**    duties less than minimumm rest, that doesnt overlap local night time interval
+**    [2:00;3:00]
+**    Rule must be implemented at leg level because of level definition of duty.
+**
+** Agreement:
+**    Functional rule
+*/
+/* Outstanding:sync terminology and functionality with min rest defs 
+   Currently using term duty free break which is the same as a da short
+   in existing terms */     
+
+rule sft_valid_duty_free_break_CC_ALL =
+  valid trip.%check_rules% and
+        duty.%in_pp% and
+        duty.%is_on_duty% and
+        not %duty_is_standby_callout% and
+        %is_day_short_stop% and
+	    rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+  %valid_short_stop%;
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  failobject = leg.%failobject_departure%;
+  failtext "Soft: Max time btw block-on block-off for day short stop exceeded."; 
+  remark "(CCP) Soft: Max time btw block-on block-off for day short stop exceeded";
+end
+  
+%valid_short_stop% =
+  default(leg.%connection_time%, %valid_connection_for_day_short_stop%) <=
+  %valid_connection_for_day_short_stop%;
+
+%valid_connection_for_day_short_stop% =
+  if leg.%arrives_at_homebase% then
+    %valid_connection_time_for_day_short_stop_base_p%
+  else
+    %valid_connection_time_for_day_short_stop_station_p%;
+
+%valid_connection_time_for_day_short_stop_base_p% =
+  parameter 0:00
+  remark "Max block-on block-off time for day short stop at base";
+
+%valid_connection_time_for_day_short_stop_station_p% =
+  parameter 0:00
+  remark "Max block-on block-off time for day short stop at station";
+
+/*
+** Rule:
+**    No deadhead first in longhaul duty
+**
+** Description:
+**    Only used for KLF runs
+**
+*/
+
+rule (off) sft_kfl_dh_calendar_day_before_cph_arn_longhaul_SKN_SKL_SKS =
+  valid trip.%check_rules% and
+        leg.%in_pp% and
+        leg.%is_long_haul_aircraft% and
+        (leg.%start_station% = "CPH" or 
+	     leg.%start_station% = "ARN") and
+        prev(leg(trip), leg.%is_deadhead%);
+  
+  leg.%start_date% > prev(leg(trip), leg.%end_date%) -
+                     rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%);
+  
+  startdate = leg.%activity_scheduled_start_time_UTC%;
+  remark "(CCP) Soft: KFL: DH calendar day before CPH or ARN longhaul duty";
+end
+
+group soft_rule_params_cc =
+  %valid_connection_time_for_day_short_stop_base_p%,
+  %valid_connection_time_for_day_short_stop_station_p%;
+
+/*
+** Rule:
+** Min connection time before a charter from other base or station
+**
+** Description:
+** The rule checks the connection time against
+** %minimum_connection_time_before_charter_from_other_base% 
+**
+** Agreement:
+*/
+
+export rule sft_min_cnx_time_before_charter_from_other_base_CC =
+  valid %is_pairing% and
+        trip.%check_rules% and 
+        duty.%in_pp_extended% and
+        duty.%has_flight_duty% and
+        connection.%connection_before_charter% and
+        (default(next(leg(duty), leg.%departure_airport_name% in bases_min_connection_time_before_charter_set) or
+        next(leg(duty), leg.%departure_airport_base% in bases_min_connection_time_before_charter_set), false));
+        
+  connection.%connection_time% >= 
+    %minimum_connection_time_before_charter_from_base_in_list% - 
+    rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%);
+    
+  startdate = leg.%activity_scheduled_start_time_UTC%; /* NOTE: The failobject is next(leg)! */
+  severity = %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = next(leg(duty), leg.%failobject_departure%);
+  failtext(Reltime value, Reltime limit) =
+    concat("Soft: Min cnx before charter from base/stn in list ", 
+            leg.%flight_name%, " - ", 
+            next(leg(duty), leg.%flight_name%),
+            %reltime2str%(value), %reltime2str%(limit));
+    
+  remark "(CCP) Soft: Min connection before charter from base/station in list",
+  planner "The rule checks that the minimum allowed connection"
+	        " before charter is satisfied. The minimum connection"
+            " times can be changed by a parameter.";
+end
+	
+%minimum_connection_time_before_charter_from_base_in_list% = 
+  parameter 1:00
+  remark "Min connection before charter from base/stn in list";
+
+set bases_min_connection_time_before_charter_set =
+  parameter ""
+  remark "Min connection before charter from base/stn in list"; 
+
+
+/* end of file */

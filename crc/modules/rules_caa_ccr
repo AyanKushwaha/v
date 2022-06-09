@@ -1,0 +1,1135 @@
+/* -*- crc -*- 
+ * 
+ * 
+ *
+ * Purpose :
+ *   This module contains government rules from the Civil Avaiation
+ *   Authority to be used in Carmen Crew Rostering and as studio only 
+ *   in Carmen Crew Tracking.
+ *
+ * Sections:
+ *   1. Point rules
+ *   2. Duty rules
+ *   3. Block time rules
+ *   4. Freeday rules
+ *   5. License, medical and badge rules
+ *   6. Visa and vaccination rules
+ *   7. EU-OPS Subpart Q / OMA16 rules.
+
+ * Created by:
+ *   Henrik Albertson, 27-Feb-2006
+ *
+ * Major changes:
+ *
+ */
+
+root module rules_caa_ccr
+
+import fundamental;
+import base_utils;
+import levels;
+import leg;
+import fdp;
+import duty_period;
+import duty;
+import trip;
+import wop;
+import roster;
+import crew;
+import model_crew;
+import duty_time;
+import accumulators;
+import rule_exceptions;
+import rules;
+import oma16_defs;
+import oma16;
+import system_db_parameters;
+import crew_pos;
+
+/****************************************************************
+ * Section 1: Block time rules
+ ***************************************************************/
+
+/*
+** Rule:
+**    Max block hours in calendar year
+**
+** Description:
+**    The rule checks that the total accumulated block time in a 
+**    calendar year (01jan-31dec) is not exceeded.
+**
+** Agreement:
+**    OM-A 7.1.5.7	15-dec-2005
+*/
+%caa_max_block_time_in_calendar_year_ALL_failobject% =
+  let rule_exception = trip.%start_UTC%,
+      year_end = round_up_year(trip.%start_hb%);
+  last(leg(trip),prev(leg(roster),
+                 next(leg(roster),leg.%failobject_departure%) where 
+                 (leg.%block_time% > 0:00)) where
+                 (leg.%start_hb% < year_end and
+                  accumulators.%block_time_in_period_caa%(round_down_year(leg.%end_hb%),
+                                         leg.%end_hb%) <= 
+                  %max_block_time_in_calendar_year% +
+                  rule_exceptions.%overshoot_rel%(rule_exception)));
+
+%max_block_time_in_calendar_year% = 900:00;
+
+/*
+** Rule:
+**    Crew must have enough blocktime hours for relevant ac type for certain airports
+**
+** Description:
+**    The rule checks that the total accumulated block time for a acfamily 
+**    is enough to land at certain airports
+**
+** Agreement:
+**    (OPS-Info 7.2 20131122)
+*/
+export rule (on) caa_cockpit_crew_has_req_ac_block_hours_for_airport =
+  valid roster.%check_rules% and
+        crew.%is_pilot% and
+        leg.%in_pp% and
+        not leg.%is_deadhead% and
+        %leg_requires_min_blockhours_check%;
+  %crew_has_enough_lifetime_blockhours_for_acfamily_at_arrival%;
+  startdate  = leg.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject =  leg.%failobject_departure%;
+  failtext concat("Crew needs at least ", %reltime2str%(%min_blockhours_required_by_arrival_airport%), " block hours with ", leg.%ac_family%, " to fly to ", leg.%end_station%);
+  remark "OMA: Min BLH before flying to specific airport",
+  planner "This rule is used to prohibit flight crew members to fly to"
+          "specific airports with a need of minimum BLHs on aircraft type."
+          "1) The flight crew member should have minimum 1000 BLH on aircraft"
+          " type before flying to GZP (OPS-Info 7.2 20131122) (JIRA SASCMS-6437).";
+end
+
+%leg_requires_min_blockhours_check% =
+  %min_blockhours_required_by_arrival_airport% > 00:00;
+
+table min_blockhours_for_airport_table =
+  leg.%end_station% -> %min_blockhours_required_by_arrival_airport%;
+  "GZP" -> 1000:00;
+   -    -> 00:00;
+end
+  
+%crew_has_enough_lifetime_blockhours_for_acfamily_at_arrival% =
+  let blockhours_from_table = %crew_lifetime_blockhours_for_acfamily_from_table%(crew.%id%,leg.%ac_family%),
+      min_blockhours_for_airport = %min_blockhours_required_by_arrival_airport%;
+  (blockhours_from_table >= min_blockhours_for_airport) or
+  (blockhours_from_table + %crew_block_hours_for_ac_family_in_plan_in_period%(leg.%ac_family%,
+                                                                              %lifetime_block_hours_save_time%(crew.%id%,leg.%ac_family%),
+                                                                              leg.%end_utc%) >= min_blockhours_for_airport);
+
+%crew_block_hours_for_ac_family_in_plan_in_period%(String ac_family,AbsTime fromtime, AbsTime totime) =
+  default(sum(leg(roster),leg.%block_time%) where (leg.%start_utc% >= fromtime and leg.%end_utc% <= totime and leg.%ac_family% = ac_family),00:00);
+
+table lifetime_block_hours_for_ac_family_table(String crewid,String acfam) = 
+  crewid,acfam ->
+    export RelTime %crew_lifetime_blockhours_for_acfamily_from_table%,
+    AbsTime %lifetime_block_hours_save_time%;
+  external "lifetime_block_hours";
+  crew, acfamily ->
+    accvalue,tim;
+  -,- ->
+    00:00, 01JAN1986 00:00;
+
+end
+/****************************************************************
+ * Section 2: License, Medical and badge rules
+ ***************************************************************/
+/*
+** Rule:
+**   Crew must have valid licence  
+**
+** Description:
+**    Checks that crew has valid licence
+**
+** Agreement:
+**   OMA 
+*/
+export rule caa_valid_licence_ALL =
+  valid roster.%check_rules% and
+        not crew.%is_leased_trip_start% and
+        %is_last_trip_in_month_where_licence_required% and
+        trip.%in_pp_extended% and
+        not crew_pos.%trip_is_supernum% and
+        %license_renewal_date% < %pp_end_extended%;
+         
+  trip.%end_day% <= %license_renewal_date% + 
+  		    rule_exceptions.%overshoot_rel%(trip.%end_day%);
+  
+  startdate = trip.%start_UTC%;
+  failtext "Crew has no valid licence"; 
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %caa_valid_licence_ALL_failobject%;
+  remark "(CCR) OMA: Crew has no valid licence.",
+  planner "The rule checks that crew has a valid licence.";
+end
+
+%caa_valid_licence_ALL_failobject% =
+  default(
+  first(leg(chain) where 
+        (leg.%start_hb% > nmax(%license_renewal_date%, %pp_start%) and
+         leg.%start_utc% >= %now% and
+         leg.%licence_required%),
+        leg.%failobject_departure%),
+  first(leg(chain) where 
+        (leg.%start_hb% > nmax(%license_renewal_date%, %pp_start%) and
+         leg.%licence_required%),
+        leg.%failobject_departure%));
+
+%license_renewal_date% =
+  default(crew.%license_renewal_date%(trip.%end_day%), 01Jan1986);
+
+%is_last_trip_in_month_where_licence_required% =
+  let month_start = round_down_month(trip.%start_hb%);
+
+  trip.%licence_required% and
+  default(next(trip(roster),trip.%start_month_start% <> month_start)
+            where (trip.%licence_required%),
+          true);
+
+/*
+** Rule:
+**    Crew must have valid medical license 
+**
+** Description:
+**    Checks that crew has valid medical license
+**
+** Agreement:
+**    OMA 
+*/
+export rule caa_valid_medical_ALL =
+  valid roster.%check_rules% and  
+        not crew.%is_leased_trip_start% and
+        not crew_pos.%trip_is_supernum% and
+        trip.%in_pp_extended% and
+        trip.%is_last_flt_sby_or_bl_in_month% and
+        %medical_renewal_date% < %pp_end_extended%;
+
+  trip.%end_hb% < %medical_renewal_date% + rule_exceptions.%overshoot_rel%(trip.%start_UTC%);
+  
+  startdate = trip.%start_UTC%;
+  severity = first(leg(trip),%severity_filter_int%(leg.%start_utc%,%duty_lh_region%));
+  failtext "OMA: No valid medical license"; 
+  failobject = %caa_valid_medical_ALL_failobject%;
+  remark "OMA: Crew has no valid medical license.",
+  planner "The rule checks that crew has a valid medical license.";
+end
+
+%caa_valid_medical_ALL_failobject% =
+  let renewal_date = %medical_renewal_date% +
+                     default(rule_exceptions.%overshoot_rel%(trip.%start_UTC%), 0:00);
+  default(    
+  first(leg(chain) where 
+    (leg.%is_flt_sby_or_bl% and
+     leg.%start_utc% >= %now% and
+     leg.%end_hb% >= renewal_date and
+     leg.%in_pp%), leg.%failobject_departure%),
+  first(leg(chain) where 
+    (leg.%is_flt_sby_or_bl% and
+     leg.%end_hb% >= renewal_date and
+     leg.%in_pp%), leg.%failobject_departure%));
+
+%medical_renewal_date% =
+  default(crew.%medical_renewal_date%(trip.%end_day%), 01Jan1986);
+  
+/*
+** Rule:
+**    Crew must have valid crew id badge. SKCMS-2997
+**
+** Description:
+**    Checks that crew has a valid crew id badge if duty does not end at homebase.
+
+** Agreement:
+**    OMA 
+*/
+export rule caa_valid_crew_id_badge_ALL =
+  valid roster.%check_rules% and  
+        trip.%in_pp_extended% and
+        system_db_parameters.%valid_crew_id_badge%(%pp_start%) and
+        not crew.%is_leased_trip_start% and
+        trip.%has_only_flight_duty% and
+        ((crew.%homebase% = "CPH" and (duty.%is_standby%) and not (duty.%is_scattered_standby%)) or (crew.%homebase% = "CPH" and not (duty.%arrives_at_homebase%)) or (crew.%homebase% <> "CPH" and (duty.%is_flight_duty%))) and
+        %crew_id_badge_renewal_date% < %pp_end_extended%;
+
+  duty.%end_day% <= %crew_id_badge_renewal_date% + rule_exceptions.%overshoot_rel%(trip.%start_UTC%);
+  
+  startdate = trip.%start_UTC%;
+  severity = first(leg(trip),%severity_filter_int%(leg.%start_utc%,%duty_lh_region%));
+  failtext %failtext_crew_id_badge%; 
+  failobject = %caa_valid_crew_id_badge_ALL_failobject%;
+  remark "OMA: Crew has no valid crew id badge.",
+  planner "The rule checks that crew has a valid crew id badge. If crew does not have a valid pcrew id badge then no night stops are allowed.";
+end
+
+%caa_valid_crew_id_badge_ALL_failobject% =
+  let renewal_date = %crew_id_badge_renewal_date% +
+                     default(rule_exceptions.%overshoot_rel%(trip.%start_UTC%), 0:00);
+  default(             
+  first(leg(trip) where 
+    (leg.%is_flt_sby_or_bl% and
+     leg.%start_utc% >= %now% and
+     leg.%end_hb% >= renewal_date and
+     leg.%in_pp%), leg.%failobject_departure%),
+  first(leg(trip) where 
+    (leg.%is_flt_sby_or_bl% and
+     leg.%end_hb% >= renewal_date and
+     leg.%in_pp%), leg.%failobject_departure%));
+
+%failtext_crew_id_badge% =
+  if crew.%homebase%  ="CPH"
+  then
+      "OMA: No valid crew id badge, night stop not allowed"
+  else
+       "OMA: No valid crew id badge";
+
+%crew_id_badge_renewal_date% =
+  default(crew.%crew_id_badge_renewal_date%(trip.%end_day%), 01jan1986);
+  
+  
+/****************************************************************
+ * Section 3: Visa and vaccination rules
+ ***************************************************************/
+
+/*
+** Rule:
+**   Crew must have valid visa  
+**
+** Description:
+**    Checks that crew has valid visa
+**    It is assumed that the first to characters in field subtyp
+**    defines the country code and that only one visa is neccesary.     
+**
+** Agreement:
+**   OMA 7.1.5.1
+*/
+export rule caa_valid_visa_ALL =
+  valid roster.%check_rules% and
+        not crew.%is_leased_trip_start% and
+        trip.%in_pp_extended% and
+        trip.%is_on_duty% and
+        trip.%is_first_flt_sby_or_bl_in_pp% and
+        rule_exceptions.%rule_on%(trip.%start_utc%);
+
+  %crew_has_required_visa%;
+  
+  startdate = trip.%start_utc%;
+  failtext %crew_required_visa_failtext%; 
+  severity = first(leg(trip),%severity_filter_int%(leg.%start_utc%,%duty_lh_region%));
+  failobject = %caa_valid_visa_ALL_failobject%;
+  remark "(CCR) OMA: Crew has no valid visa or connected passport.",
+  planner "The rule checks that crew has a valid visa or connected passport.";
+end
+
+%caa_valid_visa_ALL_failobject% =
+  default(
+    first(leg(trip), 
+          first(leg(chain) from (current) 
+                where((leg.%is_flight_duty% or
+                       leg.%is_ground_transport%) and
+                      %country_requires_visa% and
+                      leg.%start_utc% >= %now% and
+                      (not crew.%has_visa_at_date%(leg.%end_date_lt%, 
+                                                   leg.%end_country%) or
+                       not next(leg(trip),crew.%has_visa_at_date%(leg.%start_date_lt%, 
+                                                   leg.%start_country%)))),
+                leg.%failobject_departure%)),
+    last(leg(chain)
+         where((leg.%is_flight_duty% or
+                leg.%is_ground_transport%) and
+                %country_requires_visa% and
+                (not crew.%has_visa_at_date%(leg.%end_date_lt%, 
+                                             leg.%end_country%) or
+                 not next(leg(trip),crew.%has_visa_at_date%(leg.%start_date_lt%, 
+                                             leg.%start_country%)))),
+                leg.%failobject_departure%));
+                    
+
+%_crew_has_passport% =
+  crew.%has_passport%(leg.%end_utc%, leg.%end_country%);
+
+%country_requires_visa% =
+  model_crew.%country_req_visa%(leg.%end_country%, leg.%end_hb%);
+
+/* Check crew has visa valid for duration of layover in the country */
+%crew_has_required_visa% =
+  first(leg(trip), 
+        all(leg(chain) from(current) 
+            while (leg.%start_hb% < %pp_end_extended%) 
+            where ((leg.%is_flight_duty% or 
+                    leg.%is_ground_transport%) and
+                   %country_requires_visa% and
+                   not %_crew_has_passport%),
+            crew.%has_visa_at_date%(leg.%end_date_lt%, leg.%end_country%) and
+            next(leg(trip),crew.%has_visa_at_date%(leg.%start_date_lt%,leg.%start_country%))));
+
+%_crew_required_visa_failtext%(Abstime d, String country) =
+  if crew.%has_visa_at_date%(d, country) then void_string
+  else if crew.%has_req_specific_visa_at_date%(d, country) then "Crew has no valid passport for visa/country"
+  else "Crew has no valid visa for country";
+
+%crew_required_visa_failtext% =
+  first(leg(trip), 
+        max(leg(chain), default(
+                          %_crew_required_visa_failtext%( leg.%end_date%, leg.%end_country%), 
+                          default(
+                             next(leg(trip), %_crew_required_visa_failtext%( leg.%end_date%, leg.%end_country%)),
+                             ""
+                          )))
+            from(current) 
+            while (leg.%start_hb% < %pp_end_extended%) 
+            where ((leg.%is_flight_duty% or 
+                    leg.%is_ground_transport%) and
+                   %country_requires_visa% and
+                   not %_crew_has_passport%));
+                    
+
+
+/*
+** Rule:
+**   Crew must have valid vaccination  
+**
+** Description:
+**    Checks that crew has valid vaccination
+**    It is assumed that the first to characters in field subtyp
+**    defines the country code and that only one vaccination is neccesary.     
+**
+** Agreement:
+**   OMA 7.1.5.1
+*/
+export rule caa_valid_vaccination_ALL =
+  valid roster.%check_rules% and
+        not crew.%is_leased_trip_start% and
+        trip.%in_pp_extended% and 
+        trip.%is_on_duty% and
+        (leg.%is_flight_duty% or leg.%is_ground_transport%) and
+        %country_requires_vaccination% and
+	rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+
+  %crew_has_required_vaccination%;
+  
+  startdate = leg.%activity_scheduled_start_time_UTC%;
+  failtext "Crew has no valid vaccination"; 
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%; 
+  remark "(CCR) OMA: Crew has no valid vaccination.",
+  planner "The rule checks that crew has a valid vaccination.";
+end
+
+%country_requires_vaccination% =
+  model_crew.%country_req_vaccination%(leg.%end_country%, leg.%end_hb%);
+
+/* Check crew has vaccination valid for duration of layover in the country */
+%crew_has_required_vaccination% =
+  crew.%has_vaccination_at_date%(leg.%end_date%, leg.%end_country%) and
+  next(leg(trip),crew.%has_vaccination_at_date%(leg.%start_date%, leg.%start_country%));
+  
+
+/****************************************************************
+ * Section 4: EU-OPS Subpart Q / OMA16 rules
+ ***************************************************************/
+
+/*
+** Rule:
+**   OMA16 - maximum block hours in 28 calendar days backwards from duty start day  
+**
+** Description:
+**    Check block hours in 28 calendar days backwards from the day on which a
+**    duty starts.     
+**
+** Agreement:
+**   ORO.FTL.210
+*/
+
+export rule caa_oma16_max_block_time_in_28_days_start_day_ALL =
+  valid 
+        roster.%check_rules% and
+        not crew.%is_leased_duty_start% and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and
+        duty_period.%is_last_duty_period_on_start_day%;
+        
+  oma16.%block_time_in_last_28_days_start_day_hb% <=
+  oma16_defs.%max_block_time_in_28_days% -
+  oma16.%block_time_in_28_days_buffer%(duty_period.%last_28_days_start_day_start%) +
+  rule_exceptions.%overshoot_rel_on_off%(duty.%start_day%);
+                
+  startdate = duty.%start_day%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %caa_oma16_max_block_time_in_28_days_start_day_ALL_failobject%;
+  failtext(Reltime value, Reltime limit) =
+    %caa_oma16_max_block_time_in_28_days_start_day_ALL_failtext%(value, limit);
+  remark "(CCR) CAA: OMA16 max block time in 28 days from duty start day",
+  planner "The rule checks that the total block time in 28 calendar days"
+          " backwards from the day on which the duty starts is less than"
+          " maximum allowed.";
+end
+
+%caa_oma16_max_block_time_in_28_days_start_day_ALL_failtext%(Reltime value, Reltime limit) =
+  let normal = value > oma16_defs.%max_block_time_in_28_days%,
+      prefix = if normal then
+                 "CAA"
+               else
+                 "Soft",
+      new_limit = if normal then
+                    oma16_defs.%max_block_time_in_28_days%
+                  else
+                    limit;
+  rules.%failtext_rel%(concat(prefix,": OMA16 block time in 28 days ",
+                              format_time(duty_period.%last_28_days_start_day_start_day%,"%d%b"), "-",
+                              format_time(duty_period.%last_28_days_start_day_end_day%,"%d%b")),
+                       value,new_limit);
+
+%caa_oma16_max_block_time_in_28_days_start_day_ALL_failobject% =
+  let start_28_days = duty_period.%last_28_days_start_day_start%,
+      end_28_days = duty_period.%last_28_days_start_day_end%,
+      overshoot = rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+  last(leg(duty),
+       prev(leg(chain),next(leg(chain),leg.%failobject_departure%)) where
+        (accumulators.%block_time_in_period_caa_daily%(start_28_days,leg.%end_hb%) <=
+         oma16_defs.%max_block_time_in_28_days% +
+         overshoot)) where
+  (leg.%start_hb% < end_28_days);
+
+/*
+** Rule:
+**   OMA16 - maximum block hours in 28 calendar days end day  
+**
+** Description:
+**    Check block hours in 28 calendar days backwards from the day on which a
+**    duty ends, when there is no duty starting on that day.     
+**
+** Agreement:
+**   ORO.FTL.210
+*/
+
+rule caa_oma16_max_block_time_in_28_days_end_day_ALL =
+  valid 
+        roster.%check_rules% and
+        not crew.%is_leased_duty_start% and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and
+        duty_period.%is_last_duty_period_on_end_day% and
+        duty_period.%start_day_hb_utc% <> duty_period.%end_day_hb_utc%;
+        
+  oma16.%block_time_in_last_28_days_end_day_hb% <=
+  oma16_defs.%max_block_time_in_28_days% -
+  oma16.%block_time_in_28_days_buffer%(duty_period.%last_28_days_end_day_start%) +
+                rule_exceptions.%overshoot_rel_on_off%(duty.%start_UTC%);
+
+                
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %caa_oma16_max_block_time_in_28_days_end_day_ALL_failobject%;
+  failtext(Reltime value, Reltime limit) =
+    %caa_oma16_max_block_time_in_28_days_end_day_ALL_failtext%(value, limit);
+ remark "(CCR) CAA: OMA16 max block time in 28 days from duty end day",
+  planner "The rule checks that the total block time in 28 calendar days"
+          " backwards from the day on which the duty ends, when it ends on the"
+          " day after it started and there is no duty starting on that day, is"
+          " less than maximum allowed.";
+end
+
+%caa_oma16_max_block_time_in_28_days_end_day_ALL_failtext%(Reltime value, Reltime limit) =
+  let normal = value > oma16_defs.%max_block_time_in_28_days%,
+      prefix = if normal then
+                 "CAA"
+               else
+                 "Soft",
+      new_limit = if normal then
+                    oma16_defs.%max_block_time_in_28_days%
+                  else
+                    limit;
+  rules.%failtext_rel%(concat(prefix,": OMA16 block time in 28 days ",
+                              format_time(duty_period.%last_28_days_end_day_start_day%,"%d%b"), "-",
+                              format_time(duty_period.%last_28_days_end_day_end_day%,"%d%b")),
+                       value,new_limit);
+
+%caa_oma16_max_block_time_in_28_days_end_day_ALL_failobject% =
+  let start_28_days = duty_period.%last_28_days_end_day_start%,
+      end_28_days = duty_period.%last_28_days_end_day_end%,
+      overshoot = rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+  last(leg(duty),
+       prev(leg(chain),next(leg(chain),leg.%failobject_departure%)) where
+        (accumulators.%block_time_in_period_caa_daily%(start_28_days,leg.%end_hb%) <=
+         oma16_defs.%max_block_time_in_28_days% +
+         overshoot)) where
+  (leg.%start_hb% < end_28_days);
+
+ 
+/*
+** Rule:
+**    OMA16 - maximum block hours in calendar year
+**
+** Description:
+**    This rule checks that the total accumulated block time in a 
+**    calendar year (01jan-31dec) is not exceeded.
+**
+** Agreement:
+**    ORO.FTL.210
+*/
+export rule caa_oma16_max_block_time_in_calendar_year_ALL =
+  valid 
+        roster.%check_rules% and
+        not crew.%is_leased_trip_start% and
+        trip.%in_pp%;
+        
+  oma16.%block_time_in_calendar_year% <=
+    oma16_defs.%max_block_time_in_calendar_year% -
+    oma16.%block_time_in_calendar_year_buffer%(trip.%start_hb%) +
+    rule_exceptions.%overshoot_rel_on_off%(trip.%start_UTC%);
+    
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject =  trip.%failobject_start%;
+  failtext(Reltime value, Reltime limit) =
+    %caa_oma16_max_block_time_in_calendar_year_ALL_failtext%(value, limit);
+  remark "CAA: OMA16 Max block time in calendar year",
+  planner "The rule checks that the total accumulated block time in a"
+          " calendar year (01jan-31dec) is not exceeded.";
+end
+
+%caa_oma16_max_block_time_in_calendar_year_ALL_failtext%(RelTime value, RelTime limit) =
+  let normal = value > oma16_defs.%max_block_time_in_calendar_year%,
+      prefix =  if normal then "CAA" else "Soft",
+      new_limit = if normal 
+                  then oma16_defs.%max_block_time_in_calendar_year%
+                  else limit;
+  rules.%failtext_rel%(concat(prefix,": OMA16 Blk time cal yr "), value, new_limit); 
+    
+
+
+
+/*
+** Rule:
+**    OMA16 - maximum block hours in 12 calendar months
+**
+** Description:
+**    This rule checks that the total accumulated block time in 
+**    12 consecutive calendar months is not exceeded.
+**
+** Agreement:
+**    ORO.FTL.210
+*/
+export rule caa_oma16_max_block_time_in_12_calendar_months_ALL =
+  valid 
+        roster.%check_rules% and
+        not crew.%is_leased_trip_start% and
+        trip.%in_pp%;
+        
+  oma16.%block_time_in_12_calendar_months% <=
+    oma16_defs.%max_block_time_in_12_calendar_months% -
+    oma16.%block_time_in_12_calendar_months_buffer%(trip.%start_hb%) +      
+    rule_exceptions.%overshoot_rel_on_off%(trip.%start_UTC%);
+
+    
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject =  trip.%failobject_start%;
+  failtext(Reltime value, Reltime limit) =
+    %caa_oma16_max_block_time_in_12_calendar_months_ALL_failtext%(value, limit);
+  remark "CAA: OMA16 Max block time in 12 calendar months",
+  planner "The rule checks that the total accumulated block time in"
+          " 12 consecutive calendar months is not exceeded.";
+end
+
+%caa_oma16_max_block_time_in_12_calendar_months_ALL_failtext%(RelTime value, RelTime limit) =
+  let normal = value > oma16_defs.%max_block_time_in_12_calendar_months%,
+      prefix =  if normal then "CAA" else "Soft",
+      new_limit = if normal 
+                  then oma16_defs.%max_block_time_in_12_calendar_months%
+                  else limit;
+  rules.%failtext_rel%(concat(prefix,": OMA16 Blk time 12 cal mnths "), value, new_limit); 
+
+
+
+
+
+/*
+** Rule:
+**   OMA16 - maximum duty time in 14 calendar days backwards from duty start day  
+**
+** Description:
+**    Check duty time in 14 calendar days backwards from the day on which a
+**    duty starts.     
+**
+** Agreement:
+**   ORO.FTL.210
+*/
+rule caa_oma16_max_duty_in_14_days_start_day_ALL =
+  valid 
+        trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and        
+        duty_period.%is_last_duty_period_on_start_day%;
+  
+  oma16.%duty_time_in_last_14_days_start_day% <=
+    oma16_defs.%max_duty_time_in_14_days% -
+    oma16.%duty_time_in_14_days_buffer%(duty_period.%last_14_days_start_day_start%) +
+    rule_exceptions.%overshoot_rel_on_off%(duty.%start_UTC%);           
+
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %caa_oma16_max_duty_in_14_days_start_day_ALL_failobject%;
+  failtext(Reltime value, Reltime limit) =
+    %caa_oma16_max_duty_in_14_days_start_day_ALL_failtext%(value, limit);
+  remark "(CCR) CAA: OMA16 max duty time in 14 days from duty start day",
+  planner "The rule checks that the total duty time in 14 calendar days"
+          " backwards from the day on which the duty starts is less than"
+          " maximum allowed.";
+end
+
+%caa_oma16_max_duty_in_14_days_start_day_ALL_failtext%(Reltime value, Reltime limit) =
+  let normal = value > oma16_defs.%max_duty_time_in_14_days%,
+      prefix = if normal then
+                 "CAA"
+               else
+                 "Soft",
+      new_limit = if normal then
+                    oma16_defs.%max_duty_time_in_14_days%
+                  else
+                    limit;
+  rules.%failtext_rel%(concat(prefix,": OMA16 duty time in 14 days ",
+                              format_time(duty_period.%last_14_days_start_day_start_day%,"%d%b"), 
+                              "-",
+                              format_time(duty_period.%last_14_days_start_day_end_day%,"%d%b")),
+                       value,new_limit);
+
+%caa_oma16_max_duty_in_14_days_start_day_ALL_failobject% =
+  let start_14_days = duty_period.%last_14_days_start_day_start%,
+      end_14_days = duty_period.%last_14_days_start_day_end%,
+      overshoot = rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+  last(leg(duty),
+       prev(leg(chain),next(leg(chain),leg.%failobject_departure%)) where
+        (accumulators.%duty_time_in_interval%(start_14_days,leg.%end_utc%) <=
+         oma16_defs.%max_duty_time_in_14_days% +
+         overshoot)) where
+  (leg.%start_hb% < end_14_days);
+
+/*
+** Rule:
+**   OMA16 - maximum duty time in 14 calendar days backwards from duty end day  
+**
+** Description:
+**    Check duty time in 14 calendar days backwards from the day on which a
+**    duty ends.     
+**
+** Agreement:
+**   ORO.FTL.210
+*/
+rule caa_oma16_max_duty_in_14_days_end_day_ALL =
+  valid 
+        trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and
+        duty_period.%is_last_duty_period_on_end_day% and
+        duty_period.%start_day_hb_utc% <> duty_period.%end_day_hb_utc%;
+          
+  oma16.%duty_time_in_last_14_days_end_day% <=
+  oma16_defs.%max_duty_time_in_14_days% -
+  oma16.%duty_time_in_14_days_buffer%(duty_period.%last_14_days_end_day_start%) +
+                rule_exceptions.%overshoot_rel_on_off%(duty.%start_UTC%);
+                
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %caa_oma16_max_duty_in_14_days_end_day_ALL_failobject%;
+  failtext(Reltime value, Reltime limit) =
+    %caa_oma16_max_duty_in_14_days_end_day_ALL_failtext%(value, limit);
+  remark "(CCR) CAA: OMA16 max duty time in 14 days from duty end day",
+  planner "The rule checks that the total duty time in 14 calendar days"
+          " backwards from the day on which the duty ends, when it ends on the"
+          " day after it started and there is no duty starting on that day, is"
+          " less than maximum allowed.";
+end
+
+%caa_oma16_max_duty_in_14_days_end_day_ALL_failtext%(Reltime value, Reltime limit) =
+  let normal = value > oma16_defs.%max_duty_time_in_14_days%,
+      prefix = if normal then
+                 "CAA"
+               else
+                 "Soft",
+      new_limit = if normal then
+                    oma16_defs.%max_duty_time_in_14_days%
+                  else
+                    limit;
+  rules.%failtext_rel%(concat(prefix,": OMA16 duty time in 14 days ",
+                              format_time(duty_period.%last_14_days_end_day_start_day%,"%d%b"), 
+                              "-",
+                              format_time(duty_period.%last_14_days_end_day_end_day%,"%d%b")),
+                       value,new_limit);
+
+%caa_oma16_max_duty_in_14_days_end_day_ALL_failobject% =
+  let start_14_days = duty_period.%last_14_days_end_day_start%,
+      end_14_days = duty_period.%last_14_days_end_day_end%,
+      overshoot = rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+  last(leg(duty),
+       prev(leg(chain),next(leg(chain),leg.%failobject_departure%)) where
+        (accumulators.%duty_time_in_interval%(start_14_days,leg.%end_utc%) <=
+         oma16_defs.%max_duty_time_in_14_days% +
+         overshoot)) where
+  (leg.%start_hb% < end_14_days);
+
+
+/*
+** Rule:
+**   OMA16 - maximum duty time in 28 calendar days backwards from duty start day  
+**
+** Description:
+**    Check duty time in 28 calendar days backwards from the day on which a
+**    duty starts.     
+**
+** Agreement:
+**   ORO.FTL.210
+*/
+rule caa_oma16_max_duty_in_28_days_start_day_ALL =
+  valid 
+        trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and        
+        duty_period.%is_last_duty_period_on_start_day%;
+  
+  oma16.%duty_time_in_last_28_days_start_day% <=
+    oma16_defs.%max_duty_time_in_28_days% -
+    oma16.%duty_time_in_28_days_buffer%(duty_period.%last_28_days_start_day_start%) +
+    rule_exceptions.%overshoot_rel_on_off%(duty.%start_UTC%);          
+
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %caa_oma16_max_duty_in_28_days_start_day_ALL_failobject%;
+  failtext(Reltime value, Reltime limit) =
+    %caa_oma16_max_duty_in_28_days_start_day_ALL_failtext%(value, limit);
+  remark "(CCR) CAA: OMA16 max duty time in 28 days from duty start day",
+  planner "The rule checks that the total duty time in 28 calendar days"
+          " backwards from the day on which the duty starts is less than"
+          " maximum allowed.";
+end
+
+%caa_oma16_max_duty_in_28_days_start_day_ALL_failtext%(Reltime value, Reltime limit) =
+  let normal = value > oma16_defs.%max_duty_time_in_28_days%,
+      prefix = if normal then
+                 "CAA"
+               else
+                 "Soft",
+      new_limit = if normal then
+                    oma16_defs.%max_duty_time_in_28_days%
+                  else
+                    limit;
+  rules.%failtext_rel%(concat(prefix,": OMA16 duty time in 28 days ",
+                              format_time(duty_period.%last_28_days_start_day_start_day%,"%d%b"), 
+                              "-",
+                              format_time(duty_period.%last_28_days_start_day_end_day%,"%d%b")),
+                       value,new_limit);
+
+%caa_oma16_max_duty_in_28_days_start_day_ALL_failobject% =
+  let start_28_days = duty_period.%last_28_days_start_day_start%,
+      end_28_days = duty_period.%last_28_days_start_day_end%,
+      overshoot = rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+  last(leg(duty),
+       prev(leg(chain),next(leg(chain),leg.%failobject_departure%)) where
+        (accumulators.%duty_time_in_interval%(start_28_days,leg.%end_utc%) <=
+         oma16_defs.%max_duty_time_in_28_days% +
+         overshoot)) where
+  (leg.%start_hb% < end_28_days);
+
+/*
+** Rule:
+**   OMA16 - maximum duty time in 28 calendar days backwards from duty end day  
+**
+** Description:
+**    Check duty time in 28 calendar days backwards from the day on which a
+**    duty ends.     
+**
+** Agreement:
+**   ORO.FTL.210
+*/
+rule caa_oma16_max_duty_in_28_days_end_day_ALL =
+  valid 
+        trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and
+        duty_period.%is_last_duty_period_on_end_day% and
+        duty_period.%start_day_hb_utc% <> duty_period.%end_day_hb_utc%;
+          
+  oma16.%duty_time_in_last_28_days_end_day% <=
+  oma16_defs.%max_duty_time_in_28_days% -
+  oma16.%duty_time_in_28_days_buffer%(duty_period.%last_28_days_end_day_start%) +
+                rule_exceptions.%overshoot_rel_on_off%(duty.%start_UTC%);
+                
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %caa_oma16_max_duty_in_28_days_end_day_ALL_failobject%;
+  failtext(Reltime value, Reltime limit) =
+    %caa_oma16_max_duty_in_28_days_end_day_ALL_failtext%(value, limit);
+  remark "(CCR) CAA: OMA16 max duty time in 28 days from duty end day",
+  planner "The rule checks that the total duty time in 28 calendar days"
+          " backwards from the day on which the duty ends, when it ends on the"
+          " day after it started and there is no duty starting on that day, is"
+          " less than maximum allowed.";
+end
+
+%caa_oma16_max_duty_in_28_days_end_day_ALL_failtext%(Reltime value, Reltime limit) =
+  let normal = value > oma16_defs.%max_duty_time_in_28_days%,
+      prefix = if normal then
+                 "CAA"
+               else
+                 "Soft",
+      new_limit = if normal then
+                    oma16_defs.%max_duty_time_in_28_days%
+                  else
+                    limit;
+  rules.%failtext_rel%(concat(prefix,": OMA16 duty time in 28 days ",
+                              format_time(duty_period.%last_28_days_end_day_start_day%,"%d%b"), 
+                              "-",
+                              format_time(duty_period.%last_28_days_end_day_end_day%,"%d%b")),
+                       value,new_limit);
+
+%caa_oma16_max_duty_in_28_days_end_day_ALL_failobject% =
+  let start_28_days = duty_period.%last_28_days_end_day_start%,
+      end_28_days = duty_period.%last_28_days_end_day_end%,
+      overshoot = rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+  last(leg(duty),
+       prev(leg(chain),next(leg(chain),leg.%failobject_departure%)) where
+        (accumulators.%duty_time_in_interval%(start_28_days,leg.%end_utc%) <=
+         oma16_defs.%max_duty_time_in_28_days% +
+         overshoot)) where
+  (leg.%start_hb% < end_28_days);
+
+/*
+** Rule:
+**   OMA16 - maximum duty time in calendar year
+**
+** Description:
+**    Check duty time in calendar year from 1JanXXXX to 31DecXXXX
+**
+*/
+export rule caa_oma16_max_duty_time_in_calendar_year_ALL =
+   valid
+         roster.%check_rules% and
+         not crew.%is_leased_trip_start% and
+         trip.%in_pp%;
+
+   oma16.%duty_time_in_calendar_year% <=
+      oma16_defs.%max_duty_time_in_calendar_year% -
+      oma16.%duty_time_in_calendar_year_buffer%(duty.%start_hb%) +
+      rule_exceptions.%overshoot_rel_on_off%(duty.%start_UTC%);
+
+   startdate = duty.%start_UTC%;
+   severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+   failobject = %caa_oma16_max_duty_time_in_calendar_year_ALL_failobject%;
+   failtext(Reltime value, Reltime limit) =
+      %caa_oma16_max_duty_time_in_calendar_year_ALL_failtext%(value, limit);
+   remark "CAA: OMA16 Max duty time in calendar year",
+   planner "The rule checks that the total accumulated duty time in a"
+           " calendar year (01Jan-31Dec) is not exceeded.";
+end
+
+%caa_oma16_max_duty_time_in_calendar_year_ALL_failtext%(Reltime value, Reltime limit) =
+   let normal = value > oma16_defs.%max_duty_time_in_calendar_year%,
+       prefix = if normal then "CAA" else "Soft",
+       new_limit = if normal
+                   then oma16_defs.%max_duty_time_in_calendar_year%
+                   else limit;
+   rules.%failtext_rel%(concat(prefix, ": OMA16 duty time in calendar year; "), value, new_limit);
+
+%caa_oma16_max_duty_time_in_calendar_year_ALL_failobject% =
+    first(leg(duty), leg.%failobject_departure%) where (leg.%is_on_duty%);
+/*
+** Rule:
+**   OMA16 - maximum time between start of a rest period and the end of the
+**   previous weekly rest period
+**
+** Description:
+**   Check that there is no more than 7x24hrs between start of a rest period and    
+**   the end of the previous weekly rest period
+**
+** Agreement:
+**   OMA16
+*/
+
+rule caa_oma16_max_time_between_weekly_rest_ALL =
+  valid roster.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and
+        duty_period.%has_duty_to_check_weekly_rest%;
+    duty_period.%time_since_last_weekly_rest% <=
+    oma16_defs.%max_time_between_weekly_rest%;
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %caa_oma16_max_time_between_weekly_rest_ALL_failobject%;
+  failtext(Reltime value, Reltime limit) =
+    rules.%failtext_rel%("CAA: OMA16 max time between weekly rest ",
+                         value,limit);
+  remark "(CCR) CAA: OMA16 max time between weekly rest",
+  planner "The rule checks that there is no more than 7x24hrs from the start of"
+          " a rest period to the end of the previous weekly rest period.";
+end
+
+%caa_oma16_max_time_between_weekly_rest_ALL_failobject% =
+  let current_duty = duty.%start_UTC%,
+      overshoot = rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+  default(prev(duty(chain),next(duty(chain),duty.%failobject_start%)
+                     where (duty.%start_UTC% <= current_duty and
+                            duty_period.%is_on_duty% and
+                            duty_period.%time_since_last_weekly_rest% >
+                            oma16_defs.%max_time_between_weekly_rest% + overshoot))
+           where (duty_period.%has_weekly_rest_after%),
+           duty.%failobject_start%);
+
+
+/*
+** Rule:
+**   OMA16 - number of prolonged weekly rests per month
+**
+** Description:
+**   There should be at least two prolonged weekly rests per months 
+**   (AKA recurrent extended recovery rest periods increased to 2 local days).
+**   These periods should span at least 48 hrs starting at 00:00.
+**   The rule counts the number of prolonged weekly rests that fits in any rest period, so that 4 local days
+**   counts as 2 such rests, which makes the rule work also for vacation periods etc. It has been agreed that this
+**   rules should be obeyed also when no flight production has been performed.
+**
+**
+** Agreement:
+**   Subpart Q OPS 1.1110 2.1
+**   Also valid in OMA16
+*/
+rule caa_oma16_min_prolonged_rest_per_month_ALL =
+  valid 
+        roster.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and
+        duty_period.%is_last_in_month%
+        ;
+    oma16.%prolonged_weekly_rests_in_calendar_month% >=
+    oma16_defs.%min_prolonged_weekly_rests_per_month%;
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %caa_oma16_min_prolonged_rest_per_month_ALL_failobject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("CAA: OMA16 number of extended weekly rests per month ",
+                         value,limit);
+  remark "(CCR) CAA: Oma16 number of extended weekly rest per month",
+  planner "The rule checks that there is at least two extended weekly rests since one month,"
+          " which may need have extra extension if disruptive duties.";
+end
+
+%caa_oma16_min_prolonged_rest_per_month_ALL_failobject% =
+  let current_duty = duty.%start_UTC%,
+      overshoot = rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+  default(prev(duty(chain),next(duty(chain),duty.%failobject_start%)
+                     where (duty.%start_UTC% <= current_duty and
+                            duty_period.%is_on_duty% and
+                            oma16.%prolonged_weekly_rests_in_calendar_month% <
+                            oma16_defs.%min_prolonged_weekly_rests_per_month% + overshoot))
+           where (duty_period.%has_prolonged_weekly_rest_after%),
+           duty.%failobject_start%);
+
+/*
+** Rule:
+**   OMA16 - prolonged rest after disruptive duties could be extended
+**   
+** Description:
+**   If a prolonged weekly rest is preced by >=4 disruptive duties since last prolonged
+**   weekly rest, the rest should last at least 60 hrs. Disruptive duties is defined
+**   as duties that touch early start / late arrival at homebase.
+**
+** Agreement:
+*/
+
+rule caa_oma16_rest_length_after_disruptive_duties_ALL =
+  valid 
+        roster.%check_rules% and
+        duty.%in_pp% and
+        duty_period.%is_on_duty% and
+        duty_period.%is_first_duty_in_duty_period% and
+        duty_period.%rest_time_before% >= oma16_defs.%reqd_minimum_duration_weekly_rest%(duty_period.%rest_start_before_acclim%) and
+        oma16.%disruptive_dps_since_previous_weekly_rest% >= oma16_defs.%disruptive_dps_limit%;
+        
+  oma16.%weekly_rest_time_before% >= oma16_defs.%min_duration_weekly_rest_after_disruptive%;
+
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(Reltime value, Reltime limit) =
+    rules.%failtext_rel%("CAA: OMA16 rest after disruptive duties too short",
+                         value,limit);
+  remark "(CCR) CAA: OMA16 rest after disruptive duties should be >= 60 hrs",
+  planner "The rule checks that at if a period between two prolonged weekly"
+          " rests contains at least 4 duties early starts/late finish at homebase,"
+          " the following prolonged weekly rest should be at least 60 hrs";
+end
+
+
+
+/*
+** Rule:
+**   OMA16 - Rest in east/west transition 
+**
+** Description:
+**   When changing from westward LH to eastward or vv, 3 LNR is required.
+**   this is redefined as for a duty with > 4 h time zone diff, it must be 
+**   at least 3 local nights rest before, unitl a duty occurs in opposite direction
+**   of certain lengths. A transition is counted as >4 h tzd in one direction, >6 h tzd in opposite.
+** 
+*/
+
+rule caa_oma16_rest_in_east_west_transition_ALL =
+  valid 
+        roster.%check_rules% and
+        duty.%in_pp% and
+        oma16.%east_west_transition_ended%;
+	
+	oma16.%east_west_transition_started% < oma16.%prev_3_lnrs%;
+  
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(Abstime value, Abstime limit) =
+    rules.%failtext_abs%("CAA: OMA16 min 3 local nights btw east/west or west/east transition",
+                         value,limit);
+  remark "(CCR) CAA: OMA16 min 3 local nights btw east/west or west/east transition",
+  planner "The rest between a trip with >= 6 h tzd and one with > 4 h tzd opposite direction"
+          " must be at least three local nights.";
+end
+
+/*
+** Rule:
+**   OMA16 - maximum standby duty not at airport 
+**
+** Description:
+**   Check that the duration of a home/hotel standby doesn't exceed the maximum
+**   allowed 
+**
+** Agreement:
+**   ORO.FTL.225
+*/
+rule caa_oma16_max_home_hotel_standby_ALL =
+  valid
+        roster.%check_rules% and
+        not crew.%is_leased_duty_start% and
+        duty.%in_pp_extended% and
+        duty.%is_standby_with_rest%;
+        
+  oma16.%standby_duration% <=
+    oma16_defs.%max_standby_not_at_airport%;
+    
+  startdate = duty.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(Reltime value, Reltime limit) =
+    rules.%failtext_rel%("CAA: OMA16 maximum home/hotel standby time",
+                         value,limit);
+  remark "(CCR) CAA: OMA16 max home/hotel standby time",
+  planner "The rule checks that maximum home/hotel standby time doesn't exceed"
+          " the maximum allowed";
+end
+
+
+/* end of file */
+
+
+
+
+

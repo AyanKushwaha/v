@@ -1,0 +1,913 @@
+/* -*- crc -*-
+ *
+ * Purpose:
+ *   This file contains definitions that evaluates bid
+ *   points in a roster, or on a trip.
+ *   Ideally this file should not need to be changed,
+ *   the bid customization part should be done in child module.
+ *
+ *   Bids for time off are assumed to have type "TimeOff" in bid-etab.
+ *   If the name of time off bids is changed this module will need to be
+ *   adjusted.
+ *
+ *   These definitions are important:
+ *     %roster_points_basic%         - Roster bid points additive
+ *                                     (mapped to matador.map_bid_points for
+ *                                     senSeq, crewImp)
+ *     %roster_points%               - Total roster bid points
+ *                                     (for reports, dfs,..)
+ *     %get_trip_is_valid%           - Could this trip affect bid i
+ *     %get_trip_granted_value%(i)   - Est. granted times this trip will
+ *                                     contr. for bid i
+ *     %trip_grants_any%             - Trip grants any bid
+ *     %trip_violates_any%           - Trip violates any bid
+ *
+ * Sections:
+ *   1. Roster calculations
+ *   2. Trip calculations
+ *   3. Report defs for bids
+ *   4. Bid data
+ *   5. bids caching
+ *
+ * Created by:
+ *
+ * Major changes:
+ *
+ */
+root module bid
+
+import levels;
+import time_utils;
+import duty;
+import crew;
+import fundamental;
+import trip;
+import base_utils;
+import iterators;
+
+
+export %cost% = 0;
+export %crew_can_have% = True;
+%roster_bid_granted_value%(Int No) = Int;
+%_get_roster_bid_description%(Int No, Abstime abs1, Abstime abs2) = String;
+%get_trip_is_valid_in_period%(Int No, Abstime abs1, Abstime abs2) = Bool;
+%trip_bid_granted%(Int No) = Bool;
+%get_trip_bid_description%(Int No) = String;
+/* Customization to facilitate trip bids that can be granted an arbitrary
+   number of times by a trip */
+%trip_bid_granted_value%(Int No) = Int;
+
+/* Time after pp.%end that roster bids may start */
+export %roster_bid_carry_out_window% =
+  parameter 48:00
+  remark "Publication period carry out for roster bids";
+
+/*
+ * CREW ID
+ *  For trip filtering on bid there is a need to override the chains "crewid"
+ *  so that unassigned chains can relate to a crew member's bids.
+ */
+
+export %crew_id% =
+  if not %is_roster% and length(%filter_crew_id_override_p%)>4 then
+    %filter_crew_id_override_p%
+  else
+    crew.%id%;
+
+%filter_crew_id_override_p% =
+  parameter ""
+  remark "BID FILTER: This is a variable used by the trip select filters, should be empty";
+%filter_bid_number_p% =
+  parameter 0
+  remark "BID FILTER: Bid nr";
+%filter_trip_match_bid% =
+  if %filter_bid_number_p% = 0 then
+    %trip_grants_any%
+  else if %filter_bid_number_p% = -1 then
+    /* 1-10 */
+    %trip_grants_any_of_ten%(0)
+  else if %filter_bid_number_p% = -2 then
+    /* 11-20 */
+    %trip_grants_any_of_ten%(10)
+  else if %filter_bid_number_p% = -3 then
+    /* 21-30 */
+    %trip_grants_any_of_ten%(20)
+  else if %filter_bid_number_p% = -4 then
+    /* 31-40 */
+    %trip_grants_any_of_ten%(30)
+  else
+    %get_trip_is_granting%(%filter_bid_number_p%);
+
+/****************************************************************
+ * Section 1: Roster calulcations
+ ***************************************************************/
+
+/* Bid roster points for all bids */
+export %roster_points% =
+  %roster_points_basic%;
+
+/* Bid roster points for bids that are additive over trips and trip edges */
+export %roster_points_basic% =
+  if not %crew_can_have% then 0
+  else
+    sum(times(%crew_num_bids%), %get_roster_points%(%times_index_0%))
+      where(%points%(%times_index_0%) <> 0 and
+            %is_dated_bid%(%times_index_0%));
+
+/* Sort order in shortest path (used for pruning) */
+%sp_trip_sort_order% =
+  /* Trip add points not used for SAS */
+  -((%trip_points% /*- %trip_add_points%*/) * 10 / trip.%days%);
+
+export %crew_have_any% = %crew_num_bids% > 0;
+
+%get_roster_points%(Int No) =
+  if %is_checkin_bid%(No) then
+    if %crew_num_checkin_bids%(No) > 0 and %points%(No) > 0 then
+      (%get_roster_granted_value%(No) * 100 / %crew_num_checkin_bids%(No) * %points%(No) + 50) / 100
+    else
+      0
+  else if %is_checkout_bid%(No) then
+    if %crew_num_checkout_bids%(No) > 0 and %points%(No) > 0 then
+      (%get_roster_granted_value%(No) * 100 / %crew_num_checkout_bids%(No) * %points%(No) + 50) / 100
+    else
+      0
+  else
+    %get_roster_granted_value%(No) * %points%(No);
+
+
+%is_first_trip_in_production% = False;
+%is_last_trip_in_production% = False;
+
+/*   CHECKIN IN - CHECK OUT BIDS */
+%total_checkin_bids%(Int no) = 
+    sum(roster_set, %crew_num_checkin_bids%(no));
+
+%crew_num_checkin_bids%(Int no) =
+    count(trip(roster))
+    where(%get_trip_is_valid%(no) and %is_first_trip_in_production%);
+
+%total_checkout_bids%(Int no) = 
+    sum(roster_set, %crew_num_checkout_bids%(no));
+
+%crew_num_checkout_bids%(Int no) =
+    count(trip(roster))
+    where(%get_trip_is_valid%(no) and %is_last_trip_in_production%);
+
+
+/*
+ * GET ROSTER GRANTED TIMES
+ */
+
+export %is_roster_bid%(int no) =
+  not void(%_get_roster_bid_description%(no, %pp_start%, %publ_period_end%)) and
+  not %bid_is_special_timeoff_bid%(no);
+
+%bid_is_special_timeoff_bid%(Int no) =
+    default(%type%(no, 0) = "TimeOff" and %str1%(no, 0) <> "",
+            false);
+
+export %non_granted_bid_in_roster%(Int no) =
+  if %is_roster_bid%(no) then
+    default(%roster_bid_granted_value%(no) = 0, false)
+  else
+    sum(trip(roster), %get_trip_granted_times%(No)) = 0;
+
+export %get_roster_granted_value%(Int no) =
+  if %is_roster_bid%(no) then
+    default(%roster_bid_granted_value%(No),0)
+  else
+    sum(trip(roster), %get_trip_granted_times%(no));
+
+export %roster_bids_granted_on_day%(Int day_idx) =
+  if not %crew_can_have% then
+    False
+  else
+    any(times(%crew_num_bids%), %roster_bid_granted_value%(%times_index_0%) > 0)
+      where(%points%(%times_index_0%) <> 0 and
+            %is_dated_bid%(%times_index_0%) and
+            time_utils.%times_overlap%(
+                %abs1%(%times_index_0%, 0),
+                %abs2%(%times_index_0%, 0),
+                time_utils.%pp_day_2_abstime%(day_idx),
+                time_utils.%pp_day_2_abstime%(day_idx)+24:00));
+
+/*
+ * GENERATION COST
+ *  This will give priority to assign after
+ *  the crew's bids
+ */
+
+%generation_bid_violation_penalty_para% =
+  parameter 48:00
+  remark "GENERATION: Additional time for violating a bid";
+
+%generation_bid_granted_credit_para% =
+  parameter 24:00
+  remark "GENERATION: Credit time for TRIPs granting any bid";
+
+export %generation% =
+  if not bid.%crew_have_any% then 0:00
+  else
+    (if not %trip_violates_any% then 0:00
+     else %generation_bid_violation_penalty_para%) +
+    (-168:00 * %trip_points%) / 200;
+
+/* Experimental generation cost for max roster */
+export %generation2% =
+  if not bid.%crew_have_any% then 0:00
+  else (-168:00 * %net_trip_points%) / 200;
+
+
+/****************************************************************
+ * Section 2: Trip calculations
+ ***************************************************************/
+
+/*
+ * TRIP BID POINTS
+ *  %trip_* is evalualted in the context of only one trip. So,
+ *  in case 2 trip violates/satisfies the same bid, will both trips
+ *  have points even though the limit is 1 (or violating the same bid).
+ */
+
+%is_trip_bid%(Int no) = False;
+
+%is_lifestyle_bid%(Int no) =
+    %type%(no, 0) = "Preference";
+
+set available_dated_bids = "TimeOff", "Flight", "Stop", "CheckIn", "CheckOut";
+
+export %is_dated_bid%(Int no) =
+    %type%(no, 0) in available_dated_bids and
+    not %bid_is_special_timeoff_bid%(no);
+
+export %is_timeoff_bid%(Int no) =
+    default(%type%(no, 0) = "TimeOff" and %str1%(no, 0) = "",
+            false);
+
+export %is_flightid_bid%(Int no) =
+    default(%type%(no, 0) = "Flight", false);
+
+export %is_stop_bid%(Int no) =
+    default(%type%(no, 0) = "Stop", false);
+
+export %is_checkin_bid%(Int no) =
+    default(%type%(no, 0) = "CheckIn", false);
+
+export %is_checkout_bid%(Int no) =
+    default(%type%(no, 0) = "CheckOut", false);
+
+
+/* Used in experimental generation cost for max roster */
+/* The idea is to calculate a net contribution to total bid points
+   from a trip, taking into account roster bids */
+%net_trip_points% =
+  sum(times(%crew_num_bids%),
+      /* This is the points from granted trip bids */
+      (if %is_trip_bid%(%times_index_0%) then %get_trip_granted_times%(%times_index_0%) * %points%(%times_index_0%) else 0) +
+      /* This is the points from violated trip and roster bids */
+      (if %get_trip_is_violating%(%times_index_0%) then -%points%(%times_index_0%) else 0) +
+      /* This is the points from granted (or rather, not violated) roster bids */
+      (if %is_roster_bid%(%times_index_0%) and not %get_trip_is_violating%(%times_index_0%) then
+          %points%(%times_index_0%) else 0));
+
+export %trip_points% =
+  /* Trip add points not used for SAS */
+  /*%trip_add_points% +*/
+  sum(times(%crew_num_bids%),
+      %points%(%times_index_0%) * %get_trip_granted_times%(%times_index_0%));
+
+export %trip_grants_any% =
+  any(times(%crew_num_bids%), %get_trip_is_granting%(%times_index_0%))
+  where(%is_dated_bid%(%times_index_0%));
+
+export %trip_grants_any_of_ten%(Int start) =
+  any(times(10), %get_trip_is_granting%(start + %times_index_0%));
+export %trip_violates_any% =
+  any(times(%crew_num_bids%), %get_trip_is_violating%(%times_index_0%));
+
+%get_trip_is_granting%(Int No) =
+   %get_trip_granted_times%(No) > 0
+   and %points%(no) > 0;
+
+%get_trip_is_violating%(Int No) =
+   %type%(No, 0) = "TimeOff" and %get_trip_is_valid%(No) and not trip.%is_off_duty%
+   and (trip.%start_hb% < %abs2%(No, 0) and
+        trip.%end_hb% > %abs1%(No, 0))
+   and %points%(no) > 0
+   or (if %is_trip_bid%(No) then
+        %get_trip_granted_times%(No) > 0 and %points%(No) < 0
+       else false);
+%string_days_off_required_day_start%(Int No) = if %bool1%(No, 0) then %abs1%(No, 0) else %abs2%(No, 0);
+%string_days_off_required_day_end%(Int No) = %string_days_off_required_day_start%(No) + 24:00;
+
+/* A cached variant is defined in the bottom of the file */
+%_get_trip_granted_times%(Int No) =
+/* An assumption is that a trip can only affect 1 week...
+ * if %type%(No, 0) = "TimeOff" and %get_trip_is_valid%(No) then -1
+ * else
+ */
+  if %get_trip_is_valid%(No) and
+     default(%trip_bid_granted%(No), True)
+  then
+    %trip_bid_granted_value%(No)
+  else 0;
+
+/*
+ * Trips where %get_trip_is_valid%(No) = True can affect the bid point,
+ * other trips will not affect the bid points..
+ */
+export %get_trip_is_valid%(Int No) =
+  %get_trip_is_valid_in_period%(No, %abs1%(No, 0), %abs2%(No, 0));
+
+/* To be redefined in bid_customization */
+export %net_contribution_from_trip% = 0;
+
+
+/****************************************************************
+ * Section 3: Report defs for bids
+ ***************************************************************/
+
+export %get_bid_description%(Int No) =
+  default(%get_roster_bid_description%(No),
+    default(%get_trip_bid_description%(No), ""));
+
+%get_roster_bid_description%(Int No) =
+  %_get_roster_bid_description%(No, %abs1%(No, 0), %abs2%(No, 0));
+
+
+/****************************************************************
+ * Section 4: Bid data
+ ***************************************************************/
+/* Trip add points not used for SAS */
+/*
+ * TRIP BID ADD POINTS
+ * Trip bid add points is used neutralise the effect of having
+ * many avoid BIDS. It should always be 0 if one gets what one
+ * wants the most.
+ */
+
+/*export %trip_add_point_table% = %etab_path%(%trip_add_point_table_para%);
+%trip_add_point_table_para% =
+  parameter "Fleet/Period/BidAddPoints.etab"
+  remark "ETAB: Bid Trip Add Points table";
+
+%trip_add_points% =
+  if trip.%has_only_flight_duty% then %_trip_add_points% * trip.%num_duties% else 0;
+
+table trip_add_points =
+  crew.%id%, trip.%start_hb% -> Int %_trip_add_points%;
+  External %trip_add_point_table%;
+  CrewId, (PStart, PEnd( -> Points;
+  -, - -> 0;
+end*/
+
+/*
+ * BID DATA
+ * Reads the interbids table. Data is also 'repaired'
+ * here, so it fits into the standard user. Some values
+ * are also calculated; All of those values are possible to
+ * calculate without knowing anything about bid interpretation.
+ */
+
+%crew_num_bids_crew%(String crew_id) = %int1_tab_crew%(crew_id, 0, 0);
+/* In some cases crew will create faulty bids in PBS that increase the bid count
+   This is to handle that. */
+%_crew_num_bids% =
+  %int1%(0, 0);
+
+export %crew_num_bids% =
+  count(times(%_crew_num_bids%))
+  while (not void(%type%(%times_index_0%, 0)));
+
+%crew_num_dated_bids% = Int;
+
+
+%crew_has_bad_pbs% = %crew_num_bids% < %_crew_num_bids%;
+
+/*
+ * BID CONFIG TABLE
+ *  A configuration etab for treatments of BID.
+ */
+
+export %config_table% = %etab_path%(%config_table_p%);
+%config_table_p% =
+  parameter "bid_config"
+  remark "ETAB: Bid config table";
+
+table bid_config(String Type) =
+  Type -> export %description%;
+  "Stop" -> "Stop";
+  "Flight" -> "Flight id";
+  "TimeOff" -> "Days off";
+  "CheckIn" -> "Check In";
+  "CheckOut"-> "Check Out";
+  - -> concat("??? ", Type);
+end
+
+/*
+ * BID TABLE LOOKUP
+ *  The bid table is produced from InterBids, which have
+ *  a standard way of printing the table. It does not reflect
+ *  the standard rule set - thus some fields are re-interpreted
+ *  in a more suitable way.
+ *
+ */
+
+/*
+ * To adjust to the standard user (and iata), an end of a day is 24:00
+ *   (ie next day 00:00). A day starts at 0:00
+ */
+export %points%(Int No) = %_points%(No, 0);
+export %abs1%(Int No, Int SNo) =
+  let abs1 = %_abs1%(No,SNo);
+  if time_of_day(abs1) = 00:01 then abs1 - 0:01 else abs1;
+%abs1_crew%(String CrewId, Int No, Int Sno) =
+  let abs1 = %abs1_tab_crew%(CrewId, No,SNo);
+  if time_of_day(abs1) = 00:01 then abs1 - 0:01 else abs1;
+export %abs2%(Int No, Int SNo) =
+  let abs2 = %_abs2%(No,SNo);
+  if abs2 = 1Jan1986 then 1Jan2023
+  else if abs2 = 31Dec99 23:59 then 1Jan2023
+  else if time_of_day(abs2) = 23:59 then abs2 + 0:01
+  else abs2;
+%abs2_crew%(String CrewId, Int No, Int SNo) =
+  let abs2 = %abs2_tab_crew%(CrewId, No,SNo);
+  if abs2 = 1Jan1986 then 1Jan2023
+  else if abs2 = 31Dec99 23:59 then 1Jan2023
+  else if time_of_day(abs2) = 23:59 then abs2 + 0:01
+  else abs2;
+
+
+/* Used in BidsCrew report */
+export %abs22%(Int No, Int SNo) =
+  let abs2 = %_abs2%(No,SNo);
+  if abs2 = 1Jan1986 then 1Jan2020
+  else if abs2 = 31Dec99 23:59 then 1Jan2020
+  else abs2;
+
+
+export %rel1%(Int No, Int Sno) =
+  %_rel1%(No,SNo) +
+  (if (%_rel1%(No,SNo) MOD 1:00) = 0:01 then -0:01 else 0:00);
+
+/*
+ * INTERBIDS TABLE
+ */
+
+/* Location of all PBS related carmdata tables */
+%pbs_path% = "PBS/";
+export %bids_path% = concat(%pbs_path%, "BIDS/");
+export %rudob_path% = concat(%pbs_path%, "RUDOBS/");
+export %reference_path% = concat(%pbs_path%, "REFERENCE_ROSTERS/");
+
+/* The bid table */
+export %table% = %etab_path%(concat(%bids_path%, %table_para%));
+export %table_no_base% = %etab_path%(%table_para%);
+%table_para% =
+  parameter "bids"
+  remark "ETAB: Bid table";
+
+
+/****************************************************************
+ * Section 5: Bids caching
+ ***************************************************************/
+
+/*
+ * VARIABLES ONLY USED FOR BID CACHING PURPOSES
+ */
+
+table get_trip_granted_times_cache(Int No) =
+  No -> export %get_trip_granted_times%;
+   1 -> %trip_granted_times1%;
+   2 -> %trip_granted_times2%;
+   3 -> %trip_granted_times3%;
+   4 -> %trip_granted_times4%;
+   5 -> %trip_granted_times5%;
+   6 -> %trip_granted_times6%;
+   7 -> %trip_granted_times7%;
+   8 -> %trip_granted_times8%;
+   9 -> %trip_granted_times9%;
+  10 -> %trip_granted_times10%;
+  11 -> %trip_granted_times11%;
+  12 -> %trip_granted_times12%;
+  13 -> %trip_granted_times13%;
+  14 -> %trip_granted_times14%;
+  15 -> %trip_granted_times15%;
+  16 -> %trip_granted_times16%;
+   - -> %_get_trip_granted_times%(No);
+end
+
+%trip_granted_times1% = %_get_trip_granted_times%(1);
+%trip_granted_times2% = %_get_trip_granted_times%(2);
+%trip_granted_times3% = %_get_trip_granted_times%(3);
+%trip_granted_times4% = %_get_trip_granted_times%(4);
+%trip_granted_times5% = %_get_trip_granted_times%(5);
+%trip_granted_times6% = %_get_trip_granted_times%(6);
+%trip_granted_times7% = %_get_trip_granted_times%(7);
+%trip_granted_times8% = %_get_trip_granted_times%(8);
+%trip_granted_times9% = %_get_trip_granted_times%(9);
+%trip_granted_times10% = %_get_trip_granted_times%(10);
+%trip_granted_times11% = %_get_trip_granted_times%(11);
+%trip_granted_times12% = %_get_trip_granted_times%(12);
+%trip_granted_times13% = %_get_trip_granted_times%(13);
+%trip_granted_times14% = %_get_trip_granted_times%(14);
+%trip_granted_times15% = %_get_trip_granted_times%(15);
+%trip_granted_times16% = %_get_trip_granted_times%(16);
+
+
+/*
+ * CACHE THE ACCESS TO THE TABLE
+ */
+
+/* Constant table lookup */
+table bid_crew(String CrewId, Int No, Int SNo) =
+  CrewId, No, SNo ->
+    Int %points_tab_crew%,
+    String  %type_tab_crew%,
+    Int %int1_tab_crew%,
+    Int %int2_tab_crew%,
+    Reltime %rel1_tab_crew%,
+    Reltime %rel2_tab_crew%,
+    Abstime %abs1_tab_crew%,
+    Abstime %abs2_tab_crew%,
+    String  %str1_tab_crew%,
+    Bool %bool1_tab_crew%;
+  External %table%;
+  EmpNo, SeqNo, SubSeqNo -> Points, BidType, Int1, Int2, Rel1, Rel2,
+                            Abs1, Abs2, Str1, Bool1;
+  -, -, - -> void_int, void_string, 0, 0, 0:00, 0:00, 1jan86, 1jan86,"",True;
+end
+
+table bid(Int No, Int SNo) =
+  %crew_id%, No, SNo ->
+    Int %points_tab%,
+    String  %type_tab%,
+    Int %int1_tab%,
+    Int %int2_tab%,
+    Reltime %rel1_tab%,
+    Reltime %rel2_tab%,
+    Abstime %abs1_tab%,
+    Abstime %abs2_tab%,
+    String  %str1_tab%,
+    Bool %bool1_tab%;
+  External %table%;
+  EmpNo, SeqNo, SubSeqNo -> Points, BidType, Int1, Int2, Rel1, Rel2,
+                            Abs1, Abs2, Str1, Bool1;
+  -, -, - -> void_int, void_string, 0, 0, 0:00, 0:00, 1jan86, 1jan86,"",True;
+end
+
+table bid_table_by_type(String ltype) =
+  %crew_id%, ltype->
+    Int %points_by_type%,
+    String  %type_by_type%,
+    Int %int1_by_type%,
+    Int %int2_by_type%,
+    Reltime %rel1_by_type%,
+    Reltime %rel2_by_type%,
+    Abstime %abs1_by_type%,
+    Abstime %abs2_by_type%,
+    export String  %str1_by_type%,
+    Bool %bool1_by_type%;
+  External %table%;
+  EmpNo, BidType -> Points, BidType, Int1, Int2, Rel1, Rel2,
+                            Abs1, Abs2, Str1, Bool1;
+  -, - -> void_int, void_string, void_int, void_int, void_reltime, void_reltime, 1jan86, 1jan86, void_string, True;
+end
+
+table no_of_rows_in_table_bids =
+  0 -> export int %num_bids%;
+  external %table%;
+  < row_number -> count(row_number);
+end
+
+export %type_of_bid%(Int no) =
+  %type%(no, 0);
+
+table bid_table_cache(Int No, Int SNo) =
+  No,SNo -> %_points%,export %type%,export %int1%, %int2%, %_rel1%, export %rel2%, %_abs1%, %_abs2%, export %str1%, %bool1%;
+  1, 0 -> %points_10%, %type_10%, %int1_10%, %int2_10%, %rel1_10%, %rel2_10%, %abs1_10%, %abs2_10%, %str1_10%, %bool1_10%;
+  1, 1 -> %points_11%, %type_11%, %int1_11%, %int2_11%, %rel1_11%, %rel2_11%, %abs1_11%, %abs2_11%, %str1_11%, %bool1_11%;
+  2, 0 -> %points_20%, %type_20%, %int1_20%, %int2_20%, %rel1_20%, %rel2_20%, %abs1_20%, %abs2_20%, %str1_20%, %bool1_20%;
+  2, 1 -> %points_21%, %type_21%, %int1_21%, %int2_21%, %rel1_21%, %rel2_21%, %abs1_21%, %abs2_21%, %str1_21%, %bool1_21%;
+  3, 0 -> %points_30%, %type_30%, %int1_30%, %int2_30%, %rel1_30%, %rel2_30%, %abs1_30%, %abs2_30%, %str1_30%, %bool1_30%;
+  3, 1 -> %points_31%, %type_31%, %int1_31%, %int2_31%, %rel1_31%, %rel2_31%, %abs1_31%, %abs2_31%, %str1_31%, %bool1_31%;
+  4, 0 -> %points_40%, %type_40%, %int1_40%, %int2_40%, %rel1_40%, %rel2_40%, %abs1_40%, %abs2_40%, %str1_40%, %bool1_40%;
+  4, 1 -> %points_41%, %type_41%, %int1_41%, %int2_41%, %rel1_41%, %rel2_41%, %abs1_41%, %abs2_41%, %str1_41%, %bool1_41%;
+  5, 0 -> %points_50%, %type_50%, %int1_50%, %int2_50%, %rel1_50%, %rel2_50%, %abs1_50%, %abs2_50%, %str1_50%, %bool1_50%;
+  5, 1 -> %points_51%, %type_51%, %int1_51%, %int2_51%, %rel1_51%, %rel2_51%, %abs1_51%, %abs2_51%, %str1_51%, %bool1_51%;
+  6, 0 -> %points_60%, %type_60%, %int1_60%, %int2_60%, %rel1_60%, %rel2_60%, %abs1_60%, %abs2_60%, %str1_60%, %bool1_60%;
+  6, 1 -> %points_61%, %type_61%, %int1_61%, %int2_61%, %rel1_61%, %rel2_61%, %abs1_61%, %abs2_61%, %str1_61%, %bool1_61%;
+  7, 0 -> %points_70%, %type_70%, %int1_70%, %int2_70%, %rel1_70%, %rel2_70%, %abs1_70%, %abs2_70%, %str1_70%, %bool1_70%;
+  7, 1 -> %points_71%, %type_71%, %int1_71%, %int2_71%, %rel1_71%, %rel2_71%, %abs1_71%, %abs2_71%, %str1_71%, %bool1_71%;
+  8, 0 -> %points_80%, %type_80%, %int1_80%, %int2_80%, %rel1_80%, %rel2_80%, %abs1_80%, %abs2_80%, %str1_80%, %bool1_80%;
+  8, 1 -> %points_81%, %type_81%, %int1_81%, %int2_81%, %rel1_81%, %rel2_81%, %abs1_81%, %abs2_81%, %str1_81%, %bool1_81%;
+  9, 0 -> %points_90%, %type_90%, %int1_90%, %int2_90%, %rel1_90%, %rel2_90%, %abs1_90%, %abs2_90%, %str1_90%, %bool1_90%;
+  9, 1 -> %points_91%, %type_91%, %int1_91%, %int2_91%, %rel1_91%, %rel2_91%, %abs1_91%, %abs2_91%, %str1_91%, %bool1_91%;
+  10, 0 -> %points_100%, %type_100%, %int1_100%, %int2_100%, %rel1_100%, %rel2_100%, %abs1_100%, %abs2_100%, %str1_100%, %bool1_100%;
+  10, 1 -> %points_101%, %type_101%, %int1_101%, %int2_101%, %rel1_101%, %rel2_101%, %abs1_101%, %abs2_101%, %str1_101%, %bool1_101%;
+  11, 0 -> %points_110%, %type_110%, %int1_110%, %int2_110%, %rel1_110%, %rel2_110%, %abs1_110%, %abs2_110%, %str1_110%, %bool1_110%;
+  11, 1 -> %points_111%, %type_111%, %int1_111%, %int2_111%, %rel1_111%, %rel2_111%, %abs1_111%, %abs2_111%, %str1_111%, %bool1_111%;
+  12, 0 -> %points_120%, %type_120%, %int1_120%, %int2_120%, %rel1_120%, %rel2_120%, %abs1_120%, %abs2_120%, %str1_120%, %bool1_120%;
+  12, 1 -> %points_121%, %type_121%, %int1_121%, %int2_121%, %rel1_121%, %rel2_121%, %abs1_121%, %abs2_121%, %str1_121%, %bool1_121%;
+  13, 0 -> %points_130%, %type_130%, %int1_130%, %int2_130%, %rel1_130%, %rel2_130%, %abs1_130%, %abs2_130%, %str1_130%, %bool1_130%;
+  13, 1 -> %points_131%, %type_131%, %int1_131%, %int2_131%, %rel1_131%, %rel2_131%, %abs1_131%, %abs2_131%, %str1_131%, %bool1_131%;
+  14, 0 -> %points_140%, %type_140%, %int1_140%, %int2_140%, %rel1_140%, %rel2_140%, %abs1_140%, %abs2_140%, %str1_140%, %bool1_140%;
+  14, 1 -> %points_141%, %type_141%, %int1_141%, %int2_141%, %rel1_141%, %rel2_141%, %abs1_141%, %abs2_141%, %str1_141%, %bool1_141%;
+  -,- ->  %points_tab%(No,SNo), %type_tab%(No,SNo), %int1_tab%(No,SNo), %int2_tab%(No,SNo), %rel1_tab%(No,SNo), %rel2_tab%(No,SNo), %abs1_tab%(No,SNo), %abs2_tab%(No,SNo), %str1_tab%(No,SNo), %bool1_tab%(No,SNo);
+end
+
+%points_10% = %points_tab%(1, 0);
+%points_11% = %points_tab%(1, 1);
+%points_20% = %points_tab%(2, 0);
+%points_21% = %points_tab%(2, 1);
+%points_30% = %points_tab%(3, 0);
+%points_31% = %points_tab%(3, 1);
+%points_40% = %points_tab%(4, 0);
+%points_41% = %points_tab%(4, 1);
+%points_50% = %points_tab%(5, 0);
+%points_51% = %points_tab%(5, 1);
+%points_60% = %points_tab%(6, 0);
+%points_61% = %points_tab%(6, 1);
+%points_70% = %points_tab%(7, 0);
+%points_71% = %points_tab%(7, 1);
+%points_80% = %points_tab%(8, 0);
+%points_81% = %points_tab%(8, 1);
+%points_90% = %points_tab%(9, 0);
+%points_91% = %points_tab%(9, 1);
+%points_100% = %points_tab%(10, 0);
+%points_101% = %points_tab%(10, 1);
+%points_110% = %points_tab%(11, 0);
+%points_111% = %points_tab%(11, 1);
+%points_120% = %points_tab%(12, 0);
+%points_121% = %points_tab%(12, 1);
+%points_130% = %points_tab%(13, 0);
+%points_131% = %points_tab%(13, 1);
+%points_140% = %points_tab%(14, 0);
+%points_141% = %points_tab%(14, 1);
+
+%type_10% = %type_tab%(1, 0);
+%type_11% = %type_tab%(1, 1);
+%type_20% = %type_tab%(2, 0);
+%type_21% = %type_tab%(2, 1);
+%type_30% = %type_tab%(3, 0);
+%type_31% = %type_tab%(3, 1);
+%type_40% = %type_tab%(4, 0);
+%type_41% = %type_tab%(4, 1);
+%type_50% = %type_tab%(5, 0);
+%type_51% = %type_tab%(5, 1);
+%type_60% = %type_tab%(6, 0);
+%type_61% = %type_tab%(6, 1);
+%type_70% = %type_tab%(7, 0);
+%type_71% = %type_tab%(7, 1);
+%type_80% = %type_tab%(8, 0);
+%type_81% = %type_tab%(8, 1);
+%type_90% = %type_tab%(9, 0);
+%type_91% = %type_tab%(9, 1);
+%type_100% = %type_tab%(10, 0);
+%type_101% = %type_tab%(10, 1);
+%type_110% = %type_tab%(11, 0);
+%type_111% = %type_tab%(11, 1);
+%type_120% = %type_tab%(12, 0);
+%type_121% = %type_tab%(12, 1);
+%type_130% = %type_tab%(13, 0);
+%type_131% = %type_tab%(13, 1);
+%type_140% = %type_tab%(14, 0);
+%type_141% = %type_tab%(14, 1);
+
+%int1_10% = %int1_tab%(1, 0);
+%int1_11% = %int1_tab%(1, 1);
+%int1_20% = %int1_tab%(2, 0);
+%int1_21% = %int1_tab%(2, 1);
+%int1_30% = %int1_tab%(3, 0);
+%int1_31% = %int1_tab%(3, 1);
+%int1_40% = %int1_tab%(4, 0);
+%int1_41% = %int1_tab%(4, 1);
+%int1_50% = %int1_tab%(5, 0);
+%int1_51% = %int1_tab%(5, 1);
+%int1_60% = %int1_tab%(6, 0);
+%int1_61% = %int1_tab%(6, 1);
+%int1_70% = %int1_tab%(7, 0);
+%int1_71% = %int1_tab%(7, 1);
+%int1_80% = %int1_tab%(8, 0);
+%int1_81% = %int1_tab%(8, 1);
+%int1_90% = %int1_tab%(9, 0);
+%int1_91% = %int1_tab%(9, 1);
+%int1_100% = %int1_tab%(10, 0);
+%int1_101% = %int1_tab%(10, 1);
+%int1_110% = %int1_tab%(11, 0);
+%int1_111% = %int1_tab%(11, 1);
+%int1_120% = %int1_tab%(12, 0);
+%int1_121% = %int1_tab%(12, 1);
+%int1_130% = %int1_tab%(13, 0);
+%int1_131% = %int1_tab%(13, 1);
+%int1_140% = %int1_tab%(14, 0);
+%int1_141% = %int1_tab%(14, 1);
+
+%int2_10% = %int2_tab%(1, 0);
+%int2_11% = %int2_tab%(1, 1);
+%int2_20% = %int2_tab%(2, 0);
+%int2_21% = %int2_tab%(2, 1);
+%int2_30% = %int2_tab%(3, 0);
+%int2_31% = %int2_tab%(3, 1);
+%int2_40% = %int2_tab%(4, 0);
+%int2_41% = %int2_tab%(4, 1);
+%int2_50% = %int2_tab%(5, 0);
+%int2_51% = %int2_tab%(5, 1);
+%int2_60% = %int2_tab%(6, 0);
+%int2_61% = %int2_tab%(6, 1);
+%int2_70% = %int2_tab%(7, 0);
+%int2_71% = %int2_tab%(7, 1);
+%int2_80% = %int2_tab%(8, 0);
+%int2_81% = %int2_tab%(8, 1);
+%int2_90% = %int2_tab%(9, 0);
+%int2_91% = %int2_tab%(9, 1);
+%int2_100% = %int2_tab%(10, 0);
+%int2_101% = %int2_tab%(10, 1);
+%int2_110% = %int2_tab%(11, 0);
+%int2_111% = %int2_tab%(11, 1);
+%int2_120% = %int2_tab%(12, 0);
+%int2_121% = %int2_tab%(12, 1);
+%int2_130% = %int2_tab%(13, 0);
+%int2_131% = %int2_tab%(13, 1);
+%int2_140% = %int2_tab%(14, 0);
+%int2_141% = %int2_tab%(14, 1);
+
+%abs1_10% = %abs1_tab%(1, 0);
+%abs1_11% = %abs1_tab%(1, 1);
+%abs1_20% = %abs1_tab%(2, 0);
+%abs1_21% = %abs1_tab%(2, 1);
+%abs1_30% = %abs1_tab%(3, 0);
+%abs1_31% = %abs1_tab%(3, 1);
+%abs1_40% = %abs1_tab%(4, 0);
+%abs1_41% = %abs1_tab%(4, 1);
+%abs1_50% = %abs1_tab%(5, 0);
+%abs1_51% = %abs1_tab%(5, 1);
+%abs1_60% = %abs1_tab%(6, 0);
+%abs1_61% = %abs1_tab%(6, 1);
+%abs1_70% = %abs1_tab%(7, 0);
+%abs1_71% = %abs1_tab%(7, 1);
+%abs1_80% = %abs1_tab%(8, 0);
+%abs1_81% = %abs1_tab%(8, 1);
+%abs1_90% = %abs1_tab%(9, 0);
+%abs1_91% = %abs1_tab%(9, 1);
+%abs1_100% = %abs1_tab%(10, 0);
+%abs1_101% = %abs1_tab%(10, 1);
+%abs1_110% = %abs1_tab%(11, 0);
+%abs1_111% = %abs1_tab%(11, 1);
+%abs1_120% = %abs1_tab%(12, 0);
+%abs1_121% = %abs1_tab%(12, 1);
+%abs1_130% = %abs1_tab%(13, 0);
+%abs1_131% = %abs1_tab%(13, 1);
+%abs1_140% = %abs1_tab%(14, 0);
+%abs1_141% = %abs1_tab%(14, 1);
+
+%abs2_10% = %abs2_tab%(1, 0);
+%abs2_11% = %abs2_tab%(1, 1);
+%abs2_20% = %abs2_tab%(2, 0);
+%abs2_21% = %abs2_tab%(2, 1);
+%abs2_30% = %abs2_tab%(3, 0);
+%abs2_31% = %abs2_tab%(3, 1);
+%abs2_40% = %abs2_tab%(4, 0);
+%abs2_41% = %abs2_tab%(4, 1);
+%abs2_50% = %abs2_tab%(5, 0);
+%abs2_51% = %abs2_tab%(5, 1);
+%abs2_60% = %abs2_tab%(6, 0);
+%abs2_61% = %abs2_tab%(6, 1);
+%abs2_70% = %abs2_tab%(7, 0);
+%abs2_71% = %abs2_tab%(7, 1);
+%abs2_80% = %abs2_tab%(8, 0);
+%abs2_81% = %abs2_tab%(8, 1);
+%abs2_90% = %abs2_tab%(9, 0);
+%abs2_91% = %abs2_tab%(9, 1);
+%abs2_100% = %abs2_tab%(10, 0);
+%abs2_101% = %abs2_tab%(10, 1);
+%abs2_110% = %abs2_tab%(11, 0);
+%abs2_111% = %abs2_tab%(11, 1);
+%abs2_120% = %abs2_tab%(12, 0);
+%abs2_121% = %abs2_tab%(12, 1);
+%abs2_130% = %abs2_tab%(13, 0);
+%abs2_131% = %abs2_tab%(13, 1);
+%abs2_140% = %abs2_tab%(14, 0);
+%abs2_141% = %abs2_tab%(14, 1);
+
+
+%rel1_10% = %rel1_tab%(1, 0);
+%rel1_11% = %rel1_tab%(1, 1);
+%rel1_20% = %rel1_tab%(2, 0);
+%rel1_21% = %rel1_tab%(2, 1);
+%rel1_30% = %rel1_tab%(3, 0);
+%rel1_31% = %rel1_tab%(3, 1);
+%rel1_40% = %rel1_tab%(4, 0);
+%rel1_41% = %rel1_tab%(4, 1);
+%rel1_50% = %rel1_tab%(5, 0);
+%rel1_51% = %rel1_tab%(5, 1);
+%rel1_60% = %rel1_tab%(6, 0);
+%rel1_61% = %rel1_tab%(6, 1);
+%rel1_70% = %rel1_tab%(7, 0);
+%rel1_71% = %rel1_tab%(7, 1);
+%rel1_80% = %rel1_tab%(8, 0);
+%rel1_81% = %rel1_tab%(8, 1);
+%rel1_90% = %rel1_tab%(9, 0);
+%rel1_91% = %rel1_tab%(9, 1);
+%rel1_100% = %rel1_tab%(10, 0);
+%rel1_101% = %rel1_tab%(10, 1);
+%rel1_110% = %rel1_tab%(11, 0);
+%rel1_111% = %rel1_tab%(11, 1);
+%rel1_120% = %rel1_tab%(12, 0);
+%rel1_121% = %rel1_tab%(12, 1);
+%rel1_130% = %rel1_tab%(13, 0);
+%rel1_131% = %rel1_tab%(13, 1);
+%rel1_140% = %rel1_tab%(14, 0);
+%rel1_141% = %rel1_tab%(14, 1);
+
+%rel2_10% = %rel2_tab%(1, 0);
+%rel2_11% = %rel2_tab%(1, 1);
+%rel2_20% = %rel2_tab%(2, 0);
+%rel2_21% = %rel2_tab%(2, 1);
+%rel2_30% = %rel2_tab%(3, 0);
+%rel2_31% = %rel2_tab%(3, 1);
+%rel2_40% = %rel2_tab%(4, 0);
+%rel2_41% = %rel2_tab%(4, 1);
+%rel2_50% = %rel2_tab%(5, 0);
+%rel2_51% = %rel2_tab%(5, 1);
+%rel2_60% = %rel2_tab%(6, 0);
+%rel2_61% = %rel2_tab%(6, 1);
+%rel2_70% = %rel2_tab%(7, 0);
+%rel2_71% = %rel2_tab%(7, 1);
+%rel2_80% = %rel2_tab%(8, 0);
+%rel2_81% = %rel2_tab%(8, 1);
+%rel2_90% = %rel2_tab%(9, 0);
+%rel2_91% = %rel2_tab%(9, 1);
+%rel2_100% = %rel2_tab%(10, 0);
+%rel2_101% = %rel2_tab%(10, 1);
+%rel2_110% = %rel2_tab%(11, 0);
+%rel2_111% = %rel2_tab%(11, 1);
+%rel2_120% = %rel2_tab%(12, 0);
+%rel2_121% = %rel2_tab%(12, 1);
+%rel2_130% = %rel2_tab%(13, 0);
+%rel2_131% = %rel2_tab%(13, 1);
+%rel2_140% = %rel2_tab%(14, 0);
+%rel2_141% = %rel2_tab%(14, 1);
+
+
+%str1_10% = %str1_tab%(1, 0);
+%str1_11% = %str1_tab%(1, 1);
+%str1_20% = %str1_tab%(2, 0);
+%str1_21% = %str1_tab%(2, 1);
+%str1_30% = %str1_tab%(3, 0);
+%str1_31% = %str1_tab%(3, 1);
+%str1_40% = %str1_tab%(4, 0);
+%str1_41% = %str1_tab%(4, 1);
+%str1_50% = %str1_tab%(5, 0);
+%str1_51% = %str1_tab%(5, 1);
+%str1_60% = %str1_tab%(6, 0);
+%str1_61% = %str1_tab%(6, 1);
+%str1_70% = %str1_tab%(7, 0);
+%str1_71% = %str1_tab%(7, 1);
+%str1_80% = %str1_tab%(8, 0);
+%str1_81% = %str1_tab%(8, 1);
+%str1_90% = %str1_tab%(9, 0);
+%str1_91% = %str1_tab%(9, 1);
+%str1_100% = %str1_tab%(10, 0);
+%str1_101% = %str1_tab%(10, 1);
+%str1_110% = %str1_tab%(11, 0);
+%str1_111% = %str1_tab%(11, 1);
+%str1_120% = %str1_tab%(12, 0);
+%str1_121% = %str1_tab%(12, 1);
+%str1_130% = %str1_tab%(13, 0);
+%str1_131% = %str1_tab%(13, 1);
+%str1_140% = %str1_tab%(14, 0);
+%str1_141% = %str1_tab%(14, 1);
+
+%bool1_10% = %bool1_tab%(1, 0);
+%bool1_11% = %bool1_tab%(1, 1);
+%bool1_20% = %bool1_tab%(2, 0);
+%bool1_21% = %bool1_tab%(2, 1);
+%bool1_30% = %bool1_tab%(3, 0);
+%bool1_31% = %bool1_tab%(3, 1);
+%bool1_40% = %bool1_tab%(4, 0);
+%bool1_41% = %bool1_tab%(4, 1);
+%bool1_50% = %bool1_tab%(5, 0);
+%bool1_51% = %bool1_tab%(5, 1);
+%bool1_60% = %bool1_tab%(6, 0);
+%bool1_61% = %bool1_tab%(6, 1);
+%bool1_70% = %bool1_tab%(7, 0);
+%bool1_71% = %bool1_tab%(7, 1);
+%bool1_80% = %bool1_tab%(8, 0);
+%bool1_81% = %bool1_tab%(8, 1);
+%bool1_90% = %bool1_tab%(9, 0);
+%bool1_91% = %bool1_tab%(9, 1);
+%bool1_100% = %bool1_tab%(10, 0);
+%bool1_101% = %bool1_tab%(10, 1);
+%bool1_110% = %bool1_tab%(11, 0);
+%bool1_111% = %bool1_tab%(11, 1);
+%bool1_120% = %bool1_tab%(12, 0);
+%bool1_121% = %bool1_tab%(12, 1);
+%bool1_130% = %bool1_tab%(13, 0);
+%bool1_131% = %bool1_tab%(13, 1);
+%bool1_140% = %bool1_tab%(14, 0);
+%bool1_141% = %bool1_tab%(14, 1);
+
+
+/* END of BIDS FILE */

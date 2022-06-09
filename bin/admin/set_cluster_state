@@ -1,0 +1,180 @@
+#!/bin/sh
+
+# Disabel this if you only want the configuration to be updated
+#NORESTART=1
+export CARMUSR=`readlink -f \`dirname $0\`/../..`
+
+CLUSTERFILE=$CARMUSR/etc/hosts/cluster_state.xml
+
+exec | tee -a $CARMUSR/current_carmtmp_cct/set_cluster_state.log
+
+MAIN_NODE_NAME="main_node"
+SECOND_NODE_NAME="publish_node"
+BACKUP_NODE_NAME="backup_node"
+CP_NODE_NAME="cp_main_node"
+
+if [ -z "$1" ]; then
+  echo "Usage: $0 <main_node_hostname> <publish_node_hostname>"
+  echo "       $0 <backup_node_hostname>"
+  exit 1
+fi
+
+function fatal() {
+  echo "set_cluster_state FATAL `date`: $1"
+  exit 1
+}
+
+function loginfo() {
+  echo "set_cluster_state INFO `date`: $1"
+}
+
+function logwarn() {
+  echo "set_cluster_state WARNING `date`: $1"
+}
+
+loginfo "Starting script"
+OLD_CP_HOST=`$CARMUSR/bin/cmsshell getProperty "hosts/$CP_NODE_NAME@hostname"`
+NEW_CP_HOST=
+
+if [ -z "$2" ]; then
+  NEW_MAIN_HOST=
+  NEW_SECOND_HOST=
+  NEW_BACKUP_HOST=$1
+  IS_BACKUP=1
+  host $1 > /dev/null || fatal "$BACKUP_NODE_NAME host $1 does not exist. Aborting command"
+else
+  NEW_MAIN_HOST=$1
+  NEW_SECOND_HOST=$2
+  NEW_BACKUP_HOST=
+  if [ -n "$OLD_CP_HOST" ]; then
+      NEW_CP_HOST=$OLD_CP_HOST
+      host $OLD_CP_HOST > /dev/null || fatal "$CP_NODE_NAME host $OLD_CP_HOST does not exist. Aborting command"
+  fi
+  IS_BACKUP=0
+  host $1 > /dev/null || fatal "$MAIN_NODE_NAME host $1 does not exist. Aborting command"
+  host $2 > /dev/null || fatal "$SECOND_NODE_NAME host $2 does not exist. Aborting command"
+fi
+
+OLD_MAIN_HOST=`$CARMUSR/bin/cmsshell getProperty "hosts/$MAIN_NODE_NAME@hostname"`
+OLD_SECOND_HOST=`$CARMUSR/bin/cmsshell getProperty "hosts/$SECOND_NODE_NAME@hostname"`
+OLD_BACKUP_HOST=`$CARMUSR/bin/cmsshell getProperty "hosts/$BACKUP_NODE_NAME@hostname"`
+
+loginfo "Configuration should look like this:"
+loginfo "    $MAIN_NODE_NAME: $NEW_MAIN_HOST"
+loginfo "    $SECOND_NODE_NAME: $NEW_SECOND_HOST"
+loginfo "    $BACKUP_NODE_NAME: $NEW_BACKUP_HOST"
+loginfo "    $CP_NODE_NAME: $NEW_CP_HOST"
+loginfo "Configuration does currently look like this:"
+loginfo "    $MAIN_NODE_NAME: $OLD_MAIN_HOST"
+loginfo "    $SECOND_NODE_NAME: $OLD_SECOND_HOST"
+loginfo "    $BACKUP_NODE_NAME: $OLD_BACKUP_HOST"
+loginfo "    $CP_NODE_NAME: $OLD_CP_HOST"
+
+if [ "$NEW_MAIN_HOST" == "$OLD_MAIN_HOST" -a "$NEW_SECOND_HOST" == "$OLD_SECOND_HOST" -a "$NEW_BACKUP_HOST" == "$OLD_BACKUP_HOST" -a "$NEW_CP_HOST" == "$OLD_CP_HOST" ]; then
+  loginfo "Cluster configuration looks OK. Not changing anything"
+  exit 0
+fi
+
+loginfo "Stopping sysmond temporarily"
+if [ -n "$NORESTART" ]; then
+ logwarn "Skipping sysmond restart"
+else
+if [ -n "$OLD_CP_HOST" ]; then
+  loginfo "Stopping sysmond on $CP_NODE_NAME ($OLD_CP_HOST)..."
+  ssh -nT $OLD_CP_HOST $CARMUSR/bin/cmsshell sysmondctl exit
+fi
+if [ -n "$OLD_BACKUP_HOST" ]; then
+  loginfo "Stopping sysmond on $BACKUP_NODE_NAME ($OLD_BACKUP_HOST)..."
+  ssh -nT $OLD_BACKUP_HOST $CARMUSR/bin/cmsshell sysmondctl exit
+fi
+if [ -n "$OLD_SECOND_HOST" ]; then
+  loginfo "Stopping sysmond on $SECOND_NODE_NAME ($OLD_SECOND_HOST)..."
+  ssh -nT $OLD_SECOND_HOST $CARMUSR/bin/cmsshell sysmondctl exit
+fi
+if [ -n "$OLD_MAIN_HOST" ]; then
+  loginfo "Stopping sysmond on $MAIN_NODE_NAME ($OLD_MAIN_HOST)..."
+  ssh -nT $OLD_MAIN_HOST $CARMUSR/bin/cmsshell sysmondctl exit
+fi
+fi
+loginfo "Sysmond is now considered DOWN"
+
+loginfo "Will write an update to the configuration"
+if [ -f "$CLUSTERFILE" ]; then
+  CLUSTERFILEBAK="${CLUSTERFILE}.save.`date`"
+  loginfo "Moving $CLUSTERFILE to $CLUSTERFILEBAK"
+  mv "$CLUSTERFILE" "$CLUSTERFILEBAK"
+fi
+
+HOSTREC_MAIN=
+HOSTREC_SECOND=
+HOSTREC_BACKUP=
+HOSTREC_CP=
+if [ -n "$NEW_MAIN_HOST" ]; then
+  HOSTREC_MAIN="<host name=\"main_node\" hostname=\"$NEW_MAIN_HOST\" portbase=\"11000\" sysmond_ref=\"SYSMOND_MAIN\"><start>MAIN_NODE_PROCESSES</start></host>"
+fi
+if [ -n "$NEW_SECOND_HOST" ]; then
+  HOSTREC_SECOND="<host name=\"publish_node\" hostname=\"$NEW_SECOND_HOST\" portbase=\"11000\" sysmond_ref=\"SYSMOND_PUBLISH\"><start>PUBLISH_NODE_PROCESSES</start></host>"
+fi
+if [ -n "$NEW_BACKUP_HOST" ]; then
+  HOSTREC_BACKUP="<host name=\"backup_node\" hostname=\"$NEW_BACKUP_HOST\" portbase=\"11000\" sysmond_ref=\"SYSMOND_BACKUP\"><start>BACKUP_NODE_PROCESSES</start></host>"
+fi
+if [ -n "$NEW_CP_HOST" ]; then
+  HOSTREC_CP="<host name=\"cp_main_node\" hostname=\"$NEW_CP_HOST\" portbase=\"11000\" sysmond_ref=\"SYSMOND_CP_MAIN\"><start>CP_MAIN_NODE_PROCESSES</start></host>"
+fi
+
+cat > "$CLUSTERFILE" << EOF
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<global><config>
+	<hosts>
+    	$HOSTREC_MAIN
+    	$HOSTREC_SECOND
+    	$HOSTREC_BACKUP
+    	$HOSTREC_CP
+    </hosts>
+</config></global>
+EOF
+
+loginfo "Verifying reconfiguration"
+OLD_MAIN_HOST=`$CARMUSR/bin/cmsshell getProperty "hosts/$MAIN_NODE_NAME@hostname"`
+OLD_SECOND_HOST=`$CARMUSR/bin/cmsshell getProperty "hosts/$SECOND_NODE_NAME@hostname"`
+OLD_BACKUP_HOST=`$CARMUSR/bin/cmsshell getProperty "hosts/$BACKUP_NODE_NAME@hostname"`
+OLD_CP_HOST=`$CARMUSR/bin/cmsshell getProperty "hosts/$CP_NODE_NAME@hostname"`
+
+if [ "$NEW_MAIN_HOST" != "$OLD_MAIN_HOST" -o "$NEW_SECOND_HOST" != "$OLD_SECOND_HOST" -o "$NEW_BACKUP_HOST" != "$OLD_BACKUP_HOST" -o "$NEW_CP_HOST" != "$OLD_CP_HOST" ]; then
+  logwarn "Cluster reconfiguration did not work. Please check xml configuration for errors."
+  logwarn "Configuration should look like this:"
+  logwarn "    $MAIN_NODE_NAME: $NEW_MAIN_HOST"
+  logwarn "    $SECOND_NODE_NAME: $NEW_SECOND_HOST"
+  logwarn "    $BACKUP_NODE_NAME: $NEW_BACKUP_HOST"
+  logwarn "    $CP_NODE_NAME: $NEW_CP_HOST"
+  logwarn "but looks like this:"
+  logwarn "    $MAIN_NODE_NAME: $OLD_MAIN_HOST"
+  logwarn "    $SECOND_NODE_NAME: $OLD_SECOND_HOST"
+  logwarn "    $BACKUP_NODE_NAME: $OLD_BACKUP_HOST"
+  logwarn "    $CP_NODE_NAME: $OLD_CP_HOST"
+fi
+loginfo "Starting sysmond again"
+if [ -n	"$NORESTART" ];	then
+  logwarn "Skipping sysmond restart"
+else
+if [ -n "$NEW_CP_HOST" ]; then
+  loginfo "Starting sysmond on $CP_NODE_NAME ($NEW_CP_HOST)..."
+  ssh -nT $NEW_CP_HOST $CARMUSR/bin/cmsshell sysmondctl start
+fi
+if [ -n "$NEW_BACKUP_HOST" ]; then
+  loginfo "Starting sysmond on $BACKUP_NODE_NAME ($NEW_BACKUP_HOST)..."
+  ssh -nT $NEW_BACKUP_HOST $CARMUSR/bin/cmsshell sysmondctl start
+fi
+$CARMUSR/bin/cmsshell smd services
+if [ -n "$NEW_SECOND_HOST" ]; then
+  loginfo "Starting sysmond on $SECOND_NODE_NAME ($NEW_SECOND_HOST)..."
+  ssh -nT $NEW_SECOND_HOST $CARMUSR/bin/cmsshell sysmondctl start
+fi
+if [ -n "$NEW_MAIN_HOST" ]; then
+  loginfo "Starting sysmond on $MAIN_NODE_NAME ($NEW_MAIN_HOST)..."
+  ssh -nT $NEW_MAIN_HOST $CARMUSR/bin/cmsshell sysmondctl start
+fi
+fi
+loginfo "Starting is now considered UP again"
+loginfo "Failover reconfiguration completed"

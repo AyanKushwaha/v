@@ -1,0 +1,86 @@
+/* -*- crc -*- * 
+ * 
+ * Purpose:
+ *   This module contains functional rules common to CC, rostering and tracking.
+ *
+ * Sections:
+ *   1. Soft rules
+ *
+ * Created by:
+ *   Sten Larsson, 20080623
+ *
+ * Major changes:
+ *
+ */
+
+module rules_soft_ccr_cct_cc inherits rules_soft_ccr_cct
+
+import roster;
+import fundamental;
+import crew;
+import trip;
+import rule_exceptions;
+import leg;
+import levels;
+import rules;
+import rest;
+
+/****************************************************************
+ * Section 1: Soft rules
+ ***************************************************************/
+
+
+/*
+** Rule: 
+**    Minimum rest after trip followed by unused night duty standby
+** 
+** Description:
+**    The rule checks minimum rest at homebase when followed by an unused 
+**    standby that includes night duty.
+**
+** Agreement:
+**    SKN CC
+**
+**    4ExNG - no longer applies.
+*/
+rule sft_min_rest_before_unused_night_standby_SKN_CC =
+  valid roster.%check_rules% and
+        not crew.%k4exng_cc_sp5_1_valid%(trip.%start_day%) and
+        not crew.%is_leased_trip_start% and
+        %cabin_crew% and crew.%is_skn% and
+        (trip.%in_pp_extended% or trip.%rest_ends_in_pp%) and
+        not trip.%has_no_duty_time_contribution% and
+        not is_last(trip(wop)) and
+        not last(leg(trip), leg.%is_standby_callout%) and
+        not trip.%is_sby_manual_duty_break% and
+        not (last(duty(trip), duty.%is_bought% or
+             next(duty(wop),duty.%is_bought%))) and        
+        next(trip(wop),first(duty(trip),duty.%is_standby_with_rest% and
+                                        duty.%is_night_duty%));
+        
+  trip.%rest_time% >= %minimum_rest_before_night_standby% - 
+		      rule_exceptions.%overshoot_rel%(trip.%end_UTC%);
+          
+  startdate = trip.%end_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = next(trip(roster), trip.%failobject_start%);
+  failtext (Reltime value, Reltime limit) =
+    rules.%failtext_rel%("Soft: Rest before unused night duty standby", value, limit);
+  remark "Soft: Min rest before an unused night duty standby",
+  planner "The rule checks that rest at homebase before an unused standby that"
+          " includes night duty, satisfies the minimum requirement."
+          " Applies for SKN CC";
+end
+
+%minimum_rest_before_night_standby% =
+  %trip_min_time_homebase_skn% +
+  rest.%night_duty_extra_rest_homebase_cc_skn%;
+  
+%trip_min_time_homebase_skn% =
+  last(duty(trip),%duty_min_time_homebase_skn%);
+  
+%duty_min_time_homebase_skn% =
+  last(leg(duty),rest.%min_time_homebase_skn%);
+  
+/* end of file */
+

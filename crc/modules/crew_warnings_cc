@@ -1,0 +1,219 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   This module contains cabin crew warnings
+ *
+ * Sections:
+ *   1. Warning definitions
+ *
+ * Created by:
+ *   Jonas Carlsson, April 2007
+ *
+ * Major changes:
+ *
+ */
+ 
+module crew_warnings_cc inherits crew_warnings
+
+import leg;
+
+/****************************************************************
+ * Section 1: Warning definitions
+ ***************************************************************/
+ 
+table cc_warnings(Int section, Int priority) = 
+  section, 
+  priority -> 
+    redefine export String %section_group%,
+    redefine export bool %section_priority_warning%,  
+    redefine export String %section_priority_code%,    
+    redefine export String %section_priority_descr%; 
+  
+  /* REC previous year */
+  1, 1 -> "Recurrent", %warning_h1%, %warning_h1_code%, %warning_h1_description%;
+  
+  /* REC this year */
+  2, 1 -> "Recurrent", %warning_e1%, %warning_e1_code%, %warning_e1_description%;
+  2, 2 -> "Recurrent", %warning_e2%, %warning_e2_code%, %warning_e2_description%;
+  
+  /* Training need warnings */
+  3, 1 -> "Training", %warning_u1%, %warning_u1_code%, %warning_u1_description%;
+  
+  /* Absence from flight duty */
+  4, 1 -> "Absence", %warning_f1%, %warning_f1_code%, %warning_f1_description%;
+  4, 2 -> "Absence", %warning_f2%, %warning_f2_code%, %warning_f2_description%;
+  
+  /* Absence from aircraft type, there can be three ac types (or qualifications) */
+  5, 1 -> "Absence", %warning_a1_qln1%, %warning_a1_code%, %warning_a1_qln1_description%;
+  6, 1 -> "Absence", %warning_a1_qln2%, %warning_a1_code%, %warning_a1_qln2_description%;
+  7, 1 -> "Absence", %warning_a1_qln3%, %warning_a1_code%, %warning_a1_qln3_description%;
+  5, 2 -> "Absence", %warning_a2_qln1%, %warning_a2_code%, %warning_a2_qln1_description%;
+  6, 2 -> "Absence", %warning_a2_qln2%, %warning_a2_code%, %warning_a2_qln2_description%;
+  7, 2 -> "Absence", %warning_a2_qln3%, %warning_a2_code%, %warning_a2_qln3_description%;
+  
+  /* Default match used for counting the number of rows */
+  -, - -> void_string, void_bool, void_string, void_string;
+end
+
+
+/*
+** H: Missing previous year's recurrent training (prio 1)
+** This warning is not intended as a warning for missing registration of 
+** recurrent date, but since there is no other warning for that it has
+** been designed to warn also when there is no recurrent date.
+*/
+
+/* This variable is to handle the case where recurrent is planned correctly 
+   before pp, but rec assignment in pp is in wrong order.
+   Redundant since there will be an illegality, but it looks nicer.
+   /EKG 100409 */
+%next_rec_date% =
+  training.%next_rec_date%;
+
+redefine %warning_h1% = 
+  training.%has_warning_code_h%;
+
+%warning_h1_code% = "H";
+%warning_h1_description% = 
+  concat("Missing previous year's recurrent training, expiry date was ",
+         if training.%rec_date_exist% then %expiry_date_inclusive%(%next_rec_date%)
+         else "not found");
+
+/*
+** E: Recurrent training needed in pp (prio 1)
+** Warn if the recurrent date expires before end of pp
+** and there is no recurrent training planned in pp
+*/
+
+redefine %warning_e1% =
+  not %warning_h1% and
+  %next_rec_date% <= %warning_period_end%;
+%warning_e1_code% = "E";
+%warning_e1_description% = 
+  concat("Recurrent training needed in pp (",
+         %expiry_date_inclusive%(%next_rec_date%),")");
+  
+/*
+** e: Recurrent training needed in month after pp (prio 2)
+** Warn if the recurrent date expires during the month after pp and no
+** recurrent training is planned for during the month after pp
+*/
+
+redefine %warning_e2% = 
+  %next_rec_date% > %warning_period_end% and
+  %next_rec_date% <= %a_month_after_warning_period%;
+%warning_e2_code% = "e";
+%warning_e2_description% = 
+  concat("Recurrent training needed in month after pp (",
+          %expiry_date_inclusive%(%next_rec_date%),")");                                     
+
+/*
+** A: Absence from aircraft type (aircaft qualification)
+** This is divided into 3 warnings a1_qln1, a1_qln2 and a1_qln3 because
+** they can occure independently of on another. Do not warn for absence
+** from ac type if all of them are absent (= absent from flight duty F)
+*/
+/* Two different warnings can occur (per aircraft type) at pp end:
+** "a" - Absence from ANY ac-type > 90 days 
+** "A" - Absence from ANY ac-type > 1y
+*/
+
+%warning_a1_code% = "A";
+redefine %warning_a1% =
+  %warning_a1_qln1% or %warning_a1_qln2% or %warning_a1_qln3%;
+  
+%_warning_a_valid%(String ac_qual) =
+  crew.%has_ac_qln%(fundamental.%plan_end%, ac_qual) and
+  absence.%crew_is_absent_ac%(ac_qual, fundamental.%plan_end%);
+
+%warning_a1_qln1% =
+  not %warning_f1% and
+  %crew_has_ac_qln1_pp_end% and
+  %_warning_a_valid%(%crew_ac_qln1_pp_end%) and
+  absence.%crew_warning%(%crew_ac_qln1_pp_end%, %warning_period_end%-0:01) = "a1";
+
+%warning_a1_qln2% =
+  not %warning_f1% and
+  %crew_has_ac_qln2_pp_end% and
+  %_warning_a_valid%(%crew_ac_qln2_pp_end%) and
+  absence.%crew_warning%(%crew_ac_qln2_pp_end%, %warning_period_end%-0:01) = "a1";
+  
+%warning_a1_qln3% =
+  not %warning_f1% and
+  %crew_has_ac_qln3_pp_end% and
+  %_warning_a_valid%(%crew_ac_qln3_pp_end%) and
+  absence.%crew_warning%(%crew_ac_qln3_pp_end%, %warning_period_end%-0:01) = "a1";
+  
+%warning_a1_qln1_description% =
+  %_absence_descr%(%crew_ac_qln1_pp_end%);
+
+%warning_a1_qln2_description% =
+  %_absence_descr%(%crew_ac_qln2_pp_end%);
+  
+%warning_a1_qln3_description% =
+  %_absence_descr%(%crew_ac_qln3_pp_end%);
+
+%warning_a2_code% = "a";
+redefine %warning_a2% =
+  %warning_a2_qln1% or %warning_a2_qln2% or %warning_a2_qln3%; 
+
+%_warning_a2_valid% =
+  not (%warning_a1% or %warning_f2% or %warning_f1%);
+  
+%warning_a2_qln1% =
+  %_warning_a2_valid% and
+  %_warning_a_valid%(%crew_ac_qln1_pp_end%) and
+  absence.%crew_warning%(%crew_ac_qln1_pp_end%, %warning_period_end%-0:01) = "a2";
+  
+%warning_a2_qln2% =
+  %_warning_a2_valid% and
+  %_warning_a_valid%(%crew_ac_qln2_pp_end%) and
+  absence.%crew_warning%(%crew_ac_qln2_pp_end%, %warning_period_end%-0:01) = "a2";
+  
+%warning_a2_qln3% =
+  %_warning_a2_valid% and
+  %_warning_a_valid%(%crew_ac_qln3_pp_end%) and
+  absence.%crew_warning%(%crew_ac_qln3_pp_end%, %warning_period_end%-0:01) = "a2";
+  
+%warning_a2_qln1_description% =
+  %_absence_descr%(%crew_ac_qln1_pp_end%);
+
+%warning_a2_qln2_description% =
+  %_absence_descr%(%crew_ac_qln2_pp_end%);
+
+%warning_a2_qln3_description% =
+  %_absence_descr%(%crew_ac_qln3_pp_end%);
+  
+/*
+** f: Absence from flight duty ALL ac-type > 90 days
+** F: Absence from flight duty ALL ac-type > 6 months
+*/
+
+redefine %warning_f2% =
+  not %warning_f1% and 
+  %_warning_f_valid% and
+  absence.%crew_warning%(%crew_ac_qln1_pp_end%, %warning_period_end%-0:01) = "f2";
+  
+%warning_f2_code% = "f";
+
+%warning_f2_description% = 
+  %_warning_f_description%;
+  
+redefine %warning_f1% =
+  %_warning_f_valid% and
+  absence.%crew_warning%(%crew_ac_qln1_pp_end%, %warning_period_end%-0:01) = "f1";
+  
+%warning_f1_code% = "F";
+
+%warning_f1_description% =
+  %_warning_f_description%;
+
+/* The warning description is correctly generated by the absence logic */  
+%_warning_f_description% =
+  %_absence_descr%("");
+  
+%_warning_f_valid% =
+  absence.%crew_is_absent_all%(fundamental.%plan_end%);
+  
+/* end of file */
+

@@ -1,0 +1,420 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   Calendar basic variables, with no dependencies (i e usable in Manpower) 
+ *
+ * Sections:
+ *   1. Month
+ *   2. Weekends and special weekends
+ *
+ * Created by:
+ *   Lars Westerlind, 24-nov-2015
+ *
+ * Major changes:
+ *
+ */
+
+module base_calendar
+
+import base_utils;
+
+/****************************************************************
+ * Section 1: Month
+ ***************************************************************/
+
+export %month_start%(Abstime d) = round_down_month(d);
+export %month_end%(Abstime d) = round_up_month(d + 0:01);
+
+export %days_in_month%(Abstime date) =
+    /* returns an int */
+    (%month_end%(date) - %month_start%(date)) / 24:00;
+
+export %day_of_month%(Abstime date) =
+    /* returns an int */
+    base_utils.%int_parse%(format_time(date, "%d"));
+
+export %day_of_year%(abstime date) =
+  /* returns an int */
+    base_utils.%int_parse%(format_time(date, "%j"));
+
+
+export %month_number%(Abstime date) =
+    base_utils.%int_parse%(format_time(date, "%m"));
+
+
+
+table month_name_from_number(Int number) =
+    number -> export %month_name%;
+    1   -> "JAN";
+    2   -> "FEB";
+    3   -> "MAR";
+    4   -> "APR";
+    5   -> "MAY";
+    6   -> "JUN";
+    7   -> "JUL";
+    8   -> "AUG";
+    9   -> "SEP";
+    10  -> "OCT";
+    11  -> "NOV";
+    12  -> "DEC";
+    - -> void_string;
+end
+
+/****************************************************************
+ * Section 2: Week
+ ***************************************************************/
+    
+/* This is for functions that need to generate a string from a day number. */
+table weekday_from_daynumber(Int day) =
+  day -> export String %weekday%, export String %short_weekday%;
+  1 -> "Monday",	"Mo";
+  2 -> "Tuesday",	"Tu";
+  3 -> "Wednesday",	"We";
+  4 -> "Thursday",	"Th";
+  5 -> "Friday",	"Fr";
+  6 -> "Saturday",	"Sa";
+  7 -> "Sunday",	"Su";
+  - -> "",          "";
+end
+
+export %monday%   = 1;
+export %tuesday%  = 2;
+export %wednesday%= 3;
+export %thursday% = 4;
+export %friday%   = 5;
+export %saturday% = 6;
+export %sunday%   = 7;
+
+/*
+** Week day from date 
+*/
+export %wd_from_abs%(Abstime d) =
+  time_of_week(d)/24:00 + 1;
+
+/*
+** Abstime for midnight of a weekday, if include in the range, else void
+** Can be used to find a duty on a certain day of week
+*/ 
+export %covered_midnight_by_wd%(Int weekday, Abstime start_t, Abstime end_t) =
+  let sd = %wd_from_abs%(start_t-0:01), /* start weekday. set to previous if exact at midnight */
+      ed = sd +  (end_t -0:01 - round_down(start_t - 0:01, 24:00))/ 24:00,
+          /* end weekday, relative to sd. Monday after sunday gives 7+1 = 8! */
+      wd = if weekday>sd then weekday else weekday+7; /*next wanted weekday number to be covered */
+  if wd > sd and wd <= ed then 
+    round_down(start_t-0:01, 24:00) + (wd-sd) * 24:00
+  else 
+    void_abstime;
+/*
+** Creates string also for intervals 
+*/
+export %weekdays_string%(Int int_from, Int int_to) =
+  if (int_from = int_to) then %weekday%(int_from)
+  else if (int_to = int_from + 1) then
+    concat(%weekday%(int_from), " and ", %weekday%(int_to))
+  else
+    concat(%weekday%(int_from), " to ", %weekday%(int_to));
+
+%_iso_week_nr%(Abstime d,Abstime jan1) =
+  let wd = %wd_from_abs%(jan1),
+      offs = if wd>4 then wd-1 else wd+6;
+  (((d-jan1)/ 24:00)+offs)/7;
+
+/*
+** Week nr iso defintion, week 1 start with first week>=4 days long
+*/  
+export %iso_week_nr%(Abstime d) =
+  let y0 = round_down_year(d),
+      wn = %_iso_week_nr%(d, y0);
+  if (d-y0) < 120:00 then
+    if wn < 1 then %_iso_week_nr%(d,add_years(y0,-1)) else wn
+  else if (d-y0) > 8640:00 then /* 360*24, end of year */
+    if %_iso_week_nr%(d, add_years(y0,1)) < 1 then wn else 1
+  else wn;
+
+
+/*
+** Corresponding year to iso weeknr. May differ 3 days from new year.
+*/
+export %iso_year%(Abstime d) =
+  let y0 = round_down_year(d);
+  if (d-y0) < 120:00 then 
+    if %_iso_week_nr%(d,y0)<1 then base_utils.%year_nr%(d)-1 else base_utils.%year_nr%(d) 
+  else if (d-y0) > 8640:00 then /* 360*24, end of year */
+    if %_iso_week_nr%(d, add_years(y0,1)) < 1 then base_utils.%year_nr%(d) else base_utils.%year_nr%(d)+1 
+  else base_utils.%year_nr%(d);
+  
+/****************************************************************
+ * Section 4: Holidays
+ ***************************************************************/
+
+table easter_day_dates(Abstime year) =
+  format_time(round_down_year(year), "%Y") -> %_easter_day%;
+  "2008" -> 23Mar2008;
+  "2009" -> 12Apr2009;
+  "2010" -> 04Apr2010;
+  "2011" -> 24Apr2011;
+  "2012" -> 08Apr2012;
+  "2013" -> 31Mar2013;
+  "2014" -> 20Apr2014;
+  "2015" -> 05Apr2015;
+  "2016" -> 27Mar2016;
+  "2017" -> 16Apr2017;
+  "2018" -> 01Apr2018;
+  "2019" -> 21Apr2019;
+  "2020" -> 12Apr2020;
+  "2021" -> 04Apr2021;
+  "2022" -> 17Apr2022;
+  "2023" -> 09Apr2023;
+  "2024" -> 31Mar2024;
+  "2025" -> 20Apr2025;
+  "2026" -> 05Apr2026;
+  "2027" -> 28Mar2027;
+  "2028" -> 16Apr2028;
+  "2029" -> 01Apr2029;
+  "2030" -> 21Apr2030;
+  "2031" -> 13Apr2031;
+  "2032" -> 28Mar2032;
+  "2033" -> 17Apr2033;
+  "2034" -> 09Apr2034;
+  "2035" -> 25Mar2035;
+  -      -> void_abstime;
+end
+
+/*
+export %maundy_thursday_start%(Abstime year) =
+  %easter_day_start%(year) - 3 * 24:00;
+
+export %easter_monday_end%(Abstime year) =
+  %easter_day_start%(year) + 2 * 24:00;
+
+export %whitsun_day_start%(Abstime year) =
+  %easter_day_start%(year) + 49 * 24:00;
+  
+export %whit_saturday_start%(Abstime year) =
+  %whitsun_day_start%(year) - 24:00;
+
+export %whit_monday_end%(Abstime year) =
+  %whitsun_day_start%(year) + 2 * 24:00;
+*/
+
+/****************************************
+** Scandinavian holidays
+****************************************/
+
+/* Create abstime from y m d */
+export %day_from_date%(Abstime year, Int m, Int d) =
+  add_months(round_down_year(year),m-1) + (d-1)*24:00;
+ 
+export %week_from_date%(abstime d,Int w) =
+    round_down_week(add_weeks(d,w));
+  
+%day_from_easter%(Abstime year,Int diff) =
+  %_easter_day%(year) + diff*24:00;
+
+export %first_wday_from_date%(Abstime d, Int wday) =
+  d + ((7+wday-%wd_from_abs%(d)) mod 7)*24:00;
+  
+ 
+%day_from_wday%(Abstime year, Int m, Int d, Int wday) =
+  %first_wday_from_date%(%day_from_date%(year, m, d), wday); 
+  
+%day_from_wday_2%(Abstime year, Int m, Int d, Int wday) =
+  let dy = %day_from_date%(year, m, d);
+  dy + ((7+wday-%wd_from_abs%(dy)) mod 7)*24:00;
+
+export %weekday_in_period%(Abstime s, Abstime e, Int ix, Int wday) =
+  %first_wday_from_date%(s, wday) + (ix-1)*7*24:00;
+
+export %number_of_weekdays_in_period%(Abstime s, Abstime e, Int wday) =
+  ((e - %first_wday_from_date%(s, wday))/24:00+6)/7;
+
+/*
+** Holiday category, depending on use 
+*/ 
+export %hol_cat_general% = "g";         /* not specific */
+export %hol_cat_red% = "r";             /* common red days (not xmas eve, ny eve, midsummer eve) */
+export %hol_cat_per_diem% = "d";        /* salary use, double per diem */
+export %hol_cat_single_freedays% = "s"; /* use for allowing single freedays */
+export %hol_cat_weekend_freeday% = "w"; /* use for holidays that count as if a weekend freeday, even if not falling on Sat/Sun */
+
+/*
+** Please add constant upon need. Can be used for instance with %hol_days%(...)
+*/
+export %maundy_thursday_hnr%	= 4;
+export %good_friday_hnr% 	= 5;
+export %easter_day_hnr%		= 6;
+export %easter_monday_hnr%	= 7;
+
+/*
+** Holiday table.
+** In  year: any date in the year of question
+**     hnr:  holiday number, used for iteration, or using constants above.
+** Out hol_name:   english name
+**     hol_cat_se: categories matching in Sweden
+**     hol_cat_dk: categories matching in Denmark
+**     hol_cat_no: categories matching in Norway
+**     hol_day:    the date of the holiday.
+** Parameter year: any abstime in the year
+*/
+table scand_holiday_table(Abstime year, Int hnr) =
+  hnr -> export %hol_name%, %hol_cat_se%, %hol_cat_dk%, %hol_cat_no%, export %hol_day%;
+   1 -> "New Year's Day",       "grdsw", "grds", "grds", %day_from_date%(year,1,1);
+   2 -> "Epiphany",             "grds",  "",     "",     %day_from_date%(year,1,6);
+   3 -> "Palm Sunday",          "",      "",     "grds", %day_from_easter%(year,-7);
+   4 -> "Maundy Thursday",      "",      "grds", "grds", %day_from_easter%(year,-3);
+   5 -> "Good Friday",          "grdsw", "grds", "grds", %day_from_easter%(year,-2);
+   6 -> "Easter Day",           "grds",  "grds", "grds", %day_from_easter%(year,0);
+   7 -> "Easter Monday",        "grdsw", "grds", "grds", %day_from_easter%(year,1);
+   8 -> "Prayer Day",           "",      "grds", "",     %day_from_easter%(year, 26);
+   9 -> "Ascension Day",        "grdsw", "grds", "grds", %day_from_easter%(year, 39);
+  10 -> "Whit Sunday",          "grds",  "grds", "grds", %day_from_easter%(year, 49);
+  11 -> "Whit Monday",          "",      "grds", "grds", %day_from_easter%(year, 50);
+  12 -> "May Day",              "grdsw", "",     "grds", %day_from_date%(year,5,1);
+  13 -> "Constitution Day NO",  "",      "",     "grds", %day_from_date%(year,5,17);
+  14 -> "Constitution Day DK",  "",      "grds", "",     %day_from_date%(year,6,5);
+  15 -> "Constitution Day SE",  "grdsw", "",     "",     %day_from_date%(year,6,6);
+  16 -> "Midsummer Eve",        "gsw",   "",     "",     %day_from_wday%(year,6,19,%friday%);
+  17 -> "Midsummer Day",        "grds",  "",     "",     %day_from_wday%(year,6,20,%saturday%);
+  18 -> "Halloween",            "grds",  "",     "",     %day_from_wday%(year,10,31,%saturday%);
+  19 -> "Xmas Eve",             "gdsw",  "gds",  "gds",  %day_from_date%(year,12,24);
+  20 -> "Xmas Day",             "grdsw", "grds", "grds", %day_from_date%(year,12,25);
+  21 -> "Boxing Day",           "grdsw", "grds", "grds", %day_from_date%(year,12,26);
+  22 -> "New Year's Eve",       "gdsw",  "gds",  "gds",  %day_from_date%(year,12,31);
+  23 -> void_string,            "",      "",     "",     void_abstime;
+end
+
+/* Max number of indices needed to iterate in above functions */
+export %hol_max_ix% = 22;
+
+%_hol_ix_from_date%(Abstime d, Int st_ix, Int end_ix, String country, String hol_cat) = 
+  min(times(end_ix - st_ix + 1), times_index(0) + st_ix -1) 
+    where (%hol_day%(d,times_index(0)+st_ix-1) = round_down(d,24:00) and locate(hol_cat,%hol_cat%(d, times_index(0)+st_ix-1, country))>0);
+
+%_hol_date_after_date%(Abstime d, Int st_ix, String country, String hol_cat) =
+  min(times(%hol_max_ix% - st_ix + 1), %hol_day%(d,times_index(0)+st_ix-1))
+    where (%hol_day%(d,times_index(0)+st_ix-1) > d and locate(hol_cat,%hol_cat%(d, times_index(0)+st_ix-1, country))>0);
+
+/*
+** this table is for performance only, to get a fast lookup when looking for holiday
+*/ 
+table hol_fast_lookup(Abstime d, String country, String hol_cat) =
+  %month_number%(d) -> Int %hol_ix_from_date%, Abstime %hol_date_after_date%;
+  1 -> %_hol_ix_from_date%(d, 1, 2, country, hol_cat), %_hol_date_after_date%(d, 1, country, hol_cat);
+  2 -> void_int,                                       %_hol_date_after_date%(d, 3, country, hol_cat);
+  3 -> %_hol_ix_from_date%(d, 3, 7, country, hol_cat), %_hol_date_after_date%(d, 3, country, hol_cat);
+  4 -> %_hol_ix_from_date%(d, 3,12, country, hol_cat), %_hol_date_after_date%(d, 3, country, hol_cat);
+  5 -> %_hol_ix_from_date%(d, 8,13, country, hol_cat), %_hol_date_after_date%(d, 8, country, hol_cat);
+  6 -> %_hol_ix_from_date%(d,10,17, country, hol_cat), %_hol_date_after_date%(d,10, country, hol_cat);
+  7 -> void_int,                                       %_hol_date_after_date%(d,18, country, hol_cat);
+  8 -> void_int,                                       %_hol_date_after_date%(d,18, country, hol_cat);
+  9 -> void_int,                                       %_hol_date_after_date%(d,18, country, hol_cat);
+  10-> %_hol_ix_from_date%(d,18,18, country, hol_cat), %_hol_date_after_date%(d,18, country, hol_cat);
+  11-> %_hol_ix_from_date%(d,18,18, country, hol_cat), %_hol_date_after_date%(d,18, country, hol_cat);
+  12-> %_hol_ix_from_date%(d,19,22, country, hol_cat), %_hol_date_after_date%(d,19, country, hol_cat);
+  - -> void_int, void_abstime;
+end 
+
+%hol_cat%(Abstime year, Int ix, String country) =
+  if country="SE" then %hol_cat_se%(year, ix)
+  else if country="DK" then %hol_cat_dk%(year, ix)
+  else if country="NO" then %hol_cat_no%(year, ix)
+  else "";
+
+/*
+** Check if date is a holiday in given country, matching category hol_cat
+** country "" may be used for "any match"
+*/ 
+export %is_holiday_cat%(Abstime d, String country, String hol_cat) =
+  not void (%hol_ix_from_date%(d, country, hol_cat));
+/*
+** Holiday name for given abstime, void if no holiday
+** Selection is done using coubntry and category 
+*/
+export %holiday_name%(Abstime d, String country, String hol_cat) =
+  %hol_name%(d, %hol_ix_from_date%(d, country, hol_cat));
+
+/*
+** A string with date and name of holiday for display
+*/
+export %hol_dsp_string%(Abstime year, Int ix) =
+  concat(format_time(%hol_day%(year, ix), "%d%b%Y "),%hol_name%(year, ix));
+
+/*
+** A string with date and name of holiday, if matching country/category, else ""
+*/
+export %hol_dsp_cat_string%(Abstime year, Int ix, String country, String hol_cat, String prefix) =
+  if locate(hol_cat, %hol_cat%(year, ix, country))>0 or country="" then
+    concat(prefix,format_time(%hol_day%(year, ix), "%d%b%Y "),%hol_name%(year, ix))
+  else 
+    "";
+
+/*
+** First holiday in given year, matching country and category
+*/
+export %first_hol_per_cat%(Abstime year, String country, String hol_cat) =
+  let yr = round_down_year(year);  
+  if locate(hol_cat,%hol_cat%(yr,1,country))>0 or country="" then 
+    yr
+  else
+    %hol_date_after_date%(yr,country,hol_cat);
+
+/* 
+** Next holiday after given date, matching country and category.
+** Year is wrappend, after 31dec comes 1jan next year.
+*/
+export %next_hol_per_cat%(Abstime cur, String country, String hol_cat) =
+  default(
+    %hol_date_after_date%(cur,country,hol_cat),
+    %first_hol_per_cat%(add_years(round_down_year(cur),1),country,hol_cat));
+
+/*
+** this delivers first date in date interval (s,e( matching the country and category */
+export %first_hol_per_cat_in_iv%(Abstime s, Abstime e, String country, String hol_cat) =
+  let ret = if round_down_year(s)=s then %first_hol_per_cat%(s, country, hol_cat)
+           else %next_hol_per_cat%(s-0:01, country, hol_cat);
+  if ret<e then ret
+  else void_abstime;
+
+
+%_hpi%(Abstime s, Abstime e, Int ix, String country, String hol_cat) =
+  if s>=e then void_abstime
+  else if ix<1 then s
+  else %next_hol_per_cat%(s, country, hol_cat);
+
+/*
+** There are some routines especially in python, where all holidays in a planning period are handled
+** This functions returns all holiday dates in interval matching country and category, if iterated over index
+** It's currently implemented for up to 10 matches, which should be enough for planning periods.
+*/
+export %holiday_per_index%(Abstime s, Abstime e, Int ix, String country, String hol_cat) =
+  let d0 = if round_down_year(s)=s then 
+    %first_hol_per_cat%(s, country, hol_cat)
+    else %next_hol_per_cat%(s-24:00, country, hol_cat);
+  %_hpi%(
+    %_hpi%(
+      %_hpi%(
+        %_hpi%(
+          %_hpi%(
+            %_hpi%(
+              %_hpi%(
+                %_hpi%(
+                  %_hpi%(
+                    %_hpi%(d0, e, ix-1, country, hol_cat),
+                    e, ix-2, country, hol_cat),
+                  e, ix-3, country, hol_cat),
+                e, ix-4, country, hol_cat),
+              e, ix-5, country, hol_cat),
+            e, ix-6, country, hol_cat),
+          e, ix-7, country, hol_cat),
+        e, ix-8, country, hol_cat),
+      e, ix-9, country, hol_cat),
+    e, ix-10, country, hol_cat);
+
+/* limiit for above iteration; if 10 or more matches it voids! */
+export %number_of_holidays_per_index%(Abstime s, Abstime e, String country, String hol_cat) =
+  let ret = default(max(times(10), times_index(0))
+            where (not void(%holiday_per_index%(s, e, times_index(0), country, hol_cat))),0);
+  if ret>=10 then void_int /* may be more than 10. not implemented for more than 10 holidays per period */
+  else ret;
+
+/* end of file */

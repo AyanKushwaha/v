@@ -1,0 +1,184 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   Redefines the rest on board reduction points in tracking when
+ *   individual rest periods are specified.
+ *
+ * Created by:
+ *   Peter Jonsson 20060830
+ *
+ * Agreement:
+ *   OMA Chapter 7.
+ *
+ * Sections:
+ *   1 Rest planning
+ *   2 Standby callout
+ *
+ * Major changes:
+ *
+ */ 
+
+module points_cct_cc inherits points_ccr_cc
+import crg_crew_pos;
+import standby;
+import rescheduling;
+
+/****************************************************************
+ * Section 1: Rest Planning 
+ ***************************************************************/
+%crew_rest_table% = %etab_path%(%crew_rest_table_para%); 
+%crew_rest_table_para% = 
+  parameter "crew_rest"
+  remark "ETAB: Crew rest table";
+
+
+redefine %rest_on_board_reduction_points_leg%(Abstime start, Abstime stop, Bool points_style) =
+  if %specified_rest_exists% and %rest_on_board_possible% and 
+     leg.%is_active_flight% and 
+     %aircraft_type_with_rest_on_board%
+  then
+    %rest_on_board_reduction_with_specified_rest_period%(start, stop)
+  else
+    ((nmin(%points_leg_end%(points_style), stop) - nmax(%points_leg_start%(points_style), start)) * 
+    %rest_on_board_reduction_points_leg_full% / 
+    (%points_leg_end%(points_style) - %points_leg_start%(points_style)));
+
+
+redefine export %rest_on_board_reduction_points_leg_full% = 
+  if leg.%is_active_flight% and
+     %aircraft_type_with_rest_on_board% and
+     %rest_on_board_possible% and
+     not leg.%is_school_flight% 
+  then
+    if %specified_rest_exists%
+    then
+      %rest_on_board_reduction_with_specified_rest_period%(%rest_start%, %rest_end%)
+    else
+      if %rob%
+      then
+        %reduction_points%
+      else
+        0
+  else 
+    0;
+
+ /* Erik Thun 2007-12-12,  Added to display the reduction points, excluding landings, in rest planning*/ 
+%rest_on_board_reduction_points_rest_planing% = 
+  %rest_on_board_reduction_points_leg_full%;
+/*end*/
+
+
+%rest_on_board_reduction_with_specified_rest_period%(Abstime i_start, Abstime i_stop) =
+  let start = nmax(i_start, %rest_start%),
+      stop = nmin(i_stop, %rest_end%);
+  if stop <= start then
+    0
+  else if %time_zone_correction% then
+    overlap(duty.%start_utc%, duty.%start_utc% + 4:00, start, stop)
+    * (%day_points_per_hour% - %rest_points_per_hour%) / 1:00 +
+    overlap(duty.%start_utc% + 4:00, duty.%end_utc%, start, stop)
+    * (%night_points_per_hour% - %rest_points_per_hour%) / 1:00
+  
+  else
+    overlap(duty.%start_hb%, %first_night_start_utc%, start, stop)
+    * (%day_points_per_hour% - %rest_points_per_hour%) / 1:00 +
+    overlap(%first_night_start_utc%, %first_night_end_utc%, start, stop)
+    * (%night_points_per_hour% - %rest_points_per_hour%) / 1:00 +
+    overlap(%first_night_end_utc%, %second_night_start_utc%, start, stop)
+    * (%day_points_per_hour% - %rest_points_per_hour%) / 1:00 +
+    overlap(%second_night_start_utc%, %second_night_end_utc%, start, stop)
+    * (%night_points_per_hour% - %rest_points_per_hour%) / 1:00 +  
+    overlap(%second_night_end_utc%, duty.%end_utc%, start, stop)
+    * (%day_points_per_hour% - %rest_points_per_hour%) / 1:00;
+
+%first_night_start_utc% =
+  %second_night_start_utc% - 24:00;
+
+%first_night_end_utc% =
+  %second_night_end_utc% - 24:00;
+
+%second_night_start_utc% = 
+  if %three_night_zone_active% then
+    round_down(duty.%start_lt%, 24:00) + %day_time_end% - 
+    duty.%departure_station_tz_corrector%
+  else
+    round_down(duty.%start_hb%, 24:00) + %day_time_end% - 
+    duty.%homebase_tz_corrector%;
+
+%second_night_end_utc% =
+  if %three_night_zone_active% then
+    round_up(duty.%start_lt%, 24:00) + %day_time_start% - 
+    duty.%departure_station_tz_corrector%
+  else
+    round_up(duty.%start_hb%, 24:00) + %day_time_start% - 
+    duty.%homebase_tz_corrector%;
+
+
+%rest_start% =
+  if void(%_rest_start%) or void(%_rest_end%) then 1Jan1986 else %_rest_start%;
+
+%rest_end% =
+  if void(%_rest_start%) or void(%_rest_end%) then 1Jan1986 else %_rest_end%;
+
+  
+table crew_rest_table =
+  crew.%id%, 
+  leg.%start_date%,
+  leg.%flight_descriptor%,
+  leg.%start_station%
+  ->
+    Abstime %_rest_start%,
+    Abstime %_rest_end%;
+  external %crew_rest_table%;
+  crew, flight_udor, flight_fd, flight_adep -> reststart, restend;
+    - ,       -    ,     -    ,     -       -> 1Jan1986, 1Jan1986;
+end
+
+%specified_rest_exists% = not void(%_specified_rest_exists%);
+
+table specified_rest_exists_table =
+  leg.%start_date%,
+  leg.%flight_descriptor%,
+  leg.%start_station%
+  ->
+    String %_specified_rest_exists%;
+  external %crew_rest_table%;
+  flight_udor, flight_fd, flight_adep -> crew;
+        -    ,     -    ,     -       -> void_string;
+end
+
+/* Old Comment: This algortihm is correct but it can not be used until running
+ * the rule set on a complete plan covering all bases.. The def is therefore
+  * set to true in the meantime. */
+%rest_on_board_possible% = 
+  /*true;*/
+  crg_crew_pos.%leg_rostered_pos%(5) + crg_crew_pos.%leg_rostered_pos%(6) + 
+  crg_crew_pos.%leg_rostered_pos%(7) + crg_crew_pos.%leg_rostered_pos%(8)
+  >
+  crew_pos.%ac_need_in_pos%(5) + crew_pos.%ac_need_in_pos%(6) + 
+  crew_pos.%ac_need_in_pos%(7) + crew_pos.%ac_need_in_pos%(8);
+
+
+/****************************************************************
+ * Section 2: Standby callout
+ ***************************************************************/
+
+redefine %standby_callout% =
+  standby.%duty_is_standby_callout%;
+redefine %standby_callout_time% =
+  standby.%callout_time%;
+
+
+/*
+** Illness
+*/
+
+/* Each day is counted as 8 h duty and 6 points per h. */
+
+redefine %skn_illness_points_in_period%(Abstime start, Abstime stop) = 
+  if (crew.%is_SKN% or crew.%is_SKL%) then
+    freedays.%n153_time_in_period%(start,stop) * %day_points_per_hour% / 1:00
+  else
+    0;
+
+/* end of file */

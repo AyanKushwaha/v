@@ -1,0 +1,395 @@
+/* -*- crc -*-
+ *
+ *
+ *
+ * Purpose:
+ *   Specific studio variables for Carmen Crew Rostering (rudobs, header etc),
+ *   for the preRostering application.
+ *
+ *  The file contains:
+ *  1. Header mappings
+ *	2. Leg mappings
+ *	3. Rudobs
+ *   .1 Inactivated rudobs
+ *   .2 Rule exceptions
+ *   .3 Recency/Regained recency
+ *   .4 Trip bid
+ *   .5 Crew change
+ *   .6 Last free weekend
+ *   .7 Crew leased
+
+ *
+ * Created by:
+ *
+ * Major changes:
+ *   07-Jun-2007: Major restructuring of all studio_config modules.
+ *                /Erik Gustafsson
+ *
+ */
+
+module studio_config_ccr_basic inherits studio_config_common
+import bid;
+import duty_code;
+import recency;
+
+/*******************************************************************
+**
+** Section 1: Header mappings
+**
+********************************************************************/
+
+/*
+** Crew header
+*/
+
+%sc_rudob_display_homebase_color% =
+  parameter True
+  remark "Crew margin color: Display home base color.";
+
+set asian_bases = "BJS","SHA","NRT";
+
+%color_header_homebase_crew% =
+    if %sc_rudob_display_homebase_color% then
+        if crew.%homebase% = "OSL" then 8 /* light purple */
+        else if crew.%homebase% = "TRD" then 16 /* light pink */
+        else if crew.%homebase% = "SVG" then 10 /* light cyan */
+        else if crew.%homebase% = "CPH" then 14 /* light blue grey*/
+        else if crew.%homebase% = "STO" then 13 /*light yellow*/
+        else if crew.%homebase% in asian_bases then 15 /* light blue green */
+        else %color_default%
+    else %color_default%;
+
+redefine %color_crew_header% =
+  %color_header_homebase_crew%;
+
+
+/*******************************************************************
+**
+** Section 2: Leg mappings
+**
+********************************************************************/
+
+/* Violating bid */
+redefine %leg_color_bottom_crew% =
+    %leg_color%;
+
+/* Duty code */
+%rudob_display_dutycode_color% =
+  parameter False
+  remark "Show markers for duty codes.";
+
+redefine %leg_color_bottom_middle_crew% =
+  if %rudob_display_dutycode_color% and duty_code.%leg_has_duty_code% then
+    11
+  else %leg_color%;
+
+
+/*******************************************************************
+**
+** Section 3: Rudobs
+**
+********************************************************************/
+
+/*******************************************************
+ * 3.1 Inactivated rudobs
+ *******************************************************/
+/* These parameters could be turned back on if rostering wants them /EkG */
+redefine %rudob_show_ac_change% =
+  parameter False
+  remark "Show markers for aircraft changes";
+
+redefine %rudob_show_layover_time% = False;
+
+redefine %rudob_show_duty_min_rest_p% = False;
+
+/*******************************************************
+ * 3.2 Rule exceptions
+ *******************************************************/
+%rudob_rule_exception_trip_start% =
+  %rudob_date_range%(trip.%start_utc% - 0:30);
+
+%trip_has_rule_exceptions% =
+  any(leg(trip), rule_exceptions.%leg_has%) or
+  rule_exceptions.%duty_has% or
+  rule_exceptions.%trip_has%;
+
+%rudob_rule_exception_trip_len% =
+  if %trip_has_rule_exceptions% then
+    %rudob_len_if_overlap_pp%(trip.%start_utc%, trip.%end_utc% + 0:30)
+  else 0:00;
+
+%rudob_rule_exception_trip_text% = "Rule Exception";
+%rudob_rule_exception_trip_color% = %color_rule_exception%;
+%rudob_rule_exception_trip_bottom% = 0;
+%rudob_rule_exception_trip_top% = 10;
+
+/*******************************************************
+ * 3.3 Recency/Regained recency
+ *******************************************************/
+%rudob_recency_display_p% = False;
+
+%rudob_recency_display% =
+  %rudob_recency_display_p%;
+
+%rudob_recency_start_1% =
+  %rudob_date_range%(crew.%utc_time%(recency.%expiry_date_qln1%));
+%rudob_recency_end_1% =
+  %rudob_date_range%(crew.%utc_time%(crew.%ac_qln1_validto%));
+%rudob_recency_len_1% =
+  if %rudob_recency_display% then
+     default(nmax(0:00, %rudob_recency_end_1% - %rudob_recency_start_1%), 0:00)
+  else 0:00;
+%rudob_recency_bottom_1% = 0;
+%rudob_recency_top_1% = 25;
+%rudob_recency_text_1% =
+  concat(format_time(recency.%expiry_date_qln1%, "Lost recency - %02d%b%Y"),
+         if (not (crew.%is_a3a4_qualified_at_date%(%rudob_recency_start_2%) and
+                  crew.%rank_at_date%(%rudob_recency_start_2%) = "FR") and
+                  not (crew.%ac_qln2% = "37" or crew.%ac_qln2% = "38")) then
+           concat(" (", crew.%ac_qln1%, ")")
+         else
+           "");
+
+%rudob_recency_start_2% =
+  %rudob_date_range%(crew.%utc_time%(recency.%expiry_date_qln2%));
+%rudob_recency_end_2% =
+  %rudob_date_range%(crew.%utc_time%(crew.%ac_qln2_validto%));
+%rudob_recency_len_2% =
+  if %rudob_recency_display% and
+     (not (crew.%is_a3a4_qualified_at_date%(%rudob_recency_start_2%) and
+          crew.%rank_at_date%(%rudob_recency_start_2%) = "FR") and
+     not (crew.%ac_qln2% = "37" or crew.%ac_qln2% = "38")) then
+     default(nmax(0:00, %rudob_recency_end_2% - %rudob_recency_start_2%), 0:00)
+  else 0:00;
+%rudob_recency_bottom_2% = 25;
+%rudob_recency_top_2% = 50;
+%rudob_recency_text_2% =
+  concat(format_time(recency.%expiry_date_qln2%, "Lost recency - %02d%b%Y"),
+         " (", crew.%ac_qln2%, ")");
+
+%rudob_recency_start_3% =
+  %rudob_date_range%(crew.%utc_time%(recency.%expiry_date_qln3%));
+%rudob_recency_end_3% =
+  %rudob_date_range%(crew.%utc_time%(crew.%ac_qln3_validto%));
+%rudob_recency_len_3% =
+  if %rudob_recency_display% then
+     default(nmax(0:00, %rudob_recency_end_3% - %rudob_recency_start_3%), 0:00)
+  else 0:00;
+%rudob_recency_bottom_3% = 50;
+%rudob_recency_top_3% = 75;
+%rudob_recency_text_3% =
+  concat(format_time(recency.%expiry_date_qln3%, "Lost recency - %02d%b%Y"),
+         " (", crew.%ac_qln3%, ")");
+
+%rudob_recency_bottom%   = 0;
+%rudob_recency_top%      = 25;
+
+%rudob_recency_layer% = 0;
+%rudob_recency_delim% = False;
+%rudob_recency_color%    = 20; /* light-red */
+
+/*******************************************************
+ * 3.5 Crew change
+
+ Rough assumption that each change type only occurs once in pp
+
+ *******************************************************/
+%rudob_crew_change_display_p% = True;
+
+%rudob_crew_change_display% =
+  %rudob_crew_change_display_p%;
+
+/************************************************************/
+/* Common definitions for all crew change rudobs           */
+%rudob_crew_change_layer% = 1;
+
+/***********************************************************/
+/* Agreement change, 3 rudobs                              */
+/* Common definitions for all crew agreement change rudobs */
+%rudob_crew_agr_change_color% = %color_crew_agreement_change%;
+%rudob_crew_agr_change_top% = 35;
+%rudob_crew_agr_change_bottom% = 5;
+
+%rudob_crew_agr_change_1_start% =
+  if crew.%agreement_change_in_pp% and
+     not (crew.%agreement_pp_start_valid_from% = %pp_start%) then
+    crew.%utc_time%(crew.%agreement_pp_start_valid_to%)
+  else
+    %pp_start%;
+%rudob_crew_agr_change_1_len% =
+  if %rudob_crew_change_display% and crew.%agreement_change_in_pp% then
+    24:00
+  else
+    0:00;
+%rudob_crew_agr_change_1_text% = crew.%change_text_agreement_1%;
+
+%rudob_crew_agr_change_2_start% =
+  if crew.%agreement_change_2_in_pp% then
+    crew.%utc_time%(crew.%next_agreement_pp_start_valid_to%)
+  else
+    %pp_start%;
+%rudob_crew_agr_change_2_len% =
+  if %rudob_crew_change_display% and crew.%agreement_change_2_in_pp% then
+    24:00
+  else
+    0:00;
+%rudob_crew_agr_change_2_text% = crew.%change_text_agreement_2%;
+
+%rudob_crew_agr_change_3_start% =
+  if crew.%agreement_change_3_in_pp% then
+    crew.%utc_time%(crew.%next_next_agreement_pp_start_valid_to%)
+  else
+    %pp_start%;
+%rudob_crew_agr_change_3_len% =
+  if %rudob_crew_change_display% and crew.%agreement_change_3_in_pp% then
+    24:00
+  else
+    0:00;
+%rudob_crew_agr_change_3_text% = crew.%change_text_agreement_3%;
+
+
+
+/*******************/
+/* Homebase change */
+%rudob_crew_hb_change_color% = %color_crew_homebase_change%;
+%rudob_crew_hb_change_text% = crew.%change_text_homebase%;
+%rudob_crew_hb_change_top% = 65;
+%rudob_crew_hb_change_bottom% = 35;
+%rudob_crew_hb_change_start% =
+  if crew.%homebase_change_in_pp% then
+    crew.%utc_time%(crew.%homebase_pp_start_valid_to%)
+  else
+    %pp_start%;
+
+%rudob_crew_hb_change_len% =
+  if %rudob_crew_change_display% and crew.%homebase_change_in_pp% then
+    24:00
+  else
+    0:00;
+
+/******************/
+/* AC qual change */
+/* Common definitions for all AC qual change rudobs */
+
+%rudob_crew_acq_change_color% = %color_crew_acqual_change%;
+%rudob_crew_acq_change_top% = 95;
+%rudob_crew_acq_change_bottom% = 65;
+
+%rudob_crew_acq_change_1_start% =
+  if crew.%ac_qlns_change_1_in_pp% then
+    crew.%utc_time%(crew.%last_ac_qlns_change_in_pp_date%)
+  else
+    %pp_start%;
+
+%rudob_crew_acq_change_1_len% =
+  if %rudob_crew_change_display% and crew.%ac_qlns_change_1_in_pp% then
+    24:00
+  else
+    0:00;
+
+%rudob_crew_acq_change_1_text% = crew.%change_text_ac_qual_1%;
+
+
+%rudob_crew_acq_change_2_start% =
+  if crew.%ac_qlns_change_2_in_pp% then
+    crew.%utc_time%(crew.%next_ac_qlns_change_in_pp_date%)
+  else
+    %pp_start%;
+
+%rudob_crew_acq_change_2_len% =
+  if %rudob_crew_change_display% and crew.%ac_qlns_change_2_in_pp% then
+    24:00
+  else
+    0:00;
+
+%rudob_crew_acq_change_2_text% = crew.%change_text_ac_qual_2%;
+
+
+%rudob_crew_acq_change_3_start% =
+  if crew.%ac_qlns_change_3_in_pp% then
+    crew.%utc_time%(crew.%next_next_ac_qlns_change_in_pp_date%)
+  else
+    %pp_start%;
+
+%rudob_crew_acq_change_3_len% =
+  if %rudob_crew_change_display% and crew.%ac_qlns_change_3_in_pp% then
+    24:00
+  else
+    0:00;
+
+%rudob_crew_acq_change_3_text% = crew.%change_text_ac_qual_3%;
+
+
+/*******************************************************
+ * 3.6 Last free weekend
+ *******************************************************/
+%rudob_last_free_weekend_display% =
+  parameter False
+  remark "Show markers for last free weekend";
+
+%rudob_last_free_weekend_start% =
+  crew.%utc_time%(freedays.%latest_possible_rudob_start%);
+
+%rudob_last_free_weekend_len% =
+  if  %rudob_last_free_weekend_display% and
+      crew.%in_variable_group%(%rudob_last_free_weekend_start%) and
+      %free_weekend_in_pp%
+  then
+    freedays.%free_we_length%
+  else 0:00;
+
+/* Free weekend end must be greater than pp_start */
+%free_weekend_in_pp% =
+  default(freedays.%required_free_weekend% + freedays.%free_we_length%
+            > %pp_start%,
+          false);
+
+%rudob_last_free_weekend_top% = 60;
+%rudob_last_free_weekend_bottom% = 40;
+%rudob_last_free_weekend_color% = 6;
+%rudob_last_free_weekend_text% = "Last possible free weekend";
+%rudob_last_free_weekend_layer% = 0;
+
+
+
+redefine %rudob_show_briefing_debriefing_time_p% = False;
+
+/*******************************************************
+ * 3.7 Crew leased days
+ *******************************************************/
+
+/* Crew leased to non-SAS companies during these days*/
+
+%rudob_crew_leased_days_display_p% =
+  parameter true
+  remark "Show crew leased days in roster for planning period.";
+
+%rudob_crew_leased_days_display% =
+  %rudob_crew_leased_days_display_p% and not %is_reference_roster_view%;
+%rudob_crew_leased_day_start%  =
+  if %rudob_crew_leased_days_display% then
+    crew.%utc_time%(crew.%leased_validfrom_rudob%)
+  else
+    void_abstime;
+%rudob_crew_leased_day_length%  =
+  if void(%rudob_crew_leased_day_start%) then
+    0:00
+  else
+    crew.%leased_days_length%;
+%rudob_crew_leased_day_colour% = %color_crew_leased_day%;
+%rudob_crew_leased_day_text% =
+  default(concat("Crew leased from ",
+                 format_time(crew.%leased_validfrom%,"%02d%02b%02y"),
+                 " to ",
+                 format_time(crew.%leased_validto%,"%02d%02b%02y"),
+                 default(%crew_leased_day_comment_field%,"")), "");
+
+%crew_leased_day_comment_field% =
+  let comment = crew.%leased_day_comment%;
+  if length(comment) = 0
+  then ""
+  else concat(" (", substr(comment, 1, 15), ") ");
+
+
+/* end of file */
+

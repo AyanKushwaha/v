@@ -1,0 +1,181 @@
+#!/bin/env python
+# @(#) $Header: /opt/Carmen/CVS/sk_cms_user/bin/mks,v 1.1 2007/06/27 09:39:55 acosta Exp $
+
+"""
+Small utility that can be used to change entity definitions of existing databases.
+
+NO LIABLILITY FOR ANY INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES OR LOSS AS
+A RESULT OF MODIFYING, DISTRIBUTING, OR OTHERWISE USING THIS SCRIPT OR ANY
+DERIVATIVE THEREOF, EVEN IF ADVISED OF THE POSSIBILITY THEREOF.
+"""
+
+# imports ================================================================{{{1
+import getopt
+import logging
+import os
+import sys
+
+
+# exports ================================================================{{{1
+__all__ = ['main', 'MKS']
+
+
+# logging ================================================================{{{1
+logging.basicConfig(format='%(module)s: %(levelname)s: %(message)s', level=logging.INFO)
+
+
+# UsageException ========================================================={{{1
+class UsageException(Exception):
+    msg = ''
+    def __init__(self, msg):
+        self.msg = msg
+
+    def __str__(self):
+        return self.msg
+
+
+# Restart with carmpython ================================================{{{1
+# Trick to restart this script using carmpython
+try:
+    from carmensystems.dave import DMF, ModelReader
+except:
+    if sys.executable.startswith('/opt/Carmen'):
+        raise UsageException('Cannot even start with carmpython, check your installation!')
+    if not 'CARMUSR' in os.environ:
+        a0 = sys.argv[0]
+        if os.path.isabs(a0):
+            os.environ['CARMUSR'] = os.path.dirname(os.path.dirname(a0))
+        else:
+            os.environ['CARMUSR'] = os.path.dirname(os.path.abspath(os.path.join(os.getcwd(), os.path.dirname(a0))))
+    if not 'CARMSYS' in os.environ:
+        os.environ['CARMSYS'] = os.path.join(os.environ['CARMUSR'], 'current_carmsys_cct')
+    if not 'CARMTMP' in os.environ:
+        os.environ['CARMTMP'] = os.path.join(os.environ['CARMUSR'], 'current_carmtmp')
+    carmpython = os.path.join(os.environ['CARMSYS'], 'bin', 'carmpython')
+    rc = os.system(' '.join([carmpython] + sys.argv))
+    sys.exit()
+
+
+# MKS ===================================================================={{{1
+class MKS:
+    def __init__(self, connstr, schema):
+        self.connstr = connstr # Must be admin!
+        self.schema = schema
+        self.makerCfg = ModelReader.SimpleModelConfig()
+        self.makerCfg.addSearchPath(os.path.join(os.environ.get('CARMUSR'), 'data', 'config', 'models'))
+        self.schemaMaker = ModelReader.SchemaCreator(self.makerCfg)
+
+    def make(self, module):
+        schemaParts = ModelReader.SimpleModelParts()
+        schemaParts.addPart(module, '')
+        self.schemaMaker.createOrMigrateSchema(self.connstr, self.schema, schemaParts)
+
+
+# functions =============================================================={{{1
+
+# main -------------------------------------------------------------------{{{2
+def main(*argv, **options):
+    """
+    mks -c connect_string -s schema [-v] [-h] entity [entities ...]
+
+    options:
+        -c  connect_string
+        --connect connect_string
+            Use this connect string to connect to database.
+            NOTE: The user must be a system user.
+
+        -s  schema
+        --schema schema
+            Use this schema.
+
+        -v
+        --verbose
+            Print verbose messages.
+
+        -h
+        --help
+            This help text.
+
+    
+    example:
+        mks -c oracle:system/flamenco@flm:1521/flm1010 -s sk_all_sep_acosta \\
+            sas_table_accumulators
+    """
+
+    if len(argv) == 0:
+        argv = sys.argv[1:]
+    try:
+        try:
+            (opts, args) = getopt.getopt(argv, "c:hs:v",
+                [
+                    "connect=",
+                    "help",
+                    "schema=",
+                    "verbose",
+                ])
+        except getopt.GetoptError, msg:
+            raise UsageException(msg)
+
+        for (opt, value) in opts:
+            if opt in ('-h','--help'):
+                print __doc__
+                print main.__doc__
+                return 0
+            elif opt in ('-v', '--verbose'):
+                options['verbose'] = True
+            elif opt in ('-c', '--connect'):
+                options['connect'] = value
+            elif opt in ('-s', '--schema'):
+                options['schema'] = value
+            else:
+                pass
+
+        try:
+            connect = options['connect']
+            schema = options['schema']
+        except:
+            raise UsageException("The arguments '-c connect' and '-s schema' are mandatory.")
+
+        if len(args) < 1:
+            raise UsageException("You will have to supply at least one entity to modify.")
+
+        verbose = 'verbose' in options
+
+        if verbose:
+            logging.info("Connecting using connect string '%s' and schema '%s'." % (connect, schema))
+
+        m = MKS(connect, schema)
+
+        for entity in args:
+            if verbose:
+                logging.info("Updating definition of entity '%s'." % (entity))
+            m.make(entity)
+
+        if verbose:
+            logging.info("Finished.")
+
+    except UsageException, err:
+        logging.error(str(err))
+        logging.info("for help use --help")
+        return 2
+    except Exception, e:
+        logging.error(str(e))
+        return 2
+
+    return 0
+
+
+# main ==================================================================={{{1
+if __name__ == '__main__':
+    # sys.exit(main())
+    main()
+
+#
+# Note: programmatic usage:
+# import mks
+# mks.main('sas_table_accum', connect='oracle:system/flamenco@flm:1521/flm1010', schema='sk_sto_all_acosta', verbose=True)
+#
+
+# modeline ==============================================================={{{1
+# vim: set fdm=marker:
+# eof

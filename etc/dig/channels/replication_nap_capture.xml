@@ -1,0 +1,82 @@
+<!--
+  Captures changes from live database schema and exports to json files
+  that will be picked up by SEIP and consumed by NAP.
+
+  Normally the flow continuously exports changes from the live database schema.
+
+  To reset the flow to export from a certain commit:
+    * stop the dig channel
+    * write the desired commit id to the persist file
+    * ensure there are no unwanted files in the output directory
+    * start the dig channel
+
+  The flow can also be modified to export from the history database schema,
+  typically to get an initial export of all data:
+    * stop the dig channel
+    * set dbConn to "profile:history"
+    * set dbSchema to "%(db/dave/history/schema)"
+    * set chunksize to "300000" or so. It is much faster than using a small chunk size.
+    * write the desired commit id to the persist file
+    * ensure there are no unwanted files in the output directory
+    * ensure there is enough disk space for the export
+    * start the dig channel
+
+  To restore the flow from live schema revert changes and set the correct
+  commit id in the persist file again. It should be the value of:
+    history_schema.replicated_revision.source_cid
+  that corresponds to the last commit in the history schema that was exported.
+
+  SEIP shall move any transferred files to ${CARMTMP}/ftp/out/NAP/done in
+  order to simplify troubleshooting if needed.
+  The CMD_RS_CLEANUP task shall cleanup old files in the done folder.
+
+  Any changes to the data flow should be synchronized with the NAP team.
+-->
+<process name="replication_nap_capture"
+    dbConn="profile:history"
+    dbSchema="%(db/dave/history/schema)"
+    inOrder="True"
+    maxMessagesInChannel="40"
+    threadPoolSize="40"
+    messageAgeWarning="1h"
+    messageAgeError="24h"
+    continueOnMessageError="False"
+    sysMonEnabled="False">
+    
+    <start_cmd>%(programs/dig/start_cmd)</start_cmd>
+
+    <reader class="carmensystems.dig.readers.replicationcapture.ReplicationCaptureReader" 
+        searchInterval="3600"
+        chunkSize="100000"
+        persistPath="${CARMTMP}/ftp/out/NAP/persist"
+        excEntities="activity_link,dig_channel_status,job,job_parameter,resource_link,salary_wfs,task,task_alert,task_todo,todo_activity,todo_resource,track_alert"/>
+          
+    <messagehandlers>
+        <messagehandler class="carmensystems.dig.messagehandlers.jsonserialization.JsonSerializer" />
+        <messagehandler class="dig.filehandlers.TimestampSequenceFileWriter"
+            path="${CARMTMP}/ftp/out/NAP"
+            prefix="replication_data"
+            suffix=".json"
+            name="sourcefilewriter"
+            encoding="utf-8"
+            seqfile_path='${CARMTMP}/ftp/out/NAP/persist/.sequence'/>
+    </messagehandlers>
+
+    <notifiers>
+        <notifier category="message"
+            class="carmensystems.dig.notifiers.mail.MailNotifier"
+            host="%(dig_settings/mail/host)"
+            port="%(dig_settings/mail/port)"
+            sender="%(dig_settings/mail/from)"
+            recipients="%(dig_settings/mail/to)"
+            subject="DIG channel 'replication_nap_capture' message error"/>
+        <notifier category="fatal"
+            class="carmensystems.dig.notifiers.mail.MailNotifier"
+            formatterClass="dig.notifiers.TracebackFormatter"
+            host="%(dig_settings/mail/host)"
+            port="%(dig_settings/mail/port)"
+            sender="%(dig_settings/mail/from)"
+            recipients="%(dig_settings/mail/to)"
+            subject="DIG channel 'replication_nap_capture' fatal error"/>
+    </notifiers> 
+</process>

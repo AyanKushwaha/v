@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+    R1      GetReportList
+    32.3.2  Get Crew Act List              (R2 GetReport)
+    32.3.3  Get Flight Leg                 (R2 GetReport)
+    32.3.7  Get Simulator Acts             (R2 GetReport)
+    32.3.9  Get Crew Accum Info            (R2 GetReport)
+    32.13.2 Overtime Presentation          (R2 GetReport)
+    32.13.3 Crew Slip                      (R2 GetReport)
+    32.14   Duty Calculation
+    32.15   Future Activities
+    32.17   Vacation and Balance           (R2 GetReport)
+    32.21   Compensation Days presentation (R2 GetReport)
+    CrewBasicService
+    CrewFlightService
+    CrewListService
+    CrewRosterService
+ -->
+<process name="crewservices"
+    dbConn="profile:live"
+    dbSchema="%(db/dave/live/schema)"
+    inOrder="False"
+    maxMessagesInChannel="20"
+    threadPoolSize="14"
+    messageAgeWarning="10s"
+    messageAgeError="90s"
+    continueOnMessageError="True">
+    <start_cmd>%(programs/dig/start_cmd)</start_cmd>
+
+    <reader class="carmensystems.dig.readers.jmq.MQReader"
+        host="%(dig_settings/mq/server)"
+        port="%(dig_settings/mq/port)"
+        manager="%(dig_settings/mq/manager)"
+        altUser="%(dig_settings/mq/altuser)"
+        channel="%(dig_settings/mq/channel)"
+        queue="CQFREQ%(dig_settings/mq/sk_qsuffix)"
+        timeout="0.1"
+        allowExpiry="True"
+        numToRead="-1"/>
+    <!--<reader class="carmensystems.dig.readers.file.FileReader"
+        filename="$(CARMUSR)/test.in"/>-->
+    <messagehandlers>
+        <messagehandler class="dig.filehandlers.MessageRecorder"
+            log_file_prefix="CQFREQ_LIVE"
+            log_directory="/var/carmtmp/logfiles/DIG"/>
+        <messagehandler class="dig.xhandlers.ReportRequestBuilder"
+            delta="False"
+            overrideServerArgs="True"
+            serviceLookupClass="dig.xhandlers.RSLookup"
+            configFile="$(CARMUSR)/data/config/dig/queries/reports.services"
+            paramSeparator=","/>
+            <!-- defaultServer attribute is required but is overridden by dig.xhandlers.RSLookup function -->
+        <messagehandler class="dig.dispatchers.ReportCacheDispatcher"
+            cachingRequests="CrewBasic,CheckInOut,CrewRoster"
+            timeout="40"
+            archive_dir="%(services_archiver/archive_dir)"
+            defaultServer="rs_publish"
+            contentIsReports="False"
+            rs_publish="%(API/getServiceUrl/portal_publish)"
+            rs_publish_short="%(API/getServiceUrl/portal_publish_short)"
+            rs_scheduled="%(API/getServiceUrl/portal_scheduled)"
+            rs_latest="%(API/getServiceUrl/portal_latest)"
+            rs_latest_short="%(API/getServiceUrl/portal_latest_short)"/>
+        <messagehandler class="dig.xhandlers.CustomDaveWriter"
+            relaxTables="crew_notification,ci_frozen"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        <messagehandler class="dig.xhandlers.ReportCachePostProc" />
+        <messagehandler class="dig.xhandlers.AddressInjector"
+            default_dests="MQreply"
+            MQreply_protocol="mqreply"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher"
+            mqreply_host="%(dig_settings/mq/server)"
+            mqreply_port="%(dig_settings/mq/port)"
+            mqreply_channel="%(dig_settings/mq/channel)"
+            mqreply_altUser="%(dig_settings/mq/altuser)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="message"
+            class="carmensystems.dig.notifiers.file.FileNotifier"
+            formatterClass="dig.notifiers.SKLogFormatter"
+            filename="/var/carmtmp/logfiles/DIG/errmsg/crewservices.msg" />
+        <notifier category="performance"
+            class="carmensystems.dig.notifiers.file.FileNotifier"
+            formatterClass="dig.notifiers.PerformanceFormatter"
+            filename="/var/carmtmp/logfiles/DIG/performance/crewservices.log" />
+        <notifier category="fatal"
+            class="carmensystems.dig.notifiers.mail.MailNotifier"
+            host="%(dig_settings/mail/host)"
+            port="%(dig_settings/mail/port)"
+            sender="%(dig_settings/mail/from)"
+            recipients="%(dig_settings/mail/to)"
+            subject="DIG channel 'crewservices' fatal error" />
+    </notifiers>
+</process>
+

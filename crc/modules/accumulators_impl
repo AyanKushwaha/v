@@ -1,0 +1,3585 @@
+/* -*- crc -*-
+ *
+ * Purpose:
+ *   This module contains all accumulators used in the ruleset.
+ *   They are gathered here to minimize the risk of multiple implementation 
+ *
+ * Sections:
+ *   1. General accumulators
+ *   2. Cabin crew specific accumulators
+ *   3. Flight crew specific accumulators
+ *
+ * Created by:
+ *   David Lennartsson, Jeppesen 2006-10-24
+ *
+ * Major changes:
+ *   HenrikA 02feb2007: Changed name to ..._impl, to be able to import into 
+ *                      modules imported in accumulators.
+ */
+
+module accumulators_impl inherits accumulators
+
+import fundamental;
+import parameters;
+import levels;
+import iterators;
+import crew_pos;
+import crew;
+import trip;
+import leg;
+import roster;
+import task;
+import model_crew;
+import model_freedays;
+import freedays;
+import recency;
+import standby;
+import qualification;
+import bought_days;
+import duty_time;
+import duty_period;
+import training;
+import fdp;
+import oma16;
+import oma16_defs;
+import base_utils;
+import base_product;
+import bunkering;
+
+/****************************************************************
+ * Section 1: General accumulators (common for flight and cabin crew)
+ ***************************************************************/
+/*
+** Accumulator for block time, month resolution
+*/
+export %block_time_in_period_excluding_bought_days%(Abstime start, Abstime stop) =
+  %block_time_in_period_caa%(start, stop) - 
+  %block_time_on_bought_days_in_period%(start, stop);
+  
+export %block_time_in_period_caa%(Abstime start, Abstime stop) = 
+  block_time_acc(start, stop);
+
+
+accumulator block_time_acc(Abstime a1, Abstime a2) =
+  roster.%block_time_in_period_caa%(crew.%utc_time%(a1), crew.%utc_time%(a2));
+  plan_start = %pp_start_month%;
+  plan_end = %pp_end_month%;
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+  else if %job_publication_p% then void_string 
+  else crew.%id%;
+end
+ 
+
+global export %pp_start_month% =
+  round_up_month(%pp_start%);
+
+global export %pp_end_month% =
+  round_up_month(%pp_end%);
+
+/* 
+** Accumulator for block time, daily resolution.
+**
+** This accumulator is needed for rolling block-hour rules such as
+** SubpartQ and some industrial.
+*/
+
+export %block_time_in_period_excluding_bought_days_daily%(Abstime start, Abstime stop) =
+  %block_time_in_period_caa_daily%(start, stop) - 
+  %block_time_on_bought_days_in_period%(start, stop);
+  
+export %block_time_in_period_caa_daily%(Abstime start, Abstime stop) = 
+  block_time_daily_acc(start, stop);
+
+accumulator block_time_daily_acc(Abstime a1, Abstime a2) =
+  roster.%block_time_in_period_caa%(crew.%utc_time%(a1), crew.%utc_time%(a2));
+  plan_start = %pp_start_month%;
+  plan_end   = %pp_end_month%;
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+
+/* This accumulator is needed and accumulates on a daily basis
+** since the regular accumulator only has a monthly resolution */
+export %block_time_during_restriction%(Abstime start, Abstime stop) =
+  block_time_restr_acc(start, stop);
+accumulator block_time_restr_acc(Abstime a1, Abstime a2) =
+  roster.%block_time_in_period_during_restr%(crew.%utc_time%(a1), crew.%utc_time%(a2));
+  plan_start = %pp_start_month%;
+  plan_end   = %pp_end_month%;
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if not %accumulator_mode% then 
+          crew.%id%
+        else if %job_publication_p% then
+          void_string
+        else %restr_fc_id%;
+end
+
+
+/*
+** This accumulator is needed for accumulation of flight crew on a daily
+** basis. It accumluates block hours after ILC
+*/
+export %block_time_after_ilc%(Abstime start, Abstime stop) =
+  block_time_ilc_acc(start, stop);
+
+accumulator block_time_ilc_acc(Abstime a1, Abstime a2) =
+  roster.%block_time_in_period_caa%(crew.%utc_time%(a1), crew.%utc_time%(a2));
+  plan_start = %pp_start_month%;
+  plan_end   = %pp_end_month%;
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if not %accumulator_mode% then 
+          crew.%id%
+        else if %job_publication_p% then
+          void_string
+        else if crew.%a4_qual_recently% then
+          crew.%id%
+        else 
+          void_string;
+end
+
+/* Only A2 A3 are added due to pilot unions. See SKCMS-2326 comments */
+
+export %block_time_of_ac_fam%(String ac_fam, Abstime start, Abstime stop) =
+  %get_block_hours_of_ac_fam%(ac_fam, start, stop);
+
+table block_hours_of_ac_fam(String ac_fam, Abstime start, Abstime stop) =
+  ac_fam -> %get_block_hours_of_ac_fam%;
+  "A2" -> block_time_a320(start, stop);
+  "A3" -> block_time_a330(start, stop);
+  "A5" -> block_time_a350(start, stop);
+end
+
+accumulator block_time_a320(Abstime start, Abstime stop) =
+  roster.%block_time_of_ac_qual_in_period_caa%(start, stop, "A2");
+  plan_start = %pp_start_month%;
+  plan_end   = %pp_end_month%;
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if not %accumulator_mode% then
+          crew.%id%
+        else if %job_publication_p% then
+          void_string
+        else if crew.%a4_qual_recently% then
+          crew.%id%
+        else
+          void_string;
+end
+
+accumulator block_time_a330(Abstime start, Abstime stop) =
+  roster.%block_time_of_ac_qual_in_period_caa%(start, stop, "A3");
+  plan_start = %pp_start_month%;
+  plan_end   = %pp_end_month%;
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if not %accumulator_mode% then
+          crew.%id%
+        else if %job_publication_p% then
+          void_string
+        else if crew.%a4_qual_recently% then
+          crew.%id%
+        else
+          void_string;
+end
+
+accumulator block_time_a350(Abstime start, Abstime stop) =
+  roster.%block_time_of_ac_qual_in_period_caa%(start, stop, "A5");
+  plan_start = %pp_start_month%;
+  plan_end   = %pp_end_month%;
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if not %accumulator_mode% then
+          crew.%id%
+        else if %job_publication_p% then
+          void_string
+        else if crew.%a4_qual_recently% then
+          crew.%id%
+        else
+          void_string;
+end
+
+
+/*
+** Accumulator for duty time, month resolution
+*/
+export %duty_time_in_period%(abstime start, abstime stop) =
+  if crew.%is_SKS% or not fundamental.%night_upg% then
+    %duty_time_in_period_no_night_upg%(start, stop)
+  else
+    %duty_time_in_period_night_upg%(start, stop);
+
+    
+/* Note: This accumulator seems to only be used from report_crewlists.
+         See if we can get rid of it. /StenL 20080926 */
+export %duty_time_in_period_night_upg%(Abstime start, Abstime stop) = duty_time_night_upg_acc(start, stop);
+
+accumulator duty_time_night_upg_acc(Abstime a1, Abstime a2) =
+  oma16.%duty_time_in_interval_calc_indep%(duty.union, crew.%utc_time%(a1), crew.%utc_time%(a2)); 
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01); /*this + 24:00;*/
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+export %duty_time_in_period_no_night_upg%(Abstime start, Abstime stop) =
+  duty_time_no_night_upg_acc(start, stop);
+
+accumulator duty_time_no_night_upg_acc(Abstime a1, Abstime a2) =
+  if crew.%is_skj% then
+      oma16.%duty_time_in_interval_calc_indep%(duty.net_skj, crew.%utc_time%(a1), crew.%utc_time%(a2))
+  else
+      oma16.%duty_time_in_interval_calc_indep%(duty.union, crew.%utc_time%(a1), crew.%utc_time%(a2));
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01); /*this + 24:00;*/
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+/* 
+** Published duty time for Danish Cabin Crew. 
+*/
+export %duty_time_planned_skd%(Abstime start, Abstime stop) =
+  duty_time_planned_skd_acc(start, stop);
+
+accumulator duty_time_planned_skd_acc(Abstime start, Abstime stop) =
+  oma16.%duty_time_in_interval_indust_indep%(crew.%utc_time%(start), crew.%utc_time%(stop));
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01); /*this + 24:00;*/
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then 
+          crew.%id%
+        else if %job_publication_p% then 
+          %cabin_crew_id%
+        else 
+          void_string;
+end
+
+/*
+** Counting duty time in period using DutyCalculation.caa
+*/
+export %duty_time_in_period_caa%(Abstime start, Abstime stop) =
+  duty_time_in_period_caa_acc(start, stop);
+
+accumulator duty_time_in_period_caa_acc(Abstime start, Abstime stop) =
+  oma16.%duty_time_in_interval_indep%(crew.%utc_time%(start), crew.%utc_time%(stop));
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+  else if %job_publication_p% then void_string
+  else crew.%id%;
+end
+
+/*
+** Free weekend accumulator
+*/
+export %last_free_weekend%(Abstime date) = last_free_weekend_acc(date - 0:01, false);
+
+/* SASCMS-3264. Needs more rows, to calculate num free weekends in a quarter */
+%last_free_weekend_filter%(Abstime date) =
+  add_months(round_up_month(date), 1);
+
+/*
+** Monday must be in the planning period since
+** we cannot guarantee that they will not schedule anything 
+** on sunday or monday otherwise 
+*/
+%round_down_tuesday%(Abstime date) =
+  round_down_week(round_up(date, 24:00) - 24:00);
+  
+/*
+** When accumulating, find the latest free weekend in the interval
+** [date, date + 30 days). If not found, search in the interval
+** [date + 30 days, infinity).
+*/
+export %last_free_weekend_plan%(Abstime date, Bool forward) =
+    if forward then
+        freedays.%chain_first_free_weekend_after_date%(date)
+    else
+        freedays.%chain_last_free_weekend_before_date%(date);
+
+%_last_free_weekend_acc_end% =
+  if freedays.%free_we_period_is_month% then
+    freedays.%free_we_period_end%
+  else
+    %pp_end%;
+
+/*
+** Accumulator for free weekends, month resolution
+*/
+accumulator last_free_weekend_acc(Abstime date, Bool forward) =
+  %last_free_weekend_plan%(date, forward);
+  plan_start = %round_down_tuesday%(%pp_start%);
+  plan_end   = %_last_free_weekend_acc_end%;
+  acc_start  = %round_down_tuesday%(%publ_acc_start%);
+  acc_end    = %round_down_tuesday%(%publ_acc_end%);
+  acc_filter = %last_free_weekend_filter%(%publ_period_end%);
+  key = if not %accumulator_mode% then crew.%id%
+	    else
+          if %job_publication_p% then
+            crew.%id%
+	      else
+            void_string;
+end
+
+/*
+** Accumulator for OMA freedays, month resolution
+**
+** NB! OM-A freedays accumulators are no longer used.
+*/
+export %oma_freedays_in_period%(Abstime start, Abstime stop) = oma_freedays_acc(start, stop);
+accumulator oma_freedays_acc(Abstime start, Abstime stop) =
+  freedays.%oma_freedays_in_period_caa%(start, stop);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	    else void_string;
+end
+
+export %oma_considered_days_in_period%(Abstime start, Abstime stop) =
+  oma_considered_days_acc(start, stop);
+  
+accumulator oma_considered_days_acc(Abstime start, Abstime stop) =
+  freedays.%oma_considered_days_in_period%(start, stop);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	    else void_string;
+end
+
+/*
+** Accumulator for freedays, month resolution
+*/
+export %qual_freedays_in_period%(Abstime start, Abstime stop) = qual_freedays_acc(start, stop);
+accumulator qual_freedays_acc(Abstime start, Abstime stop) =
+  freedays.%qual_freedays_in_period%(start, stop);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if not %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+/*
+**  Accumulator for number of months with reduced freeday requirement.
+**
+**  NB! K11 FC: this accumulator will be used for SKN, SKD and SKS!
+*/
+export %no_of_reduced_months_in_calendar_year_skn%(AbsTime start, AbsTime stop) = reduced_months_skn_acc(start, stop);
+%_month_is_reduced%(AbsTime start, AbsTime stop) =
+  if freedays.%freeday_requirement_is_reduced%(start) and
+     freedays.%_target_days_in_period_1_month_fcsh_k11%(start, stop) >= 
+        %qual_freedays_in_period%(start, stop) * ((stop - start) / 24:00)
+  then
+    1
+  else
+    0;
+accumulator reduced_months_skn_acc(Abstime start, Abstime stop) =
+  %_month_is_reduced%(start, stop);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then
+            crew.%id%
+        else if %job_publication_p% and
+            (crew.%is_skn% or
+             (parameters.%k11_fc_sp10_9_valid%(%pp_start%) and
+              (crew.%is_skd% or crew.%is_sks%))) then 
+            %flight_crew_id%
+        else 
+            void_string;
+end
+
+/*
+** Accumulator for VA days in period
+*/
+set p_days_fd_va_set = 
+  "VA", "VA1", "F7"
+  remark "FDPDAYS: VA codes.";
+  
+%_va_days% =
+  if (leg.%code% in p_days_fd_va_set) then 
+    leg.%days_in_period%(%publ_period_start%, %publ_period_end%)        
+  else 
+    0;
+
+/* scaled */
+%_va_days_in_period%(Abstime start, Abstime stop) =
+    sum(leg(chain), %scale% * %_va_days%) 
+    where (leg.%in_period%(start, stop));
+    
+export %nr_va_days_in_period%(Abstime start, Abstime stop) = 
+    va_days_acc(start, stop);
+
+/* scaled */    
+accumulator va_days_acc(Abstime start, Abstime stop) =
+  %_va_days_in_period%(start, stop);
+  plan_start = %pp_start%;
+  plan_end   = %pp_end%;
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then 
+            crew.%id%
+        else if %job_publication_p% and 
+             crew.%max_production_days_rule_FC_SKN_valid% or
+             crew.%max_production_days_rule_FC_ALL_valid% and
+             fundamental.%flight_crew% then 
+             crew.%id%
+        else 
+             void_string;
+end
+
+/* scaled */
+%_va_days_pt_in_period%(Abstime start, Abstime stop) =
+    (sum(leg(chain), %scale% * %_va_days% *
+         crew.%part_time_factor_at_date%(leg.%start_utc%))
+        where (leg.%in_period%(start, stop))) / 100;
+
+export %nr_va_days_pt_in_period%(Abstime start, Abstime stop) = 
+    va_days_pt_acc(start, stop);
+  
+/* scaled */
+accumulator va_days_pt_acc(Abstime start, Abstime stop) =
+  %_va_days_pt_in_period%(start, stop);
+  plan_start = %pp_start%;
+  plan_end   = %pp_end%;
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then 
+            crew.%id%
+        else if %job_publication_p% and
+            crew.%max_production_days_rule_FC_SKN_valid% or
+            crew.%max_production_days_rule_FC_ALL_valid% and
+            fundamental.%flight_crew% then 
+            crew.%id%
+        else 
+            void_string;
+end
+
+/*
+** Accumulator for LOA days in period
+*/
+set p_days_fd_not_loa_set = 
+    "LA91", "LA91R", "LA92", "LA92R"
+    remark "FDPDAYS: LA days not LOA.";
+    
+%_loa_days% =
+  if leg.%is_loa% and not (leg.%code% in p_days_fd_not_loa_set) then 
+    leg.%days_in_period%(%publ_period_start%, %publ_period_end%)        
+  else 
+    0;
+    
+/* scaled 1000 */
+%_loa_days_pt_in_period%(Abstime start, Abstime stop) =
+    training.%long_course_period_days_in_period_pt%(start, stop) +
+    (sum(leg(chain), %scale% * %_loa_days% * 
+         crew.%part_time_factor_at_date%(leg.%start_hb%)) 
+        where (leg.%in_period%(start, stop))) / 100;
+    
+%scale% = 1000;
+    
+export %nr_loa_days_pt_in_period%(Abstime start, Abstime stop) = 
+    loa_days_pt_acc(start, stop);
+
+/* scaled 1000 */    
+accumulator loa_days_pt_acc(Abstime start, Abstime stop) =
+  %_loa_days_pt_in_period%(start, stop);
+  plan_start = %pp_start%;
+  plan_end   = %pp_end%;
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then 
+            crew.%id%
+        else if %job_publication_p% and
+            crew.%max_production_days_rule_FC_SKN_valid% or
+            crew.%max_production_days_rule_FC_ALL_valid% and
+            fundamental.%flight_crew%then 
+            crew.%id%
+        else 
+            void_string;
+end
+
+/*
+** Accumulator for bought days in period
+** Daily resolution
+*/
+export %bought_days_in_period%(Abstime start, Abstime stop) = bought_days_acc(start, stop);
+accumulator bought_days_acc(Abstime start, Abstime stop) =
+  bought_days.%bought_days_in_period%(start, stop);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+/*
+** Accumulator for blh on bought days in period
+**
+** NB! Daily resolution 
+**/
+
+export %block_time_on_bought_days_in_period%(Abstime start, Abstime stop) = 
+  block_time_on_bought_days_acc(start, stop);
+accumulator block_time_on_bought_days_acc(Abstime a1, Abstime a2) =
+  bought_days.%blh_of_bought_freedays_in_period%(crew.%utc_time%(a1), crew.%utc_time%(a2));
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+/*
+** Accumulator for required freedays in 2 months, month resolution
+** We only calculate 1 month part of a 2 month requirement.
+** The calculation is weighted against partime changes in
+** that month. Assumption is max one parttime change in a period (month).
+** The relative requirement differs from the ordinary 1 month requirement.
+**
+** This function takes the arguments and splits them up to monthly pieces
+** since the accumulator is only built to take 1 month at a time.
+** We assume no PP > 12 months.
+*/
+export %min_required_freedays_in_2_months%(Abstime start, Abstime stop) =
+  sum(times(12),
+      required_freedays_month_2_month_acc(
+        nmax(%_month_start_ix%(start, %times_index_0%), start),
+        nmin(%_month_end_ix%(start, %times_index_0%), stop))) 
+  while (%_month_end_ix%(start, %times_index_0%) <= stop);
+
+%_month_start_ix%(Abstime start, Int ix) =
+  add_months(round_down_month(start), ix - 1);
+%_month_end_ix%(Abstime start, Int ix) =
+  add_months(round_up_month(start), ix);
+
+  /*required_freedays_month_2_month_acc(start, stop);*/
+accumulator required_freedays_month_2_month_acc(Abstime start, Abstime stop) =
+  freedays.%ind_req_2_months_1_month_part%(start, stop);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% and
+           (crew.%is_pilot% and 
+            crew.%is_short_haul_pp_start%) or
+           (crew.%is_cabin% and
+            not crew.%is_SKS%) then
+          crew.%id% 
+        else
+          void_string;
+end
+
+/*
+ * Accumulator for SKN Resource Pool working days, month resolution
+ */
+/* Planned working days */
+export %skbu_resource_planned_working_days_in_period%(Abstime start, Abstime stop) = 
+  skbu_resource_planned_working_days_acc(start, stop);
+accumulator skbu_resource_planned_working_days_acc(Abstime start, Abstime stop) =
+  %_skbu_resource_qual_working_days_in_period%(start, stop);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% and crew.%is_skbu_resource_pool% then crew.%id%
+	else void_string;
+end
+
+/* Actual working days */
+export %skbu_resource_qual_working_days_in_period%(Abstime start, Abstime stop) = 
+  skbu_resource_qual_working_days_acc(start, stop);
+accumulator skbu_resource_qual_working_days_acc(Abstime start, Abstime stop) =
+  %_skbu_resource_qual_working_days_in_period%(start, stop);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if not %job_publication_p% and crew.%is_skbu_resource_pool% then crew.%id%
+	else void_string;
+end
+
+%_skbu_resource_qual_working_days_in_period%(Abstime start, Abstime stop) =
+  sum(trip(roster), trip.%days_in_period%(start, stop))
+  where (trip.%is_qualifying_skbu_resource_pool% and next(trip(roster), trip.%start_day%) <> trip.%start_day%);
+  
+  
+/*
+** Last flown ac family
+*/
+/* Important: Subtract 0:01 as the accumulator process looks for objects
+** with end date less than or equal to date, and not strictly less than...
+**
+** NB! There are cases when crew are qualifying on a new a/c qual, when there
+** are no entries in the accumulator although there are assigned legs in the
+** roster before the leg being checked. The accumulator look-up returns VOID,
+** which resulted in the default 01jan1986. An intermediate default has been
+** added below to search the roster before the actual leg so that the correct
+** last flown date can be found.
+*/
+export %last_flown%(String ac_fam, Abstime date) =
+  default(%get_last_flown%(ac_fam, date - 0:01),
+    default(%last_flown_this_ac_fam%(ac_fam,date,false),01jan1986));
+
+table get_last_flown(String ac_fam, Abstime date) =
+  ac_fam -> %get_last_flown%;
+  "A320" -> last_flown_a320(date, false);
+  "A330" -> last_flown_a330(date, false);
+  "A340" -> last_flown_a340(date, false);
+  "A350" -> last_flown_a350(date, false);
+  "B737" -> last_flown_b737(date, false);
+  "MD80" -> last_flown_md80(date, false);
+  "CRJ"  -> last_flown_crj(date, false);
+  "EMJ"  -> last_flown_emj(date, false);
+  - -> void_abstime;
+end
+
+/*
+** SKCMS-2680: Added function & table to calculate next flown sector
+*/
+
+export %next_flown%(String ac_fam, Abstime date) =
+  default(%get_next_flown%(ac_fam, date),
+    default(%last_flown_this_ac_fam%(ac_fam,date,true),01jan1986));
+
+table get_next_flown(String ac_fam, Abstime date) =
+  ac_fam -> %get_next_flown%;
+  "A320" -> last_flown_a320(date, true);
+  "A330" -> last_flown_a330(date, true);
+  "A340" -> last_flown_a340(date, true);
+  "A350" -> last_flown_a350(date, true);
+  "B737" -> last_flown_b737(date, true);
+  "MD80" -> last_flown_md80(date, true);
+  "CRJ"  -> last_flown_crj(date, true);
+  "EMJ"  -> last_flown_emj(date, true);
+  - -> void_abstime;
+end
+
+/* 
+* The last 6 landings are needed due to rule 
+* sby_2_months_lh_experience_before_sby_CC_SKD
+*/
+%acc_last_flown_filter%(String ac_fam, Abstime date) =
+  first(leg(roster) where(%qual_last_flown%(ac_fam) and leg.%end_UTC% > date), 
+    next(leg(roster) where(%qual_last_flown%(ac_fam)),
+      next(leg(roster) where(%qual_last_flown%(ac_fam)),
+        next(leg(roster) where(%qual_last_flown%(ac_fam)),
+          next(leg(roster) where(%qual_last_flown%(ac_fam)),
+            next(leg(roster) where(%qual_last_flown%(ac_fam)),
+              next(leg(roster) where(%qual_last_flown%(ac_fam) and
+                                     leg.%end_utc% <= %now%),
+                   leg.%end_UTC%)))))));
+  
+%qual_last_flown%(String ac_fam) =
+  leg.%ac_family% = ac_fam
+  and leg.%is_active_flight%
+  and not leg.%returned_to_ramp%;
+  
+%last_flown_this_ac_fam%(String ac_fam, Abstime date, Bool forward) =
+  if forward then
+    first(leg(roster) where(leg.%end_UTC% > date and
+      %qual_last_flown%(ac_fam)), leg.%end_UTC%)
+  else
+    last(leg(roster) where(leg.%end_UTC% < date and
+      %qual_last_flown%(ac_fam)), leg.%end_UTC%);
+
+accumulator last_flown_a320(Abstime date, Bool forward) =
+  %last_flown_this_ac_fam%("A320", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_last_flown_filter%("A320", date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+accumulator last_flown_a330(Abstime date, Bool forward) =
+  %last_flown_this_ac_fam%("A330", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_last_flown_filter%("A330", date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+accumulator last_flown_a340(Abstime date, Bool forward) =
+  %last_flown_this_ac_fam%("A340", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_last_flown_filter%("A340", date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+accumulator last_flown_a350(Abstime date, Bool forward) =
+  %last_flown_this_ac_fam%("A350", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_last_flown_filter%("A350", date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+accumulator last_flown_b737(Abstime date, Bool forward) =
+  %last_flown_this_ac_fam%("B737", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_last_flown_filter%("B737", date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+accumulator last_flown_md80(Abstime date, Bool forward) =
+  %last_flown_this_ac_fam%("MD80", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_last_flown_filter%("MD80", date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+/*
+ * Removed Q400 (CR138)
+ */
+/* accumulator last_flown_q400(Abstime date, Bool forward) =
+ *   %last_flown_this_ac_fam%("Q400", date, forward);
+ *   plan_start = %pp_start%;
+ *   plan_end   = round_up_month(%pp_end%);
+ *   acc_start  = %actual_acc_start%;
+ *   acc_end    = %actual_acc_end%;
+ *   acc_filter = %acc_last_flown_filter%("Q400", date);
+ *   key = if not %accumulator_mode% then crew.%id%
+ * 	else if %job_publication_p% then void_string
+ * 	else crew.%id%;
+ * end
+ */
+
+accumulator last_flown_crj(Abstime date, Bool forward) =
+  %last_flown_this_ac_fam%("CRJ", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_last_flown_filter%("CRJ", date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+accumulator last_flown_emj(Abstime date, Bool forward) =
+  %last_flown_this_ac_fam%("EMJ", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_last_flown_filter%("EMJ", date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+
+/*
+** Accumulator for standby blocks
+** CC SKN 
+*/
+export %standby_3day_blocks_in_period%(Abstime start, Abstime stop) = 
+  default(standby_blocks_acc(start, stop), 0);
+
+accumulator standby_blocks_acc(Abstime a1, Abstime a2) =
+  roster.%standby_3day_blocks_in_period%(a1, a2);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01); /* this + 24:00;*/
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then %skn_cabin_crew_id%
+	else void_string;
+end
+
+/*
+** Accumulator prev short standby block
+** non standby line
+** non scattered standby
+*/
+export %prev_short_standby_block_date%(Abstime date) =
+  default(short_standby_block_date_acc(date, false), 01Jan1986);
+
+%short_standby_block_date_filter%(Abstime date) =
+  first(wop(roster) where(wop.%has_short_standby_block% and standby.%last_standby_in_wop_date% > date),
+    next(wop(roster) where(wop.%has_short_standby_block%), standby.%last_standby_in_wop_date%));
+
+accumulator short_standby_block_date_acc(Abstime date, Bool forward) =
+  if forward then 
+    first(wop(roster) where(%_last_standby_block_date_in_period% > date and
+                            wop.%has_short_standby_block%), %_last_standby_block_date_in_period%)
+  else
+    last(wop(roster) where(standby.%last_standby_in_wop_date% < date and
+                           wop.%has_short_standby_block%), standby.%last_standby_in_wop_date%);
+
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %publ_acc_start%;
+  acc_end = %publ_acc_end%;
+  acc_filter = %short_standby_block_date_filter%(date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then crew.%id%
+	else void_string;
+end
+
+%_last_standby_block_date_in_period% =
+  nmin(standby.%last_standby_in_wop_date%,
+       standby.%last_standby_in_publ_period%);
+
+/*
+** Accumulator prev standby line
+*/
+export %prev_standby_line_date%(Abstime date) =
+  default(standby_line_date_acc(date, false), 01Jan1986);
+
+%standby_line_date_filter%(Abstime date) =
+  first(wop(roster) where(wop.%has_standby_line% and standby.%last_standby_in_wop_date% > date),
+    next(wop(roster) where(wop.%has_standby_line%), standby.%last_standby_in_wop_date%));
+
+accumulator standby_line_date_acc(Abstime date, Bool forward) =
+  if forward then
+    first(wop(roster) where(standby.%last_standby_in_wop_date% > date and
+       wop.%has_standby_line%), standby.%last_standby_in_wop_date%)
+  else
+    last(wop(roster) where(standby.%last_standby_in_wop_date% < date and
+      wop.%has_standby_line% and last(duty(wop), duty.%is_last_in_standby_line%)), 
+      standby.%last_standby_in_wop_date%);
+
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %publ_acc_start%;
+  acc_end = %publ_acc_end%;
+  acc_filter = %standby_line_date_filter%(date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then crew.%id%
+	else void_string;
+end
+
+/*
+** Accumulator for blank days
+**
+*/
+export %blank_days_in_period%(Abstime start, Abstime stop) = 
+  default(blank_days_acc(start, stop), 0);
+
+accumulator blank_days_acc(Abstime a1, Abstime a2) =
+  roster.%blank_days_in_period_all%(a1, a2);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01); /* this + 24:00;*/
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then
+           %cabin_crew_id%
+	     else void_string;
+end
+
+/*
+** Accumulators for number of flights (monthly resolution)
+*/
+/* Used in recency calculations for Temp CC, and for experience for FC.
+ * If it should be used for other crew groups, change the key */
+table nr_active_flights_in_period(String type, Abstime start, Abstime stop) =
+  type   -> export %nr_active_flights_in_period%;
+  "SH"   -> sh_flights_acc(start, stop);
+  "LH"   -> lh_flights_acc(start, stop);
+  "A2"   -> a2_flights_acc(start, stop);
+  "A2LH" -> a2lh_flights_acc(start, stop);
+  "A3"   -> a3_flights_acc(start, stop);
+  "A5"   -> a5_flights_acc(start, stop);
+  "EJ"   -> ej_flights_acc(start, stop);
+  -      -> 0;
+end
+
+/*
+** SKCMS-2838
+** Added table to define new accumulators data to nr_all_flights_in_period
+*/
+
+table nr_all_flights_in_period(String type, Abstime start, Abstime stop) =
+  type   -> export %nr_all_flights_in_period%;
+  "SH"   -> sh_all_fc_flight_acc(start, stop);
+  "LH"   -> lh_all_fc_flight_acc(start, stop);
+   -      -> 0;
+end
+
+/*
+** This variable _nr_active_flights_in_period doesn't give the exact count of legs if used in daily accumulator.
+** If a leg is crossing a day to next day, then this variable calculates the same leg as two legs which may not be required for your daily accumulator logic.
+** For getting the count of legs in a particular period please check _nr_active_leg_in_period variable and try to use it
+*/
+
+%_nr_active_flights_in_period%(Abstime start, Abstime stop, String type) =
+  count(leg(roster))
+  where (leg.%start_hb% < stop and
+         leg.%end_hb% > start and
+         leg.%is_active_flight% and
+         %leg_attribute%(type));
+
+/*
+** SKCMS-2838
+** Adding new variable to calculate legs for  accumulators sh_all_fc_flight_acc and lh_all_fc_flight_acc
+** 
+**
+*/
+
+%_nr_active_leg_in_period%(Abstime start, Abstime stop, String type) =
+  count(leg(roster))
+  where (leg.%start_hb% >= start and
+         leg.%start_hb% < stop and
+         leg.%is_active_flight% and
+         %leg_attribute%(type));
+
+
+         /*
+** SKCMS-2680: Added function to calculate total number of sectors in a period. 
+*/
+%_nr_all_active_flights_in_period%(Abstime start, Abstime stop) =
+count(leg(roster))
+where (leg.%start_hb% < stop and
+       leg.%end_hb% > start and
+       leg.%is_active_flight% );
+
+/* Used for accumulator sh/lh_flights_acc and sh/lh_production_days_acc */
+table attributes(String attr) =
+  attr ->
+    %duty_attribute%,
+    %leg_attribute%;
+  "SH"   -> duty.%with_short_haul_ac% and duty.%is_active_flight%,
+            leg.%is_short_haul% /*leg.%with_short_haul_ac%*/;
+  "LH"   -> duty.%with_long_haul_ac% and duty.%is_active_flight%,
+            leg.%is_long_haul% /*leg.%with_long_haul_ac%*/;
+  "38"   -> duty.%is_active_flight%,
+            leg.%qual% = "38";
+  "A2"   -> duty.%is_active_flight%,
+            leg.%qual% = "A2";
+  "A2LH" -> duty.%is_active_flight%,
+            leg.%qual% = "A2" and
+            leg.%is_long_haul%;
+  "A3"   -> duty.%is_active_flight%,
+            leg.%qual% = "A3";
+  "A5"   -> duty.%is_active_flight%,
+            leg.%qual% = "A5";
+  "EJ"   -> duty.%is_active_flight%,
+            leg.%qual% = "EJ";
+  -      -> duty.%is_on_duty%, leg.%is_on_duty%;
+end
+
+accumulator sh_flights_acc(Abstime start, Abstime stop) =
+  %_nr_active_flights_in_period%(start, stop, "SH");
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %temp_cc_or_restr_fc_id%;
+end
+
+accumulator lh_flights_acc(Abstime start, Abstime stop) =
+  %_nr_active_flights_in_period%(start, stop, "LH");
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %temp_cc_or_restr_fc_lh_id%;
+end
+
+
+accumulator a2_flights_acc(Abstime start, Abstime stop) =
+  %_nr_active_flights_in_period%(start, stop, "A2");
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %temp_cc_or_restr_fc_lh_id%;
+end
+
+accumulator a2lh_flights_acc(Abstime start, Abstime stop) =
+  %_nr_active_flights_in_period%(start, stop, "A2LH");
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %temp_cc_or_restr_fc_lh_id%;
+end
+
+accumulator a3_flights_acc(Abstime start, Abstime stop) =
+  %_nr_active_flights_in_period%(start, stop, "A3");
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %temp_cc_or_restr_fc_lh_id%;
+end
+
+accumulator a5_flights_acc(Abstime start, Abstime stop) =
+  %_nr_active_flights_in_period%(start, stop, "A5");
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %temp_cc_or_restr_fc_lh_id%;
+end
+
+accumulator ej_flights_acc(Abstime start, Abstime stop) =
+  %_nr_active_flights_in_period%(start, stop, "EJ");
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %temp_cc_or_restr_fc_lh_id%;
+end
+
+/*
+** SKCMS-2838
+** Adding new accumulators sh_all_fc_flight_acc and lh_all_fc_flight_acc
+** To log all SH and LH active flights without restriction in FD crew
+** 
+*/
+
+accumulator sh_all_fc_flight_acc(Abstime start, Abstime stop) =
+  %_nr_active_leg_in_period%(start, stop, "SH");
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+        else if %job_publication_p% then void_string
+        else %flight_crew_id%;
+end
+
+accumulator lh_all_fc_flight_acc(Abstime start, Abstime stop) =
+  %_nr_active_leg_in_period%(start, stop, "LH");
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+        else if %job_publication_p% then void_string
+        else %flight_crew_id%;
+end
+
+/* Accumulator: Number of sector per day
+**   Needed since regular accumulators only have a
+**   monthly resolution. This accumulator has a daily
+**   resolution.
+*/
+
+table nr_active_sectors_in_period(String type, Abstime start, Abstime stop) =
+  type   -> export %nr_active_sectors_in_period%;
+  "A2"   -> a2_flights_sectors_daily_acc(start, stop);
+  "38"   -> q38_flights_sectors_daily_acc(start, stop);
+  "A3"   -> a3_flights_sectors_daily_acc(start, stop);
+  "A5"   -> a5_flights_sectors_daily_acc(start, stop);
+  "EJ"   -> ej_flights_sectors_daily_acc(start, stop);
+  "all"  -> all_flights_sectors_daily_acc(start, stop);
+  -      -> 0;
+end
+
+%_nr_of_opc_pc_ast_sectors%(Abstime start, Abstime stop) =
+  count(duty(chain))
+  where (duty.%start_hb% < stop and
+        duty.%end_hb% > start and
+        (duty.%is_pc_or_opc% or duty.%is_ast%));
+
+
+export %nr_sim_sectors_in_period%(Abstime start, Abstime stop) =
+  sim_sectors_daily_acc(start, stop);
+
+
+accumulator q38_flights_sectors_daily_acc(Abstime start, Abstime stop) =
+  %_nr_active_flights_in_period%(start, stop, "38");
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+accumulator a2_flights_sectors_daily_acc(Abstime start, Abstime stop) =
+  %_nr_active_flights_in_period%(start, stop, "A2");
+  plan_start = %pp_start_month%;
+  plan_end   = %pp_end_month%;
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+/*
+** SKCMS-2622: Daily cccumulators are created for record A3, A5 sectors
+*/
+accumulator a3_flights_sectors_daily_acc(Abstime start, Abstime stop) =
+  %_nr_active_flights_in_period%(start, stop, "A3");
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %temp_cc_or_restr_fc_lh_id%;
+end
+
+accumulator a5_flights_sectors_daily_acc(Abstime start, Abstime stop) =
+  %_nr_active_flights_in_period%(start, stop, "A5");
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %temp_cc_or_restr_fc_lh_id%;
+end
+
+accumulator ej_flights_sectors_daily_acc(Abstime start, Abstime stop) =
+  %_nr_active_flights_in_period%(start, stop, "EJ");
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %temp_cc_or_restr_fc_lh_id%;
+end
+
+/*SKCMS-2680*/
+accumulator all_flights_sectors_daily_acc(Abstime start, Abstime stop) =
+  %_nr_all_active_flights_in_period%(start, stop);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %temp_cc_or_restr_fc_lh_id%;
+end
+
+accumulator sim_sectors_daily_acc(Abstime start, Abstime stop) =
+  %_nr_of_opc_pc_ast_sectors%(start, stop);
+  plan_start = %pp_start_month%;
+  plan_end   = %pp_end_month%;
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+
+
+/* Accumulator: Restricted legs
+**   Needed since regular accumulators only have a 
+**   monthly resolution. This accumulator has a daily
+**   resolution.
+*/
+%_nr_restr_flights_in_period%(Abstime start, Abstime stop) =
+  count(leg(roster))
+  where (leg.%start_hb% >= start and
+         leg.%start_hb% < stop and
+         leg.%is_active_flight% and
+         (crew.%has_restr_new_leg_start% or
+          crew.%has_qual_restr_new_actype_on_leg% or
+          crew.%has_restr_training_dct_foc_refr_leg_start% or
+          crew.%has_restr_training_capt_leg_start%));
+  
+export %nr_restricted_legs_in_period%(Abstime start, Abstime stop) =
+  restr_flights_acc(start, stop);
+accumulator restr_flights_acc(Abstime start, Abstime stop) =
+  %_nr_restr_flights_in_period%(start, stop);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %restr_fc_id%;
+end
+
+
+/****************************************************************
+ * Section 2: Cabin crew accumulators
+ ***************************************************************/
+/*
+** Accumulators for production days (monthly resolution)
+*/
+/* Used in recency calculations for Temp CC.
+ * If it should be used for other crew groups, change the key */
+table nr_production_days_in_period(String type, Abstime start, Abstime stop) =
+  type -> export %nr_production_days_in_period%;
+  "SH" -> sh_production_days_acc(start, stop);
+  "LH" -> lh_production_days_acc(start, stop);
+  - -> 0;
+end
+
+%_nr_production_days_in_period%(String type, Abstime start, Abstime stop) =
+  sum(duty(roster), duty.%days% -
+      (if duty.%end_hb% > stop or duty.%start_hb% < start then 1
+      else 0) -
+      (if duty.%end_day% = next(duty(roster), duty.%start_day%) then
+         1
+       else
+         0))
+  where (duty.%start_hb% < stop and
+         duty.%end_hb% > start and
+         %duty_attribute%(type));
+  
+accumulator sh_production_days_acc(Abstime start, Abstime stop) =
+  %_nr_production_days_in_period%("SH", start, stop);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key =
+    if not %accumulator_mode% then
+        crew.%id%
+	else if %job_publication_p% then 
+        void_string
+	else if %flight_crew% and crew.%is_skn% then
+		%flight_crew_id%
+	else if crew.%is_temporary% then 
+        %temp_cabin_crew_id%
+    else
+	    %cabin_crew_id%;
+end
+
+accumulator lh_production_days_acc(Abstime start, Abstime stop) =
+  %_nr_production_days_in_period%("LH", start, stop);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = 
+    if not %accumulator_mode% then
+        crew.%id%
+	else if %job_publication_p% then 
+        void_string
+    else if %flight_crew% and crew.%is_skn% then
+		%flight_crew_id%
+	else if crew.%is_temporary% then
+	    %temp_or_new_new_cabin_crew_id%
+    else
+        %cabin_crew_id%;
+end
+
+/*
+** Accumulator for standby days
+*/
+export %standby_days_in_period%(Abstime start, Abstime stop) = 
+  default(standby_days_acc(start, stop), 0);
+
+accumulator standby_days_acc(Abstime a1, Abstime a2) =
+  roster.%standby_days_in_period%(a1, a2);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01); /* this + 24:00;*/
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then %cabin_crew_id%
+	else void_string;
+end
+
+/* 
+** Accumulator for standby-line days
+*/
+export %standby_line_days_in_period%(Abstime start, Abstime stop) =
+  default(standby_line_days_acc(start, stop), 0);
+  
+accumulator standby_line_days_acc(Abstime start_hb, Abstime stop_hb) =
+  roster.%standby_lines_days_in_period%(start_hb, stop_hb);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01); /* this + 24:00;*/
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then %cabin_crew_id%
+	else void_string;
+end
+
+/*
+** Accumulator for scattered standby days
+*/
+export %scattered_standby_days_in_period%(Abstime start, Abstime stop) = 
+  default(scattered_standby_days_acc(start, stop), 0);
+
+accumulator scattered_standby_days_acc(Abstime a1, Abstime a2) =
+  roster.%scattered_standby_days_in_period%(a1, a2);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01); /* this + 24:00;*/
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then %cabin_crew_id%
+	else void_string;
+end
+
+/*
+** Accumulator for standby lines
+*/
+export %standby_lines_in_period%(Abstime start, Abstime stop) = 
+  default(standby_lines_acc(start, stop), 0);
+
+accumulator standby_lines_acc(Abstime a1, Abstime a2) =
+  roster.%standby_lines_in_period%(a1, a2);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01); /* this + 24:00;*/
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then
+	   if %flight_crew% then %flight_crew_id% else %cabin_crew_id%
+	else void_string;
+end
+
+/*
+** Accumulator prev airport standby
+*/
+export %prev_airport_standby_date%(Abstime date) =
+  default(airport_standby_date_acc(date, false), 01Jan1986);
+
+%airport_standby_date_filter%(Abstime date) = 
+  first(wop(roster) where (wop.%has_airport_standby% and %last_airport_standby_in_wop_date% > date),
+    next(wop(roster) where (wop.%has_airport_standby%), %last_airport_standby_in_wop_date%));
+
+accumulator airport_standby_date_acc(Abstime date, Bool forward) =
+  if forward then
+    first(wop(roster) where(%last_airport_standby_in_wop_date% > date and
+      wop.%has_airport_standby%), %last_airport_standby_in_wop_date%)
+  else
+    last(wop(roster) where(%last_airport_standby_in_wop_date% < date and
+      wop.%has_airport_standby%), %last_airport_standby_in_wop_date%);
+
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %publ_acc_start%;
+  acc_end = %publ_acc_end%;
+  acc_filter = %airport_standby_date_filter%(date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then %skd_cabin_crew_id%
+	else void_string;
+end
+
+%last_airport_standby_in_wop_date% = 
+  default(last(duty(wop),duty.%end_hb%)
+          where(duty.%is_standby_at_airport%), wop.%end_hb%);
+
+export %last_course_office_duty%(Abstime date) = last_course_office_acc(date - 0:01, false);
+export %next_course_office_duty%(Abstime date) = last_course_office_acc(date + 0:01, true);
+
+%course_office_duty_filter%(Abstime date) =
+  first(wop(roster) where(wop.%is_course_office_duty% and 
+                          wop.%end_hb% > date),
+    next(wop(roster) where(wop.%is_course_office_duty%),
+      next(wop(roster) where(wop.%is_course_office_duty% and
+                             wop.%end_utc% <= %now%),
+           wop.%end_hb%)));
+  
+accumulator last_course_office_acc(Abstime date, Bool forward) =
+  if forward then
+    first(wop(roster) where(wop.%start_hb% > date and
+      wop.%is_course_office_duty%), wop.%start_hb%)
+  else
+    last(wop(roster) where(wop.%start_hb% < date and
+      wop.%is_course_office_duty%), wop.%start_hb%);
+
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %course_office_duty_filter%(date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %cabin_crew_id%;
+end
+
+/* 
+ * accumulator number of attended pm activitites, per crew
+ */
+accumulator pm_attend_acc(Abstime s, Abstime e) = 
+  count(leg(roster))
+    from(first where (arrival > s))
+    forwards while(arrival <= e)
+    where (leg.%is_pm_student%);
+  key = crr_crew_id;
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+end    
+
+export %pm_attended% =
+  pm_attend_acc(parameters.%pm_validity_start%,parameters.%pm_validity_end%);
+  
+
+
+
+/*
+ * Keep track of last attended PM activity
+ */
+accumulator pm_last_acc(Abstime starttime, Bool forward) =
+  if forward then
+    first(leg(roster), leg.%start_hb%)
+    where (leg.%start_hb% > starttime and leg.%is_pm_student%)
+  else
+    last(leg(roster), leg.%start_hb%)
+    where (leg.%start_hb%<starttime and leg.%is_pm_student%);
+  key = crr_crew_id;
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+end
+
+export %pm_last_attend% =
+  pm_last_acc(%pp_end%, false);
+
+/****************************************************************
+ * Section 3: Flight crew accumulators
+ ***************************************************************/
+
+/*
+** Recency accumulators (last landing & last simulator)
+*/
+/* Important: Subtract 0:01 as the accumulator process looks for objects
+ * with end date less than or equal to date, and not strictly less than... */
+export %last_landing%(String ac_fam, Abstime date) =
+  default(%get_last_landing%(ac_fam, date - 0:01), 01jan1986);
+
+table get_last_landing(String ac_fam, Abstime date) =
+  ac_fam -> %get_last_landing%;
+  "A320" -> last_landing_a320(date, false);
+  "A330" -> last_landing_a330(date, false);
+  "A340" -> last_landing_a340(date, false);
+  "A350" -> last_landing_a350(date, false);
+  "B737" -> last_landing_b737(date, false);
+  "MD80" -> last_landing_md80(date, false);
+  "CRJ" -> last_landing_crj(date, false);
+  "EMJ" -> last_landing_emj(date, false);
+  - -> void_abstime;
+end
+
+%last_landing_this_ac_fam%(String ac_fam, Abstime date, Bool forward) =
+  if forward then
+    first(leg(roster) where(leg.%end_UTC% > date and
+      %qual_landing%(ac_fam)), leg.%end_UTC%)
+  else
+    last(leg(roster) where(leg.%end_UTC% < date and
+      %qual_landing%(ac_fam)), leg.%end_UTC%);
+
+%acc_landing_filter%(String ac_fam, Abstime date) = 
+  first(leg(roster) where(%qual_landing%(ac_fam) and leg.%end_UTC% > date), 
+    next(leg(roster) where(%qual_landing%(ac_fam)),
+      next(leg(roster) where(%qual_landing%(ac_fam)),
+        next(leg(roster) where(%qual_landing%(ac_fam) and
+                               leg.%end_utc% <= %now%), leg.%end_UTC%))));
+
+%qual_landing%(String ac_fam) =
+  leg.%ac_family% = ac_fam and recency.%leg_qualifies_for_recency%;
+
+accumulator last_landing_a320(Abstime date, Bool forward) =
+  %last_landing_this_ac_fam%("A320", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_landing_filter%("A320",date); 
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %flight_crew_id%;
+end
+
+accumulator last_landing_a330(Abstime date, Bool forward) =
+  %last_landing_this_ac_fam%("A330", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_landing_filter%("A330",date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %flight_crew_id%;
+end
+
+accumulator last_landing_a340(Abstime date, Bool forward) =
+  %last_landing_this_ac_fam%("A340", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_landing_filter%("A340",date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %flight_crew_id%;
+end
+
+accumulator last_landing_a350(Abstime date, Bool forward) =
+  %last_landing_this_ac_fam%("A350", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_landing_filter%("A350",date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %flight_crew_id%;
+end
+
+accumulator last_landing_b737(Abstime date, Bool forward) =
+  %last_landing_this_ac_fam%("B737", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_landing_filter%("B737",date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %flight_crew_id%;
+end
+
+accumulator last_landing_md80(Abstime date, Bool forward) =
+  %last_landing_this_ac_fam%("MD80", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_landing_filter%("MD80",date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %flight_crew_id%;
+end
+
+/*
+ * Removed Q400 (CR138)
+ */
+/* accumulator last_landing_q400(Abstime date, Bool forward) =
+ *   %last_landing_this_ac_fam%("Q400", date, forward);
+ *   plan_start = %pp_start%;
+ *   plan_end   = round_up_month(%pp_end%);
+ *   acc_start  = %actual_acc_start%;
+ *   acc_end    = %actual_acc_end%;
+ *   acc_filter = %acc_landing_filter%("Q400",date);
+ *   key = if not %accumulator_mode% then crew.%id%
+ * 	else if %job_publication_p% then void_string
+ * 	else %flight_crew_id%;
+ * end
+ */
+
+accumulator last_landing_crj(Abstime date, Bool forward) =
+  %last_landing_this_ac_fam%("CRJ", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_landing_filter%("CRJ",date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %flight_crew_id%;
+end
+
+accumulator last_landing_emj(Abstime date, Bool forward) =
+  %last_landing_this_ac_fam%("EMJ", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_landing_filter%("EMJ",date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %flight_crew_id%;
+end
+
+/*
+** Last_simulator
+*/
+/* Important: Subtract 0:01 as the accumulator process looks for objects
+ * with end date less than or equal to date, and not strictly less than... */
+export %last_simulator%(Abstime date) = last_simulator(date - 0:01, false);
+
+%last_simulator_filter%(Abstime date) = 
+  first(trip(roster) where(trip.%is_simulator% and trip.%end_UTC% > date), 
+    next(trip(roster) where(trip.%is_simulator% and
+                            trip.%end_utc% <= %now%), trip.%end_UTC%));
+
+accumulator last_simulator(Abstime date, Bool forward) =
+  if forward then
+    first(trip(roster) where(trip.%end_UTC% > date and
+      trip.%is_simulator%), trip.%end_UTC%)
+  else
+    last(trip(roster) where(trip.%end_UTC% < date and
+      trip.%is_simulator%), trip.%end_UTC%);
+
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %last_simulator_filter%(date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %flight_crew_id%;
+end
+
+
+/* Last ZFTT simulator */
+export %last_zftt_simulator%(Abstime date) = last_zftt_simulator(date - 0:01, false);
+
+%last_zftt_simulator_filter%(Abstime date) = 
+  first(trip(roster) where(trip.%is_zftt_simulator% and trip.%end_UTC% > date), 
+    next(trip(roster) where(trip.%is_zftt_simulator% and
+                            trip.%end_utc% <= %now%), trip.%end_UTC%));
+
+
+
+accumulator last_zftt_simulator(Abstime date, Bool forward) =
+  if forward then
+    first(leg(roster) where(leg.%end_UTC% > date and
+      leg.%is_zftt_simulator%), leg.%end_UTC%)
+  else
+    last(leg(roster) where(leg.%end_UTC% < date and
+      leg.%is_zftt_simulator%), leg.%end_UTC%);
+
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %last_zftt_simulator_filter%(date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %flight_crew_id%;
+end
+
+
+/* Last Skill test */
+export %last_skill_test%(Abstime date) = last_skill_Test(date - 0:01, false);
+
+%last_skill_test_filter%(Abstime date) = 
+    first(trip(roster) where(trip.%is_skill_test% and trip.%end_UTC% > date),
+          next(trip(roster) where(trip.%is_skill_test% and
+                                  trip.%end_utc% <= %now%), trip.%end_UTC%));
+
+accumulator last_skill_test(Abstime date, Bool forward) =
+    if forward then
+        first(trip(roster) where (trip.%end_UTC% > date and
+          trip.%is_skill_test%), trip.%end_UTC%)
+    else
+        last(trip(roster) where (trip.%end_UTC% < date and
+          trip.%is_skill_test%), trip.%end_UTC%);
+    plan_start = %pp_start%;
+    plan_end   = round_up_month(%pp_end%);
+    acc_start  = %actual_acc_start%;
+    acc_end    = %actual_acc_end%;
+    acc_filter = %last_skill_test_filter%(date);
+    key = if not %accumulator_mode% then crew.%id%
+      else if %job_publication_p% then void_string
+      else %flight_crew_id%;
+end
+
+/*
+** Last flown airport accumulator
+*/
+/* Important: Subtract 0:01 as the accumulator process looks for objects
+ * with end date less than or equal to date, and not strictly less than... */
+
+/* Removed and replaced with crew qualifications instead.
+** See BZ 32742 
+*/
+
+/*
+**  Accumulators for max 3 in a row
+*/
+export %prev_cons_us_date%(Abstime date) =
+  default(cons_us_flight_acc(date, false), 01jan1986);
+  
+%cons_us_flight_filter%(Abstime date) =
+  first(leg(roster) where(leg.%arrival_in_max_consecutive_us_airports% and 
+                          leg.%end_UTC% > date),
+    next(leg(roster) where(leg.%arrival_in_max_consecutive_us_airports%),
+      next(leg(roster) where(leg.%arrival_in_max_consecutive_us_airports%),
+        next(leg(roster) where(leg.%arrival_in_max_consecutive_us_airports% and
+                               leg.%end_utc% <= %now%), 
+             leg.%end_UTC%))));
+  
+accumulator cons_us_flight_acc(Abstime date, Bool forward) =
+  if forward then
+    first(leg(roster) where(leg.%end_UTC% > date and
+      leg.%arrival_in_max_consecutive_us_airports%), leg.%end_UTC%)
+  else
+    last(leg(roster) where(leg.%end_UTC% < date and
+      leg.%arrival_in_max_consecutive_us_airports%), leg.%end_UTC%);
+
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_filter = %cons_us_flight_filter%(date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %flight_crew_id%;
+end
+
+%prev_lh_filter%(Abstime date) =
+  first(leg(roster) where(%qual_prev_lh% and leg.%end_UTC% > date), 
+    next(leg(roster) where(%qual_prev_lh%),
+      next(leg(roster) where(%qual_prev_lh%),
+        next(leg(roster) where(%qual_prev_lh% and
+                               leg.%end_utc% <= %now%), leg.%end_UTC%))));
+   
+%qual_prev_lh% = 
+  not leg.%is_deadhead% and
+  leg.%is_long_haul% and
+  leg.%departure_is_interscand%;
+
+export %prev_lh_date%(Abstime date) =
+  default(lh_flight_acc(date, false), 01Jan1986);
+  
+accumulator lh_flight_acc(Abstime date, Bool forward) =
+  if forward then
+    first(leg(roster) where(leg.%end_UTC% > date and
+      %qual_prev_lh%), leg.%end_UTC%)
+  else
+    last(leg(roster) where(leg.%end_UTC% < date and
+      %qual_prev_lh%), leg.%end_UTC%);
+  
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_filter = %prev_lh_filter%(date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %flight_crew_id%;
+end
+
+/*
+** Accumulator prev standby
+*/
+export %prev_standby_date%(Abstime date) =
+  default(standby_date_acc(date, false), 01Jan1986);
+export %next_standby_date%(Abstime date) =
+  default(standby_date_acc(date, true), 01Jan2036);
+
+%standby_date_filter%(Abstime date) =
+  first(wop(roster) where(wop.%has_standby% and standby.%last_standby_in_wop_date% > date),
+    next(wop(roster) where(wop.%has_standby%), standby.%last_standby_in_wop_date%));
+
+accumulator standby_date_acc(Abstime date, Bool forward) =
+  if forward then
+    first(wop(roster)  where(standby.%last_standby_in_wop_date% > date and
+      wop.%has_standby%), standby.%last_standby_in_wop_date%)
+  else
+    last(wop(roster) where(standby.%last_standby_in_wop_date% < date and
+      wop.%has_standby%), standby.%last_standby_in_wop_date%);
+
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %publ_acc_start%;
+  acc_end = %publ_acc_end%;
+  acc_filter = %standby_date_filter%(date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then %flight_crew_id%
+	else void_string;
+end
+
+/*
+** SKI LCP airports landings accumulator
+**
+** Description: Last flown to place for Line Check Pilots. 
+** NB. BKK, NRT and PEK is also valid for all SKI instructors
+** Important: Subtract 0:01 as the accumulator process looks for objects
+** with end date less than or equal to date, and not strictly less than... */
+export %last_ski_lcp_airp_landing%(String airport, Abstime date) =
+  default(%get_last_ski_lcp_airp_landing%(airport, date - 0:01), 01jan1986);
+
+table get_last_ski_lcp_airp_landing(String airport, Abstime date) =
+  airport -> %get_last_ski_lcp_airp_landing%;
+  "EWR" -> last_ski_lcp_airp_landing_EWR(date, false);
+  "ORD" -> last_ski_lcp_airp_landing_ORD(date, false);
+  "IAD" -> last_ski_lcp_airp_landing_IAD(date, false);
+  "SEA" -> last_ski_lcp_airp_landing_SEA(date, false);
+  "BKK" -> last_ski_lcp_airp_landing_BKK(date, false);
+  "PEK" -> last_ski_lcp_airp_landing_PEK(date, false);
+  "NRT" -> last_ski_lcp_airp_landing_NRT(date, false);
+  "PVG" -> last_ski_lcp_airp_landing_PVG(date, false);
+  - -> void_abstime;
+end
+
+%last_landing_this_ski_lcp_airp%(String airport, Abstime date, Bool forward) =
+  if forward then
+    first(leg(roster) where(leg.%end_UTC% > date and
+      leg.%end_station% = airport), leg.%end_UTC%)
+  else
+    last(leg(roster) where(leg.%end_UTC% < date and
+      leg.%end_station% = airport), leg.%end_UTC%);
+
+%acc_last_ski_filter%(String airport, Abstime date) = 
+  first(leg(roster) where(%qual_last_ski%(airport) and leg.%end_UTC% > date), 
+    next(leg(roster) where(%qual_last_ski%(airport) and
+                           leg.%end_utc% <= %now%), leg.%end_UTC%));
+
+%qual_last_ski%(String airport) = 
+  leg.%end_station% = airport;
+
+accumulator last_ski_lcp_airp_landing_EWR(Abstime date, Bool forward) =
+  %last_landing_this_ski_lcp_airp%("EWR", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_last_ski_filter%("EWR", date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %LCP_lh_flight_crew_id%;
+end
+
+accumulator last_ski_lcp_airp_landing_ORD(Abstime date, Bool forward) =
+  %last_landing_this_ski_lcp_airp%("ORD", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_last_ski_filter%("ORD", date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %LCP_lh_flight_crew_id%;
+end
+
+accumulator last_ski_lcp_airp_landing_IAD(Abstime date, Bool forward) =
+  %last_landing_this_ski_lcp_airp%("IAD", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_last_ski_filter%("IAD", date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %LCP_lh_flight_crew_id%;
+end
+
+accumulator last_ski_lcp_airp_landing_SEA(Abstime date, Bool forward) =
+  %last_landing_this_ski_lcp_airp%("SEA", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_last_ski_filter%("SEA", date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %LCP_lh_flight_crew_id%;
+end
+
+accumulator last_ski_lcp_airp_landing_BKK(Abstime date, Bool forward) =
+  %last_landing_this_ski_lcp_airp%("BKK", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_last_ski_filter%("BKK", date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else default(%LCP_lh_flight_crew_id%, %fci_lh_flight_crew_id%);
+end
+
+accumulator last_ski_lcp_airp_landing_PEK(Abstime date, Bool forward) =
+  %last_landing_this_ski_lcp_airp%("PEK", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_last_ski_filter%("PEK", date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else default(%LCP_lh_flight_crew_id%, %fci_lh_flight_crew_id%);
+end
+
+accumulator last_ski_lcp_airp_landing_NRT(Abstime date, Bool forward) =
+  %last_landing_this_ski_lcp_airp%("NRT", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_last_ski_filter%("NRT", date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else default(%LCP_lh_flight_crew_id%, %fci_lh_flight_crew_id%);
+end
+
+accumulator last_ski_lcp_airp_landing_PVG(Abstime date, Bool forward) =
+  %last_landing_this_ski_lcp_airp%("PVG", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_last_ski_filter%("PVG", date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else default(%LCP_lh_flight_crew_id%, %fci_lh_flight_crew_id%);
+end
+
+/*
+** Accumulator for parttime freedays, month resolution
+*/
+export %qual_pt_freedays_in_period%(Abstime start, Abstime stop) = qual_pt_freedays_acc(start, stop);
+accumulator qual_pt_freedays_acc(Abstime start, Abstime stop) =
+  freedays.%possible_pt_freedays_in_period%(start, stop);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if not %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+/*
+** Accumulator for required parttime freedays in 2 months, month resolution
+** We only calculate 1 month part of a 2 month requirement.
+** The calculation is weighted against partime changes in
+** that month. Assumption is max one parttime change in a period (month).
+** We call the accumulator with monthly intervals and sum them up.
+*/
+
+export %min_required_pt_freedays_2_months%(Abstime start, Abstime stop) =
+  sum(times(2),
+    required_pt_freedays_month_2_month_acc(
+      nmax(%_month_start_ix%(start, %times_index_0%), start),
+      nmin(%_month_end_ix%(start, %times_index_0%),stop)))
+  while(%_month_end_ix%(start, %times_index_0%) <= stop);
+
+accumulator required_pt_freedays_month_2_month_acc(Abstime start, Abstime stop) =
+  freedays.%ind_req_pt_freedays_2_months_1_month_part%(start, stop);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+        else if %job_publication_p% and
+           crew.%is_pilot% and 
+           crew.%is_short_haul_pp_start% then
+          crew.%id% 
+        else
+          void_string;
+end
+
+/*
+** Accumulator for required freedays in 3 months, month resolution
+** We only calculate 1 month part of a 3 month requirement.
+** The calculation is weighted against partime changes in
+** that month. Assumption is max one parttime change in a period (month).
+*/
+export %min_required_freedays_in_3_months%(Abstime start, Abstime stop) =
+  required_freedays_month_3_month_acc(start, stop);
+accumulator required_freedays_month_3_month_acc(Abstime start, Abstime stop) =
+  freedays.%ind_req_3_months_1_month_part%(start, stop);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% and
+            ((parameters.%k11_fc_sp10_9_valid%(%pp_start%) and
+              not crew.%is_ski%) or
+             (not parameters.%k11_fc_sp10_9_valid%(%pp_start%) and
+              (crew.%is_fdrc_pp_start% or crew.%is_skn%))) then crew.%id%
+	else void_string;
+end
+
+/* Accumulator for calculating the number of non-qualifying days
+** in period
+** Used for calculating the required number of freedays for 100% FC SH crew 
+** NB! Accumulator ONLY counts non-qualifying days when crew is on 100% and
+** in VG group
+*/
+export %nr_non_qualifying_days_in_period_fulltime_fc_sh%(Abstime start, Abstime stop) =
+  non_qualifying_days_fulltime_fc_sh_acc(start, stop);
+  
+accumulator non_qualifying_days_fulltime_fc_sh_acc(Abstime start, Abstime stop) =
+  freedays.%nr_non_qualifying_days_in_period_fulltime_fc_vg%(start, round_up(stop, 24:00));
+  plan_start = %pp_start%;
+  plan_end   = %pp_end%;
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% and 
+            (crew.%is_sks% or
+             crew.%is_sks_at_date%(%pp_end%) or
+             crew.%is_skd% or
+             crew.%is_skd_at_date%(%pp_end%)) then void_string
+	else void_string;
+end
+
+/* Accumulator for calculating the number of non-qualifying days
+** in period
+** Used for calculating the required number of freedays for CC SKN crew 
+** NB! Accumulator ONLY counts non-qualifying days when crew is in VG group
+*/
+export %nr_non_qualifying_days_in_period_cc_skn%(Abstime start, Abstime stop) =
+  non_qualifying_days_cc_skn_acc(start, stop);
+  
+accumulator non_qualifying_days_cc_skn_acc(Abstime start, Abstime stop) =
+  freedays.%nr_non_qualifying_days_in_period_cc_skn_vg%(start, round_up(stop, 24:00));
+  plan_start = %pp_start%;
+  plan_end   = %pp_end%;
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = 
+    if not %accumulator_mode% then 
+        crew.%id%
+	else if %job_publication_p% and crew.%is_skn% then 
+        %cabin_crew_id%
+	else 
+        void_string;
+end
+
+/* Accumulator for calculation the number of freedays for FC SH 100%.
+** To keep the month resolution, we only count freedays during the time the 
+** contract is 100% VG */
+export %nr_freedays_in_period_fulltime_fc_sh%(Abstime start, Abstime stop) =
+  nr_freedays_fulltime_fc_sh_acc(start, stop);
+
+accumulator nr_freedays_fulltime_fc_sh_acc(Abstime start, Abstime stop) =
+  freedays.%qual_freedays_in_period_fulltime_fc_sh%(start, round_up(stop, 24:00));
+  plan_start = %pp_start%;
+  plan_end   = %pp_end%;
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% and 
+            (crew.%is_sks% or
+             crew.%is_sks_at_date%(%pp_end%) or
+             crew.%is_skd% or
+             crew.%is_skd_at_date%(%pp_end%)) then void_string
+	else void_string;
+end
+
+
+/* Accumulator for calculating the actual number of P-days in period
+**  Values are only accumulated where crew is VG to be able to keep
+**  the accumulator with a monthly resolution
+*/
+/*export %nr_actual_p_days_2_months_fc_skd_skn%(Abstime start, Abstime stop) =
+  nr_actual_p_days_fc_skd_acc(start, stop);
+  
+accumulator nr_actual_p_days_fc_skd_acc(Abstime start, Abstime stop) =
+  duty_time.%nr_p_days_vg%(start, round_up(stop, 24:00), false, false, true, false) +
+  (if not crew.%is_skd% then
+     duty_time.%nr_p_days_fg%(start, round_up(stop, 24:00), false, false, true, false)
+   else
+     0);
+  plan_start = %pp_start%;
+  plan_end   = %pp_end%;
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+        else if %job_publication_p% then void_string
+        else if parameters.%k11_fc_sp10_7_valid%(%pp_start%) then void_string
+        else %skd_skn_flight_crew_id%;
+end
+*/
+/* Accumulator for calculating the planned number of P-days in period
+**  Values are only accumulated where crew is VG to be able to keep
+**  the accumulator with a monthly resolution
+*/
+/* TODO: REMOVE this and accumulator */
+export %nr_p_days_2_months_fc_skd_skn%(Abstime start, Abstime stop) =
+  nr_p_days_fc_skd_acc(start, stop);
+  
+accumulator nr_p_days_fc_skd_acc(Abstime start, Abstime stop) =
+  duty_time.%nr_p_days_vg%(start, round_up(stop, 24:00), false, false, true, false);
+  plan_start = %pp_start%;
+  plan_end   = %pp_end%;
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+        else if not %job_publication_p% then void_string
+        else if parameters.%k11_fc_sp10_7_valid%(%pp_start%) then void_string
+        else %skd_skn_flight_crew_id%;
+end
+
+/* Accumulator for calculating the number of VA-days in period*/
+
+export %vacation_day%(Abstime start) =
+  vacation_per_day_acc(start, start + 24:00);
+
+export %vacation_day_in_period%(Abstime start, Abstime stop) =
+  vacation_per_day_acc(start, stop);
+
+accumulator vacation_per_day_acc(Abstime start, Abstime stop) =
+  roster.%activity_group_in_period%(start, stop, "VAC");
+  
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  key = if not %accumulator_mode% then crew.%id%
+	  else if %job_publication_p% then void_string
+	  else crew.%id%;
+end
+
+export %blank_day%(Abstime start) =
+  blank_day_per_day_acc(start, start + 24:00);
+
+accumulator blank_day_per_day_acc(Abstime start, Abstime stop) =
+  roster.%blank_days_in_period%(start, stop);
+
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  key = if not %accumulator_mode% then crew.%id%
+	  else if %job_publication_p% then void_string
+	  else crew.%id%;
+end
+
+/* Accumulator for calculating the number of reducing activities for bunkering
+   period - ILL, LOA and VAC */
+export %bunkering_reduction_days%(Abstime start, Abstime stop) =
+    nr_bunkering_reducing_activities(start, stop);
+
+%bunkering_reducing_activities_in_period%(Abstime start, Abstime stop) =
+    roster.%activity_group_in_period%(start, stop, "ILL")
+    + roster.%activity_group_in_period%(start, stop, "LOA")
+    + roster.%activity_group_in_period%(start, stop, "VAC");
+
+accumulator nr_bunkering_reducing_activities(Abstime start, Abstime stop) =
+    %bunkering_reducing_activities_in_period%(start, stop);
+    plan_start = %pp_start%;
+    plan_end = round_up_month(%pp_end%);
+    acc_start = %actual_acc_start%;
+    acc_end = %actual_acc_end%;
+    acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+    key = if not %accumulator_mode% then crew.%id%
+          else if %job_publication_p% then void_string
+          else %sks_bunkering_flight_crew_id%;
+end
+
+/* crew id for bunkering accumulators. */
+%sks_bunkering_flight_crew_id% =
+    %_crew_id%(bunkering.%has_bunkering_agreement_in_pp%);
+
+/* Accumulator for the number of banked days during bunkering period
+   This accumulator is required to cap the following accumulator calculation
+   for recovered days and avoid circularity in definitions that would happen without it.
+     Banked Days -> Recovered Days -> Banked Days
+*/
+export %bunkering_banked_days%(Abstime start, Abstime stop) =
+    nr_bunkering_banked_days(start, stop);
+
+%bunkering_days_banked_in_period%(Abstime start, Abstime stop) =
+    if bunkering.%has_bunkering_agreement_at_pp_end%
+           and not bunkering.%has_cv80_exception_whole_pp%
+    then
+        bunkering.%days_banked_in_period%(start, stop)
+    else
+        0;
+
+accumulator nr_bunkering_banked_days(Abstime start, Abstime stop) =
+    %bunkering_days_banked_in_period%(start, stop);
+    plan_start = %pp_start%;
+    plan_end = round_up_month(%pp_end%);
+    acc_start = %actual_acc_start%;
+    acc_end = %actual_acc_end%;
+    acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+    key = if not %accumulator_mode% then crew.%id%
+          else if %job_publication_p% then void_string
+          else %sks_bunkering_flight_crew_id%;
+end
+
+/* Accumulator for the number of P-days recovered during a month */
+export %bunkering_recovered_days%(Abstime start, Abstime stop) =
+    nr_bunkering_recovered_days(start, stop);
+
+/* Recovered day calculation
+        = CVxx Contract Freeday Entitlement - Scheduled Freedays
+   assuming result is > 0 and to a max of banked days at the start of the period
+*/
+%bunkering_recovered_days_in_period%(Abstime start, Abstime stop) =
+    if bunkering.%has_bunkering_agreement_at_pp_start% then
+        nmin(nmax(freedays.%crew_month_entitled%(start, stop)
+                      - freedays.%crew_month_possibly_scheduled%(start, stop),
+                  0),
+             %bunkering_banked_days%(round_down_month(bunkering.%start_crew%), start))
+    else
+        0;
+
+accumulator nr_bunkering_recovered_days(Abstime start, Abstime stop) =
+    %bunkering_recovered_days_in_period%(start, stop);
+    plan_start = %pp_start%;
+    plan_end = round_up_month(%pp_end%);
+    acc_start = %actual_acc_start%;
+    acc_end = %actual_acc_end%;
+    acc_next(Abstime this) = round_up_month(this + 0:01);
+    key = if not %accumulator_mode% then crew.%id%
+          else if %job_publication_p% then void_string
+          else %sks_bunkering_flight_crew_id%;
+end
+
+/* Accumulator for calculating the number of P-days in period 
+** Same as above but for SKN FC */
+/* TODO: REMOVE this and accumulator */
+export %nr_p_days_in_period%(Abstime start_hb, Abstime stop_hb) =
+  nr_production_days_acc(start_hb, stop_hb);
+
+accumulator nr_production_days_acc(Abstime start_hb, Abstime stop_hb) = 
+  duty_time.%nr_p_days_vg%(start_hb, round_up(stop_hb, 24:00), false, false, true, false);
+  plan_start = %pp_start%;
+  plan_end   = %pp_end%;
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+        else if not %job_publication_p% then void_string
+        else if parameters.%k11_fc_sp10_7_valid%(%pp_start%) then void_string
+        else %skn_fc_part_time_crew_id%;
+end
+/* Accumulator for calculating the number of P-days in year for SKN */ 
+export %nr_p_days_in_year_skn%(Abstime start_hb, Abstime stop_hb) =
+  nr_production_days_skn_acc(start_hb, stop_hb);       
+
+/* scaled 1000 */
+accumulator nr_production_days_skn_acc(Abstime start_hb, Abstime stop_hb) = 
+  duty_time.%nr_p_days_in_publ_period_fd%; 
+  plan_start = %pp_start%;
+  plan_end   = %pp_end%;
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if not %accumulator_mode% then 
+            crew.%id%
+        else if %job_publication_p% and 
+            crew.%max_production_days_rule_FC_SKN_valid% or
+            crew.%max_production_days_rule_FC_ALL_valid% and
+            fundamental.%flight_crew% then
+            crew.%id%
+        else
+            void_string;
+end
+
+/*
+** Accumulator prev lower rank
+*/
+export %prev_lower_rank_date%(Abstime date) =
+  default(lower_rank_date_acc(date, false), 01Jan1986);
+  
+%acc_lower_rank_filter%(Abstime date) = 
+  first(trip(roster) where(%qual_lower_rank% and trip.%end_UTC% > date), 
+    next(trip(roster) where(%qual_lower_rank% and
+                            trip.%end_utc% <= %now%), trip.%end_UTC%));
+      
+%qual_lower_rank% = 
+  crew_pos.%trip_lower_rank%;
+  
+accumulator lower_rank_date_acc(Abstime date, Bool forward) =
+  if forward then
+    first(trip(roster) where(trip.%end_UTC% > date and
+      crew_pos.%trip_lower_rank%), trip.%end_UTC%)
+  else
+    last(trip(roster) where(trip.%end_UTC% < date and
+      crew_pos.%trip_lower_rank%), trip.%end_UTC%);
+
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_filter = %acc_lower_rank_filter%(date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %flight_crew_id%;
+end
+
+/* Accumulator for SubpartQ duty-time */
+export %subq_duty_time_in_period%(Abstime start_hb, Abstime stop_hb) = 
+  nmax(subq_duty_time_acc(start_hb, stop_hb), 0:00);
+  
+accumulator subq_duty_time_acc(Abstime start_hb, Abstime stop_hb) =
+  oma16.%duty_time_in_interval_indep%(crew.%utc_time%(start_hb), crew.%utc_time%(stop_hb));
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  key = if not %accumulator_mode% then crew.%id%
+	  else if %job_publication_p% then void_string
+	  else crew.%id%;
+end
+
+/* Accumulator for OMA16 duty-time */
+export %duty_time_in_interval%(Abstime start_utc, Abstime stop_utc) = 
+  nmax(duty_time_acc(start_utc, stop_utc), 0:00);
+  
+accumulator duty_time_acc(Abstime start_utc, Abstime stop_utc) =
+  oma16.%duty_time_in_interval_indep%(start_utc, stop_utc);
+
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  key = if not %accumulator_mode% then crew.%id%
+	  else if %job_publication_p% then void_string
+	  else crew.%id%;
+end
+
+/* Accumulator for duty-time in VG for SKD FC crew. */
+export %duty_time_fc_skd_in_period%(Abstime start_hb, Abstime stop_hb) = 
+  subq_duty_time_2_months_acc(start_hb, stop_hb);
+  
+accumulator subq_duty_time_2_months_acc(Abstime start_hb, Abstime stop_hb) =
+  oma16.%duty_time_in_interval_indep%(crew.%utc_time%(start_hb), crew.%utc_time%(stop_hb));
+  
+plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+	  else if %job_publication_p% then void_string
+	  else %skd_flight_crew_id%;
+end
+
+/* Accumulator for duty time FC crew
+**
+** Saves the actual duty time for FC according to overtime calculations.
+**
+*/
+/*export %duty_time_fc_skn_skd_vg_in_period%(Abstime start_hb, Abstime stop_hb) =
+  duty_time_fc_skn_skd_vg_acc(start_hb, stop_hb);
+  
+export %duty_time_in_period_fc_skn_skd%(Abstime start_hb, Abstime stop_hb) =
+  duty_time_fc_skn_skd_vg_acc(start_hb, stop_hb) +
+  (if not crew.%is_skd% then
+     duty_time_fc_skn_fg_acc(start_hb, stop_hb)
+   else
+     0:00);
+  
+accumulator duty_time_fc_skn_skd_vg_acc(Abstime start_hb, Abstime stop_hb) =
+  duty_time.%duty_time_agreement_sel%(model_crew.%AGMT_SEL_VG%, start_hb, stop_hb);
+
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+	  else if %job_publication_p% then void_string
+	  else if parameters.%k11_fc_sp10_7_valid%(%pp_start%) then void_string
+	  else default(%skn_vg_flight_crew_id%, %skd_vg_flight_crew_id%);
+end
+
+accumulator duty_time_fc_skn_fg_acc(Abstime start_hb, Abstime stop_hb) =
+  duty_time.%duty_time_agreement_sel%(model_crew.%AGMT_SEL_FG%, start_hb, stop_hb);
+
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+	  else if %job_publication_p% then void_string
+	  else %skn_fg_flight_crew_id%;
+end
+*/
+/* Accumulator for planned duty time FC crew
+**
+** Saves the planned duty time for FC to be
+** used in CCR.
+**
+*/
+/*
+export %planned_duty_time_fc_skn_skd_vg_in_period%(Abstime start_hb, Abstime stop_hb) =
+  planned_duty_time_fc_skn_skd_vg_acc(start_hb, stop_hb);
+  
+export %planned_duty_time_in_period_fc_skn_skd%(Abstime start_hb, Abstime stop_hb) =
+  planned_duty_time_fc_skn_skd_vg_acc(start_hb, stop_hb) + 
+  planned_duty_time_fc_skn_fg_acc(start_hb, stop_hb);
+  
+accumulator planned_duty_time_fc_skn_skd_vg_acc(Abstime start_hb, Abstime stop_hb) =
+  duty_time.%duty_time_agreement_sel%(model_crew.%AGMT_SEL_VG%, start_hb, stop_hb);
+
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %publ_acc_start%;
+  acc_end = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+	  else if not %job_publication_p% then void_string
+	  else if parameters.%k11_fc_sp10_7_valid%(%pp_start%) then void_string
+      else default(%skn_vg_flight_crew_id%, %skd_vg_flight_crew_id%);
+end
+
+accumulator planned_duty_time_fc_skn_fg_acc(Abstime start_hb, Abstime stop_hb) =
+  duty_time.%duty_time_agreement_sel%(model_crew.%AGMT_SEL_FG%, start_hb, stop_hb);
+
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %publ_acc_start%;
+  acc_end = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+	  else if %job_publication_p% then void_string
+	  else %skn_fg_flight_crew_id%;
+end
+*/
+
+/* Accumulator duty_time_fx_days
+**
+** Saves the duty-time on fx/vx (bought days). This is used in 
+** max duty-time 2 months legality for SKD 
+*/
+export %duty_time_vg_on_fx_vx_in_period%(Abstime start_hb, Abstime stop_hb) =
+  duty_time_vg_on_fx_vx_in_period(start_hb, stop_hb);
+  
+accumulator duty_time_vg_on_fx_vx_in_period(Abstime start_hb, Abstime stop_hb) =
+  duty_time.%duty_time_bought_days%(model_crew.%AGMT_SEL_VG%, start_hb, stop_hb);
+
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+	  else if %job_publication_p% then void_string
+	  else %skd_vg_flight_crew_id%;
+end
+
+/* Accumulator for SCHEDULED duty-time
+** 
+** Only saves the SCHEDULED duty-time during time crew is in variable group
+*/
+/* TODO: RFEMOVE this and accumulator */
+export %sched_duty_time_in_period%(Abstime start_hb, Abstime stop_hb) =
+  subq_sched_duty_time_acc(start_hb, stop_hb);
+
+accumulator subq_sched_duty_time_acc(Abstime start_hb, Abstime stop_hb) =
+  oma16.%scheduled_duty_time_in_interval_indust_indep%(
+     crew.%utc_time%(start_hb),
+     crew.%utc_time%(stop_hb));
+
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+	  else if %job_publication_p% then void_string
+	  else if parameters.%k11_fc_sp10_7_valid%(%pp_start%) then void_string
+	  else %skn_fc_part_time_crew_id%;
+end
+
+/*
+** Accumulator for oma16 rest: time for previous weekly rest end
+*/
+accumulator oma16_weekly_rest_acc(Abstime starttime, Bool forward) =
+  if forward then
+    first(duty(roster), duty_period.%start_utc%)
+    where (duty_period.%start_utc% >= starttime and duty_period.%is_on_duty% and duty_period.%has_weekly_rest_before%) 
+  else
+    last(duty(roster), duty_period.%start_utc%)
+    where (duty_period.%end_utc% <= starttime and duty_period.%is_on_duty% and duty_period.%has_weekly_rest_before%)
+  ;
+  key = crr_crew_id;
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+end
+
+export %oma16_prev_weekly_rest%(Abstime starttime) =
+  oma16_weekly_rest_acc(starttime, false);
+
+
+/*
+export %oma16_prev_x_extended_rest%(Abstime starttime) =
+  oma16_x_extended_rest_acc(starttime, false);
+*/
+
+/*
+ * accumulator number of fdp's with "disruptive elements" (early_start, night_duty, late_finish)
+ */
+accumulator oma16_disruptive_dps_acc(Abstime s, Abstime e) =
+  count(duty(roster))
+    from(first where (duty.%end_utc% > s))
+    forwards while(duty.%end_utc% <= e)
+    where (duty_period.%is_first_duty_in_duty_period% and duty_period.%is_disruptive%);
+  key = crr_crew_id;
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01,24:00);
+end
+
+export %oma16_disruptive_dps%(Abstime s, Abstime e) =
+  oma16_disruptive_dps_acc(s, e);
+
+/*
+** Accumulator for super freedays, month resolution
+*/
+export %super_freedays_in_period%(Abstime start, Abstime stop) = super_freedays_acc(start, stop);
+accumulator super_freedays_acc(Abstime start, Abstime stop) =
+  freedays.%super_freedays_in_period%(start, stop);
+  plan_start = %pp_start%;
+  plan_end   = %pp_end%;
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+/* Dummy variables used to preload accumulator tables to rave. */
+export %preload_abstime_accumulator_table% = 
+  if any(roster_set, %last_flown%("B737", 1jan1986) >= 1jan1986) then 
+    "Accumulator abstime loaded." 
+  else "";
+
+export %preload_reltime_accumulator_table% = 
+  if any(roster_set, %block_time_in_period_caa%(1jan1986, %now%) >= 0:00) then 
+    "Accumulator reltime loaded." 
+  else "";
+
+export %preload_int_accumulator_table% = 
+  if any(roster_set, %oma_freedays_in_period%(1jan1986, %now%) >= 0) then 
+    "Accumulator int loaded." 
+  else "";
+  
+/*
+ * Accumulator for extended duties in period.
+ * Note that this accumulator is only relevant for short haul duties.
+*/
+
+export %nr_extended_shorthaul_duties_in_period%(Abstime start, Abstime stop) =
+  count(duty(chain))
+    where (fdp.%start_utc% >= start and
+           fdp.%end_utc% < stop and
+           duty_period.%is_on_duty% and
+           oma16.%is_extended_fdp% and
+           duty.%is_short_haul%);
+
+export %extended_shorthaul_duties_in_period%(Abstime start, Abstime stop) = extended_shorthaul_duties_acc(start, stop);
+accumulator extended_shorthaul_duties_acc(Abstime start, Abstime stop) =
+  %nr_extended_shorthaul_duties_in_period%(crew.%utc_time%(start), crew.%utc_time%(stop));
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
+/*
+** Accumulators for FC SH K11 2 months duty rule
+**
+** This applies for all regions, FG and VG, with exception of SKS VG
+**
+** There are accumulators for planned production days and duty time for use in
+** CCR, and for actual production days and duty time for use in CCT and
+** Salary/Overtime.
+**
+** NB! The old pre-K11 rules should have used accumulators for the number
+** of P-days and part-time LA-days, but there were no such accumulators.
+** The K11 accumulators will therefore be used for the last few months of the
+** old rules' lifetime.
+*/
+
+/* Total actual production days in 2 months for FC SH K11 */
+
+export %nr_actual_p_days_2_months_fc%(Abstime start, Abstime stop) =
+  nr_actual_p_days_fc_fg_acc(start, stop) +
+  (if not crew.%is_sks% then
+     nr_actual_p_days_fc_vg_acc(start, stop)
+   else
+     0);
+
+/*
+** Accumulator for calculating the actual number of P-days in a 
+** calendar month for FC SH K11 FG. 
+*/
+
+accumulator nr_actual_p_days_fc_fg_acc(Abstime start, Abstime stop) =
+  duty_time.%nr_p_days_fg%(start, round_up(stop, 24:00), false, false, true, false);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+        else if %job_publication_p% then void_string
+        else %flight_crew_k11_fg_2_months_duty_id%;
+end
+
+/*
+** Accumulator for calculating the actual number of P-days in a 
+** calendar month for FC SH K11 VG. 
+*/
+
+accumulator nr_actual_p_days_fc_vg_acc(Abstime start, Abstime stop) =
+  duty_time.%nr_p_days_vg%(start, round_up(stop, 24:00), false, false, true, false);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+        else if %job_publication_p% then void_string
+        else %flight_crew_k11_vg_2_months_duty_id%;
+end
+
+/* Actual P days for FC - FG or VG across period */
+
+export %nr_actual_p_days%(abstime start, abstime stop) =
+    nr_actual_prod_days_acc(start, stop);
+
+%nr_prod_days_in_period%(Abstime start, Abstime stop) =
+    nmax(0, crew.%days_in_period%(start, stop)
+            - duty.%days_with_selection_possible%(duty.%duty_sel_freeday%, start, stop)
+            - %bunkering_reducing_activities_in_period%(start, stop));
+
+accumulator nr_actual_prod_days_acc(Abstime start, Abstime stop) =
+  %nr_prod_days_in_period%(start, round_up(stop, 24:00));
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+        else if %job_publication_p% then void_string
+        else %sks_bunkering_flight_crew_id%;
+end
+
+/*
+** Total actual production days plus part-time LA-days in 1/2 months for FC SH K11
+**
+** NB! These accumulators are also used for the pre-K11 rules, in which case
+** SKS VG P-days should also be included.
+*/
+
+export %nr_actual_p_and_pt_la_days_fc%(Abstime start, Abstime stop) =
+  nr_actual_p_and_pt_la_days_fc_fg_acc(start, stop) +
+  (if not crew.%is_sks%  then
+     nr_actual_p_and_pt_la_days_fc_vg_acc(start, stop)
+   else
+     0);
+
+/* Total actual VG/FG production days plus part-time LA days for FC SH K11 */
+export %nr_actual_p_and_pt_la_days_fc_sks%(Abstime start, Abstime stop) =
+  if crew.%is_sks% then
+    nr_actual_p_and_pt_la_days_fc_fg_acc(start, stop) + nr_actual_p_and_pt_la_days_fc_vg_acc(start, stop)
+  else
+    0;
+
+/*
+** Accumulator for calculating the actual number of P-days plus
+** part-time LA-days in a calendar month for FC SH K11 FG. 
+*/
+
+accumulator nr_actual_p_and_pt_la_days_fc_fg_acc(Abstime start, Abstime stop) =
+  duty_time.%nr_p_days_fg%(start, round_up(stop, 24:00), false, true, true, false);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+        else if %job_publication_p% then void_string
+        else %flight_crew_k11_fg_2_months_duty_id%;
+end
+
+/*
+** Accumulator for calculating the actual number of P-days plus
+** part-time LA-days in a calendar month for FC SH K11 VG. 
+*/
+
+accumulator nr_actual_p_and_pt_la_days_fc_vg_acc(Abstime start, Abstime stop) =
+  duty_time.%nr_p_days_vg%(start, round_up(stop, 24:00), false, true, true, false);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+        else if %job_publication_p% then void_string   
+        else %flight_crew_k11_vg_2_months_duty_id%;
+end
+
+/* Total planned production days in 2 months for FC K19 */
+
+export %nr_planned_p_days_2_months_fc%(Abstime start, Abstime stop) =
+  nr_planned_p_days_fc_fg_acc(start, stop) + nr_planned_p_days_fc_vg_acc(start, stop);
+  
+/*
+** Accumulator for calculating the planned number of P-days in a
+** calendar month for FC SH K11 FG. 
+*/
+
+accumulator nr_planned_p_days_fc_fg_acc(Abstime start, Abstime stop) =
+  duty_time.%nr_p_days_fg_in_1_month%;
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+        else if not %job_publication_p% then void_string
+        else crew.%id%;
+end
+
+/*
+** Accumulator for calculating the planned number of P-days in a
+** calendar month for FC SH K11 VG. 
+*/
+
+accumulator nr_planned_p_days_fc_vg_acc(Abstime start, Abstime stop) =
+  duty_time.%nr_p_days_vg_in_1_month%(start, stop);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+        else if not %job_publication_p% then void_string
+        else crew.%id%;
+end
+
+/* Total planned duty time for FC K19 */
+
+export %planned_duty_time_2_months_fc%(Abstime start_hb, Abstime stop_hb) =
+  planned_duty_time_fc_fg_acc(start_hb, stop_hb) + planned_duty_time_fc_vg_acc(start_hb, stop_hb);
+  
+/* 
+** Accumulator for calculating the planned duty time in a
+** calendar month for FC SH K11 FG.
+*/
+
+accumulator planned_duty_time_fc_fg_acc(Abstime start_hb, Abstime stop_hb) =
+  duty_time.%duty_time_agreement_sel%(model_crew.%AGMT_SEL_FG%, start_hb, stop_hb);
+
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %publ_acc_start%;
+  acc_end = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+        else if not %job_publication_p% then void_string
+        else crew.%id%;
+end
+
+/* 
+** Accumulator for calculating the planned duty time in a
+** calendar month for FC SH K11 VG.
+*/
+
+accumulator planned_duty_time_fc_vg_acc(Abstime start_hb, Abstime stop_hb) =
+  duty_time.%duty_time_agreement_sel%(model_crew.%AGMT_SEL_VG%, start_hb, stop_hb);
+
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %publ_acc_start%;
+  acc_end = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+        else if not %job_publication_p% then void_string
+        else crew.%id%;
+end
+
+/* Total actual duty time for FC SH K11, for use in CCT */
+
+export %actual_duty_time_2_months_fc%(Abstime start_hb, Abstime stop_hb) =
+  actual_duty_time_fc_fg_acc(start_hb, stop_hb) + 
+  (if not crew.%is_sks% then
+     actual_duty_time_fc_vg_acc(start_hb, stop_hb)
+   else
+     0:00);
+  
+/* 
+** Accumulator for calculating the actual duty time in a
+** calendar month for FC SH K11 FG.
+*/
+
+accumulator actual_duty_time_fc_fg_acc(Abstime start_hb, Abstime stop_hb) =
+  duty_time.%duty_time_agreement_sel%(model_crew.%AGMT_SEL_FG%, start_hb, stop_hb);
+
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+        else if %job_publication_p% then void_string
+        else %flight_crew_k11_fg_2_months_duty_id%;
+end
+
+/* 
+** Accumulator for calculating the actual duty time in a
+** calendar month for FC SH K11 VG.
+*/
+
+accumulator actual_duty_time_fc_vg_acc(Abstime start_hb, Abstime stop_hb) =
+  duty_time.%duty_time_agreement_sel%(model_crew.%AGMT_SEL_VG%, start_hb, stop_hb);
+
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+        else if %job_publication_p% then void_string
+        else %flight_crew_k11_vg_2_months_duty_id%;
+end
+
+/*
+** Accumulators for SKD CC K12 2 months duty rule
+**
+** There are accumulators for planned production days and duty time for use in
+** CCR, and for actual production days and duty time for use in CCT and
+** Salary/Overtime.
+**
+*/
+
+/* Total actual production days in 2 months for SKD CC K12 */
+
+export %nr_actual_p_days_2_months_cc%(Abstime start, Abstime stop) =
+  nr_actual_p_days_cc_acc(start, stop);
+
+/*
+** Accumulator for calculating the actual number of P-days in a 
+** calendar month for SKD CC K12. 
+*/
+
+accumulator nr_actual_p_days_cc_acc(Abstime start, Abstime stop) =
+  duty_time.%nr_p_days_in_period%(start, round_up(stop, 24:00), false, false, true, true, false);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+        else if %job_publication_p% then void_string
+        else %skd_cabin_crew_id%;
+end
+
+/* Total actual standby days in 2 months for SKD CC K12 */
+
+export %nr_planned_sb_ln_days_cc%(Abstime start, Abstime stop) =
+  nr_planned_sb_ln_days_cc_acc(start, stop);
+
+/*
+** Accumulator for calculating the actual number of SB-days in a
+** calendar month for SKD CC K12.
+*/
+
+accumulator nr_planned_sb_ln_days_cc_acc(Abstime start, Abstime stop) =
+  duty_time.%nr_sb_ln_days_in_period%(start, round_up(stop, 24:00));
+  /* Making plan-interval 0 minutes forces accumulator to always use "lookup" */
+  plan_start = %pp_start%;
+  plan_end   = if %accumulator_mode% or base_product.%is_rostering% then round_up_month(%pp_end%) else %pp_start%;
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if %accumulator_mode% then
+            if %job_publication_p% then
+                %cabin_crew_id%
+            else
+                void_string
+        else crew.%id%;
+end
+
+/* Total planned production days in 2 months for SKD CC K12 */
+
+export %nr_planned_p_days_2_months_cc%(Abstime start, Abstime stop) =
+  nr_planned_p_days_cc_acc(start, stop);
+  
+/*
+** Accumulator for calculating the planned number of P-days in a
+** calendar month for SKD CC K12. 
+*/
+
+accumulator nr_planned_p_days_cc_acc(Abstime start, Abstime stop) =
+  duty_time.%nr_p_days_in_1_month_cc%;
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t = round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+        else if not %job_publication_p% then void_string
+        else %skd_cabin_crew_id%;
+end
+
+
+
+
+export %nr_planned_p_days_skn_cc%(Abstime start, Abstime stop) =
+  nr_planned_p_days_skn_cc_acc(start, stop);
+
+
+/* Similar to nr_planned_p_days_cc_acc, but only accumulates for SKN*/
+accumulator nr_planned_p_days_skn_cc_acc(Abstime start, Abstime stop) =
+    duty_time.%nr_p_days_in_period_cc%(start, stop, false, false, true, false, false);
+    key = if %accumulator_mode% then
+              if %job_publication_p% then
+                 %skn_cabin_crew_id%
+              else
+                 void_string
+          else
+              crew.%id%;
+    /* Making plan-interval 0 minutes forces accumulator to always use "lookup" */
+    plan_start = %pp_start%;
+    plan_end   = if %accumulator_mode% or base_product.%is_rostering% then round_up_month(%pp_end%) else %pp_start%;
+    acc_start  = %publ_acc_start%;
+    acc_end    = %publ_acc_end%;
+    acc_next(Abstime this) = round_up_month(this + 0:01);
+
+end
+
+
+/* Total planned duty time for SKD CC K12 */
+
+export %planned_duty_time_2_months_cc%(Abstime start_hb, Abstime stop_hb) =
+  planned_duty_time_cc_acc(start_hb, stop_hb);
+  
+/* 
+** Accumulator for calculating the planned duty time in a
+** calendar month for SKD CC K12.
+*/
+
+accumulator planned_duty_time_cc_acc(Abstime start_hb, Abstime stop_hb) =
+  duty_time.%duty_time_in_2_months_cc%(start_hb,stop_hb);
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %publ_acc_start%;
+  acc_end = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+        else if not %job_publication_p% then void_string
+        else %skd_cabin_crew_id%;
+end
+
+
+export %planned_duty_time_2_months_skn_cc%(Abstime start_hb, Abstime stop_hb) =
+  planned_duty_time_skn_cc_acc(start_hb, stop_hb);
+
+
+accumulator planned_duty_time_skn_cc_acc(Abstime start_hb, Abstime stop_hb) =
+  duty_time.%duty_time_in_2_months_cc%(start_hb,stop_hb);
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %publ_acc_start%;
+  acc_end = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+        else if not %job_publication_p% then void_string
+        else %skn_cabin_crew_id%;
+end
+
+
+/* Total actual duty time for SHD CC K12, for use in CCT */
+
+export %actual_duty_time_2_months_cc%(Abstime start_hb, Abstime stop_hb) =
+  actual_duty_time_cc_acc(start_hb, stop_hb);
+  
+/* 
+** Accumulator for calculating the actual duty time in a
+** calendar month for SKD CC K12.
+*/
+export %actual_duty_time_cc%(Abstime start, Abstime stop) =
+  actual_duty_time_cc_acc(start, stop);
+
+accumulator actual_duty_time_cc_acc(Abstime start_hb, Abstime stop_hb) =
+  duty_time.%duty_time_in_2_months_cc%(start_hb,stop_hb);
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+        else if %job_publication_p% then void_string
+        else %skd_cabin_crew_id%;
+end
+
+
+export %actual_duty_time_cc_scheduled%(Abstime start, Abstime stop) =
+  actual_duty_time_cc_scheduled_acc(start, stop);
+
+accumulator actual_duty_time_cc_scheduled_acc(Abstime start_hb, Abstime stop_hb) =
+  duty_time.%duty_time_cc_scheduled%(start_hb, stop_hb);
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+        else if %job_publication_p% then void_string
+        else %skd_cabin_crew_id%;
+end
+
+
+export %duty_time_skn_cc_scheduled%(Abstime start, Abstime stop) =
+  actual_duty_time_skn_cc_scheduled_acc(start, stop);
+
+accumulator actual_duty_time_skn_cc_scheduled_acc(Abstime start_hb, Abstime stop_hb) =
+  duty_time.%duty_time_in_period_scheduled%(start_hb, stop_hb, false);
+  plan_start = %pp_start%;
+  plan_end = if %accumulator_mode% or base_product.%is_rostering% then round_up_month(%pp_end%) else %pp_start%;
+  acc_start = %publ_acc_start%;
+  acc_end = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if %accumulator_mode% then
+            if %job_publication_p% then
+               %skn_cabin_crew_id%
+            else
+               void_string
+        else
+            crew.%id%;
+end
+
+/* 
+** Accumulator for calculating the planned (scheduled) number of freedays fdc15 style
+** in a calendar month, to be compared with entitled yearly freedays calculated as in K15 
+** freeday control. This is typically valid for FD crew, VG (Variable group) only. For crew contracts
+** which are not following these calculation, the sum will be 0. 
+**
+** The accumulator calculates "published" values, that is, the state at roster release.
+*/
+export %fdc15_nr_acc_possibly_scheduled_freedays%(Abstime month_start) =
+  fdc15_nr_possibly_scheduled_freedays_acc(model_freedays.%fdc_start_year_date%(crew.%id%,month_start),round_up_month(month_start+0:01));
+
+export %fdc15_nr_twin_possibly_scheduled_freedays%(Abstime start, Abstime stop) =
+  fdc15_nr_possibly_scheduled_freedays_acc(start, stop);
+
+accumulator fdc15_nr_possibly_scheduled_freedays_acc(Abstime start, Abstime stop) =
+  freedays.%crew_month_possibly_scheduled%(round_down_month(stop-0:01),stop);
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %publ_acc_start%;
+  acc_end = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+        else if not %job_publication_p% then void_string
+        else crew.%id%;
+end
+
+/* 
+** Accumulator for calculating the entitled freedays fdc15 style
+** contributed by a calendar month. The contributution is dependent on the contract and changes with the month.
+** Examples: FG contracts don't contribute, part time factors change the entitlement, and some activitites like VAC / ILL reduce
+** the entitlement. 
+**
+** The accumulator calculates "published" values, that is, the state at roster release.
+*/
+export %fdc15_nr_acc_entitled_freedays%(Abstime month_start) =
+  fdc15_nr_entitled_freedays_acc(model_freedays.%fdc_start_year_date%(crew.%id%,month_start), round_up_month(month_start+0:01));
+
+/* balance for a crew is number of entitled freedays in year so far, minus number of (possibly) scheduled */
+export %fdc15_balance%(Abstime month_start) =
+  %fdc15_nr_acc_entitled_freedays%(month_start) - %fdc15_nr_acc_possibly_scheduled_freedays%(month_start);
+ 
+accumulator fdc15_nr_entitled_freedays_acc(Abstime start, Abstime stop) =
+  freedays.%crew_year_entitled%(round_down_month(stop-0:01),stop); 
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %publ_acc_start%;
+  acc_end = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+        else if not %job_publication_p% then void_string
+        else crew.%id%;
+end
+
+
+/* 
+** Accumulator for calculating the entitled freedays fdc15 style for Cimber
+** contributed by two calendar months. The contributution is dependent on the contract and changes with the month.
+** Examples: FG contracts don't contribute, part time factors change the entitlement, and some activitites like VAC / ILL reduce
+** the entitlement. 
+**
+** The accumulator calculates "published" values, that is, the state at roster release.
+*/
+export %fdc15_nr_acc_entitled_freedays_qa_2_months%(Abstime month_start, Abstime month_stop) =
+  fdc15_nr_entitled_freedays_qa_2_months_acc(month_start, month_stop);
+ 
+accumulator fdc15_nr_entitled_freedays_qa_2_months_acc(Abstime start, Abstime stop) =
+  freedays.%crew_2_months_entitled%(round_down_month(stop-0:01),stop); 
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %publ_acc_start%;
+  acc_end = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+        else if not %job_publication_p% or not crew.%has_agmt_group_qa% then void_string /* Two-month rule is only valid for Cimber */
+        else crew.%id%;
+end
+
+
+/* 
+** Accumulator for calculating the planned number of FC instructor simulator
+** duties in a calendar month.
+**
+** 4ExNG: no longer used.
+*/
+
+export %nr_planned_instr_sim_duty%(Abstime start_hb, Abstime stop_hb) =
+  nr_planned_instr_sim_duty_acc(start_hb,stop_hb);
+  
+accumulator nr_planned_instr_sim_duty_acc(Abstime start_hb, Abstime stop_hb) =
+  duty_time.%nr_instr_sim_duty%(start_hb,stop_hb);
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %publ_acc_start%;
+  acc_end = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+        else if not %job_publication_p% then void_string
+        else %fci_sim_flight_crew_id%;
+end
+
+/*  
+** Accumulator for calculating the number of actual FC instructor simulator
+** duties in a calendar month.
+**
+** 4ExNG: no longer used.
+*/
+
+export %nr_actual_instr_sim_duty%(Abstime start_hb, Abstime stop_hb) =
+  nr_actual_instr_sim_duty_acc(start_hb,stop_hb);
+  
+accumulator nr_actual_instr_sim_duty_acc(Abstime start_hb, Abstime stop_hb) =
+  duty_time.%nr_instr_sim_duty%(start_hb,stop_hb);
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+        else if %job_publication_p% then void_string
+        else %fci_sim_flight_crew_id%;
+end
+
+/* 
+** Accumulator for calculating the planned number of simulator duties
+** attended as TR (pos 10).
+*/
+
+export %nr_planned_sim_duty_as_tr%(Abstime start_hb, Abstime stop_hb) =
+  nr_planned_sim_duty_as_tr_acc(start_hb,stop_hb);
+  
+accumulator nr_planned_sim_duty_as_tr_acc(Abstime start_hb, Abstime stop_hb) =
+  duty_time.%nr_sim_duty_as_tr%(start_hb,stop_hb);
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %publ_acc_start%;
+  acc_end = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+        else if not %job_publication_p% then void_string
+        else %fci_sim_flight_crew_id%;
+end
+
+/*  
+** Accumulator for calculating the number of actual number of simulator duties
+** attended as TR (pos 10).
+*/
+
+export %nr_actual_sim_duty_as_tr%(Abstime start_hb, Abstime stop_hb) =
+  nr_actual_sim_duty_as_tr_acc(start_hb,stop_hb);
+  
+accumulator nr_actual_sim_duty_as_TR_acc(Abstime start_hb, Abstime stop_hb) =
+  duty_time.%nr_sim_duty_as_tr%(start_hb,stop_hb);
+  plan_start = %pp_start%;
+  plan_end = round_up_month(%pp_end%);
+  acc_start = %actual_acc_start%;
+  acc_end = %actual_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  key = if not %accumulator_mode% then crew.%id%
+        else if %job_publication_p% then void_string
+        else %fci_sim_flight_crew_id%;
+end
+
+/*
+** Accumulator for calculating the number of single slipping nights for 
+** far destinations (%has_agmt_group_ski_fd% and variable group)
+**
+**
+*/
+
+export %nr_far_single_slipping_in_period%(Abstime start, Abstime stop) = 
+  nr_far_single_slipping(start, stop);
+
+accumulator nr_far_single_slipping(Abstime start, Abstime stop) =
+  duty_time.%nr_far_single_slipping_in_period%(start, stop);
+  plan_start = %_month_start%;
+  plan_end   = round_up_month(%_month_end%);
+  /*acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;*/
+  acc_start  = %publ_acc_start%;
+  acc_end    = %publ_acc_end%;
+  acc_next(Abstime this) = round_up_month(this + 0:01);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  /*key = if not %accumulator_mode% then crew.%id%
+  else if %job_publication_p% then void_string
+  else crew.%id%;*/
+  key = if not %accumulator_mode% then crew.%id%
+        else if %job_publication_p% then crew.%id%
+        else void_string;
+end
+
+%_month_start% =
+  if parameters.%salary_month_start_p% = 1Jan1986 0:00 then %pp_start%
+  else parameters.%salary_month_start_p%;
+
+%_month_end% =
+  if parameters.%salary_month_end_p% = 1Jan1986 0:00 then %pp_end%
+  else parameters.%salary_month_end_p%;
+
+/*
+ * Handling of rest; particularly transition east west
+ * 
+ */
+ 
+
+%is_lnr_at_date%(Abstime midnight) =
+  oma16.%is_lnr_at_date%(midnight);
+
+/* local nights rest as defined in oma16. Midnight a night where at least 8 hrs rest between 22:00 and 08:00 */ 
+accumulator lnr_acc(Abstime origomidnight, Bool forward) =
+  if forward then
+    default(min(times(20), origomidnight + %times_index_0%*24:00)  
+    where (  %is_lnr_at_date%(origomidnight  + %times_index_0%*24:00)), origomidnight + 20*24:00)
+  else
+    default(max(times(20), origomidnight - %times_index_0%*24:00)  
+    where (  %is_lnr_at_date%(origomidnight - %times_index_0%*24:00)), origomidnight - 20*24:00); 
+  key = crr_crew_id;
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+end
+
+export %prev_lnr%(Abstime starttime) =
+  default(
+    lnr_acc(round_down(starttime + 18:00, 24:00), false),
+    %abstimemin%);
+
+/* not used */
+export %next_lnr%(Abstime starttime) =
+  default(
+    lnr_acc(round_down(starttime - 6:00, 24:00), false),
+    %abstimemin%);
+
+/* finish time for a duty from west with at least 4 h tzd */ 
+accumulator lh_west4h_acc(Abstime starttime, Bool forward) =
+  if forward then
+    first(duty(roster), duty.%end_utc%)
+    where (duty.%start_utc%>starttime and duty.%sub_trip_max_west_tzd_hb_bwd% >= 4:00) /* note: tzdfiff for RETURN leg is positive from west */
+  else
+    last(leg(roster), leg.%end_utc%)
+    where (duty.%start_utc%<starttime and duty.%sub_trip_max_west_tzd_hb_bwd% >= 4:00);
+  key = crr_crew_id;
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+end
+
+export %prev_west4h_duty%(Abstime starttime) =
+  lh_west4h_acc(starttime, false);
+  
+/* finish time for a duty from west with at least 6 h tzd */ 
+accumulator lh_west6h_acc(Abstime starttime, Bool forward) =
+  if forward then
+    first(duty(roster), duty.%end_utc%)
+    where (duty.%start_utc%>starttime and duty.%sub_trip_max_west_tzd_hb_bwd% >= 6:00 ) /* note: tzdfiff for RETURN leg is positive from west */
+  else
+    last(leg(roster), leg.%end_utc%)
+    where (duty.%start_utc%<starttime and duty.%sub_trip_max_west_tzd_hb_bwd% >= 6:00);
+  key = crr_crew_id;
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+end
+
+export %prev_west6h_duty%(Abstime starttime) =
+  lh_west6h_acc(starttime, false);
+
+/* finish time for a duty from east with at least 4 h tzd */ 
+accumulator lh_east4h_acc(Abstime starttime, Bool forward) =
+  if forward then
+    first(duty(roster), duty.%end_utc%)
+    where (duty.%start_utc%>starttime and duty.%sub_trip_max_east_tzd_hb_bwd% >= 4:00 ) /* note: tzdfiff for RETURN leg is positive from west */
+  else
+    last(leg(roster), leg.%end_utc%)
+    where (duty.%start_utc%<starttime and duty.%sub_trip_max_east_tzd_hb_bwd% >= 4:00);
+  key = crr_crew_id;
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+end
+
+export %prev_east4h_duty%(Abstime starttime) =
+  lh_east4h_acc(starttime, false);
+
+/* finish time for a duty from east with at least 6 h tzd */ 
+accumulator lh_east6h_acc(Abstime starttime, Bool forward) =
+  if forward then
+    first(duty(roster), duty.%end_utc%)
+    where (duty.%start_utc%>starttime and duty.%sub_trip_max_east_tzd_hb_bwd% >= 6:00) /* note: tzdfiff for RETURN leg is positive from west */
+  else
+    last(leg(roster), leg.%end_utc%)
+    where (duty.%start_utc%<starttime and duty.%sub_trip_max_east_tzd_hb_bwd% >= 6:00);
+  key = crr_crew_id;
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+end
+
+export %prev_east6h_duty%(Abstime starttime) =
+  lh_east6h_acc(starttime, false);
+
+export %rotationsferie_start%(Abstime date, Bool forward) = rotationsferie_start(date, forward);
+
+accumulator rotationsferie_start(Abstime date, Bool forward) =
+  freedays.%rotationsferie_start%(date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% or not freedays.%has_rotationsferie_in_roster% then void_string
+	else %flight_crew_id%;
+end
+
+export %rotationsferie_end%(Abstime date, Bool forward) = rotationsferie_end(date, forward);
+
+accumulator rotationsferie_end(Abstime date, Bool forward) =
+  freedays.%rotationsferie_end%(date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% or not freedays.%has_rotationsferie_in_roster% then void_string
+	else %flight_crew_id%;
+end
+
+
+/* End of file */
+
+
+/* A "toy" accumulator - simply to test how accumulators work. */
+accumulator f22_acc(Abstime s, Abstime e) =
+    %count_f22%(s, e);
+    key = crr_crew_id;
+    plan_start = %pp_start%;
+    plan_end = %pp_end%;
+    acc_start  = %actual_acc_start%;
+    acc_end    = %actual_acc_end%;
+    acc_next(Abstime this) = round_up_month(this + 0:03);
+end
+
+%count_f22%(Abstime s, Abstime e) =
+    count(duty(roster)) where(duty.%start_day% >= s and duty.%start_day% <= e and duty.%code% = "F22");
+
+/*
+(& (name=accumulators.f22_acc) (acckey=34231))
+*/
+
+

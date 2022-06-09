@@ -1,0 +1,113 @@
+/* -*- crc -*-
+ *
+ * Variables that are used to update 'crew_log_acc' entity.
+ *
+ * [acosta:07/145@16:05]
+ */
+
+module crew_log_acc
+
+import crew;
+import crew_pos;
+import fundamental;
+import iterators;
+import leg;
+import levels;
+import report_cio;
+
+
+/* ac_type_set iterator ********************************************** {{{1 */
+export iterator ac_family_set =
+  partition(leg)
+  by (%ac_family%, %is_active_flight_or_sim%);
+end
+
+export %is_active_flight_or_sim% =
+  (leg.%is_flight_duty% or leg.%is_simulator%) and not leg.%is_deadhead%;
+
+export %ac_family% =
+  if leg.%is_simulator% then %sim_ac_family%
+  else leg.%ac_family%;
+
+
+/* Block Hours ******************************************************* {{{1 */
+export %total_block_time%(abstime s, abstime e) = 
+  sum(leg_set, leg.%block_time_in_period%(s, e));
+
+
+/* Loggable Block Hours ********************************************** {{{1 */
+export %total_loggable_block_time%(abstime s, abstime e) = 
+  sum(leg_set, %loggable_block_time_in_period%(s, e));
+
+export %loggable_block_time% = 
+  %_loggable_block_time%(leg.%block_time%);
+
+export %loggable_block_time_in_period%(abstime s, abstime e) =
+  %_loggable_block_time%(leg.%block_time_in_period%(s, e));
+
+
+/*
+ * Reduce the block time if flight has relief pilot(s)
+ * with needed / booked * time, no reduction for pilot-in-command.
+ */
+
+%_loggable_block_time%(reltime block_time) =
+  if report_cio.%pic% = crew.%id% then
+    block_time
+  else
+    if %assigned_fd% > %needed_fd% then
+      (%needed_fd% * block_time) / %assigned_fd%
+    else
+      block_time;
+      
+%assigned_fd% = 
+  sum(equal_legs, %_assigned_fd%) where (%is_roster% and %flight_crew% and leg.%is_active_flight%);
+%_assigned_fd% =
+  default(crew_pos.%leg_assigned_func%("FC"), 0) +
+  default(crew_pos.%leg_assigned_func%("FP"), 0) +
+  default(crew_pos.%leg_assigned_func%("FR"), 0);
+
+%needed_fd% =
+  crew_pos.%ac_need_in_pos%(1) +
+  crew_pos.%ac_need_in_pos%(2) +
+  crew_pos.%ac_need_in_pos%(3);
+
+/* Simulator Block Hours ********************************************* {{{1 */
+export %total_simulator_block_time%(abstime s, abstime e) =
+  sum(leg_set, %simulator_block_time_in_period%(s, e));
+
+export %simulator_block_time% = 
+  if leg.%is_simulator% then
+    leg.%time%
+  else
+    0:00;
+
+export %simulator_block_time_in_period%(abstime s, abstime e) =
+  if leg.%is_simulator% then
+    overlap(s, e, leg.%start_hb%, leg.%end_hb%)
+  else
+    0:00;
+
+/* NOTE: "" is not acceptable when trying to save to model, so  "---" was 
+   chosen to match leg.%ac_family% in case of unknown A/C family. */
+%sim_ac_family% = 
+  let fam = leg.%gd_leg_fam%;
+  if fam = "" then "---" else fam;
+
+/* Landings ********************************************************** {{{1 */
+export %total_landings%(abstime s, abstime e) =
+  sum(leg_set, %landings_in_period%(s, e));
+
+export %landings% =
+  crew.%nr_landings%;
+
+export %landings_in_period%(abstime s, abstime e) =
+  if leg.%end_hb% >= s and leg.%end_hb% < e then
+    crew.%nr_landings%
+  else
+    0;
+  
+
+/* modeline {{{1 */
+/* vim: set fdm=marker: */
+/* eof */

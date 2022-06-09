@@ -1,0 +1,996 @@
+/* -*- crc -*-
+ * 
+ * 
+ *
+ * Purpose: 
+ *   Specific studio variables for Carmen Crew Tracking (rudobs, header etc). 
+ *   
+ *  The file contains:
+ *  1. Header/Trailer mappings
+ *	2. Leg mappings
+ *	3. Rudobs
+ *   .1 NOW TIMELINE
+ *   .2 Min rest after duty
+ *   .3 Min rest after trip 
+ *   .4 Briefing/Debriefing 
+ *   .5 FDP rudob 
+ *   .6 Bought days
+ *   .7 Blank days
+ *   .8 Crew leased days
+ *  4.  Rotations view mappings
+ *  5.  Redefine Crew Header
+ *  6.  Do Not Publish Rudob
+ *  7.  Inform-at-Save Rudob
+ *  7.1 Published-Not-Informed rudob
+ *  8.  Make some rudobs invisible for reference rosters
+ *  9.  TrackingGuiExt definitions
+ *  10. Delayed trip/duty (scheduled, estimated and actuals
+ *  11. Meal break rudob
+ *
+ * Created by:
+ *    Markus Kollind 16 feb 2005
+ *
+ * Major changes:
+ *   minor changes by Peter Jonsson 20 feb 2006
+ *   07-Jun-2007: Major restructuring of all studio_config modules.
+ *                /Erik Gustafsson
+ *   27-Jul-2007: Added unpublished leg colour
+ *                /Yaser Mohamed
+ *
+ */
+
+module studio_config_cct inherits studio_config_common
+import bought_days;
+import base_break;
+import duty_code;
+import leg;
+import publish;
+import rescheduling;
+import rules_notifications_cct;
+import crew;
+import calendar;
+import checkinout;
+import standby;
+import meal;
+import attributes;
+import report_common;
+import oma16_defs;
+
+/*******************************************************************
+**
+** Section 1: Header/Trailer mappings
+**
+********************************************************************/
+
+
+%crew_trailer_text_top_left% = report_common.%aircraft_qlns%;
+%crew_trailer_text_top_right% =  report_common.%block_time_in_following_28_days%;
+%crew_trailer_text_bottom_right% =  report_common.%block_time_in_full_calendar_year%;
+
+%crew_trailer_cell_color%(Reltime cell_value, Reltime limit) =
+  if cell_value >= limit then 20
+  else if cell_value >= limit * 8 / 10 then 13
+  else 28;
+
+
+%crew_trailer_color_top_right% = %crew_trailer_cell_color%(report_common.%block_time_in_following_28_days%, oma16_defs.%max_block_time_in_28_days%);
+%crew_trailer_color_bottom_right% =
+    if %crew_likely_to_exceed_max_blh_full_calendar_year%(report_common.%block_time_in_full_calendar_year%, oma16_defs.%max_block_time_in_calendar_year%) then 13
+    else %crew_trailer_cell_color%(report_common.%block_time_in_full_calendar_year%, oma16_defs.%max_block_time_in_calendar_year%);
+
+%crew_likely_to_exceed_max_blh_full_calendar_year%(Reltime cell_value, Reltime limit) =
+    cell_value >= limit / 12 * calendar.%month_number%(%pp_end%);
+
+redefine %crr_header_text_top_left% = %trip_crew_string%(1, 4);
+redefine %crr_header_text_bottom_left% = %trip_crew_string%(5, 10);
+redefine %crr_header_text_bottom_middle% = "";
+redefine %crr_header_text_top_right% = ""; 
+redefine %crr_header_text_bottom_right% = 
+  default(trip.%planning_group%, first(leg(trip) , leg.%planning_group%));
+
+/* The first function makes sure a non-empty string is returned. This is 
+   to prevent the information from "jumping up and down" in the info box. */
+%trip_crew_string%(Int start_pos, Int end_pos) = 
+  let s = %_trip_crew_string%(start_pos, end_pos);
+  if s = "" then " " else s;
+%_trip_crew_string%(Int start_pos, Int end_pos) =
+  let shift = start_pos - 1, nr = end_pos - shift;
+  cat(times(nr), concat(%int2str%(crew_pos.%trip_assigned_pos%(%times_index_0%+shift)),
+                       crew_pos.%pos2func%(%times_index_0% + shift)), " ")
+  where(crew_pos.%trip_assigned_pos%(%times_index_0% + shift) > 0);
+
+%crr_trailer_text_top_left% = default(%ac_qual_string%,"");
+%crr_trailer_text_bottom_left% = " ";
+
+%ac_qual_string% =
+  cat(times(crew.%nr_ac_quals%), concat(crew.%_acqual_by_ix%(%times_index_0%), %ac_version%(crew.%_acqual_by_ix%(%times_index_0%))), " ")
+  where (%trip_has_qual%(crew.%_acqual_by_ix%(%times_index_0%)));
+
+%trip_has_qual%(String qual) =
+  default(any(leg(trip), leg.%qual% = qual)
+          where (not leg.%is_deadhead%), false); 
+
+%ac_version%(String qual) =
+  default(first(leg(trip), leg.%ac_version%)
+    where (leg.%ac_version% <> "" and leg.%qual% = qual and leg.%is_active_flight%), "");
+
+/*******************************************************************
+**
+** Section 2: Leg mappings
+**
+********************************************************************/
+
+/* AC-qual */
+redefine %rudob_display_leg_ac_qual% =
+  parameter True
+  remark "Show markers for AC-qualification";
+
+redefine set leg_ac_qual_gr1 =
+  parameter "A2", "A3"
+  remark "AC-qualification color 1";
+
+redefine set leg_ac_qual_gr2 =
+  parameter "A5"
+  remark "AC-qualification color 2";
+
+/* marker for:
+*  - check in airport sby
+*  - called-out-to leg */
+
+%rudob_callout_display_p% = 
+  parameter true
+  remark "Show markers on callout and called-out-to legs.";
+
+%rudob_callout_display% =
+  %rudob_callout_display_p% and not %is_reference_roster_view%;
+
+%rudob_private_display_p% = 
+  parameter true
+  remark "Show markers on private-passive (DP/PP) legs.";
+
+%rudob_private_display% =
+  %rudob_private_display_p% and not %is_reference_roster_view%;
+
+%color_callout% = 7; /* Yellow */
+%color_private% = 7; /* Only used on deadhead - no conflict with callout */
+  
+redefine %leg_color_middle_left_crew% =
+  if leg.%is_standby_at_airport% and checkinout.%leg_has_mandatory_ci%
+  then if leg.%checked_in%
+       then %color_brief_debrief_checked_in%
+       else %color_brief_debrief%
+  else if %rudob_callout_display%
+           and (leg.%is_callout_from_standby% 
+                or leg.%is_callout_from_airport%)
+       then %color_callout%
+  else %leg_color_middle_crew%;
+
+redefine %leg_color_middle_right_crew% =
+  if %rudob_callout_display%
+  and (leg.%is_standby_callout%  or leg.%is_airport_callout%) then
+     %color_callout%
+  else if %rudob_private_display% and leg.%is_private_passive% then
+    %color_private%
+  else
+    %leg_color_middle_crew%;
+  
+redefine %leg_color_top_crew% =
+  if not default(base_break.%is_break%, false) then
+    %leg_color%
+  else if leg.%is_deadhead% then
+    %color_flight_leg%
+  else
+    %color_base_break%;
+    
+/* Marker that shows if a flight is block off, airborne or landed. */
+%color_off_block%=17;
+%color_airborne%=31;
+%color_landed%=13;
+%rudob_status_display% = 
+  parameter TRUE
+  remark "Show status of flight, yellow is landed, dark purple is airborne.";
+redefine %leg_color_top_middle_ac% =
+  if %leg_color_top_middle% <> -1 then
+    %leg_color_top_middle%
+  else
+    %leg_color_ac%;
+
+redefine %leg_color_top_middle_crr% = 
+  if %leg_color_top_middle% <> -1 then
+    %leg_color_top_middle%
+  else
+    %leg_color_top_crew%;
+
+redefine %leg_color_top_middle_crew% = 
+  if %leg_color_top_middle% <> -1 then
+    %leg_color_top_middle%
+  else
+    %leg_color_top_crew%;
+
+%leg_color_top_middle% =
+    if %rudob_status_display% and leg.%is_flight_duty% and leg.%has_landed% then
+        %color_landed%
+    else if %rudob_status_display% and leg.%is_flight_duty% and leg.%is_airborne% then
+        %color_airborne%
+    else if %rudob_status_display% and leg.%is_flight_duty% and leg.%is_off_block% then
+        %color_off_block%
+    else
+        -1;
+
+%leg_color_bottom_middle_leg% = -1;
+
+
+/* Duty code marker */
+%rudob_display_dutycode_color% =
+  parameter True
+  remark "Show markers for training duty codes.";
+  
+redefine %leg_color_bottom_middle_crew% =
+  if %rudob_display_dutycode_color% and %is_training% then
+    11
+  else %leg_color%;
+
+%is_training% =
+  /* Training codes */
+  leg.%is_flight_duty% and training.%has_duty_code% or
+  leg.%is_school_flight% and duty_code.%leg_has_duty_code% or
+  /* Simulator codes don't have position code  */
+  leg.%is_simulator% and training.%simulator_duty_code% <> "A";
+
+/*******************************************************************
+**
+** Section 3: Rudobs
+**
+********************************************************************/
+
+/*******************************************************
+ * 3.1 NOW TIMELINE
+ *******************************************************/
+%show_now_time_line% = 
+  parameter true 
+  remark "RUDOB: Show timeline";
+
+%rudob_now_time_line_start% =
+  if %show_now_time_line% 
+  then fundamental.%now%
+  else 01Jan1986;
+
+%rudob_time_line_len% = 0:00;
+%rudob_now_time_line_color% = 6;
+%rudob_now_time_layer% = true;
+
+
+/*******************************************************
+ * 3.2 Min rest after duty
+ *******************************************************/
+ 
+redefine %rudob_show_duty_min_rest_p% = 
+  parameter FALSE
+  remark "Show markers for minimum required rest time after a duty";
+
+redefine %rudob_show_duty_min_rest% =
+  %rudob_show_duty_min_rest_p% and not %is_reference_roster_view%;
+
+/* The rudob itself is identical to the original pairing implementation */ 
+
+redefine %rudob_show_rest_required_trip_p% =
+  parameter False
+  remark "Show markers for minimum rest after a trip";
+  
+redefine %rudob_show_trip_min_rest% = 
+  %rudob_show_duty_min_rest_p% and not %is_reference_roster_view%;
+
+/*******************************************************
+ * 3.4 Briefing/Debriefing 
+ *******************************************************/
+redefine %rudob_briefing_time_color% = 
+  if leg.%checked_in% then
+    %color_brief_debrief_checked_in%
+  else if leg.%has_frozen_duty_start% then
+    %color_frozen_brief%
+  else
+    %color_brief_debrief%;
+    
+redefine %rudob_scheduled_briefing_time_text% = 
+  if leg.%has_frozen_estimated_block_off% then
+    format_time(leg.%activity_updated_scheduled_start_time_utc%, "Briefing at frozen estimated block-off (%H:%02M)")
+  else
+    "Scheduled briefing";
+
+redefine %rudob_briefing_time_text% = 
+  let ciover = not void(leg.%briefing_override%),
+      ciin   = leg.%checked_in%;
+  if ciover then
+    if ciin then
+      "Briefing(Manually set) - Checked in"
+    else
+      "Briefing(Manually set)"
+  else 
+    if ciin then
+      "Briefing - Checked in"
+    else
+      "Briefing";
+
+redefine %rudob_debriefing_time_color% = 
+  /* Changing the check-out colour really fools the eye. The light green marker
+     is something you scan for to find checked-in crew. Leaving check-out markers
+     on the roster makes you search for the wrong crew. */
+  %color_brief_debrief%;
+
+redefine %rudob_debriefing_time_text% = 
+  let coover = not void(leg.%debriefing_override%), /* > 0:00,*/
+      coout  = leg.%checked_out%;
+  if coover then
+    if coout then
+      "Debriefing(Frozen) - Checked out"
+    else
+      "Debriefing(Frozen)"
+  else 
+    if coout then
+      "Debriefing - Checked out"
+    else
+      "Debriefing";
+
+/* USE THIS CODE TO REMOVE BRIEFING RUDOBS WHEN CREW IS CHECKED IN
+
+  redefine %rudob_briefing_time_length% =
+  
+  if duty.%checked_in%
+  then 
+    0:00
+  else
+    %rudob_briefing_time_length_default%;
+*/
+
+/* The purpose of this redefine is to hide the normal checkin rudob
+   when frozen estimated block-off is used */
+redefine %rudob_briefing_time_length% =  
+  if leg.%has_frozen_estimated_block_off% and not default(leg.%checked_in%, false)
+  then 
+    0:00
+  else
+    %rudob_briefing_time_length_default%;
+
+                                    
+/* Subpart Q rudobs - replaces point rudobs */
+/* Remaining FDP */
+%rudob_fdp_indicator_display_p% = 
+  parameter TRUE
+  remark "Show fdp limit indicator";
+
+%rudob_fdp_indicator_display% =
+  %rudob_fdp_indicator_display_p% and
+  not %is_reference_roster_view%;
+  
+%rudob_fdp_valid% =
+  duty_period.%is_fdp% and
+  fdp.%is_last_leg_in_fdp%;
+
+%rudob_fdp_indicator_length% = 
+  if %rudob_fdp_valid% and %rudob_fdp_indicator_display% then 
+    %length_rudob_fdp% 
+  else 0:00;
+
+%rudob_fdp_indicator_start% =
+    leg.%end_utc%;
+
+%rudob_fdp_indicator_text% =
+  concat("FDP indicator. Remaining time: ", %reltime2str%(%_remaining_fdp%));
+  
+%_remaining_fdp% = oma16.%max_daily_fdp% - fdp.%time%;
+
+%length_rudob_fdp% =
+  nmax(%_remaining_fdp%, 0:01);
+
+%rudob_fdp_indicator_color% = 31;
+  
+/* Remaining FDP in unforeseen circumstances */
+
+%rudob_fdp_uc_indicator_display_p% =
+  parameter true
+  remark "Show marker for remaining FDP in unforeseen circumstances";
+
+%rudob_fdp_uc_indicator_display% =
+  %rudob_fdp_uc_indicator_display_p% and
+  not %is_reference_roster_view%;
+
+%rudob_fdp_uc_indicator_length% =
+  if %rudob_fdp_uc_indicator_display% and %rudob_fdp_valid% then
+    %length_rudob_fdp_uc%
+  else 0:00;
+    
+%_remaining_fdp_uc% = 
+  oma16.%max_duty_fdp_uc% - fdp.%time%;
+
+%length_rudob_fdp_uc% =
+  nmax(%_remaining_fdp_uc%, 0:01) - %length_rudob_fdp%;
+
+%rudob_fdp_uc_indicator_start% =
+  %rudob_fdp_indicator_start% + %length_rudob_fdp%;
+
+%rudob_fdp_uc_indicator_text% =
+  concat("FDP indicator UC. Remaining time: ",
+         %reltime2str%(%_remaining_fdp_uc%));
+  
+%rudob_fdp_uc_indicator_color% = 30;
+%rudob_fdp_indicator_bottom% = 55;
+%rudob_fdp_indicator_top% = 60;
+
+/*******************************************************
+ * 3.6 Bought days
+ *******************************************************/
+
+%is_co_type%(Int idx)  = bought_days.%is_co_type_account_name%(bought_days.%account_name_for_match%(idx));
+
+%rudob_bought_days_display_p% = 
+  parameter true
+  remark "Show bought days in roster for planning period.";
+
+%rudob_bought_days_display% =
+  %rudob_bought_days_display_p% and not %is_reference_roster_view%;
+
+%rudob_bought_day_start%(Int idx)  = if %rudob_bought_days_display% then crew.%utc_time%(bought_days.%start_time%(idx)) else void_abstime;
+%rudob_bought_day_length%(Int idx)  = if void(%rudob_bought_day_start%(idx)) then 0:00 else bought_days.%bought_days_length%(idx);
+%rudob_bought_day_colour% = %color_bought_day%;
+%rudob_bought_day_top%(Int idx)    = if %is_co_type%(idx)    then 40 else 100;
+%rudob_bought_day_bottom%(Int idx) = 0;
+
+%rudob_bought_day_text%(int match) =
+  default(
+    concat(
+      if %is_co_type%(match) then "OT compensation on Fday"
+      else concat(
+        "Buy: ",
+        bought_days.%bought_day_type%(match),
+        if bought_days.%account_name_for_match%(match) = bought_days.%comp_account_name% then " +COMP"
+          else if bought_days.%account_name_for_match%(match) = bought_days.%bought8_account_name% then " <= 6:00 hrs"
+          else if bought_days.%account_name_for_match%(match) = bought_days.%account_name% then " > 6:00 hrs"
+          else if bought_days.%account_name_for_match%(match) = bought_days.%bought_f3s_account_name% then " +F3S"
+          else if bought_days.%account_name_for_match%(match) = bought_days.%co_on_f_account_name% then " (with C/O)"
+          else if bought_days.%account_name_for_match%(match) = bought_days.%bought_f3_account_name% then " <= 6:00 hrs"
+          else if bought_days.%account_name_for_match%(match) = bought_days.%bought_f3_2_account_name% then " > 6:00 hrs"
+          else ""),
+      " ",
+      %bought_day_comment_field%(match),
+      " By: ",
+      bought_days.%bought_day_username%(match)) ,
+    ""); 
+  
+%bought_day_comment_field%(int match) = 
+  let comment = default(bought_days.%bought_day_comment%(match), "");
+  if length(comment) = 0
+  then "" 
+  else concat("(", substr(comment, 1, 15), ") ");
+
+/*******************************************************
+ * 3.7 Blank days
+ *******************************************************/
+ 
+/* Blank day rudobs differ in height and text depending if the blank days
+** are currently INFORMED, or if they just at some point were INFORMED.
+**
+** NB! If a BL-day is bought, then the BL rudob is not shown
+*/
+
+%rudob_blank_days_display_p% = 
+  parameter true
+  remark "Show blank days in roster for planning period.";
+
+%rudob_blank_days_display% =
+  %rudob_blank_days_display_p% and not %is_reference_roster_view% and
+  not bought_days.%leg_is_bought%;
+ 
+%rudob_blank_day_colour% =  18;
+
+%rudob_blank_day_start%(Int idx) =
+  if not %rudob_blank_days_display% then
+    void_abstime
+  else
+    crew.%utc_time%(rescheduling.%blank_day_start_by_index%(idx));
+
+%rudob_blank_day_length%(Int idx) =
+  rescheduling.%blank_day_length_by_index%(idx);
+
+%rudob_blank_day_bottom%(Int idx) =
+  if rescheduling.%blank_day_informed%(idx)
+  then 0
+  else 25;
+  
+%rudob_blank_day_top%(Int idx) =
+  if rescheduling.%blank_day_informed%(idx)
+  then 100
+  else 75;
+  
+%rudob_blank_day_text%(Int idx) =
+  concat(if rescheduling.%blank_day_informed%(idx)
+         then "Informed"
+         else "Was",
+         " BL-day in ", crew.%homebase%);
+
+
+/*******************************************************
+ * 3.8 Crew leased days
+ *******************************************************/
+ 
+/* Crew leased to non-SAS companies during these days*/
+
+%rudob_crew_leased_days_display_p% = 
+  parameter true
+  remark "Show crew leased days in roster for planning period.";
+
+%rudob_crew_leased_days_display% =
+  %rudob_crew_leased_days_display_p% and not %is_reference_roster_view%;
+%rudob_crew_leased_day_start%  = if %rudob_crew_leased_days_display% then crew.%utc_time%(crew.%leased_validfrom_rudob%) else void_abstime;
+%rudob_crew_leased_day_length%  = if void(%rudob_crew_leased_day_start%)  then 0:00 else crew.%leased_days_length%;
+%rudob_crew_leased_day_colour% = %color_crew_leased_day%;
+%rudob_crew_leased_day_text% =
+  default(concat("Crew leased from ", 
+                 format_time(crew.%leased_validfrom%,"%02d%02b%02y"),
+                 " to ",
+                 format_time(crew.%leased_validto%,"%02d%02b%02y"),
+                 default(%crew_leased_day_comment_field%,"")), ""); 
+  
+%crew_leased_day_comment_field% = 
+  let comment = crew.%leased_day_comment%; 
+  if length(comment) = 0
+  then "" 
+  else concat(" (", substr(comment, 1, 15), ") ");
+
+/*******************************************************************
+**
+** Section 4: Rotation view mappings
+**
+********************************************************************/
+  
+/*******************************************************************
+**
+** Section 5: Redefine Crew Header
+**
+********************************************************************/
+
+/* Text */
+redefine %crew_header_text_top_left% =
+  if not %is_reference_roster_view% then
+    default(substr(crew.%login_name%,1,8),"No name") /*max 8 characters*/
+  else
+    "";
+
+redefine %crew_header_text_top_middle% = "";
+redefine %crew_header_text_top_right% =
+  if not %is_reference_roster_view%
+    then if calendar.%is_now_in_pp%
+           then default(crew.%titlerank_now%,"")
+           else default(crew.%titlerank%,"")
+    else "";
+
+redefine %crew_header_text_bottom_left% =
+  if not %is_reference_roster_view% then
+    default(crew.%employee_number%,
+	    default(crew.%id%,"No empl. nr"))
+  else
+     %name_reference_plan%;
+
+redefine %crew_header_text_bottom_middle% =
+  if not %is_reference_roster_view%
+    then  %_special_qual%(%special_qual%)
+    else "";
+    
+%special_qual% = 
+  if calendar.%is_now_in_pp%
+    then crew.%special_qual_now%
+    else crew.%special_qual_pp_start%;
+
+%_special_qual%(String sp_q) =
+  if default(sp_q, "") <> ""
+    then sp_q
+    else default(crew.%agreement_details%,"");
+
+redefine %crew_header_text_bottom_right% =
+  if not %is_reference_roster_view%
+    then if calendar.%is_now_in_pp%
+           then default(crew.%homebase_now%,"")
+           else default(crew.%homebase%,"")
+    else "";
+
+/* Colors */
+redefine %leg_color% =
+  /* Leg colors for rosters and trips. 
+     Rotations are colored by %leg_color_ac% */
+  if %now_before_pp_end% and %leg_after_publication_time% and %is_roster% then
+    %color_after_publication_time%
+  else if leg.%is_not_operating% or leg.%is_deadhead% or %extra_seat% then
+    %color_default%
+  else if leg.%is_manual_flight% then
+    %color_manual_flight%
+  else if leg.%is_flight_duty% then
+    /* Flight leg coloring */
+    if %is_roster% then
+      /* Roster view coloring */
+      if crew_pos.%underrostered_in_pos% then
+        %_color_underrostered%
+      else if crew_pos.%overrostered_in_pos% then
+        %color_overrostered%
+      else
+        %color_flight_leg%
+    else
+      /* Trip view coloring */
+      if crew_pos.%overbooked_in_pos% then
+        %color_overbooked%
+      else
+        %color_flight_leg%
+  else if leg.%is_ground_duty_leg% then
+    /* Ground duty leg coloring */
+    if %is_roster% then
+      /* Roster view coloring */
+      if crew_pos.%gd_underrostered% then
+        %color_gd_underrostered%
+      else if crew_pos.%gd_overrostered% then
+        %color_gd_overrostered%
+      else
+        default(task.%color%(leg.%code%), %color_default%)
+    else
+      /* Trip view coloring */
+      if crew_pos.%overbooked_in_pos% then
+        %color_overbooked%
+      else
+        default(task.%color%(leg.%code%), %color_default%)      
+  else if duty.%is_privately_traded% and (duty.%is_freeday% or duty.%is_vacation%) then
+  		%color_privately_traded_free_day%
+  else
+    default(task.%color%(leg.%code%), %color_default%);
+
+%now_before_pp_end% = fundamental.%now% < %pp_end%;
+%leg_after_publication_time% = leg.%start_hb% > %pp_end%;
+
+%extra_seat% = extra_seat;
+
+%_color_underrostered% =
+  if crew_pos.%underrostered_jar% then
+    %color_underrostered_jar%
+  else
+    %color_underrostered%;
+
+/* Leg color in rotation view */
+%leg_color_ac% =
+ if leg.%is_not_operating% then
+    %color_default% 
+ else if leg.%is_active_flight% then
+    %color_flight_leg%
+ else
+    default(task.%color%(leg.%code%), %color_default%);
+
+redefine %color_crew_header_top% = 
+    %color_default%;
+
+redefine %crew_header_color_top_left% =
+    %color_default%;
+
+redefine %crew_header_color_top_middle% =
+    %color_default%;
+
+redefine %crew_header_color_top_right% = 
+    %color_default%;
+    
+redefine %crew_header_color_bottom_left%	= 
+  if annotations.%on_crew% and not %is_reference_roster_view% then 
+    %color_annotation%
+  else
+    28; /* default background, to get rid of legality marking */
+
+redefine %crew_header_color_bottom_middle% = 28; /* default background, to get rid of legality marking */
+
+redefine %crew_header_color_bottom_right% = 28; /* default background, to get rid of legality marking */
+
+/*******************************************************************
+**
+** Section 6.1: Do Not Publish rudob
+**
+********************************************************************/
+
+%rudob_do_not_publish_display_p% = 
+  parameter true
+  remark "Show day which shall not be published in roster for planning period.";
+
+%rudob_do_not_publish_display% =
+  %rudob_do_not_publish_display_p% and not %is_reference_roster_view%;
+
+%rudob_do_not_publish_start%(Int idx) =
+  if %rudob_do_not_publish_display% then
+    crew.%utc_time%(publish.%do_not_publish_start%(idx))
+  else
+    void_abstime;
+  
+%rudob_do_not_publish_length%(Int idx) = 
+  crew.%utc_time%(publish.%do_not_publish_end%(idx)) - crew.%utc_time%(publish.%do_not_publish_start%(idx));
+    
+%rudob_do_not_publish_colour% =  %color_do_not_publish%;
+    
+%rudob_do_not_publish_text% = 
+  "This period will NOT be PUBLISHED when saving";
+
+/*******************************************************************
+**
+** Section 6.3: Privately traded day rudob
+**
+********************************************************************/
+
+%rudob_privately_traded_day_p% =
+  parameter true
+  remark "Mark privately traded.";
+
+%rudob_privately_traded_day_display% =
+  %rudob_do_not_publish_display% and not %is_reference_roster_view%;
+
+%rudob_privately_traded_day_start%(Int idx) =
+  if %rudob_do_not_publish_display% then
+    attributes.%roster_start_by_idx%(attributes.%roster_privatelytraded%, crew.%id%, idx)
+  else
+    void_abstime;
+
+%rudob_privately_traded_day_length%(Int idx) =
+    attributes.%roster_end%(
+        attributes.%roster_privatelytraded%, crew.%id%, attributes.%roster_start_by_idx%(attributes.%roster_privatelytraded%, crew.%id%, idx)
+      )
+    - attributes.%roster_start_by_idx%(attributes.%roster_privatelytraded%, crew.%id%, idx);
+
+%production_day_before_ptd%(int idx) =
+    attributes.%roster_str%(
+        attributes.%roster_privatelytraded%,
+        crew.%id%,
+        %rudob_privately_traded_day_start%(idx)) = "Production";
+
+
+%triptrade_day_before_ptd%(int idx) =
+    default(
+        attributes.%roster_si%(
+            attributes.%roster_privatelytraded%,
+            crew.%id%,
+            %rudob_privately_traded_day_start%(idx))
+             , "") = "TripTrade";
+
+
+%rudob_privately_traded_day_bg_colour%(Int idx) = 
+	if %production_day_before_ptd%(idx) then
+		%color_privately_traded_day_J3F_bg%
+	else
+		%color_privately_traded_day_J3P_bg%;
+
+
+%rudob_privately_traded_day_bottom%(Int idx) =
+	if %triptrade_day_before_ptd%(idx)
+	then 50
+	else 0;
+
+
+%rudob_privately_traded_day_text%(Int idx) =
+    let base_text =
+        if %production_day_before_ptd%(idx)
+        then "Private trade, J3P"
+        else "Private trade, was day off, J3F";
+
+    if %triptrade_day_before_ptd%(idx)
+    then concat(base_text, "; TripTrade")
+    else base_text;
+
+
+/*******************************************************************
+**
+** Section 7: Inform-at-Save rudob
+**
+********************************************************************/
+
+%rudob_informed_period_display_p% = 
+  parameter true
+  remark "Show day which will be marked as informed to crew.";
+
+
+%rudob_informed_period_display% =
+  %rudob_informed_period_display_p% and not %is_reference_roster_view%;
+
+
+%rudob_informed_period_start%(Int idx)  =
+    if %rudob_informed_period_display%
+    then crew.%utc_time%(publish.%inform_start%(idx))
+    else void_abstime;
+
+
+%rudob_informed_period_length%(Int idx)  =
+    if void(%rudob_informed_period_start%(idx))
+    then 0:00
+    else crew.%utc_time%(publish.%inform_end%(idx))  - %rudob_informed_period_start%(idx);
+
+
+%rudob_informed_period_colour% =
+    %color_informed_period%;
+
+
+%rudob_informed_period_text%(Int idx) =
+    let base_text = "This period will be considered INFORMED when saved.";
+
+    if default(publish.%inform_si%(idx), "") = "TripTrade"
+    then concat(base_text, " (TripTrade)")
+    else base_text;
+
+
+/*******************************************************************
+**
+** Section 7.1: Published-Not-Informed rudob
+**
+********************************************************************/
+
+%rudob_pubnotinf_display_p% = 
+  parameter true
+  remark "Show day with published changes that are not informed.";
+
+%rudob_pubnotinf_display% =
+  %rudob_pubnotinf_display_p% and not %is_reference_roster_view%;
+
+%rudob_pubnotinf_start%(Int idx)   =
+  if %rudob_pubnotinf_display% then
+    crew.%hb_date_as_utc_time%(publish.%pubnotinf_start%(idx))
+  else
+    void_abstime;
+
+%rudob_pubnotinf_colour% = %color_published_not_informed%;
+
+%rudob_pubnotinf_end%(Int match) =
+  crew.%hb_date_end_as_utc_time%(publish.%pubnotinf_end%(match));
+
+%rudob_pubnotinf_length%(Int match) =
+  %rudob_pubnotinf_end%(match) - %rudob_pubnotinf_start%(match);
+
+%rudob_pubnotinf_text%(Int match) =
+  let std = format_time(crew.%hb_date%(publish.%pubnotinf_start%(match)),           "%02d%b"),
+      etd = format_time(crew.%hb_date_end%(publish.%pubnotinf_end%(match)) - 24:00, "%02d%b"),
+      dl_delta = default(publish.%pubnotinf_deadline%(match),
+                            publish.%pubnotinf_start%(match)) - %now%,
+      dl  = if dl_delta < 0:00 then format_time(-dl_delta, "-%hh%02M ")
+                               else format_time(dl_delta, "+%hh%02M "),
+      /* 'compat' puts a '*' in the text to indicate that there is no firstmodst/lastmodet
+      ** in the crew_notification entry; i.e. a compatibility issue between entries created
+      ** before these fields were introduced in the model. */
+      compat = if void(publish.%pubnotinf_firstmodst%(match)) then "*" else "";
+  concat(compat,
+         "NOTINF", 
+         dl,
+         if etd = std
+         then std
+         else if substr(std, 3, 3) = substr(etd, 3, 3)
+         then concat(substr(std ,1, 2), "-", etd)
+         else concat(std, "-", etd),
+         ": ", publish.%pubnotinf_failmsg%(match));
+  
+
+/*******************************************************************
+**
+** Section 8: Make some rudobs invisible for reference views
+***           (when viewing PUBLISHED/INFORMED/...)
+**
+********************************************************************/
+
+redefine %rudob_show_briefing_debriefing_time% =
+  %rudob_show_briefing_debriefing_time_p% and not %is_reference_roster_view% and not leg.%is_simulator%;
+
+/*******************************************************************
+**
+** Section 9: TrackingGuiExt definitions
+**
+********************************************************************/
+
+/* This is used to filter the Trips view.
+   Filter is based on (salvad 2009-02-12) BZs: 33852, 27596 (comment #7):
+                 Active         Not           Flight
+                 flight      -  operating  -  duty
+                
+   Flight:        True (x)   - False       - True      |
+                                                       |> Select
+   Training:      False      - False       - False (x) |
+   
+   Cancel flight: False      - True        - True      |
+                                                       |> Filter-out
+   Deadhead:      False      - False       - True      |
+   
+   */
+redefine export %trip_assigned_check% =
+  crew_pos.%trip_assigned% > 0 and
+   (any(leg(trip), not leg.%is_flight_duty%) or 
+   any(leg(trip), leg.%is_active_flight%));
+  
+/******************************************
+** Section 10: Delayed trip/duty (scheduled, estimated and actuals)
+********************************************/
+%rudob_show_flight_movements% =
+  parameter TRUE
+  remark "Show flight movements";
+
+%rudob_sched_off_block_start% = 
+	if leg.%activity_scheduled_start_time_utc% < leg.%start_utc% 
+	  then leg.%activity_scheduled_start_time_utc%
+	else
+	  leg.%start_utc%;
+
+%rudob_sched_off_block_len% = 
+	if not %rudob_show_flight_movements% then 
+    0:00
+	else if leg.%start_utc% < leg.%activity_scheduled_start_time_utc% then 
+	  leg.%activity_scheduled_start_time_utc% - leg.%start_utc%
+  else 
+    leg.%start_utc% - leg.%activity_scheduled_start_time_utc%; 
+
+%rudob_sched_off_block_bottom% = 0;
+%rudob_sched_off_block_top% = 20;
+%rudob_sched_off_block_text% = 
+  if leg.%start_delay% > 0:00 then 
+    concat(leg.%flight_carrier%,format_int(leg.%flight_nr%,"%03d"),format_time(leg.%start_delay%, " departure delayed %h:%02M"))
+  else 
+    concat(leg.%flight_carrier%,format_int(leg.%flight_nr%,"%03d"),format_time(abs(leg.%start_delay%), " departure ahead of time %h:%02M"));
+%rudob_sched_off_block_color% = %color_sch_off_block_color%;
+%rudob_sched_off_block_layer% = 1;
+%rudob_sched_off_block_delimitation% = false;
+
+%rudob_sched_in_block_start% = 
+	if leg.%end_utc% >= leg.%activity_scheduled_end_time_utc%
+	  then leg.%activity_scheduled_end_time_utc%
+	else 
+	  leg.%end_utc%;
+
+%rudob_sched_in_block_len% = 
+	if not %rudob_show_flight_movements% then 
+    0:00
+  else if leg.%end_utc% > leg.%activity_scheduled_end_time_utc% then 
+    leg.%end_utc% - leg.%activity_scheduled_end_time_utc%
+  else
+    leg.%activity_scheduled_end_time_utc% - leg.%end_utc%;
+
+%rudob_sched_in_block_bottom% = 0;
+%rudob_sched_in_block_top% = 20;
+%rudob_sched_in_block_text% = 
+  let diff = leg.%end_utc% - leg.%activity_scheduled_end_time_utc%;
+  if diff > 0:00 then 
+    concat(leg.%flight_carrier%,format_int(leg.%flight_nr%,"%03d"),format_time(diff, " arrival delayed %h:%02M"))
+  else 
+    concat(leg.%flight_carrier%,format_int(leg.%flight_nr%,"%03d"),format_time(abs(diff), " arrival ahead of time %h:%02M"));
+%rudob_sched_in_block_color% = %color_sch_in_block_color%;
+%rudob_sched_in_block_layer% = 1;
+%rudob_sched_in_block_delimitation% = false;
+
+/******************************************
+** Section 11: Meal break rudob
+********************************************/
+
+%rudob_meal_stop_start% = 
+  leg.%end_UTC%;
+
+%rudob_meal_stop_length% = 
+  if meal.%is_assigned_meal_stop% then
+      meal.%meal_stop_req_connection_time%
+  else
+    0:00;
+
+%rudob_meal_stop_bottom% = 25;
+%rudob_meal_stop_top% = 30;
+
+%rudob_meal_stop_text% = 
+  if meal.%is_manual_set% then
+    format_time(meal.%meal_stop_req_connection_time%, "Meal stop, manual (%h:%M)")
+  else
+    format_time(meal.%meal_stop_req_connection_time%, "Meal stop (%h:%M)"); 
+
+%rudob_meal_stop_color% =
+  if meal.%is_manual_set% then
+    %color_meal_stop_manual%
+  else
+    %color_meal_stop%;
+    
+
+
+%debug_1_start% = duty.%start_utc%;
+%debug_1_len% = duty.%end_utc% - duty.%start_utc%;
+%debug_1_bottom% = 20;
+%debug_1_top% = 25;
+%debug_1_color% = "Black";
+%debug_1_layer% = 1;
+%debug_1_text% = "Duty";
+%debug_1_delimitation% = true;
+
+/* end of file */

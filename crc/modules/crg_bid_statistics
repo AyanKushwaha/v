@@ -1,0 +1,196 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ *   Bid statistics;
+ *     1. Active bid types
+ *     2. General Bid Statistics
+ *     3. Trip bids
+ *     4. Timeoff bids
+ *     5. Selects from bid type
+ */
+
+root module crg_bid_statistics
+
+import bid;
+import iterators;
+import fundamental;
+import studio_bid;
+import studio_select;
+
+/*
+**     1. Active bid types
+*/
+
+%bid_type_ix% = %_bid_type%(%py_index%);
+
+table bid_config_types(int i) =
+  i -> String %_bid_type%;
+  External bid.%config_table%;
+  row_number -> Type;
+end
+
+table bid_config_max =
+  0 -> int %nr_bid_types%;
+  External bid.%config_table%;
+  < row_number -> count(row_number);
+end
+
+
+/*
+**   2. General Bid Statistics
+*/
+
+%total_crew_in_plan% = 
+  count(roster_set)
+  where(%is_roster%);
+
+%no_of_bidding_crew% = 
+  count(roster_set) 
+  where(%is_roster% 
+        and bid.%crew_have_any% 
+        and bid.%crew_can_have%);
+  
+%percentage_of_crew_with_bids% = 
+  (100*%no_of_bidding_crew%) / %total_crew_in_plan%;
+
+%tot_no_of_bids% = 
+  sum(roster_set, bid.%crew_num_valid_bids%)
+  where(%is_roster% and bid.%crew_can_have%);
+  
+%tot_no_of_general_bids%(Int btype) = 
+  sum(roster_set, bid.%crew_nr_general_bids_of_type%(%_bid_type%(btype)));
+
+%tot_no_of_dated_bids%(Int btype) = 
+  sum(roster_set, bid.%crew_nr_dated_bids_of_type%(%_bid_type%(btype)));
+
+/* Only include crew with a valid bid ratio, i.e. have granted bids in ref */
+%average_bid_ratio% =
+  default(avg(roster_set, bid.%points_above_target_raw%)
+            where (bid.%crew_have_any% 
+                   and bid.%crew_can_have%),
+            0);
+
+/* Only include crew with a valid bid ratio, i.e. have granted bids in ref */
+%no_of_crew_below_target% = 
+  count(roster_set)
+    where (studio_bid.%crew_is_below_target% 
+           and bid.%crew_have_any% 
+           and bid.%crew_can_have%);
+
+%percentage_of_crew_below_target% =
+  (100 * %no_of_crew_below_target%) / nmax(%no_of_bidding_crew%, 1); /* avoid potential division by zero */
+
+/* Only defined for StringDaysOff and only used in BidStatistics report */
+%no_of_days_in_bid%(Int no) = 
+  if bid.%type_of_bid%(no) = "StringDaysOff" then
+    (bid.%abs2%(no, 0) - bid.%abs1%(no, 0))/24:00
+  else
+    0;
+    
+
+/* Let rave decide about additional info instead of changing report */
+table customized_stats =
+  %py_index% -> %custom_header_ix%, %custom_value_ix%;
+  - -> "", 0;
+end
+
+
+/*
+**   3. Trip bids
+*/
+
+/* maybe consider  %roster_bid_carry_out_window% */
+%bid_valid_pp%(int no) = 
+  overlap(bid.%abs1%(No, 0), bid.%abs2%(No, 0), 
+          %pp_start%, %publ_period_end% + bid.%roster_bid_carry_out_window%/*%pp_end%*/) > 0:00;
+
+%bid_is_time_off_bid%(int no) =
+  default(bid.%type%(no, 0) = "TimeOff", false);
+
+export %count_match_trip_bid_crew%(String type,
+                        Bool dated,
+                        Bool granted)=
+  /* Either count number of bids or number of times granted */
+  sum(times(bid.%crew_num_bids%), if (not granted) then 1
+                 else bid.%get_roster_granted_value_report%(%times_index_0%))
+  where (not %bid_is_time_off_bid%(%times_index_0%)
+	 and %bid_valid_pp%(%times_index_0%)
+         and (type = ""
+              or %match_bid%(%times_index_0%, type))
+         /* A dated bid has a period less than 2 days */ 
+         and (not dated 
+              or (bid.%abs2%(%times_index_0%, 0) - bid.%abs1%(%times_index_0%, 0)) / 23:59 <2)
+        );
+
+
+%match_bid_part%(Int bidNr, Int bidPart, String type, String str1) =
+  bid.%type%(bidNr, bidPart) = type
+  and (str1 = "" or bid.%str1%(bidNr, bidPart) = str1);
+
+table match_bid(Int bidNr, String type)=
+  type -> %match_bid%;
+
+  "TimeOff" -> %bid_is_time_off_bid%(bidNr);
+
+  - -> bid.%type%(bidNr, 0) = type;
+end
+
+
+/*
+**   4. TimeOff bids
+*/
+
+%nr_of_crew_timeoff_ix% =
+  %nr_crew_match_timeoff%("", false, 0);
+
+%nr_of_timeoff_ix% =
+  %nr_match_timeoff%("", false, 0);
+
+%nr_of_granted_timeoff_ix% =
+  %nr_match_timeoff%("", true, 0);
+
+%nr_match_timeoff%(String str1, Bool granted, Int p_length) =
+  sum(roster_set,
+      %count_match_time_off_crew%(str1, granted,p_length))
+  where(%is_roster%);
+
+%nr_crew_match_timeoff%(String str1, Bool granted, Int p_length) =
+  count(roster_set)
+  where(%is_roster%
+        and %count_match_time_off_crew%(str1, granted, p_length) > 0);
+
+
+%count_match_time_off_crew%(String str1, Bool granted, Int p_length) =
+  /* Either count number of bids or number of times granted */
+  sum(times(bid.%crew_num_bids%), if (not granted) then 1
+                 
+                 else bid.%get_roster_granted_value_report%(%times_index_0%))
+  where (%bid_is_time_off_bid%(%times_index_0%)
+	 and (%bid_valid_pp%(%times_index_0%))
+         and (str1 = "ANY"
+              or bid.%str1%(%times_index_0%, 0) = str1)
+         and (p_length = 0 or 
+              (bid.%abs2%(%times_index_0%, 0) - bid.%abs1%(%times_index_0%, 0)) / 23:59 
+              = p_length));
+
+/*
+**  5. Selects from bid type
+**     ... maybe move to studio code
+*/
+
+%bid_type_csl_int% = %_bid_type%(studio_select.%csl_int_1%);
+
+export %nr_granted_bids_p% =
+  %count_match_trip_bid_crew%(%bid_type_csl_int%,
+           false, true);
+
+%has_bid_p% = 
+  %count_match_trip_bid_crew%(%bid_type_csl_int%,
+           false, false) > 0;
+
+%has_granted_bid_p% = 
+  %nr_granted_bids_p% > 0;
+
+%has_not_granted_bid_p% = 
+  %has_bid_p% and not %has_granted_bid_p%;  

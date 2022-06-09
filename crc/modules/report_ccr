@@ -1,0 +1,350 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   List variables used in rostering-only reports.
+ *
+ * Created by:
+ *   Erik Gustafsson, 12-April-2007
+ *
+ * Major changes:
+ *
+ */
+ 
+root module report_ccr
+
+import fundamental;
+import calendar;
+import trip;
+import crew_pos;
+import roster_cost;
+import iterators;
+import planning_area;
+import levels;
+import roster_constraints;
+import accumulators;
+import task;
+import leg;
+import crew;
+import training;
+import crew_warnings;
+import rules_training_ccr;
+import wop;
+import rules_indust_ccr;
+  
+/*
+ ** Basic Definitions
+ */
+
+%next_month_end% = round_down_month(add_months(%pp_end%, 1));
+%current_year% = round_down_year(%pp_start%);
+%previous_year% = round_down_year(add_years(%pp_start%,-1));
+
+/* Date format like Jun 1, 2007 */
+%format_string% = "%b %d, %Y";
+
+/* Date format like 1 Jun 2007 */
+%format_string2% = "%d %b %Y";
+
+%unassigned_trip_to_be_counted% =
+    (not %is_roster%) and
+    (not hidden) and
+    planning_area.%trip_is_in_planning_area% and
+    crew_pos.%trip_assigned% > 0;
+
+set course_office_day_set = "MET", "COD", "OFD";
+export %course_office_day% =
+    default(task.%group%(leg.%code%), "---") in course_office_day_set;
+	/*substr(leg.%code%,1,2) = "MT" or
+	substr(leg.%code%,1,2) = "OK" or
+	substr(leg.%code%,1,2) = "UP";*/
+
+export iterator different_task_codes =
+    partition(leg)
+    by(leg.%code%);
+end
+
+/* Sim Mismatching PC Dates Info */
+export %recurrent_type_mismatch_expiry_date% =
+  not (training.%pc_opc_match_pp_start% 
+       and training.%pc_opc_match_pp_end%);
+  
+%pca3_month% =
+  default(%expiry_month_inclusive%(training.%pc_a3_date%), "N/A");
+  
+%opca3_month% =
+  default(%expiry_month_inclusive%(training.%opc_a3_date%), "N/A");
+
+%pca4_month% =
+  default(%expiry_month_inclusive%(training.%pc_a4_date%), "N/A");
+
+%opca4_month% =
+  default(%expiry_month_inclusive%(training.%opc_a4_date%), "N/A");
+
+%pca5_month% =
+  default(%expiry_month_inclusive%(training.%pc_a5_date%), "N/A");
+
+%opca5_month% =
+  default(%expiry_month_inclusive%(training.%opc_a5_date%), "N/A");
+
+%pca3a5_month% =
+  default(%expiry_month_inclusive%(training.%pc_a3a5_date%), "N/A");
+
+%opca3a5_month% =
+  default(%expiry_month_inclusive%(training.%opc_a3a5_date%), "N/A");
+
+/* 
+ * Rostering Statistics 
+ */
+ 
+%unassigned_crew% = crew_pos.%trip_assigned%;
+ 
+%rostering_stats_trip% =
+  %unassigned_trip_to_be_counted% and trip.%starts_in_pp%;
+
+%unassigned_trip_with_cost_element% =
+  %rostering_stats_trip% and
+  any(times(roster_cost.%unassigned_elements%),
+      roster_cost.%_days_unassigned_ix%(%times_index_0%) <> 0);
+
+%trip_unassigned_ix% = 
+    default(if roster_cost.%days_unassigned_ix% <> 0 and trip.%starts_in_pp% then 
+                %unassigned_crew%
+            else 0,0);
+ 
+%trips_unassigned% =
+  sum(trip_set, %unassigned_crew%)
+  where (%rostering_stats_trip%);
+  
+%trip_days_unassigned_ix% =
+  default(
+          if trip.%starts_in_pp% then
+            %unassigned_crew% * roster_cost.%days_unassigned_ix%
+          else
+            0,0);
+
+%days_unassigned% =
+  sum(trip_set, %unassigned_crew% * trip.%days%)
+  where (%unassigned_trip_with_cost_element%);
+  
+%trip_cost_unassigned_ix% =
+  default(if trip.%starts_in_pp% then
+            roster_cost.%unassigned_factor_p% * 
+            (%unassigned_crew% * roster_cost.%cost_unassigned_ix%)
+          else 0,0);
+  
+%cost_unassigned% =
+  sum(trip_set, %unassigned_crew% * roster_cost.%trip_cost_unassigned%)
+  where (%rostering_stats_trip%);
+  
+%rosters_assigned_ix% = 
+  count(roster_set)
+  where (roster_cost.%section_volume_ix% <> 0);
+
+%rosters_assigned_ix1_ix% = 
+  count(roster_set)
+  where (roster_cost.%volume_ix1_ix% <> 0);
+  
+%rosters_assigned% =
+  count(roster_set)
+  where (roster_cost.%volume% <> 0);
+  
+%volume_assigned_ix1_ix% =
+  sum(roster_set, roster_cost.%volume_ix1_ix%);
+
+%cost_assigned_ix% =
+  sum(roster_set, roster_cost.%section_cost_ix%);
+  
+%cost_assigned% =
+  sum(roster_set, roster_cost.%chain%);
+  
+/* Leg constraints */
+%cost_soft_max_crew_on_pc% =
+  roster_constraints.%max_crew_on_pc_on_trip_soft_cost_p%*
+  sum(roster_set,
+      count(trip_set)
+      where(trip.%starts_in_pp% and
+            training.%trip_is_pc% and
+            training.%trip_is_2x2h_opc% and
+            count(equal_trips)
+            where (training.%trip_is_pc%) = 2))/2;
+  
+%sim_uuid% =
+  first(leg(trip), leg.%uuid%)
+  where (leg.%is_simulator%);
+  
+/* Standby line distribution */
+
+/* What is the standby line need for a given base, rank, startime and date combination? */
+table standby_line_need_table(String base, String rank, Reltime start, Abstime date) =
+  base, rank, start, date -> Int %sbyln_optimal%;
+  external roster_constraints.%table_standby_line_need_p%;
+  "base", "rank", "starttime", ("validfrom", "validto"( -> "target";
+  -, -, -, - -> 0;
+end
+
+/* Does there exist a need for a given base, rank and starttime combination regardless
+   of date? */
+%sbyln_optimal_exist%(String base, String rank, Reltime start) = 
+  %_sbyln_optimal_exist%(base, rank, start) > 0;
+table standby_line_need_table2(String base, String rank, Reltime start) =
+  base, rank, start -> Int %_sbyln_optimal_exist%;
+  external roster_constraints.%table_standby_line_need_p%;
+  "base", "rank", "starttime" -> "target";
+  -, -, - -> 0;
+end
+
+/* Does crew have any standby line during pp? */
+%crew_has_sby_line_in_pp% = roster_constraints.%crew_has_sby_line_in_pp%;
+  
+  
+  
+/*****************************************************************************
+**          Illegal Training Info
+*****************************************************************************/
+
+/* Will be true for a failure */
+%illegal_training_trigger_ix% =
+  %illegal_training_trigger%(%py_index%);
+  
+%illegal_training_trigger%(Int ix) =
+  %illegal_training_valid%(ix) and
+  not %_illegal_training_trigger%(ix);
+
+%illegal_training_remark_ix% =
+  %illegal_training_remark%(%py_index%);
+  
+%illegal_training_remark%(Int ix) =
+  %_illegal_training_remark%(ix);
+
+%illegal_training_value_ix% =
+  default(
+          format_int(%illegal_training_value%(%py_index%), "%d"),"-");
+%illegal_training_limit_ix% =
+  default(
+          format_int(%illegal_training_limit%(%py_index%), "%d"),"-");
+
+%illegal_training_number_rules% = 10;
+
+%illegal_training_any_failure_pp% =
+  any(wop(chain), %illegal_training_any_failure_wop%)
+  where (wop.%in_pp%);
+
+%illegal_training_any_failure_wop% =
+  any(trip(wop), %illegal_training_any_failure_trip%)
+  where (trip.%in_pp%);
+
+%illegal_training_any_failure_trip% =
+  any(leg(trip), %illegal_training_any_failure_leg%);
+  
+%illegal_training_any_failure_leg% =
+  any(times(%illegal_training_number_rules%), 
+      %illegal_training_trigger%(%times_index_0%));
+
+      
+%illegal_training_remarks_on_leg% =
+  cat(times(%illegal_training_number_rules%), %illegal_training_remark%(%times_index_0%)) where (%illegal_training_trigger%(%times_index_0%));
+      
+table illegal_training(Int no) =
+  no ->  Bool %illegal_training_valid%,
+         String %_illegal_training_remark%,
+         Bool %_illegal_training_trigger%,
+         Int %illegal_training_value%,
+         Int %illegal_training_limit%;
+  1  ->  %valid_trng_min_experience_before_new_training_ALL%,
+         %remark_trng_min_experience_before_new_training_ALL%,
+         %trigger_trng_min_experience_before_new_training_ALL%,
+         void_int,
+         void_int;
+  2  ->  rules_training_ccr.%valid_comp_crew_with_training_flight_has_good_companion_ALL%,
+         rules_training_ccr.%remark_comp_crew_with_training_flight_has_good_companion_ALL%,
+         rules_training_ccr.%trigger_comp_crew_with_training_flight_has_good_companion_ALL%,
+         void_int,
+         void_int;
+  3  ->  rules_training_ccr.%valid_comp_max_nr_crew_performing_training_type_on_flight_ALL%,
+         rules_training_ccr.%remark_comp_max_nr_crew_performing_training_type_on_flight_ALL%,
+         rules_training_ccr.%trigger_comp_max_nr_crew_performing_training_type_on_flight_ALL%,
+         rules_training_ccr.%value_comp_max_nr_crew_performing_training_type_on_flight_ALL%,
+         rules_training_ccr.%limit_comp_max_nr_crew_performing_training_type_on_flight_ALL%;
+  4  ->  rules_training_ccr.%valid_comp_max_restricted_new_ALL%,
+         rules_training_ccr.%remark_comp_max_restricted_new_ALL%,
+         rules_training_ccr.%trigger_comp_max_restricted_new_ALL%,
+         rules_training_ccr.%value_comp_max_restricted_new_ALL%,
+         rules_training_ccr.%limit_comp_max_restricted_new_ALL%;
+  5  ->  rules_training_ccr.%valid_comp_trainee_assigned_in_correct_position_ALL%,
+         rules_training_ccr.%remark_comp_trainee_assigned_in_correct_position_ALL%,
+         rules_training_ccr.%trigger_comp_trainee_assigned_in_correct_position_ALL%,
+         void_int,
+         void_int;
+  6  ->  rules_training_ccr.%valid_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL%,
+         rules_training_ccr.%remark_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL%,
+         rules_training_ccr.%trigger_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL%,
+         rules_training_ccr.%value_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL%,
+         rules_training_ccr.%limit_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL%;
+  -  ->  false, 
+         "",
+         false,
+         void_int,
+         void_int;
+end
+
+/* Redefined in child module */
+%valid_trng_min_experience_before_new_training_ALL% = false;
+%remark_trng_min_experience_before_new_training_ALL% = "";
+%trigger_trng_min_experience_before_new_training_ALL% = false;
+
+/* 
+ * Production Days Info
+ * Variables for Production info report
+ */
+%flight_crew_region_valid% = fundamental.%flight_crew%;
+
+%crew_firstname% = default(crew.%firstname%,"");
+%crew_surname% = crew.%surname_not_void%;
+%employee_number% = default(crew.%employee_number%,"");
+%homebase_at_pp_start% = crew.%homebase_pp_start%;
+%ac_qual_at_pp_start% = default(crew.%ac_qln_string%(%pp_start%), "");
+%crew_rank% = crew.%rank_not_void%;
+%part_time_factor% = crew.%part_time_factor%;
+
+%crew_excluded_from_max_production_rule% = 
+  rules_indust_ccr.%crew_excluded_from_max_production_rule_at_date%(%pp_start%) or
+  not crew.%in_variable_group_pp_end%;
+
+
+%nr_production_days_until_now% = 
+    rules_indust_ccr.%prod_days_sofar_s%;
+
+%target% = 
+    rules_indust_ccr.%target_s%;
+  
+%nr_va_days% = 
+    rules_indust_ccr.%va_days_sofar_s%;
+
+%nr_va_days_pt% = 
+    rules_indust_ccr.%va_days_pt_sofar_s%;
+
+%nr_loa_days_pt% = 
+    rules_indust_ccr.%loa_days_pt_sofar_s%;
+
+%nr_of_scaled_production_days% =
+    rules_indust_ccr.%max_limit_full_va%;
+
+%max_production_days_limit_in_year% = 
+    rules_indust_ccr.%max_limit_s%;
+
+%avail_factor% = 
+    rules_indust_ccr.%avail_factor_s%;
+
+%prod_days_mon% =
+    rules_indust_ccr.%prod_days_month%;
+
+%month_target_prod% =
+    rules_indust_ccr.%month_target%;
+
+%rule_start% =
+    rules_indust_ccr.%_rule_calc_start_date%;
+
+%rule_end% =
+    rules_indust_ccr.%_rule_calc_end_date%;
+
+/* end of file */

@@ -1,0 +1,400 @@
+/* -*- crc -*- 
+
+  
+
+TOR (External Table fOr Regularity) APC part
+-------------------------------------------------------
+
+Use: Rave code for TOR (external Table fOr Regularity).
+     Definitions needed for both APC and Studio.
+
+Contents:
+     Common definitions for the TOR functionality.
+     Read from the etables
+     General parameters
+     Penalties
+
+*******************************************************/
+
+/******************************************************
+ * Common definitions for the TOR functionality.
+ ******************************************************/
+
+module tor
+import levels;
+import fundamental;
+import leg;
+
+/* Interface section - mapping towards rave variables
+   that are needed for the TOR functionality  */
+export %tor_dh% = default (if leg.%is_deadhead% then "T" else "F","F");
+export %tor_start_utc% = leg.%start_utc%;
+export %tor_end_utc% = leg.%end_utc%;
+export %tor_start_lt% = leg.%start_lt%;
+export %tor_end_station% = leg.%end_station%;
+%tor_start_station% = leg.%start_station%;
+%tor_flight_nr% = leg.%flight_nr%;
+%tor_flight_suffix% = leg.%flight_suffix%;
+%tor_flight_carrier% = leg.%flight_carrier%;
+
+/* groupdefs group used in trip cost tab */
+%trip_tor_penalty_header_p% =
+  parameter ""
+  remark "#HEADER#TOR penalty";
+group trip_cost_tor = 
+  %trip_tor_penalty_header_p%,
+  %tor_penalty_use%,
+  %tor_penalty_changed_connection_end_or_start%,
+  %tor_penalty_changed_connection_layover_on_duty%,
+  %tor_penalty_changed_connection_layover_deadhead%,
+  %tor_penalty_changed_connection_day_on_duty%,
+  %tor_penalty_changed_connection_day_deadhead%;
+  
+/* Functionality section */
+%tor_stop_type_btw_duty% = (next(leg(chain),%tor_start_utc%) - %tor_end_utc%)/24:00 + 1;
+
+export %tor_stop_type% =
+  if is_last(leg(chain)) then       /* Last leg in chain */
+    -1
+  else if is_last(leg(duty)) then
+    %tor_stop_type_btw_duty%
+  else 
+    0;                            /* Inside duty      */
+    
+%tor_prev_stop_type% =
+    default(prev(leg(chain),%tor_stop_type%),-1);
+
+/*
+ * Traffic day variables for writing to the external table 
+ * are found in the studio_tor module.
+ */
+
+%tor_dep_traffic_day_read% =
+    if %tor_weekdays_in_etable% = "YES" then
+      time_of_week(%tor_start_lt%)/24:00 + 1
+    else if %tor_weekdays_in_etable% = "DATED" then 
+      (%tor_start_lt%-01Jan1990)/24:00 - 
+        %tor_general_days_to_add_if_dated%
+    else
+      0;
+                
+%tor_next_leg_dep_traffic_day_read% = 
+  default(next(leg(chain),%tor_dep_traffic_day_read%),-1);
+%tor_prev_leg_dep_traffic_day_read% = 
+  default(prev(leg(chain),%tor_dep_traffic_day_read%),-1);
+
+/* TOR variables for identifying a unique leg */    
+%tor_next_dh% = default(next(leg(chain),%tor_dh%),"-");
+%tor_prev_dh% = default(prev(leg(chain),%tor_dh%),"-");
+    
+%tor_duty_code% =
+  if default (duty_type,"") = "" or 
+    not %tor_general_consider_duty_type_in_leg_key% then
+    ""
+  else
+    concat("_",duty_type);
+  
+export %tor_id% =
+   if ground_duty then
+     concat(ground_duty_code,
+            "_",
+            ground_duty_code_suffix,
+            format_int(%tor_flight_nr%,"%d"),
+            %tor_duty_code%)
+   else if leg.%is_ground_transport% then
+     concat("GT_",
+            %tor_flight_carrier%,
+            format_int(%tor_flight_nr%,"%d"),
+            %tor_flight_suffix%)
+   else
+      concat(%tor_flight_carrier%,
+             format_int(%tor_flight_nr%,"%03d"),
+             %tor_flight_suffix%,
+             %tor_duty_code%);
+
+%tor_next_id% = default(next(leg(chain),%tor_id%),"-");
+%tor_prev_id% = default(prev(leg(chain),%tor_id%),"-");
+    
+%tor_next_dep_station% = default(next(leg(chain),%tor_start_station%),"-");
+    
+/*
+ * Variables defining which connections to write to the external table.
+ */
+
+%tor_write_connection% =
+  %tor_dh%="F" or default(next(leg(chain), %tor_dh%="F"),false);
+
+%tor_write_first_leg_in_chain% =
+  %tor_dh%="F" and is_first(leg(chain));
+
+/******************************************************
+ * Read from the etables
+******************************************************/
+
+export %tor_fallback_table_used% = %tor_weekdays_in_etable% = "UNDEF";
+
+/* Location should not be changed because the table is copied by a script */
+%connection_table% = "TOR.etab";
+ 
+table tor_weekdays_in_table =
+    "USE_WEEKDAY" -> String %tor_weekdays_in_etable%;   
+               /* YES = Weekly mode, NO = Daily mode, DATED = Dated Mode. */
+    external %connection_table%;                     
+    station_1 ->  from_id;
+    -         ->  "UNDEF";
+end
+
+/******/
+
+export %tor_leg_exists_in_etable% =
+  %tor_leg_exists_in_etable_tab_nr_times% > 0;
+    
+table tor_leg_exists_num_times =
+  %tor_end_station%, 
+  %tor_id%, %tor_dh%,
+  %tor_dep_traffic_day_read% -> 
+  int %tor_leg_exists_in_etable_tab_nr_times%;
+
+  external %connection_table%;
+  station_1, 
+  from_id, 
+  from_dh, 
+  from_traffic_day -> 
+  count("row_number");
+end
+
+/* Read the leg connections from the table, previous and current
+   to find if identical connection */    
+table tor_identical_connection_exists_before =
+  %tor_start_station%,
+  %tor_id%, %tor_dh%,
+  %tor_dep_traffic_day_read%,
+  %tor_prev_id%,
+  %tor_prev_dh%,
+  %tor_prev_leg_dep_traffic_day_read%,
+  %tor_prev_stop_type% -> 
+  bool %tor_identical_connection_before%;
+  
+  external %connection_table%;
+  station_2, 
+  to_id,   
+  to_dh, 
+  to_traffic_day,  
+  from_id, 
+  from_dh, 
+  from_traffic_day, 
+  stop_type -> 
+  any("row_number");
+end    
+
+/****/
+/* Read the leg connections from the table, current and next
+   to find if identical connection */  
+table tor_identical_connection_exists_after =
+  %tor_end_station%,
+  %tor_id%, 
+  %tor_dh%,
+  %tor_dep_traffic_day_read%,
+  %tor_next_id%,
+  %tor_next_dh%,
+  %tor_next_leg_dep_traffic_day_read%,
+  %tor_stop_type%-> 
+  bool %tor_identical_connection_after%;
+
+  external %connection_table%;
+  station_1, 
+  from_id, 
+  from_dh, 
+  from_traffic_day, 
+  to_id, 
+  to_dh, 
+  to_traffic_day,  
+  stop_type -> 
+  any("row_number");
+end
+
+/*********************/
+/* Read from table to find next leg connection from table, 
+   based from the current leg */
+table tor_info_connection_after =
+  %tor_end_station%, 
+  %tor_id%, 
+  %tor_dh%, 
+  %tor_dep_traffic_day_read% ->
+  export string %tor_etab_after_id%, 
+  string %tor_etab_after_dh%, 
+  int %tor_etab_after_traffic_day%, 
+  int %tor_etab_after_stop_type%;
+
+  external %connection_table%;
+  station_1, 
+  from_id, 
+  from_dh, 
+  from_traffic_day ->
+    to_id, 
+    to_dh, 
+    to_traffic_day, 
+    stop_type;
+  -, -, -, - ->
+  "ERROR", "ERROR", 0, 999;  /* Should not happen */
+end
+
+/****/
+/* Read from table to find previous leg connection from table, 
+   based from the current leg */
+table tor_info_connection_before =
+  %tor_start_station%, 
+  %tor_id%, 
+  %tor_dh%, 
+  %tor_dep_traffic_day_read% ->
+  export string %tor_etab_before_id%, 
+  string %tor_etab_before_dh%, 
+  int %tor_etab_before_traffic_day%, 
+  int %tor_etab_before_stop_type%;
+
+  external %connection_table%;
+  station_2, 
+  to_id, 
+  to_dh, 
+  to_traffic_day ->
+    from_id, 
+    from_dh, 
+    from_traffic_day, 
+    stop_type;
+  -, -, -, - ->
+  "ERROR", "ERROR", 0, 999; /* Should not happen */
+end 
+
+/*
+ * There are 8 possible kinds of connections.
+ * 
+ * 0. Current leg is a deadhead.
+ * 1. Current leg not in etable.
+ * 2. Identical connection (before/after).
+ *   
+ * 3. Different connection (before/after). In reference plan, 
+ *    end/start of chain,
+ * 4. Different connection (before/after). In reference plan, 
+ *    nightstop
+ * 5. Different connection (before/after). In reference plan, 
+ *    nightstop, deadhead.
+ * 6. Different connection (before/after). In reference plan, 
+ *    inside duty.
+ * 7. Different connection (before/after). In reference plan, 
+ *    inside duty, deadhead.
+ */
+    
+%tor_consider_after% =
+    %tor_dh% = "F" and %tor_leg_exists_in_etable%;
+
+%tor_consider_before% =
+    %tor_consider_after%;
+
+export %tor_kind_of_connection_after% =
+    if %tor_dh% = "T"                         then 0
+    else if not %tor_leg_exists_in_etable%    then 1
+    else if  %tor_identical_connection_after% then 2
+    else if  %tor_etab_after_stop_type% = -1  then 3
+    else if  %tor_etab_after_stop_type% > 0 and  
+             %tor_etab_after_dh% = "F" then 4
+    else if  %tor_etab_after_stop_type% > 0 and  
+             %tor_etab_after_dh% = "T" then 5
+    else if  %tor_etab_after_stop_type% = 0 and  
+             %tor_etab_after_dh% = "F" then 6
+    else if  %tor_etab_after_stop_type% = 0 and  
+             %tor_etab_after_dh% = "T" then 7
+    else -1;  /* ERROR */
+
+export %tor_kind_of_connection_before% =
+    if %tor_dh% = "T"                            then 0
+    else if not %tor_leg_exists_in_etable%       then 1
+    else if  %tor_identical_connection_before%   then 2
+    else if  %tor_etab_before_stop_type% = -1    then 3
+    else if  %tor_etab_before_stop_type% > 0 and  
+             %tor_etab_before_dh% = "F" then 4
+    else if  %tor_etab_before_stop_type% > 0 and  
+             %tor_etab_before_dh% = "T" then 5
+    else if  %tor_etab_before_stop_type% = 0 and  
+             %tor_etab_before_dh% = "F" then 6
+    else if  %tor_etab_before_stop_type% = 0 and  
+             %tor_etab_before_dh% = "T" then 7
+    else -1;  /* ERROR */   
+
+/******************************************************
+* General parameters
+******************************************************/
+    
+%tor_general_deadhead_instead_of_onduty_ok% =
+  parameter FALSE
+  remark "(TOR) Leg changed from on-duty to deadhead is considered as an identical leg",
+  planner "A leg connection is not considered as changed if one of the two legs have changed from deadhead to active, or active to deadhead.";  
+
+%tor_general_consider_duty_type_in_leg_key% =
+  parameter FALSE
+  remark "(TOR) Consider the Duty Type as a part of the leg key",
+  planner "Parameter that states wether the duty type should be part of the leg key, when looking up a leg within the TOR table.";
+    
+%tor_general_days_to_add_if_dated% = 
+  parameter 0
+  remark "(TOR) Add this number of days to the dates in the etable.",
+  planner "Parameter that states the number of days that should be added to the leg dates from within the TOR table when looking them up. Is used when imitating the trips from one planning period to the next and then adding the number of weeks per planning period.";
+
+/******************************************************
+ * Penalties
+ *****************************************************/
+
+export %tor_penalty_use% = parameter FALSE
+    /*remark "(C&P) 14.0  Use TOR penalty in cost function",*/
+    remark "Use TOR penalty in cost function",
+    planner "The parameter controls if penalties for TOR connections should be used or not within the cost function. The parameter can be turned on and still not influence the solution, as long as no TOR table have been activated. As soon as the TOR table have been activated, the parameter will have an influence on the cost function.";
+%tor_penalty_changed_connection_end_or_start% = parameter 1000
+    /*remark "(C&P) 14.1 (TOR) Penalty for a changed start or end",*/
+    remark "Penalty for a changed start or end",
+    planner "Parameter that states how high penalty a leg connection that previously started or ended a trip within the TOR table and does not do that anymore should have. For example: a new duty or a new leg follows after the connection.";
+%tor_penalty_changed_connection_layover_on_duty% = parameter 1000
+    /*remark "(C&P) 14.2 (TOR) Penalty for a changed layover to/from On-duty",*/
+    remark "Penalty for a changed layover to/from On-duty",
+    planner "Parameter that states how high penalty a leg connection that previously started or ended a duty within the TOR table as on-duty legs and does not do that anymore as on-duty legs should have. For example: a new leg follows after the connection.";
+%tor_penalty_changed_connection_layover_deadhead% = parameter 1000
+    /*remark "(C&P) 14.3 (TOR) Penalty for a changed layover to/from Deadhead",*/
+    remark "Penalty for a changed layover to/from Deadhead",
+    planner "Parameter that states how high penalty a leg connection that previously started or ended a duty within the TOR table as a deadhead leg and does not do that anymore as a deadhead leg should have. For example: a new leg follows after the connection.";
+%tor_penalty_changed_connection_day_on_duty% = parameter 1000
+    /*remark "(C&P) 14.4 (TOR) Penalty for a changed day connection to/from On-duty",*/
+    remark "Penalty for a changed day connection to/from On-duty",
+    planner "Parameter that states how high penalty a leg connection within a duty period, as on-duty legs, within the TOR table and does not do that anymore as on-duty legs should have. For example: The legs connection now ends the duty period";
+%tor_penalty_changed_connection_day_deadhead% = parameter 1000
+    /*remark "(C&P) 14.5 (TOR) Penalty for a changed day connection to/from Deadhead",*/
+    remark "Penalty for a changed day connection to/from Deadhead",
+    planner "Parameter that states how high penalty a leg connection within a duty period, as a deadhead leg, within the TOR table and does not do that anymore as a deadhead leg should have. For example: The legs connection now ends the duty period";
+
+table tor_raw_penalty_after (int i) =
+    i        -> %tor_raw_penalty_leg%;
+    (0,2)    -> 0;
+    3        -> %tor_penalty_changed_connection_end_or_start%;
+    4        -> %tor_penalty_changed_connection_layover_on_duty%; 
+    5        -> %tor_penalty_changed_connection_layover_deadhead%;
+    6        -> %tor_penalty_changed_connection_day_on_duty%;
+    7        -> %tor_penalty_changed_connection_day_deadhead%;
+    &
+    -        -> 0; /* ERROR */
+end    
+         
+%tor_leg_penalty% =
+  if %tor_penalty_use% then 
+    %tor_raw_penalty_leg%(%tor_kind_of_connection_after%) +
+    %tor_raw_penalty_leg%(%tor_kind_of_connection_before%)
+  else
+    0;
+
+%tor_chain_penalty% = sum(leg(chain),%tor_leg_penalty%);   
+
+/* Add the following variable to the trip_cost module,
+  to the apc and report cost of chain definitions
+*/
+export %trip_tor_chain_penalty% =
+  if NOT %tor_penalty_use% then 0
+  else %tor_chain_penalty%;
+
+/* END */
+

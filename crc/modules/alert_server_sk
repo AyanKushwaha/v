@@ -1,0 +1,377 @@
+/* -*- crc -*- 
+ *
+ */
+
+/*******************************************************
+ALERT_SERVER
+--------------------------------------------------------
+
+Use:
+  This module contains customization of tracking alert server:
+
+ 1. Parameters for alert server 
+ 2. Keys for alerts and rule exceptions
+ 3. Alert contexts
+ 4. Alert groupings
+ 5. Alert server specific rules (open time, service need)
+
+*******************************************************/
+module alert_server_sk inherits alert_server
+
+import fundamental;
+import leg;
+import trip;
+import levels;
+import crew;
+
+import crew_pos;
+import duty;
+import studio_config;
+
+/* 
+** 1. Parameters for alert server 
+*/
+
+%check_alert_rules_p% =
+  parameter false
+  remark "ALERTGENERATOR: Activate alertserver-specific rules";
+
+export %check_alert_rules% = %check_alert_rules_p%;
+
+/*
+** 2. Keys for alerts and rule exceptions
+*/
+
+/*
+** Failobject - rule attribute for the alert server
+*/
+
+export %failobject_leg_departure_str% =
+  concat(activity_id, "+", format_time(leg.%activity_scheduled_start_time_utc%, "+%02H%02M"), "+",
+         format_time(departure, "%02d%02ub%Y+%02H%02M"));
+
+export %failobject_leg_arrival_str% =
+  concat(activity_id, "+", format_time(leg.%activity_scheduled_end_time_utc%, "+%02H%02M"), "+",
+         format_time(arrival, "%02d%02ub%Y+%02H%02M"));
+
+
+
+export %failobject_leg_checkin_str% =
+  concat(activity_id, "+", format_time(leg.%activity_scheduled_start_time_utc%, "+%02H%02M"), "+",
+         format_time(leg.%duty_brief_start_utc%, "%02d%02ub%Y+%02H%02M"));
+/*
+** Dummy (no object) failobject for notifications.
+*  'N' is used as the activity_link type for notifications
+*/
+
+export %failobject_no_object%(Abstime start_time) =
+  concat("P+", crew.%id%, "+NOTIFICATION+",
+         format_time(start_time, "%02d%02ub%Y+%02H%02M"), "+",
+         format_time(start_time, "+%02H%02M"), "+",
+         format_time(start_time, "%02d%02ub%Y+%02H%02M"));
+
+redefine %resource_description% = 
+  if default(crew.%login_name%, "") <> "" then 
+    crew.%login_name%
+  else if default(concat(crew.%surname%, crew.%firstname%), "") <> "" then
+    concat(crew.%surname%, " ", crew.%firstname%)
+  else 
+    "-"; /* Open time alert */
+
+redefine %resource_id% = 
+  let max_res_length = 400;
+  substr(default(crew.%id%, %chain_resource_name%), 1, max_res_length-1);
+
+export %chain_resource_name% =
+  if leg.%is_acrot% then
+    leg.%tail_id%
+  else
+    %trip_resource_name%;
+
+export %trip_resource_name% =
+  concat(cat(duty(chain), %uniq_duty_name%), first(trip(chain), cat(times(12),
+         format_int(crew_pos.%trip_assigned_pos%(%times_index_0%),"%02d"))));
+
+%uniq_duty_name% =
+  cat(leg(duty),
+    concat("[", %alertgenerator_leg_descriptor%, leg.%start_station%,
+           format_time(leg.%activity_scheduled_start_time_UTC%,"%h%02M"), "]"));
+  
+%alertgenerator_leg_descriptor% = 
+  if leg.%is_flight_duty% then
+    concat(leg.%flight_carrier%, 
+           format_int(leg.%flight_nr%,"%d"),
+           (if flight_suffix = "*"
+              then ""
+            else flight_suffix), 
+           (if leg.%is_deadhead% 
+              then "D" 
+           else "A"))
+  else
+    leg.%code%;
+
+/*
+** 3. Alert contexts
+*/
+
+table alert_contexts_customization(Int entry_nr) =
+  entry_nr -> redefine %context%, redefine %context_regexp%;
+  1 -> "sp_crew", "";
+  2 -> "sp_crrs", "^OPEN_TIME_CC|^OPEN_TIME_FD|^OPEN_TIME_TRAINING|^COMPOSITION";
+  - -> void_string, void_string;
+end
+
+/* 
+** 4. Alert groupings
+*/
+
+/*
+ * Each alert group is shown with a distinct icon in TWS.
+ */
+
+table alert_grouping_customization_tab(Int entry_nr) =
+  entry_nr -> redefine %alert_group_regexp%, redefine %alert_group%;
+
+/* Note: to add a new role duplicate a line only change rule name and category, then run alert_server_sk_table_numgen.py
+*  for rearrange numbering; The script is located in lib/python/adhoc/alert_server_sk_table_numgen.py
+*  to run the script cd to crc/modules and run ../../lib/python/adhoc/alert_server_sk_table_numgen.py
+*/
+/* Note: "(?i)" means case insensitive match for <expr>. */
+
+/* First:  Individual rules */
+   1 -> "(?i).*caa_max_duty_time_in_calendar_year_ALL", "DUTY_HOURS";
+   2 -> "(?i).*caa_scc_qualified_crew_member", "COMPOSITION";
+   3 -> "(?i).*func_assign_order_FC_ALL", "UNION_RULES";
+   4 -> "(?i).*func_office_duty_valid_for_crew_CC_all", "RESCHEDULING_OR_SOFT";
+   5 -> "(?i).*func_seniority_order_CC_ALL", "COMPOSITION";
+   6 -> "(?i).*func_seniority_order_FC_ALL", "UNION_RULES";
+   7 -> "(?i).*gui_2_lc_legs_reqired_FC_ALL", "RESCHEDULING_OR_SOFT";
+   8 -> "(?i).*gui_maximum_number_of_assists_FC_ALL", "TRAINING_PLANNING";
+   9 -> "(?i).*gui_min_reqd_crew_on_opc_FC_ALL", "COMPOSITION";
+  10 -> "(?i).*gui_sim_fully_assigned_FC_ALL", "COMPOSITION";
+  11 -> "(?i).*ind_check_in_time_limit_for_wop_fc_skd", "TIME_OFF";
+  12 -> "(?i).*ind_check_out_time_limit_for_wop_all", "TIME_OFF";
+  13 -> "(?i).*ind_check_out_before_summer_va", "TIME_OFF";
+  14 -> "(?i).*ind_duty_ends_at_first_arrival_to_hb_after_short_stop_SKD_SKS", "REST";
+  15 -> "(?i).*ind_max_number_checkin_per_day", "UNION_RULES";
+  16 -> "(?i).*ind_max_sectors_in_duty.*", "DUTY_HOURS";
+  17 -> "(?i).*ind_max_daily_duty_qa_ALL","DUTY_HOURS";
+  18 -> "(?i).*ind_long_haul_returning_duty_last_in_trip_ALL", "DUTY_HOURS";
+  19 -> "(?i).*ind_long_haul_trip_last_in_wop_ALL", "DUTY_HOURS";
+  20 -> "(?i).*ind_max_4_working_days_when_pilot_education_FC", "DUTY_HOURS";
+  21 -> "(?i).*ind_max_duty_day_before_lh_CC", "DUTY_HOURS";
+  22 -> "(?i).*ind_max_duty_time_2_months_fc", "DUTY_HOURS";
+  23 -> "(?i).*ind_max_duty_time_after_short_stop_SKD_SKL_SKS", "REST";
+  24 -> "(?i).*ind_max_extended_duties_in_calendar_month_SKD_SKN_SKL", "DUTY_HOURS";
+  25 -> "(?i).*ind_max_hours_in_flight_duty", "TWENTY_HOURS";
+  26 -> "(?i).*ind_max_in_2x25_hrs_SKD", "DUTY_HOURS";
+  27 -> "(?i).*ind_max_night_duties_in_calendar_month_SKN_SKL", "DUTY_HOURS";
+  28 -> "(?i).*ind_max_night_duties_in_trip_FC_SKD_SKN_SKL", "DUTY_HOURS";
+  29 -> "(?i).*ind_max_night_duties_in_working_period_FC_SKD_SKN_SKL", "DUTY_HOURS";
+  30 -> "(?i).*ind_max_num_sold_days_year_SKN_SKL_SKS", "RESCHEDULING_OR_SOFT";
+  31 -> "(?i).*ind_max_production_days_in_year_SKN_SKL", "DUTY_HOURS";
+  32 -> "(?i).*ind_max_time_btw_meal_breaks_ALL", "MEALSTOP";
+  33 -> "(?i).*ind_max_working_days_btw_freedays_ALL", "TIME_OFF";
+  34 -> "(?i).*ind_max_working_days_in_trip_ALL", "TIME_OFF";
+  35 -> "(?i).*ind_meal_stop_is_to_short_ALL", "MEALSTOP";
+  36 -> "(?i).*ind_min_days_btw_long_duties_SKN_SKL", "DUTY_HOURS";
+  37 -> "(?i).*ind_min_extra_freedays_in_months_FC_ALL", "TIME_OFF";
+  38 -> "(?i).*ind_min_F_days_after_SFJ_SKD", "DUTY_HOURS";
+  39 -> "(?i).*ind_min_freedays_after_wop_ALL", "TIME_OFF";
+  40 -> "(?i).*ind_min_free_weekend_in_period_ALL", "DUTY_HOURS";
+  41 -> "(?i).*ind_min_nr_meal_breaks_in_duty_SKN_SKL_SKS", "MEALSTOP";
+  42 -> "(?i).*ind_min_one_F_day_between_SFJ_SKD", "DUTY_HOURS";
+  43 -> "(?i).*ind_min_rest_after_duty_period_ALL", "REST";
+  44 -> "(?i).*ind_min_rest_after_trip_ALL", "DUTY_HOURS";
+  45 -> "(?i).*ind_min_rest_days_after_long_wop_FC", "TIME_OFF";
+  46 -> "(?i).*ind_no_duty_same_day_when_late_check_out_FC_SKD_SKS", "DUTY_HOURS";
+  47 -> "(?i).*ind_no_extension_before_lh_cc", "DUTY_HOURS";
+  48 -> "(?i).*ind_no_F3_F7S_block_SKD", "RESCHEDULING_OR_SOFT";
+  49 -> "(?i).*ind_no_lh_trips_to_crew_in_fg_SKD_SKS", "DUTY_HOURS";
+  50 -> "(?i).*ind_only_flt_or_sby_on_red_days_SKD", "DUTY_HOURS";
+  51 -> "(?i).*ind_plausible_connection_ALL", "INCONSISTENCY";
+  52 -> "(?i).*ind_production_must_follow_fixed_group_cycle_ALL", "TIME_OFF";
+  53 -> "(?i).*ind_sched_duty_time_in_1_month_fc", "DUTY_HOURS";
+  54 -> "(?i).*ind_sched_duty_time_in_2_months_fc", "DUTY_HOURS";
+  55 -> "(?i).*ind_short_stop_is_at_night_FC", "REST";
+  56 -> "(?i).*ind_training_earliest_ci_after_night_simulators", "TRAINING_PLANNING";
+  57 -> "(?i).*min_days_btw_vacation_and_rec", "RESCHEDULING_OR_SOFT";
+  58 -> "(?i).*max_night_simulators_in_row", "TRAINING_PLANNING";
+  59 -> "(?i).*qln_absence_flight_training_performed_ALL", "LACK_OF_TRAINING";
+  60 -> "(?i).*qln_absence_ground_training_performed_ALL", "LACK_OF_TRAINING";
+  61 -> "(?i).*qln_arr_airport_ok_FC", "COMPOSITION";
+  62 -> "(?i).*qln_dep_airport_ok_FC", "COMPOSITION";
+  63 -> "(?i).*alf_forbidden_for_skd_sks_fp", "COMPOSITION";
+  64 -> "(?i).*qln_actype_airport_ok_FC", "COMPOSITION";
+  65 -> "(?i).*qln_asf_on_fr_only_FC", "COMPOSITION";
+  66 -> "(?i).*qln_max_ac_families_in_duty_CC", "QUALIFICATION";
+  67 -> "(?i).*qln_max_one_ac_type_in_duty_for_double_qual_FC", "LACK_OF_TRAINING";
+  68 -> "(?i).*qln_min_days_btw_pc_opc_and_asf_FC", "COMPOSITION";
+  69 -> "(?i).*qln_pc_opc_intended_for_fc_FC", "TRAINING_PLANNING";
+  70 -> "(?i).*qln_recency_ok_ALL", "LACK_OF_TRAINING";
+  71 -> "(?i).*qln_recurrent_training_performed_ALL", "GOVERNMENT_RULES";
+  72 -> "(?i).*sby_2_months_lh_experience_before_sby_CC_SKD", "UNION_RULES";
+  73 -> "(?i).*sby_limit_on_airport_sby_after_callout_and_fd_CC_SKD", "RESCHEDULING_OR_SOFT";
+  74 -> "(?i).*sby_limit_on_apsby_end_after_callout_FC_SH", "RESCHEDULING_OR_SOFT";
+  75 -> "(?i).*sby_limit_on_checkout_after_callout_CC", "RESCHEDULING_OR_SOFT";
+  76 -> "(?i).*sby_limit_on_overnights_after_apsby_callout_CC_SKD", "RESCHEDULING_OR_SOFT";
+  77 -> "(?i).*sby_limit_on_time_between_check_in_and_callout*", "RESCHEDULING_OR_SOFT";
+  78 -> "(?i).*sby_max_duration_standby_ALL", "DUTY_HOURS";
+  79 -> "(?i).*sby_max_duration_standby_block_ALL", "UNION_RULES";
+  80 -> "(?i).*sby_no_early_airport_standby_after_offduty_CC_SKN_SKL", "UNION_RULES";
+  81 -> "(?i).*sby_no_standby_for_AH_AS_change_CC_ALL", "DUTY_HOURS";
+  82 -> "(?i).*sby_R363_FC_SH", "RESCHEDULING_OR_SOFT";
+  83 -> "(?i).*sft_base_variants_time_limit_ALL", "RESCHEDULING_OR_SOFT";
+  84 -> "(?i).*sft_check_leg_ac_qual_against_trip_area", "MISCELLANEOUS";
+  85 -> "(?i).*sft_comp_crew_not_fly_with", "COMPOSITION";
+  86 -> "(?i).*sft_comp_days_must_be_bidded_for_ALL", "MISCELLANEOUS";
+  87 -> "(?i).*sft_comp_ok_CC", "COMPOSITION";
+  88 -> "(?i).*sft_comp_ok_FC", "COMPOSITION";
+  89 -> "(?i).*sft_comp_no_not_operating_leg_in_roster", "CANCELLED_FLIGHT";
+  90 -> "(?i).*sft_comp_no_overcrewed_cockpits", "OVERCREWED_COCKPIT";
+  91 -> "(?i).*sft_empty_day_on_roster_ALL", "MISCELLANEOUS";
+  92 -> "(?i).*sft_max_1_heavy_long_haul_trip_in_calendar_month_SKN_SKL", "DUTY_HOURS";
+  93 -> "(?i).*sft_min_days_btw_lower_FC_ALL", "RESCHEDULING_OR_SOFT";
+  94 -> "(?i).*sft_need_greater_than_max_crew_seats_ALL", "OVERSTAFFED";
+  95 -> "(?i).*sft_no_duty_free_break_in_scandinavia_SKN_SKL_SKS", "DUTY_HOURS";
+  96 -> "(?i).*sft_normal_rest_changed_to_short_ALL", "REST";
+  97 -> "(?i).*sft_nr_comp_days_must_not_exceed_balance_ALL", "TIME_OFF";
+  98 -> "(?i).*sft_open_no_open_positions_CC", "OPEN_TIME_CC";
+  99 -> "(?i).*sft_open_no_open_positions_FC", "OPEN_TIME_FD";
+  100 -> "(?i).*sft_open_no_open_positions_training", "OPEN_TIME_TRAINING";
+  101 -> "(?i).*sft_trip_code_is_unknown_ALL", "MISCELLANEOUS";
+  102 -> "(?i).*sft_activity_not_allowed_on_day_ALL", "MISCELLANEOUS";
+ 103 -> "(?i).*sft_spec_sched_trip_length_ALL", "RESCHEDULING_OR_SOFT";
+ 104 -> "(?i).*stb_max_duration_airport_standby_CC_SKD_SKN_SKL", "RESCHEDULING_OR_SOFT";
+ 105 -> "(?i).*stb_min_calendar_weeks_between_airport_standby_CC_SKD", "RESCHEDULING_OR_SOFT";
+ 106 -> "(?i).*stb_no_mixed_duty_FC", "MISCELLANEOUS";
+ 107 -> "(?i).*trng_fly_below_rank_not_allowed_FC", "LACK_OF_TRAINING";
+ 108 -> "(?i)rules_training_ccr_fc.trng_all_airports_visited_commander_trng_fc", "LACK_OF_TRAINING";
+ 109 -> "(?i).*trng_no_vacation_loa_after_ilc", "QUALIFICATION";
+ 110 -> "(?i).*trng_min_blk_or_legs_before_double_qual", "QUALIFICATION";
+ 111 -> "(?i).*trng_new_pilots_must_perform_icrm_within_first_year_ALL", "LACK_OF_TRAINING";
+ 112 -> "(?i).*comp_max_temp_crew_on_flight_CC", "UNION_RULES";
+ 113 -> "(?i).*gui_min_reqd_crew_on_opc_2x2h_FC_ALL", "RESCHEDULING_OR_SOFT";
+ 114 -> "(?i).*caa_comp_restr_ok_FC", "COMPOSITION";
+ 115 -> "(?i).*no_medical_restriction_on_ZFTT_LIFUS_instructor", "COMPOSITION";
+ 116 -> "(?i).*no_instr_sim_duty_same_day_as_flight", "DUTY_HOURS";
+ 117 -> "(?i).*trng_max_days_between_skill_test_and_zftt_fc", "TRAINING_PLANNING";
+ 118 -> "(?i).*qln_sim_type_ok_fc", "TRAINING_PLANNING";
+ 119 -> "(?i).*comp_min_nr_pilots_on_school_flight_fc", "TRAINING_PLANNING";
+ 120 -> "(?i).*comp_skill_test_must_have_new_instructor_all", "TRAINING_PLANNING";
+ 121 -> "(?i).*trng_ok_simulator_type_fc_all", "TRAINING_PLANNING";
+ 122 -> "(?i).*trng_course_ground_activities_performed_fc", "TRAINING_PLANNING";
+ 123 -> "(?i).*trng_course_ground_activities_in_order_fc", "TRAINING_PLANNING";
+ 124 -> "(?i).*trng_CCQ_skilltest_requires_valid_pc_doc", "TRAINING_PLANNING";
+ 125 -> "(?i).*trng_web_training_needed", "GOVERNMENT_RULES";
+ 126 -> "(?i).*qln_crew_allowed_lower_on_opc_fc", "TRAINING_PLANNING";
+ 127 -> "(?i).*has_valid_passport*", "DOCUMENTS";
+ 128 -> "(?i).*sft_no_fdp_extension_during_20_first_lifus_legs", "LACK_OF_TRAINING";
+ 129 -> "(?i).*caa_oma16_max_duty_time_in_calendar_year_all", "OMA16";
+ 130 -> "(?i).*trng_normal_crew_comp_at_skilltest_cdr_upgrade", "COMPOSITION";
+ 131 -> "(?i).*trng_normal_crew_comp_at_ilc_cdr_upgrade", "COMPOSITION";
+ 132 -> "(?i).*trng_no_pc_opc_skilltest_at_night_fc", "LACK_OF_TRAINING";
+ 133 -> "(?i).*unexperienced_lifus_trainee_require_supernum_fp", "COMPOSITION";
+ 134 -> "(?i).*ind_latest_checkout_before_lh_skd_cc", "DUTY_HOURS";
+ 135 -> "(?i).*qln_min_sectors_in_max_days_recency_FC_sh", "LACK_OF_TRAINING";
+ 136 -> "(?i).*unexperienced_fp_require_tri_lifus_instr", "COMPOSITION";
+ 137 -> "(?i).*mff_not_mixed_actypes_in_wop_fc", "GOVERNMENT_RULES";
+ 138 -> "(?i).*mff_not_below_rank_fc", "GOVERNMENT_RULES"; 
+ 139 -> "(?i).*mff_airports_not_allowed_fc", "GOVERNMENT_RULES";
+ 
+
+    /* Second: Regular expressions matching rule names */
+ 140 -> "(?i).*caa_valid.*", "DOCUMENTS";
+ 141 -> "(?i).*ind_max_bl_days_in.*", "DUTY_HOURS";
+ 142 -> "(?i).*ind_min_connection_time.*", "CONNECTION_TIME";
+ 143 -> "(?i).*ind_min_training_connection_ALL", "CONNECTION_TIME";
+ 144 -> "(?i).*ind_min_pt_freedays.*", "TIME_OFF";
+ 145 -> "(?i).*ind_min_rest.*", "REST";
+ 146 -> "(?i).*ind_night_rest.*", "REST";
+ 147 -> "(?i).*notif_notpub.*", "UNPUBLISHED";
+ 148 -> "(?i).*notif_pending_other.*", "UNINFORMED";
+ 149 -> "(?i).*notif_pending_resched_rule.*", "UNINFORMED_RRULE";
+ 150 -> "(?i).*notif_manual.*", "UNINFORMED_MANUAL";
+ 151 -> "(?i).*notif_overdue.*", "OVERDUE";
+ 152 -> "(?i).*notif_missed_checkout.*", "MISSED_CHECKOUT";
+ 153 -> "(?i).*notif_pending_sbycall.*", "STANDBY_CALLOUT";
+ 154 -> "(?i).*ind_duty_restrictions_after_short_stop.*", "UNION_RULES";
+
+
+    /* Third: Groups of rules in specified module */
+ 155 -> "(?i)rules_caa_.*subq.*", "SUBPART_Q";
+ 156 -> "(?i)rules_caa_.*oma16.*", "OMA16";
+ 157 -> "(?i)rules_indust_.*block.*", "DUTY_HOURS";
+ 158 -> "(?i)rules.*indust_.*duty_day.*", "DUTY_HOURS";
+ 159 -> "(?i)rules.*indust_.*duty_time.*", "DUTY_HOURS";
+ 160 -> "(?i)rules.*indust_.*ind_check_.*", "TIME_OFF";
+ 161 -> "(?i)rules.*indust_.*ind_correct_placement.*", "TIME_OFF";
+ 162 -> "(?i)rules.*indust_.*ind_min_free.*", "TIME_OFF";
+ 163 -> "(?i)rules.*indust_.*ind_min_lh_rest.*", "TIME_OFF";
+ 164 -> "(?i)rules.*indust_.*ind_union_.*", "UNION_RULES";
+ 165 -> "(?i)rules.*indust_.*ind_training_.*", "LACK_OF_TRAINING";
+ 166 -> "(?i)rules_qual_.*recurrent.*", "LACK_OF_TRAINING";
+ 167 -> "(?i)rules_resched_cct.resched_R145_.*", "MISCELLANEOUS";
+ 168 -> "(?i)rules_soft_cct.sft_cio.*", "MISSED_CHECKIN";
+ 169 -> "(?i)rules_soft_cct.sft_comp.*", "COMPOSITION";
+ 170 -> "(?i)rules_soft_cct.sft_plaus.*", "INCONSISTENCY";
+ 171 -> "(?i)rules_soft_.*charter.*", "CHARTER";
+ 172 -> "(?i)rules_training.*comp_.*", "COMPOSITION";
+ 173 -> "(?i)rules_resched_cct.resched_R153_.*", "MISCELLANEOUS";
+ 174 -> "(?i)rules_resched_cct.max_limit_reduction_CAU_.*", "DUTY_HOURS";
+ 175 -> "(?i)rules_crew_planning_guide_.cpg_.*", "CREW_PLANNING_GUIDE";
+
+    /* Fourth: Use module names to categorize. */
+ 176 -> "(?i)rules_apis.*", "APIS";
+ 177 -> "(?i)rules_caa_.*", "GOVERNMENT_RULES";
+ 178 -> "(?i)rules_indust_.*", "UNION_RULES";
+ 179 -> "(?i)rules_meal_.*", "MEALSTOP";
+ 180 -> "(?i)rules_quality_.*", "MISCELLANEOUS";
+ 181 -> "(?i)rules_qual_.*", "QUALIFICATION";
+ 182 -> "(?i)rules_resched.*", "RESCHEDULING_OR_SOFT";
+ 183 -> "(?i)rules_svs_resched.*", "RESCHEDULING_OR_SOFT";
+ 184 -> "(?i)rules_standby_ccr.*", "DUTY_HOURS";
+ 185 -> "(?i)rules_training_ccr.*", "LACK_OF_TRAINING";
+ 186 -> "(?i)rules_soft.*", "RESCHEDULING_OR_SOFT";
+
+ 187 -> "(?i).*qln_min_sectors_in_max_days_recency_FC_LH", "LACK_OF_TRAINING";
+ 188 -> "(?i).*trng_only_A5_sectors_allowed_btw_fam_and_con_flt", "LACK_OF_TRAINING";
+ 189 -> "(?i).*trng_min_active_sectors_after_etops_training", "LACK_OF_TRAINING";
+ 190 -> "(?i).*trng_lrsb_followed_by_active_sectors", "LACK_OF_TRAINING";
+ 191 -> "(?i).*qln_rec_in_correct_order_CC", "LACK_OF_TRAINING";
+ 192 -> "(?i).*comp_max_nbr_mff_fc", "COMPOSITION";
+
+ 193 -> "(?i).*min_legs_per_month_for_instructor", "LACK_OF_TRAINING";
+ 194 -> "(?i).*qln_min_legs_in_month_recency_fc_mff.*", "LACK_OF_TRAINING";
+ 195 -> "(?i).*qln_min_legs_in_prev_month_recency_fc_mff.*", "LACK_OF_TRAINING";
+ 196 -> "(?i).*sft_plaus_trip_start_and_end_at_homebase_all", "INCONSISTENCY";
+ 197 -> "(?i).*ind_max_split_duty_in_wop_svs", "UNION_RULES";
+ 198 -> "(?i).*ind_min_freedays_in_1_month_All", "TIME_OFF";
+ 199 -> "(?i).*ind_max_duty_time_in_calendar.*", "DUTY_HOURS";
+ 200 -> "(?i).*ind_max_duty_time_in_7_days.*", "DUTY_HOURS";
+ 201 -> "(?i).*ind_max_sectors_after_split_duty_svs", "DUTY_HOURS";
+ 202 -> "(?i).*ind_max_time_btw_meal_breaks_svs_ALL", "MEALSTOP";
+ 203 -> "(?i).*ind_meal_stop_is_to_short_svs_ALL", "MEALSTOP";
+ 204 -> "(?i)rules_svs_resched_cct.resched_R136_ALL*", "MISCELLANEOUS";
+ 205 -> "(?i)rules_svs_resched_cct.resched_R138_ALL*", "MISCELLANEOUS";
+ 206 -> "(?i).*sft_booked_greater_than_max_crew_seats_ALL", "OVERSTAFFED";
+ -   -> "", "";
+end
+
+/*
+   The alert server adds a number of resource properties
+   for each new alert based on this table. Each property
+   is calculated by calling a chain function: func(leg.start).
+*/
+
+table alert_filter_resource_properties(Int entry_nr) =
+  entry_nr -> %resource_property_udm%, %resource_property_rave%;
+ /* Region and maincat coded in severity int*/
+  1 -> "empno", "alert_server.%empno_at_date%";
+  - -> void_string, void_string;
+end
+
+%empno_at_date%(Abstime alert_t) = 
+  default(default(crew.%extperkey_at_date%(alert_t), crew.%id%), "--");
+
+/* End of file */

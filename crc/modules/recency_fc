@@ -1,0 +1,693 @@
+/* -*- crc -*-
+ *
+ * Purpose:
+ *   This module contains recency definitions for flight crew
+ *   used in qualification recency rules, costs and select filters.
+ *
+ * Sections:
+ *   1. Rule definitions and calculations
+ *   2. Accumulator lookups
+ *   3. Rudob definitions
+ *
+ * Created by:
+ *   Henrik Albertson, 04-Jul-2006
+ *
+ * Major changes:
+ */
+
+module recency_fc inherits recency
+import training;
+import leg;
+import crew;
+import base_utils;
+import system_db_parameters;
+
+/****************************************************************
+ * Section 1: Rule definitions and calculations
+ ***************************************************************/
+/* Constants */
+redefine export %max_days% = 90;
+export %max_a5_days% = 45;
+export %max_a2a3_days% = 45;
+export %max_a2a5_days% = 45;
+%extension_days% = 30;
+
+/* Edit this table when adding a new MFF qualification */
+/* total_landings notes whether it's the 90 or 45 day period that is considered */
+table recency_time_table(bool total_landings, String leg_ac_qual, Abstime date) =
+  total_landings,
+  leg_ac_qual,
+  crew.%has_ac_qln%(date,"A2"),
+  crew.%has_ac_qln%(date,"A3"),
+  crew.%has_ac_qln%(date,"A4"),
+  crew.%has_ac_qln%(date,"A5")-> redefine export %recency_time%;
+  n, "A5", -, -, -, - -> %max_a5_days%;
+  n, "A2", y, y, n, n -> %max_a2a3_days%;
+  n, "A3", y, y, n, n -> %max_a2a3_days%;
+  n, "A2", y, n, n, y -> %max_a2a5_days%;
+  -, -, -, -, -, - -> %max_days%;
+end
+
+/* Definitions */
+redefine export %leg_qualifies_for_recency% = %active_landing%;
+export %active_landing% =
+  default(crew.%landing_this_crew%, %active_landing_default%) and not leg.%returned_to_ramp%; /* added test on rtr 2015-06-04 */
+
+/* If ZFFT LIFUS (first 4 LIFUS after ZFTT), the student gets all landings,
+ * but from leg 5 and forwards continue with the standard default landing. 
+ * This behaviour is extended for FAM FLT in SKCMS-2582 
+ * Default case: FC lands every uneven active leg and FP lands every even active leg. */
+redefine export %active_landing_default% =
+  leg.%is_active_flight% and
+  (/* On school flights all FD get landings */
+   leg.%is_school_flight%
+   or
+   /* Crew on ZFTT LIFUS/FAM FLT gets landing. 
+   If someone else has ZFTT LIFUS/FAM FLT you can't get landing */
+   (leg.%is_zftt_lifus% or leg.%is_fam_flt%)
+   or
+   not (leg.%leg_has_zftt_lifus% or leg.%leg_has_fam_flt%) and
+   /* Default - FP even legs, FC uneven legs */
+   %_active_landing_default%);
+
+%_active_landing_default% =
+  ((crew_pos.%acting_commander% and not %leg_is_even%) or
+  (crew_pos.%acting_copilot% and %leg_is_even%));
+
+/* If the last leg that was landed was landed by FP we should count all unlanded
+   legs.
+   If the last leg that was landed was landed by FC we should add 1 */
+%last_leg_landed_by_fp% =
+  default(
+          last(leg(trip), crew_pos.%acting_copilot% = crew.%landing_this_crew%)
+          where (leg.%is_active_flight% and crew.%landing_any_crew%), true);
+
+%leg_is_even% =
+  (%leg_index% mod 2 = 0);
+
+%leg_index% =
+  if %last_leg_landed_by_fp% then
+    %_leg_index%
+  else
+    %_leg_index% + 1;
+
+%_leg_index% =
+  let stop = leg.%start_hb%;
+  count(leg(trip))
+  where (leg.%is_active_flight% and not crew.%landing_any_crew%)
+  while (leg.%start_hb% <= stop);
+
+/*
+** OM-A 5.2.10 Note 3, 01dec12 - A3 and A4 now considered as same a/c type,
+** so the rule that there must be min 1 landing on each no longer applies.
+*/
+
+/* for performance add a min time to not look through all history if it is slow */
+
+redefine export %leg_is_recent% =
+  /* Recency for single and multi qualified pilots*/
+  %expiry_date%(leg.%start_date%, leg.%qual%) >= leg.%start_date% or
+  /* Recency 91-120 days: Allowed to assign t-flight (OM-A 5.2.10 note 2) */
+  (leg.%is_t_flight% and crew.%rank_leg_start% <> "FR" and %nr_landings_extended_fulfilled% and
+   training.%leg_has_tri_tre%) or
+  /* SKN only requires one T-flight to regain recency. WP Leg 184 */
+  (crew.%is_skn_at_date%(leg.%start_date%) and
+   %days_since%(leg.%start_date%,
+                training.%last_perf_date_for_act_of_type%("T-FLIGHT", leg.%start_date%)) < %max_days%);
+
+redefine %crew_is_recent%(Abstime date, String qual) =
+  %expiry_date%(date, qual) >= date;
+
+redefine export %expiry_date%(Abstime date, String ac_qual) =
+  round_up(%expiry_time_for_recency_for_acqual_at_date%(ac_qual, date), 24:00) - 00:01;
+
+/* used for behave tests */
+export %leg_has_at_least_one_landing_of_leg_qual_for_recency% =
+  let earliest_date = %earliest_date_ac_qual%(false, leg.%qual%,leg.%start_date%);
+  %time_for_at_least_one_landing_of_qual%(leg.%qual%, leg.%start_date%) >= earliest_date;
+
+export %leg_has_at_least_two_landings_of_leg_qual_for_recency% =
+  let earliest_date = %earliest_date_ac_qual%(false, leg.%qual%,leg.%start_date%);
+  %time_for_at_least_two_landings_of_qual%(leg.%qual%, leg.%start_date%) >= earliest_date;
+
+/* used for behave tests */
+export %leg_has_enough_total_landings_for_recency% =
+  let earliest_date = %earliest_date_ac_qual%(true, leg.%qual%,leg.%start_date%);
+  %time_for_enough_total_landings%(leg.%qual%, leg.%start_date%) >= earliest_date;
+
+%earliest_date_ac_qual%( bool total_landings, String leg_ac_qual, Abstime date) =
+  round_down(date,24:00) - %recency_time%(total_landings, leg_ac_qual, date)*24:00;
+
+export %nr_landings_extended_fulfilled% =
+  %extension_days%*24:00 + %expiry_time_for_recency_for_acqual_at_date%(leg.%qual%, leg.%start_date%) >=
+    leg.%start_date%;
+
+/* Very ugly duplication as a result of rules_training_ccr_fc. This is not in use but in the code and as such
+   This function is kept. This is NOT an accurate representation for when the recency was last refreshed and
+   should only be used in case the behavior should mimic 45 day recency. */
+
+export %time_for_recency_for_acqual_at_date%(String ac_qual, Abstime date) =
+  if crew.%ac_qln%(date, 1) = "FF" then
+      %pp_end%
+ 
+  /* Recency 0-45 days: Min 1 A5 landing within 45 days, Min 3 landings within 90 days*/
+  else if ac_qual = "A5" then
+    nmin(%time_for_at_least_one_landing_of_qual%(ac_qual, date),
+         %time_for_enough_total_landings%(ac_qual, date)
+    )
+  /* Recency 0-45 days: Min 1 A5 or A2/A3 landing within 45 days, Min 3 landings within 90 days*/
+  else if crew.%is_a2a3_qualified_at_date%(date) or crew.%is_a2a5_qualified_at_date%(date) then
+    if system_db_parameters.%two_landings_every_45_days_parameter%(date) then
+        nmin(%time_for_at_least_two_landings_of_qual%(ac_qual, date),
+         %time_for_enough_total_landings%(ac_qual, date)
+        )
+    else
+        nmin(%time_for_at_least_one_landing_of_qual%(ac_qual, date),
+         %time_for_enough_total_landings%(ac_qual, date)
+        )
+ 
+
+  else
+    /* Recency 0-90 days: Min 3 landings (OM-A 5.2.10 note 3)*/
+    %time_for_enough_total_landings%(ac_qual, date);
+
+export %expiry_time_for_recency_for_acqual_at_date%(String ac_qual, Abstime date) =
+  if crew.%ac_qln%(date, 1) = "FF" then
+      %pp_end% + %recency_time%(true, ac_qual, date) * 24:00
+  
+  else if crew.%rank_at_date%(date) = "FR" and
+        crew.%is_multi_qualified_at_date%(date) and
+        (ac_qual in crew.awb_ac_quals) then
+        nmax(%latest_3_simulator_landings_date%("A3", date),
+             %latest_3_simulator_landings_date%("A4", date),
+             %latest_3_simulator_landings_date%("A5", date)) + %recency_time%(false, ac_qual, date) * 24:00
+  /* Recency 0-45 days: Min 1 A5 or A2/A3 landing within 45 days, Min 3 landings within 90 days*/
+  else if crew.%is_multi_qualified_at_date%(date) then
+    if crew.%is_a2a3_qualified_at_date%(date) or crew.%is_a2a5_qualified_at_date%(date) then
+      if system_db_parameters.%two_landings_every_45_days_parameter%(date) then
+        nmin(%time_for_at_least_two_landings_of_qual%(ac_qual, date) + %recency_time%(false, ac_qual, date) * 24:00,
+         %time_for_enough_total_landings%(ac_qual, date) + %recency_time%(true, ac_qual, date) * 24:00)
+      else
+        nmin(%time_for_at_least_one_landing_of_qual%(ac_qual, date) + %recency_time%(false, ac_qual, date) * 24:00,
+         %time_for_enough_total_landings%(ac_qual, date) + %recency_time%(true, ac_qual, date) * 24:00)
+
+    else
+        nmin(%time_for_at_least_one_landing_of_qual%(ac_qual, date) + %recency_time%(false, ac_qual, date) * 24:00,
+         %time_for_enough_total_landings%(ac_qual, date) + %recency_time%(true, ac_qual, date) * 24:00)  
+    
+  else
+    /* Recency 0-90 days: Min 3 landings (OM-A 5.2.10 note 3)*/
+    %time_for_enough_total_landings%(ac_qual, date) + %recency_time%(true, ac_qual, date) * 24:00;
+
+
+export %time_for_enough_total_landings%(String ac_qual, Abstime date) =
+  if crew.%is_multi_qualified_at_date%(date) then
+    %time_for_enough_total_landings_multi%(date)
+  else
+    %time_for_enough_total_landings_single%(ac_qual, date);
+
+/* Only uses one function to calc this now. If more places to look in are added add them to last_landing_date
+   Nr land used to use pp, accumulators and simulators */
+/* do three lookups, can do with let for now. Should depend on min_landings_in_interval */
+
+export %time_for_enough_total_landings_single%(String ac_qual, Abstime earliest_date) =
+  let landing1 = %last_landing_date%(ac_qual, earliest_date),
+      landing2 = if landing1 <> %abstimemin% then %last_landing_date%(ac_qual, landing1) else %abstimemin%,
+      landing3 = if landing2 <> %abstimemin% then %last_landing_date%(ac_qual, landing2) else %abstimemin%,
+      latest_landing = nmax(landing1, training.%last_simulator_date%(earliest_date)),
+      sim_3_landing = %sim_3_landings_date%( ac_qual, earliest_date,latest_landing),
+      sim_2_landing_1 = %sim_2_landings_date%( ac_qual, earliest_date,latest_landing),
+      sim_2_landing_2 = %sim_2_landings_date%( ac_qual, sim_2_landing_1,latest_landing),
+      sim_1_landing_1 = %sim_1_landings_date%( ac_qual, earliest_date,latest_landing),
+      sim_1_landing_2 = %sim_1_landings_date%( ac_qual, sim_1_landing_1, latest_landing),
+      sim_1_landing_3 = %sim_1_landings_date%( ac_qual, sim_1_landing_2, latest_landing),
+      landing1_incl_sim= nmax(landing1, sim_1_landing_1),
+      landing3_incl_sim= %third_landing_incl_1_sim%( landing1,  landing2,  landing3,  sim_1_landing_1,  sim_1_landing_2,  sim_1_landing_3);
+  if (sim_3_landing <> %abstimemin% and sim_3_landing > latest_landing -  %recency_time%(true, ac_qual, latest_landing) * 24:00) then
+      if(landing3_incl_sim < sim_2_landing_1) then
+       nmax(nmin(nmax(landing1_incl_sim,sim_2_landing_2),sim_2_landing_1), sim_3_landing)
+      else
+       nmax(landing3_incl_sim, sim_3_landing)
+  
+  else if (sim_2_landing_1 <> %abstimemin% and sim_2_landing_1 > latest_landing -  %recency_time%(true, ac_qual, latest_landing) * 24:00) then
+      if(landing3_incl_sim > sim_2_landing_1) then
+        landing3_incl_sim
+      else if(landing1_incl_sim > sim_2_landing_1) then
+        sim_2_landing_1
+      else
+         nmax(landing1_incl_sim, sim_2_landing_2)
+     
+   else 
+        landing3_incl_sim;
+         
+      
+
+export %time_for_enough_total_landings_multi%(Abstime earliest_date) =
+  let landing1 = %last_landing_date_any_qual%(earliest_date),
+      landing2 = if landing1 <> %abstimemin% then %last_landing_date_any_qual%(landing1) else %abstimemin%,
+      landing3 = if landing1 <> %abstimemin% then %last_landing_date_any_qual%(landing2) else %abstimemin%,
+      latest_landing = nmax(landing1, training.%last_simulator_date%(earliest_date)),
+      sim_3_landing_multi = %last_3_landing_simulator_date_any_qual%( earliest_date, latest_landing),
+      sim_2_landing_multi_1 = %last_2_landing_simulator_date_any_qual%( earliest_date, latest_landing),
+      sim_2_landing_multi_2 = %last_2_landing_simulator_date_any_qual%(  sim_2_landing_multi_1,latest_landing),
+      sim_1_landing_multi_1 = %last_1_landing_simulator_date_any_qual%( earliest_date, latest_landing),
+      sim_1_landing_multi_2 = %last_1_landing_simulator_date_any_qual%( sim_1_landing_multi_1, latest_landing),
+      sim_1_landing_multi_3 = %last_1_landing_simulator_date_any_qual%( sim_1_landing_multi_2, latest_landing),
+      landing1_incl_sim= nmax(landing1, sim_1_landing_multi_1),
+      landing3_incl_sim= %third_landing_incl_1_sim%( landing1,  landing2,  landing3,  sim_1_landing_multi_1,  sim_1_landing_multi_2,  sim_1_landing_multi_3);
+  if (sim_3_landing_multi <> %abstimemin%  ) then
+    if(landing3_incl_sim < sim_2_landing_multi_1) then
+      nmax(nmin(nmax(landing1_incl_sim,sim_2_landing_multi_2),sim_2_landing_multi_1), sim_3_landing_multi)
+     else
+       nmax(landing3_incl_sim, sim_3_landing_multi)
+     
+   else if (sim_2_landing_multi_1 <> %abstimemin%) then
+      if(landing3_incl_sim > sim_2_landing_multi_1) then
+        landing3_incl_sim
+      else if(landing1_incl_sim > sim_2_landing_multi_1) then
+        sim_2_landing_multi_1
+      else
+         nmax(landing1_incl_sim, sim_2_landing_multi_2)
+     
+   else 
+        landing3_incl_sim;
+
+%second_landing_incl_1_sim%(Abstime landing1, Abstime landing2, Abstime sim_1_landing_1, Abstime sim_1_landing_2) =
+ if (landing1 > sim_1_landing_1) then
+    if(sim_1_landing_1 > landing2) then
+     sim_1_landing_1
+    else
+     landing2     
+ else
+     if(landing1 > sim_1_landing_2) then
+       landing1
+     else
+       sim_1_landing_2;
+
+%third_landing_incl_1_sim%(Abstime landing1, Abstime landing2, Abstime landing3, 
+Abstime sim_1_landing_1, Abstime sim_1_landing_2, Abstime sim_1_landing_3) =
+
+  if (landing1 > sim_1_landing_1) then
+    if(landing2 > sim_1_landing_1) then
+      if(landing3 > sim_1_landing_1) then
+         landing3
+      else 
+         sim_1_landing_1
+    else
+     if(landing2 > sim_1_landing_2) then
+        landing2
+     else 
+        sim_1_landing_2
+  else
+    if(sim_1_landing_2 > landing1) then
+      if(sim_1_landing_3 > landing1) then
+         sim_1_landing_3
+      else 
+         landing1
+    else
+     if(sim_1_landing_2 > landing2) then
+        sim_1_landing_2
+     else 
+        landing2;
+     
+     
+     
+  export %time_for_at_least_two_landings_of_qual%(String ac_qual, Abstime earliest_date) =
+  let landing1 = %last_landing_date%(ac_qual, earliest_date),
+      landing2 = if landing1 <> %abstimemin% then %last_landing_date%(ac_qual, landing1) else %abstimemin%,
+      sim_1_landing_1= %last_1_landing_simulator_date%( ac_qual, earliest_date),
+      sim_1_landing_2= %last_1_landing_simulator_date%( ac_qual, sim_1_landing_1);
+        
+  nmax(%second_landing_incl_1_sim%( landing1,  landing2,  sim_1_landing_1,sim_1_landing_2), %last_2_landing_simulator_date%( ac_qual, earliest_date), %last_3_landing_simulator_date%( ac_qual, earliest_date));
+
+
+export %time_for_at_least_one_landing_of_qual%(String ac_qual, Abstime earliest_date) =
+
+  if ac_qual = "A3" or ac_qual = "A4" then
+    nmax(%last_landing_date%("A3", earliest_date), %last_any_landing_simulator_date%("A3", earliest_date),
+         %last_landing_date%("A4", earliest_date), %last_3_landing_simulator_date%("A4", earliest_date))
+  else 
+    nmax(%last_landing_date%(ac_qual, earliest_date), %last_any_landing_simulator_date%(ac_qual, earliest_date));
+
+/* Functions to calculate the time when enough landings for all valid MFF qualifications
+   have been completed. They are valid only for "valid_qualifications_for_multi_qual"
+   and will add all landings of these types together. */
+
+set valid_qualifications_for_multi_qual = "A2", "A3", "A4", "A5";
+
+%last_landing_date_any_qual%(Abstime date) =
+  default(max(times(crew.%number_of_qualifications%), %last_landing_date%(crew.%qln_subtype%(%times_index_0%), date))
+    where (crew.%qln_type%(%times_index_0%) = "ACQUAL" and
+           crew.%qln_subtype%(%times_index_0%) in valid_qualifications_for_multi_qual), %abstimemin%);
+
+%last_3_landing_simulator_date_any_qual%(Abstime date, Abstime latest_landing_date) =
+  default(max(times(crew.%number_of_qualifications%),
+              %sim_3_landings_date%(crew.%qln_subtype%(%times_index_0%), date,latest_landing_date)
+              )
+    where (crew.%qln_type%(%times_index_0%) = "ACQUAL" and
+           crew.%qln_subtype%(%times_index_0%) in valid_qualifications_for_multi_qual), %abstimemin% );
+           
+%last_2_landing_simulator_date_any_qual%(Abstime date, Abstime latest_landing_date) =
+  default(max(times(crew.%number_of_qualifications%),
+              %sim_2_landings_date%(crew.%qln_subtype%(%times_index_0%), date, latest_landing_date)
+              )
+    where (crew.%qln_type%(%times_index_0%) = "ACQUAL" and
+           crew.%qln_subtype%(%times_index_0%) in valid_qualifications_for_multi_qual), %abstimemin%);
+
+%last_1_landing_simulator_date_any_qual%(Abstime date, Abstime latest_landing_date) =
+  default(max(times(crew.%number_of_qualifications%),
+              %sim_1_landings_date%(crew.%qln_subtype%(%times_index_0%), date, latest_landing_date)
+              )
+    where (crew.%qln_type%(%times_index_0%) = "ACQUAL" and
+           crew.%qln_subtype%(%times_index_0%) in valid_qualifications_for_multi_qual), %abstimemin%);
+           
+/* Can first look through planning period and then accumulators. May improve performance. */
+export %last_landing_date%(String ac_qual, Abstime date) =
+  accumulators.%last_landing%(%ac_fam_str%(ac_qual), date);
+
+/* Not all simulators give recency, but these:
+ *   (- FFS (coded C/CE)) - This is not true according to updated specification
+ *   - ASF (coded CH)
+ *   - PC  (coded Y/YE/YO or when skill test Z/ZE/ZO)
+ *   - OPC (coded S/SE/SO)
+ *   (For A3A4A5 crew a SIM gives recency only on the ac type for which the simulator is performed)
+ *   AST gives full recency, 3 landings, to flown ac qual because of corona. Previously AST only gave a single
+ *   landing to the flown ac qual"*/
+ 
+%last_3_landing_simulator_date%(String ac_qual, Abstime date) =
+  if crew.%is_SVS% then
+    nmax(training.%last_simulator_date_of_type%("ASF", date, ac_qual),
+        training.%last_simulator_date_of_type%("PC", date, ac_qual),
+        training.%last_simulator_date_of_type%("OPC", date, ac_qual),
+        training.%last_simulator_date_of_type%("PC SKILL TEST", date, ac_qual),
+        training.%last_simulator_date_of_type%("PC CHANGE", date, ac_qual),
+        training.%last_simulator_date_of_type%("PC RENEWAL", date, ac_qual),
+        training.%last_simulator_date_of_type%("PC FORCED", date, ac_qual),
+        training.%last_simulator_date_of_type%("OPC FORCED", date, ac_qual),
+        training.%last_simulator_date_of_type%("SIM ASSIST LANDINGS", date, ac_qual))
+  else
+    nmax(training.%last_simulator_date_of_type%("ASF", date, ac_qual),
+        training.%last_simulator_date_of_type%("SIM ASSIST LANDINGS", date, ac_qual),
+        training.%last_simulator_date_of_type%("PC SKILL TEST", date, ac_qual));
+
+     
+%last_2_landing_simulator_date%(String ac_qual, Abstime date) =
+    if (ac_qual = "A3" or ac_qual = "A5") and not crew.%is_SVS% then 
+	  nmax( training.%last_simulator_date_of_type%("PC", date, ac_qual),
+	          training.%last_simulator_date_of_type%("OPC", date, ac_qual),
+	          training.%last_simulator_date_of_type%("PC CHANGE", date, ac_qual),
+	          training.%last_simulator_date_of_type%("PC RENEWAL", date, ac_qual),
+	          training.%last_simulator_date_of_type%("PC FORCED", date, ac_qual),
+	          training.%last_simulator_date_of_type%("OPC FORCED", date, ac_qual))
+   else %abstimemin%;
+ 
+   
+%last_1_landing_simulator_date%(String ac_qual, Abstime date) =
+    if (ac_qual = "A2" or ac_qual = "38") and not crew.%is_SVS% then
+        nmax( training.%last_simulator_date_of_type%("PC", date, ac_qual),
+	          training.%last_simulator_date_of_type%("OPC", date, ac_qual),
+	          training.%last_simulator_date_of_type%("PC CHANGE", date, ac_qual),
+	          training.%last_simulator_date_of_type%("PC RENEWAL", date, ac_qual),
+	          training.%last_simulator_date_of_type%("PC FORCED", date, ac_qual),
+	          training.%last_simulator_date_of_type%("OPC FORCED", date, ac_qual))
+    else %abstimemin%;
+%last_any_landing_simulator_date%(String ac_qual, Abstime date) =   
+        nmax(%last_1_landing_simulator_date%(ac_qual, date),%last_2_landing_simulator_date%(ac_qual, date),%last_3_landing_simulator_date%(ac_qual, date));
+        
+%valid_simulator_landing_date%(String ac_qual, Abstime date, string type)=
+ let sim_date = training.%last_simulator_date_of_type%(type, date, ac_qual);
+   if (not void(sim_date) and sim_date + %recency_time%(false, ac_qual, date) * 24:00 > date) or date = recency.%last_date% then
+    true
+   else
+    false;
+
+table nr_simulator_landings(String type, Abstime date, String ac_qual) =
+  crew.%is_SVS%, ac_qual, type, %valid_simulator_landing_date%(ac_qual, date, type) ->
+    Int %nr_sim_landings%;
+ 
+  false,    -,                 "ASF", true  -> 3; 
+  false,    -,       "PC SKILL TEST", true  -> 3;
+  false,    -, "SIM ASSIST LANDINGS", true  -> 3;
+  false, "A3",                  "PC", true  -> 2;
+  false, "A3",                 "OPC", true  -> 2; 
+  false, "A3",           "PC CHANGE", true  -> 2;
+  false, "A3",          "PC RENEWAL", true  -> 2; 
+  false, "A3",           "PC FORCED", true  -> 2; 
+  false, "A3",          "OPC FORCED", true  -> 2; 
+  false, "A5",                  "PC", true  -> 2;
+  false, "A5",                 "OPC", true  -> 2; 
+  false, "A5",           "PC CHANGE", true  -> 2;
+  false, "A5",          "PC RENEWAL", true  -> 2; 
+  false, "A5",           "PC FORCED", true  -> 2; 
+  false, "A5",          "OPC FORCED", true  -> 2; 
+  false, "A2",                  "PC", true  -> 1;
+  false, "A2",                 "OPC", true  -> 1; 
+  false, "A2",           "PC CHANGE", true  -> 1;
+  false, "A2",          "PC RENEWAL", true  -> 1; 
+  false, "A2",           "PC FORCED", true  -> 1; 
+  false, "A2",          "OPC FORCED", true  -> 1; 
+  false, "38",                  "PC", true  -> 1;
+  false, "38",                 "OPC", true  -> 1; 
+  false, "38",           "PC CHANGE", true  -> 1;
+  false, "38",          "PC RENEWAL", true  -> 1; 
+  false, "38",           "PC FORCED", true  -> 1; 
+  false, "38",          "OPC FORCED", true  -> 1; 
+  true,     -,                     -, true  -> 3;
+  -,        -,                     -,    -  -> 0;
+end
+
+%total_sim_landings%(String ac_qual, Abstime date) =
+        %nr_sim_landings%("ASF", date, ac_qual)+
+        %nr_sim_landings%("PC", date, ac_qual)+
+        %nr_sim_landings%("OPC", date, ac_qual)+
+        %nr_sim_landings%("PC SKILL TEST", date, ac_qual)+
+        %nr_sim_landings%("PC CHANGE", date, ac_qual)+
+        %nr_sim_landings%("PC RENEWAL", date, ac_qual)+
+        %nr_sim_landings%("PC FORCED", date, ac_qual)+
+        %nr_sim_landings%("OPC FORCED", date, ac_qual)+
+        %nr_sim_landings%("SIM ASSIST LANDINGS", date, ac_qual);
+        
+%latest_3_simulator_landings_date%(String ac_qual, Abstime date) = 
+    let sim_3_landings_date = default(%last_3_landing_simulator_date%(ac_qual, date), %abstimemin%),
+      sim_2_landings_date=  default(%last_2_landing_simulator_date%(ac_qual, date), %abstimemin%) ,
+      sim_1_landings_date = default(%last_1_landing_simulator_date%(ac_qual, date), %abstimemin%), 
+      total_landings = %total_sim_landings%(ac_qual, date) ;
+      
+      if total_landings >= 3 then 
+        nmax(sim_3_landings_date, sim_2_landings_date,sim_1_landings_date)
+      else 
+        %abstimemin%;      
+    
+
+%sim_3_landings_date%(String ac_qual, Abstime date, Abstime latest_landing_date) = 
+       let sim_3_date = default(%last_3_landing_simulator_date%(ac_qual, date), %abstimemin%);
+       if( sim_3_date > latest_landing_date -  %recency_time%(true, ac_qual, date) * 24:00) then
+        sim_3_date
+       else
+         %abstimemin%;
+        
+%sim_2_landings_date%(String ac_qual, Abstime date, Abstime latest_landing_date)=  
+       let sim_2_date = default(%last_2_landing_simulator_date%(ac_qual, date), %abstimemin%);
+       if( sim_2_date > latest_landing_date -  %recency_time%(true, ac_qual, date) * 24:00) then
+        sim_2_date
+       else
+         %abstimemin%;
+          
+%sim_1_landings_date%(String ac_qual, Abstime date, Abstime latest_landing_date) = 
+       let sim_1_date = default(%last_1_landing_simulator_date%(ac_qual, date), %abstimemin%);
+       if( sim_1_date > latest_landing_date -  %recency_time%(true, ac_qual, date) * 24:00) then
+        sim_1_date
+       else
+         %abstimemin%;
+ 
+    
+
+export %_max_days_recency_limit_38_p% =
+  parameter 45
+  remark "    Max days recency (38) to fly with recent crew";
+
+export %_max_days_recency_limit_A2_p% =
+  parameter 45
+  remark "    Max days recency (A2) to fly with recent crew";
+
+export %_max_days_recency_limit_LH_p% =
+  parameter 45
+  remark "    Max days recency (LH) to fly with recent crew";
+
+redefine export %max_days_recency_limit_p% =
+  let qual = leg.%qual%;
+  if qual = "38" then
+    %_max_days_recency_limit_38_p%
+  else if qual = "A2" then
+    %_max_days_recency_limit_A2_p%
+  else if qual in crew.long_haul_qlns_set then
+    %_max_days_recency_limit_LH_p%
+  else
+    void_int;
+
+export %crew_is_too_many_days_unrecent% =
+  %days_since_recency_flight% > %max_days_recency_limit_p%;
+
+redefine export %days_since_recency_flight% = %days_since%(leg.%start_date%,
+                                                  %last_active_flight%(leg.%start_utc%));
+
+/* If crew is either A2 or 38 qualified, crew needs to be recent on that specific qualification */
+set exact_quals = "A2", "38";
+
+export %last_active_flight%(Abstime date) =
+  let qual = leg.%qual%;
+  if locate(qual, crew.%aircraft_qlns%) > 0 then
+    if qual in exact_quals then
+      %last_flown_ac_qual%(qual, date)
+    else
+      nmax(accumulators.%last_flown%("A330", date),
+           accumulators.%last_flown%("A340", date),
+           accumulators.%last_flown%("A350", date))
+  else
+    void_abstime;
+
+
+
+/****************************************************************
+ * Section 2: Accumulator lookups
+ ***************************************************************/
+table ac_qual_ac_type_map_fc(String ac_qual_str) =
+  ac_qual_str -> redefine String %ac_type_str%;
+  external leg.%ac_type_mappings_table%;
+  "ac_qual_fc" -> "ac_type";
+  - -> "";
+end
+
+/****************************************************************
+ * Section 3: Rudob definitions
+ ***************************************************************/
+
+redefine export %expiry_date_min%(Abstime date, String type) =
+  if type = "ALL" then
+    min(times(crew.%ac_qln_max_iter_at_date%(date)),
+        %expiry_date_for_ac_qln%(crew.%ac_qln%(date, %times_index_0%), date))
+  else if crew.%has_acqln_in_pp%(type) then
+    /* SKCMS-2548: Filtering for specific acqual instead of all */
+     %expiry_date_for_ac_qln%(type, date)
+  else
+    void_abstime;
+
+%expiry_date_for_ac_qln%(String ac_qln, Abstime date) =
+   nmax(%expiry_time_for_recency_for_acqual_at_date%(ac_qln, date),
+        crew.%qln_entry_date%("ACQUAL", ac_qln, date) +
+         %recency_time%(false, ac_qln, date) * 24:00
+       );
+
+redefine export %extension_by_trip_for_ac_qln%(String ac_qln) =
+  let expiry_date_before_trip = %expiry_date_for_ac_qln%(ac_qln, trip.%start_day%),
+      expiry_date_after_trip = %expiry_date_for_ac_qln%(ac_qln, trip.%start_day% + 24:00);
+
+  (expiry_date_after_trip - expiry_date_before_trip) / 24:00;
+
+
+set qln_min_sectors_in_max_days_recency_FC_active_qualifications =
+  parameter "38", "A2", "A3", "A5", "A3A5"
+  remark "Active qualifications for rule qln_min_sectors_in_max_days_recency_FC";
+
+export %_qln_min_sectors_in_max_days_recency_FC_valid_for_qual% =
+  leg.%qual% in qln_min_sectors_in_max_days_recency_FC_active_qualifications;
+
+export %min_sectors_sh% =
+  parameter 8
+  remark "Minimum sectors to be considered recent crew in SH flights";
+
+export %max_days_SH_pilot2% =
+  parameter 60
+  remark "Max days for pilot 2 to perform 1 sector/SIM-duty to be considered recent in SH flights";
+
+export %max_days_SH_pilot1% =
+  parameter 30
+  remark "Max days for pilot 1 to fly the min sectors to be considered recent crew in SH flights";
+
+export %min_sectors_lh% =
+  parameter 4
+  remark "Minimum sectors to be considered recent crew in LH flights";
+
+ 
+export %max_days_LH_pilot1% =
+  parameter 35
+  remark "Max days for pilot 1 to fly the min sectors to be considered recent crew in LH flights";
+  
+export %max_days_LH_pilot2% =
+  parameter 45
+  remark "Max days for pilot 2 to fly the min sectors to be considered recent crew in LH flights";
+
+export %max_days_LH_pilot3% =
+  parameter 45
+  remark "Max days for pilot 3 to fly the min sectors to be considered recent crew in LH flights";
+
+export  %number_of_active_sectors_on_max_days_lh_pilot1% =
+  %number_of_sim_sectors%(duty.%start_hb%, %max_days_LH_pilot1%) * 2 +
+  %number_of_active_sectors_on_max_days%("A3", leg.%start_hb%,  %max_days_LH_pilot1% ) +
+  %number_of_active_sectors_on_max_days%("A5", leg.%start_hb%,  %max_days_LH_pilot1% );
+
+export  %number_of_active_sectors_on_max_days_lh_pilot2% =
+  %number_of_sim_sectors%(duty.%start_hb%, %max_days_LH_pilot2%) * 2 +
+  %number_of_active_sectors_on_max_days%("A3", leg.%start_hb%,  %max_days_LH_pilot2% ) +
+  %number_of_active_sectors_on_max_days%("A5", leg.%start_hb%,  %max_days_LH_pilot2% );
+
+export  %number_of_active_sectors_on_max_days_lh_pilot3% =
+  %number_of_sim_sectors%(duty.%start_hb%, %max_days_LH_pilot3%) * 2 +
+  %number_of_active_sectors_on_max_days%("A3", leg.%start_hb%,  %max_days_LH_pilot3% ) +
+  %number_of_active_sectors_on_max_days%("A5", leg.%start_hb%,  %max_days_LH_pilot3% ); 
+
+export %lh_pilot3_recency_checked% =   %expiry_date%(leg.%start_date%, leg.%qual%) >= leg.%start_date% or
+                                (leg.%is_t_flight% and %nr_landings_extended_fulfilled% and training.%leg_has_tri_tre%) or
+                                (crew.%is_skn_at_date%(leg.%start_date%) and %days_since%(leg.%start_date%,
+                                   training.%last_perf_date_for_act_of_type%("T-FLIGHT", leg.%start_date%)) < %max_days%);                           
+
+
+  
+export %total_nr_of_sectors% =
+  %number_of_sim_sectors%(duty.%start_hb%, %max_days_SH_pilot1%) * 6 +
+  %number_of_active_sectors_on_max_days%(leg.%qual%, leg.%start_hb%,  %max_days_SH_pilot1% );
+  
+export %total_nr_of_sectors_pilot2% =
+  %number_of_sim_sectors%(duty.%start_hb%, %max_days_SH_pilot2%) * 6 +
+  %number_of_active_sectors_on_max_days%(leg.%qual%, leg.%start_hb%,  %max_days_SH_pilot2% );
+
+
+export %number_of_active_sectors_on_max_days_pilot2% =
+      %number_of_sim_sectors%(duty.%start_hb%, %max_days_SH_pilot2%)  +
+      %number_of_active_sectors_on_max_days%(leg.%qual%, leg.%start_hb%,  %max_days_SH_pilot2% ); 
+
+    
+%number_of_sim_sectors%(Abstime date, int max_days) =
+  accumulators.%nr_sim_sectors_in_period%(date - max_days * 24:00, date);
+
+%number_of_active_sectors_on_max_days%(String leg_qual, Abstime date,  int max_days) =
+  accumulators.%nr_active_sectors_in_period%(leg_qual, date - max_days* 24:00, date);
+
+export %crew_is_recent_in_leg% =
+  %total_nr_of_sectors% >= %min_sectors_sh%;
+
+
+export %total_nr_of_sectors_lh% =
+  %number_of_sim_sectors%(duty.%start_hb%, %max_days_LH_pilot3%) * 2 +
+  %number_of_active_sectors_on_max_days%("A3", leg.%start_hb%,  %max_days_LH_pilot2% ) +
+  %number_of_active_sectors_on_max_days%("A5", leg.%start_hb%,  %max_days_LH_pilot2% );
+
+/*%number_of_sim_sectors%(Abstime date) =
+  accumulators.%nr_sim_sectors_in_period%(date - %max_days_sh% * 24:00, date);*/
+
+
+/*%number_of_active_sectors_on_max_days%(String leg_qual, Abstime date) =
+  accumulators.%nr_active_sectors_in_period%(leg_qual, date - %max_days_sh% * 24:00, date);*/
+
+export %crew_is_recent_in_leg_lh% =
+  %number_of_active_sectors_on_max_days_lh_pilot1% >= %min_sectors_lh%;
+
+export %crew_is_unrecent_in_leg_lh% =
+  %number_of_active_sectors_on_max_days_lh_pilot1% < %min_sectors_lh%;
+  
+export %crew_is_recent_in_leg_lh_pilot2% =
+  %number_of_active_sectors_on_max_days_lh_pilot2% >= %min_sectors_lh%;
+    
+export %crew_is_unrecent_in_leg% =
+  %total_nr_of_sectors% <= %min_sectors_sh%;
+

@@ -1,0 +1,144 @@
+/* -*- crc -*-
+ *
+ * Purpose:
+ *   This module contains recency definitions for cabin crew
+ *   used in qualification recency rules, costs and select filters.
+ *
+ * Sections:
+ *   1. Rule definitions and calculations
+ *   2. Accumulator lookups
+ *   3. Rudob definitions
+ *
+ * Created by:
+ *   Henrik Albertson, 04-Jul-2006
+ *
+ * Major changes:
+ */
+
+module recency_cc inherits recency
+import task;
+import training;
+import base_product;
+
+/****************************************************************
+ * Section 1: Rule definitions and calculations
+ ***************************************************************/
+
+/* Constants */
+redefine export %max_days% = 180;
+
+/*
+** Temporary employed crew
+*/
+/* Temp crew is recent if there is a refresher before first leg in month
+ * or if the required nr of production days and active flights have been
+ * flown in previous month(s). */
+export %temporary_crew_is_recent% = /* At trip start */
+  %absence_refresher_prev_in_month% or
+  %temporary_cc_requirements_fulfilled%;
+
+/* Absence refresher must be performed within 14 days from first unrecent leg */
+%absence_refresher_prev_in_month% =
+  default(prev(leg(roster), leg.%end_date%)
+          where (leg.%is_ground_duty% and
+                 training.%refresher%(crew.%ac_qln1%) or
+                 training.%refresher%(crew.%ac_qln2%))
+          >= trip.%start_day% - %max_days_from_refresher% * 24:00,
+  false);
+
+%max_days_from_refresher% = 14;
+
+%temporary_cc_requirements_fulfilled% =
+  /* Short/long haul combined requirements */
+  if %check_requirements_for%("SH") and %check_requirements_for%("LH") then
+    %prod_days_and_flights_fulfilled%("SH") and
+    %prod_days_and_flights_fulfilled%("LH")
+  /* Long haul requirements */
+  else if %check_requirements_for%("LH") then
+    %prod_days_and_flights_fulfilled%("LH")
+  /* Short haul requirements */
+  else
+    %prod_days_and_flights_fulfilled%("SH");
+
+%check_requirements_for%(String type) = not void(%max_months_temp_cc%(type));
+
+/* Requirements below or refresher before first leg in month
+ *   qlns = "SH" -> 12 legs and 5 prod days prev month
+ *   qlns = "LH" -> 4 legs and 4 prod days prev month
+ *   qlns = "SL" -> 18 legs and 9 prod days SH prev 3 months
+ *   qlns = "SL" -> 6 legs and 6 prod days LH prev 3 months */
+table recency_limits_temp_cc(String type) =
+  alias qlns = if crew.%is_short_long_combined_trip_start% then "SL"
+               else if crew.%is_long_haul_trip_start% then "LH"
+               else "SH";
+  qlns, type ->
+    Int %max_months_temp_cc%,
+    Int %min_prod_days_temp_cc%,
+    Int %min_flights_temp_cc%;
+  "LH", "LH" -> 1, 4, 4;
+  "SH", "SH" -> 1, 5, 12;
+  "SL", "LH" -> 3, 6, 6;
+  "SL", "SH" -> 3, 9, 18;
+  -, - -> void_int, 0, 0;
+end
+
+%prod_days_and_flights_fulfilled%(String type) =
+  let stop  = %temporary_crew_month_start%,
+      start = add_months(stop, -%max_months_temp_cc%(type));
+  accumulators.%nr_production_days_in_period%(type, start, stop) >=
+    %min_prod_days_temp_cc%(type) and
+  accumulators.%nr_active_flights_in_period%(type, start, stop) >=
+    %min_flights_temp_cc%(type);
+
+%temporary_crew_month_start% =
+  if %product% = "CCT" then
+    trip.%start_month_end%
+  else trip.%start_month_start%;
+
+/*
+** Permanently employed crew
+*/
+/* Definitions */
+export %days_since_last_recent% = %days_since%(leg.%start_UTC%, %last_recent_date_leg_start%);
+export %last_recent_date_leg_start% =
+  default(%last_recent_date_qual%(leg.%start_utc%, leg.%qual%), 01jan1986);
+
+redefine export %leg_is_recent% =
+  leg.%is_training_or_has_training_code% or
+  %expiry_date_leg_start% >= round_up(leg.%start_UTC%, 24:00);
+
+%last_recent_date_qual%(Abstime date, String ac_qual) =
+  %last_flown_ac_qual%(ac_qual, date);
+
+redefine export %expiry_date%(Abstime date, String ac_qual) =
+  round_up(%last_recent_date_qual%(date, ac_qual), 24:00)  + %max_days% * 24:00;
+
+/****************************************************************
+ * Section 2: Accumulator lookups
+ ***************************************************************/
+
+table ac_qual_ac_type_map_cc(String ac_qual_str) =
+  ac_qual_str -> redefine String %ac_type_str%;
+  external leg.%ac_type_mappings_table%;
+  "ac_qual_cc" -> "ac_type";
+  - -> "";
+end
+
+/****************************************************************
+ * Section 3: Rudob definitions
+ ***************************************************************/
+
+redefine export %expiry_date_min%(Abstime date, String type) =
+  if type = "ALL" then
+    /* expiry date of the recency that expires first */
+    min(times(crew.%ac_qln_max_iter_at_date%(date)),
+        %recency_expiry_date_for_ac_qln%(crew.%ac_qln%(date, %times_index_0%), date))
+  else if crew.%has_acqln_in_pp%(type) then
+    %recency_expiry_date_for_ac_qln%(type, date)
+  else
+    void_abstime;
+
+%recency_expiry_date_for_ac_qln%(String type, Abstime date) =
+   nmax(%last_flown_ac_qual%(type, date),
+         crew.%qln_entry_date%("ACQUAL", type, date)
+       ) + %max_days% * 24:00;

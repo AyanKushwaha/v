@@ -1,0 +1,1 @@
+var wpf_portal_ui_LOGOUT_PAGE="/portal/logout.html";

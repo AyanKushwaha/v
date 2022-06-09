@@ -1,0 +1,657 @@
+\documentclass[techdoc]{nobs}   %% Technical document style
+
+\title{Jeppesen Unified Data Model, version 8.00\\ SAS CMS}
+
+\author{Jeppesen Systems \texttt{<info@jeppesen.com>}}
+
+\DocRevision{CMS2 SP5, SAS CMS}  %% Manually set revision
+
+\def \theDocCompanyName {Jeppesen}
+
+\DocSecClass{\textbf{CONFIDENTIAL}}
+\DocCopyright{Copyright \copyright{} \theDocCompanyName, \number\year}
+
+\usepackage{makeidx}
+\makeindex
+
+\usepackage{times}
+\renewcommand{\rmdefault}{phv}
+
+\usepackage{nobsutils}  %% Load the NOBS utilities macros (lists, etc
+
+\graphicspath{{./}{../figures/}{../../sysarch01/figures/}}
+
+\newcommand{\discuss}[1]{{{\bf Discuss:}\em #1}}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+
+This document presents the Jeppesen Unified Data Model.
+The goal is to provide a common data model used internally by all Jeppesen
+products, allowing them to operate on information stored in one and the
+same database. The model should support the crew management process from
+manpower planning to post operations calculations.
+
+\end{abstract}
+
+\tableofcontents
+
+\newpage
+
+
+\section{DAVE schema definitions}
+\label{sec:DAVE schema definitions}
+
+DAVE schema definitions specify
+a {\bf relational data model}, grouped into modules.
+
+DAVE schema definitions consist of:
+
+- modules (= top-level grouping),
+
+- entities (= roughly version controlled database tables, each with a primary key
+  and attributes),
+
+- attributes (of entities),
+
+- extensions (= additional attributes to an entity),
+
+- references (= roughly links between entities),
+
+- sequences (not used in this model, therefore not described here).
+
+Indexes can also be specified in the schema definition files.
+However they are not part of the data model, they are part of its implementation,
+therefore they are not treated in this document.
+
+
+\subsection{Entities and Extensions}
+\label{sec:entities}
+
+The central objects of a DAVE schema definition are entities.
+
+{\bf Entities} are roughly version controlled database tables and define the
+persistent storage items.
+They roughly correspond to {\em classes} in object-oriented terminology.
+Each entity has a set of {\bf attributes},
+also called {\bf fields} or {\bf columns},
+a subset of which is defined as the {\bf primary key}.
+
+{\bf Extensions} are additional attributes that are added to an entity. They
+allow supplementary modules to enhance already existing entities.
+
+Each entity must be read as the basic entity definition and all extensions
+to that entity.
+
+Each entity in the database contains elements, which are called {\bf objects}
+(or sometimes records, rows, instances, items, or entries).
+
+A {\bf reference} or {\bf foreign key} %of an entity
+is an attribute or set of attributes of an entity
+used to identify an object in a referenced entity.
+
+
+\subsubsection{Modules}
+\label{sec:Modules}
+
+Entities and extensions are grouped into modules.
+An entity belongs to the module it is defined in, even if it has extensions
+defined in other modules.
+
+The modules allow tailoring systems according to different needs by selectively
+implementing only some of the UDM features. The basic UDM schema can be extended
+to cover specific customer needs.
+
+The data model is shared between different Jeppesen products.
+One part is the "core", shared by all installations,
+other parts are product-specific extension modules, may or may not be
+present in different installations.
+Certain modules require other modules. % (All require core.)
+
+UDM can be extended with client-specific extension modules.
+The actual data model found in a client installation
+will thus consist of:
+
+1. the core part of UDM,
+
+2. possibly one or more product-specific extension modules of UDM,
+
+3. possibly client-specific extension modules.
+
+This delivery of UDM have all SAS specific modules prefixed with sas\_.
+
+
+\subsection{Data types}
+\label{sec:types}
+
+\subsubsection{Basic data types}
+\label{sec:Basic data types}
+
+The basic data types are: bool, int, char, date, time, reltime, string and uuid.
+
+\begin{itemize}
+
+\item {\bf bool.}
+\label{sec:bool}
+A boolean value, i.e. True or False. Stored internally as a character, 'Y' or 'N'.
+
+A boolean field can be empty (if "nullable"), which does {\it not} correspond to
+any boolean value.
+
+\item {\bf int.}
+\label{sec:int}
+An integer value.
+Capable of holding the range of a signed 32 bit integer, from -2147483648 to 2147483647.
+
+Int corresponds to the Rave type int.
+
+\item {\bf char.}
+\label{sec:char}
+A single character.
+Values shall be limited to the ASCII character set,
+as the character set for other characters than ASCII is not defined.
+The NUL character (ASCII code 0) is not allowed, however a char field can be empty
+(if "nullable").
+
+\item {\bf date.}
+\label{sec:date}
+An absolute date, stored internally as the (integer) number of days
+since beginning of Carmen epoch, 1 Jan 1986 UTC. Dates before that are
+negative integers.
+
+% Range of this data type?
+% Min possible date in Oracle: 1 January 4712 BC, which is = -2446431 for us.
+% Max possible date in Oracle: 31 December 9999 AD, which is = 2927052 for us.
+% Both are well within our range of 32-bit integer, thus we should be able to
+% handle all of the Oracle date range 1 Jan 4712 BC .. 31 Dec 9999 AD.
+
+Capable of holding a range of 1986 +/- 5.8 million years.
+
+% ``A date range includes its end date''!?
+
+\item {\bf time.}
+\label{sec:time}
+An absolute point in time, stored internally as the (integer) number
+of minutes since beginning of Carmen epoch, 1 Jan 1986 00:00 UTC.
+Times before that are negative integers.
+
+% Range of this data type?
+% Min possible time in Oracle: 1 January 4712 BC, which is = -3522860640 for us.
+% Max possible time in Oracle: 31 December 9999 23:59 AD, which is = 4214956319 for us.
+% Both are well outside our range of 32-bit integer.
+% The min and max AbsTime we can express with 32-bit (signed) integer are:
+% min = -2147483648 = -2098-12-26 21:52:00
+% max = +2147483647 = 6069-01-23 02:07:00
+
+Capable of holding a range of 1986 +/- 4000 years.
+
+Time corresponds to the Rave type abstime.
+
+\item {\bf reltime.}
+\label{sec:reltime}
+Difference between two absolute times, expressed as an integral number of minutes.
+
+Capable of holding the range of +/- 4000 years.
+
+Reltime corresponds to the Rave type reltime.
+
+\item {\bf string.}
+\label{sec:string}
+A variable-length string, always with a maximum string length.
+%A string is a sequence of Unicode characters, and its length is the number of characters,
+%{\it not} the number of bytes in some encoding of those characters.
+
+A zero-length string is not allowed, however a string field can be
+empty (if "nullable").
+
+String corresponds to the Rave type string.
+
+\item {\bf uuid.}
+\label{sec:uuid}
+This type represents a ``Universally Unique IDentifier'' as specified by
+RFC 4122. A UUID is a 128 bit number that is guaranteed to be universally
+unique, and can therefore safely be used as an artificial key. A UUID is
+stored in the database as a 24 character string by base64 (RFC 1421) encoding
+the 16 octets of the UUID. The resulting string contains only printable
+ASCII characters (letters, digits, plus sign, slash, equals sign).
+
+\end{itemize}
+
+\subsubsection{Character set}
+\label{sec:Character set}
+
+It is the intention that in future the full character set of the Basic
+Multilingual Plane of Unicode will be supported: by the database, the
+Dave API and all input/output interfaces (using UTF-8 as preferred
+encoding of the character set where needed). For all practical
+purposes, presently only the ISO-8859-1 (Latin-1) subset of
+Unicode is fully supported.
+
+\subsubsection{String size}
+\label{sec:String size}
+
+All string fields in the data model have a size,
+which is the maximum number of characters (in Unicode) that the field can hold
+(independent of the number of bytes in some encoding).
+
+The size is specified with the ''size'' modifier (only used with string).
+(If the size modifier is not given, the maximum length of a string is
+implementation dependent.
+String without size modifier is not used in this data model.)
+
+\subsubsection{Array length}
+\label{sec:Array length}
+
+The optional ''arraylength'' modifier declares the field to be an array.
+Arraylength can be used together with all data types, both basic and
+reference types.
+
+
+\subsubsection{Missing values: NULL}
+\label{sec:Missing values}
+
+By default, a non-key field can be "empty", that is, contain no value.
+Information can be missing for any of several different reasons
+(for example, "information not available", "not applicable",
+``not relevant'', or "unknown").
+The {\it absence} of a value in a field is sometimes also called NULL.
+(Since it is {\em not} a value, a NULL should {\em not} be called ``a NULL value''.)
+A field can be declared as {\tt ``nonnull''} (or ``mandatory'')
+which forces it to actually contain a value (to be NOT NULL),
+otherwise it is allowed to be empty and is called ``nullable'' (or ``optional'').
+Primary key fields are always automatically {\bf nonnull}.
+Two special values that can sometimes be confused with NULL
+are disallowed in the data model:
+The {\tt char} type does not allow a NUL character (ASCII code 0).
+The {\tt string} type does not allow a zero-length string.
+Fields of type {\tt char} or {\tt string} can however be
+empty (unless they are declared {\tt nonnull}).
+For numerical values, care should be taken not to confuse 0 (zero, an
+ordinary value) with NULL (no information, value is missing).
+
+NULL is considered equal to NULL and different from every value
+(i.e. the ``ternary logic'' used in SQL does not apply).
+Other comparisons with NULL are not defined.
+
+In some cases, the data model may state a more specific meaning
+for NULL, for example, an empty {\it validfrom} means there is no end
+date to the validity period, an empty touchdown time can mean
+the aircraft has not landed yet.
+
+In some cases, a primary key needs to include a field that could be
+``empty''. In this case, some real value can be used to express emptiness,
+for example a space character for an empty operational suffix.
+
+
+\subsection{Primary keys and foreign keys}
+\label{sec:Primary keys and foreign keys}
+
+The {\bf primary key} of an entity is a (minimal) subset of its attributes
+that uniquely identifies an object in that entity.
+In the schema definition, the attributes that make up the primary key
+of an entity are marked with {\tt pk=''true''}.
+Every entity must have a primary key.
+Primary key attributes are automatically {\bf nonnull}.
+
+An entity can contain {\bf foreign keys}, also called {\bf references},
+to other entities (or even to itself).
+A foreign key is an attribute or set of attributes
+that identifies an object in the referenced entity.
+It must match the referenced entity's primary key in number and data type(s).
+
+A primary or foreign key is called {\bf composite} if it has more than one attribute.
+
+If all attributes of a foreign key in an object are non-null, then in
+the referenced entity a corresponding object is expected (but not required) to exist
+which has exactly the values of the foreign key as its primary key.
+
+References thus represent links between entities and can be used to
+``navigate'' between them -- from referencing object (``child'') to
+referenced (``parent''), and v.v.
+
+If some or all attributes of a foreign key are null, then no
+corresponding object is expected to exist (it couldn't, since primary
+key is always nonnull). The attributes that are non-null still carry
+meaning in their own right even if no referenced object exists.
+
+Some more notes about primary and foreign keys:
+{\it (Note: most of this applies mainly to natural keys; irrelevant for artificial keys.)}
+\begin{itemize}
+\item The order of attributes in the PK of an entity is significant.
+\item FK's can overlap with each other.
+\item FK's can overlap with PK.
+\item A FK attribute can still be meaningful even if the reference is "dangling".
+\item A FK attribute can still be meaningful even if another attribute of same FK is NULL.
+\item If a reference is nullable, then each attribute in it is independently nullable.
+    (Does not always make sense, but that's how it is.)
+%\item (...)
+\end{itemize}
+
+\subsubsection{Primary key is identity}
+\label{sec:Primary key is identity}
+
+An object is identified by its primary key attributes.
+Therefore: When an object is deleted,
+and later an object with the same key attributes is created, this is considered to be
+the same object. This also implies that if there were dangling references to the
+deleted object, they now become valid references again, pointing to the (re-)created
+object. (This may or may not be the intended behaviour!)
+
+The primary key attributes of an object cannot be changed.
+There are some cases, where an operation like ``change of primary key'' would be needed
+anyway, for example, ``Change Flight Leg Identifier'' (message OC018 in AOC).
+Such an operation
+will usually be implemented by deleting the existing object and inserting a
+new object with the new key, and all other attributes copied from the existing one.
+That operation
+may also require that other objects with references to this one are updated as well
+(similar to ``ON UPDATE CASCADE'' in SQL) -- if those other objects contain the
+reference in their own primary key, this will have to be implemented as delete-and-insert
+for those objects, too.
+
+{\it (Note: ``Faking'' an update like this is a complex and error-prone operation.
+Also, we lose the ``real'' identity (f.x. continuity of its DAVE history).
+We should avoid this hack if possible -- which probably means that we should choose
+the primary keys accordingly: if an attribute {\bf can} be changed, it shall not be PK.
+We may need artificial keys in those cases.)}
+
+
+
+\subsubsection{Validity period}
+\label{sec:Validity period}
+
+A {\bf validity period entity} represents a fact that holds true over
+a given period of time.
+
+A ``Validity period'' entity has the following properties:
+\begin{itemize}
+\item The entity contains a key attribute {\it validfrom} and a nullable, non-key attribute {\it validto}.
+  Both are of the same type, either ``time'' or ``date''.
+\item An entry represents a fact that holds true for all time points $t$ in the half-open interval
+ {\it validfrom}  $ \le t < $ {\it validto} (if {\it validto} is not null),
+  or in the half-open interval
+ {\it validfrom}  $ \le t$ (if {\it validto} is null).
+\item By convention, {\it validfrom} is listed as the last key attribute, and {\it validto} immediately after
+  as the first non-key attribute.
+\item By convention, the entity name ends in ``{\it \_period}''.
+\item Constraint: ({\it validto} is null or {\it validfrom} < {\it validto})
+\item Constraint: Different entries with the same ``parent key''
+  (all key attributes except {\it validfrom})
+  must not have overlapping validity periods, i.e.
+  if $validfrom_1 < validfrom_2$
+  then $validto_1$ is not null and $validto_1 \le validfrom_2$ must hold.
+\item The entity's ``parent key'' usually is or contains a foreign key to another entity,
+  whereas the entity itself is usually {\it not} referenced by any other entity.
+\item Typically (but not required),
+  different entries with the same ``parent key'' form a consecutive sequence that
+  covers the whole period from the earliest {\it validfrom} to the latest {\it validto}.
+\item Some ``validity period'' entities may have additional constraints that {\it validfrom} and {\it validto}
+  are, for example, integral dates or integral years.
+\item A validity period that is unbounded below (a fact that holds ``since forever'',
+  has ``always been true'') cannot be represented exactly.
+  If necessary, some date that lies far in the past is chosen to approximate this.
+\end{itemize}
+
+\section{Schema}
+\label{sec:schemas}
+
+\subsection{Data Model Outline}
+\label{sec:outline}
+
+The data model consists roughly of three parts, see Figure 1. First
+there is the basic need consisting of flight\_legs and ground\_tasks.
+The scheduling problem consists of covering the needs of these entities
+with crew and aircraft. The resource needs are not modeled explicitly,
+as it is assumed that they will be calculated by Rave rules. However,
+it is quite possible to extend the entities to explicitly store the
+resource needs if so desired.
+
+Then there is the crew part. This contains the crew entity as well as
+a number of entities linking crew with various tasks. Both anonymous
+and individual assignments are represented.
+
+Finally there is the aircraft part. This contains the aircraft entity
+as well as a number of entities linking aircraft with various tasks.
+Both anonymous and individual assignments are represented.
+
+Many entity fields can be null. This is on purpose, acknowledging
+the fact that all information is not known at all planning stages.
+In principle keys must be non-null and scheduled times and places
+should also be non-null. Most entities contain a supplementary
+information field. This allows free text comments to be attached
+to the items, serving as notes to the schedulers.
+
+The ambition is to model crew and aircraft assignments in a similar
+way. Furthermore in order to not force all systems to implement all of
+the data model, UDM is divided into a number of modules. The base is
+provided by the module air\_core. It contains all of the important
+entities and allows representation of crew and aircraft assignments.
+The module contains only minimal crew and aircraft entities.
+
+The module air\_crew contains an extended crew model for systems that
+need to reason about crew.
+
+The module air\_aicraft contains an extended aircraft model for systems
+that need to reason about aircraft.
+
+The module air\_planning contains extensions to support the planning
+process.
+
+The module air\_tracking contains extensions to support the tracking
+process.
+
+\subsection{Identifiers}
+\label{sec:Identifiers}
+
+All identifiers of any data model objects (this includes schemas, entities,
+attributes, references and sequences) are restricted to
+lower-case ASCII letters, digits and underscore, starting with a letter.
+
+Maximum length is 23 characters for entity names
+and 30 characters for other names.
+Attribute names should
+generally be short, especially primary key, foreign key and array fields,
+because of the concatenation of field names (explained further below),
+and the limit applies to the resulting concatenated names.
+
+Words that are {\em reserved words} in ANSI SQL or in Oracle
+must not be used.
+(These include, among others: {\it add, all, any, as, asc, between, by,
+char, check, comment, create, current, date, decimal, default, desc,
+for, from, group, in, index, integer, into, is, lock, long, minus,
+mode, not, null, number, of, on, option, or, order, public, raw, set,
+size, start, then, to, uid, union, user, values, where, with}.)
+Other words that have special meaning in SQL ({\em keywords}) should not be used either.
+(These include, among others: {\it count, character, min, max, type, value, when}.)
+
+
+There are two situations where the field names defined in this document are
+mapped to different names that must be used in the Dave API. One case is where
+a field is a reference to an entity identified by a composite primary key.
+Assume the field {\it f} in entity E1 references the entity E2. Assume also
+that E2 has a primary key consisting of fields {\it k1} and {\it k2}. Then E1
+will contain the two fields {\it f\_k1} and {\it f\_k2}. The other case where
+renaming happens is when arrays are defined. Declaring a field {\it g} as an
+array with length 2 will result in the fields {\it g\_1} and {\it g\_2}. Finally,
+it is possible to combine arrays and foreign keys. If the field {\it f} above
+was declared as an array of length 2, the actual fields would be: {\it f\_1\_k1},
+{\it f\_1\_k2}, {\it f\_2\_k1}, {\it f\_2\_k2}.
+
+\subsection{DAVE internals}
+\label{sec:Dave internals}
+
+The following tables contains DAVE internal configuration and metadata status and must never interacted by from anything else than the DAVE layer itself. Any modification to these tables can make the entire database schema irreversably corrupt and un-usable.
+\begin{itemize}
+\item DAVE\_ATTRIBCFG
+\item DAVE\_BRANCH
+\item DAVE\_DIGCHANNEL\_STATUS
+\item DAVE\_ENTITY
+\item DAVE\_ENTITYCFG
+\item DAVE\_ENTITY\_ATTRIBS
+\item DAVE\_ENTITY\_FKS
+\item DAVE\_ENTITY\_TABLES
+\item DAVE\_INSTALLED\_MODULES
+\item DAVE\_METADATA\_STATUS
+\item DAVE\_MODULE\_REQUIRE
+\item DAVE\_UPDATED\_TABLES
+\item DAVE\_REVISION
+\item DAVE\_SCHEMACFG
+\item UTIL\_STATUS
+\end{itemize}
+
+These tables contains DAVE internal filtering expressions.
+\begin{itemize}
+\item DAVE\_ENTITY\_SELECT
+\item DAVE\_SELECTION
+\item DAVE\_SELPARAM
+\end{itemize}
+\newpage
+
+\subsection{Legend to the pictures}
+\label{sec:legend}
+
+An entitity is shown as a solid box. The name above is the name of the entity.
+The top part of the box shows the primary key fields. The bottom part shows
+the non-primary-key fields. On the left side are the names of the fields, and
+on the right side are the types. The types can be either basic types or the names
+of entities. In the latter case the field is foreign key and the symbol {\bf FK}
+is shown beside the the box. A boldface type name shows that the field is
+declared non-null. All primary key fields are non-null.
+
+An extension is shown as a box with a dashed top line, the name above is the
+name of the entity it extends. The presentation is similar to an entity except
+that an extension can only contain non-primary-key fields.
+
+A number within parenthesis after the field type denotes the maximum length of
+a string valued field. A number within brackets after the field type indicates
+that the field is an array of values.
+
+
+\label{sec:details}
+
+\include{figures/figures}
+
+\clearpage
+
+%\section{Appendix - Enumeration of types}
+%
+%\subsection{Crew Documents}
+
+%This section lists a suggested set of standard documents.
+
+%*** UNFINISHED:
+%\begin{itemize}
+%\item Language?
+%\item Are type ratings tied to CP/FO?
+%\item Recurrent training (emergency, line, route, airport)?
+%\end{itemize}
+
+%\subsubsection{Document Number and Issuer}
+
+%\begin{tabular}[htbp]{l|l|l|l}
+%{\bf Type} & {\bf Docno} & {\bf Maindocno} & {\bf Issuer} \\
+%passport &	passport number &	- &			IATA city code where issued \\
+%visa &		visa number &		passport number &	IATA city code where issued \\
+%%vaccination &	- &			- &			- \\
+%licence &	licence number &	- &			- \\
+%rating &	- &			licence number &	- \\
+%medical &	- &			licence number &	- \\
+%\end{tabular}
+
+%\subsubsection{General Documents}
+
+%\begin{tabular}[htbp]{l|l|l}
+%{\bf Type} & {\bf Subtype} & {\bf Comment} \\
+%passport &	DK &			Passport \\
+%passport &	NO &			Passport \\
+%passport &	SE &			Passport \\
+%visa &		US,B1 &			Visa \\
+%visa &		US,B1/B2 &		Visa \\
+%visa &		US,C1 &			Visa \\
+%visa &		US,C1/D &		Visa \\
+%visa &		US,D &			Visa \\
+%visa &		CN,crew &		Visa \\
+%vaccination &	diphtheria &		Vaccination \\
+%vaccination &	havrix &		Vaccination \\
+%vaccination &	tetanus &		Vaccination \\
+%licence &	SE,B &			BCL B Certificate \\
+%licence &	SE,D &			BCL D Certificate \\
+%\end{tabular}
+
+%\subsubsection{JAA Documents}
+
+%\begin{tabular}[htbp]{l|l|l}
+%{\bf Type} & {\bf Subtype} & {\bf Comment} \\
+%medical &	JAA,class1 &		JAA Medical \\
+%medical &	JAA,class2 &		JAA Medical \\
+%licence &	JAA,ATPL &		JAA ATPL(A) Licence \\
+%licence &	JAA,CPL &		JAA CPL(A) Licence \\
+%rating &	JAA,FI &		JAA Flight Instructor Rating \\
+%rating &	JAA,IRI &		JAA Instrument Rating Instructor Rating \\
+%rating &	JAA,TRI &		JAA Type Rating Instructor Rating \\
+%rating &	JAA,CRI &		JAA Class Rating Instructor Rating \\
+%rating &	JAA,IR &		JAA Instrument Rating \\
+%rating &	JAA,ME &		JAA Multiengine Rating \\
+%rating &	JAA,A300 &		JAA Type Rating \\
+%rating &	JAA,A300FFCC &		JAA Type Rating \\
+%rating &	JAA,A310 300-600 &	JAA Type Rating \\
+%rating &	JAA,A320 &		JAA Type Rating \\
+%rating &	JAA,A330 &		JAA Type Rating \\
+%rating &	JAA,A340 &		JAA Type Rating \\
+%rating &	JAA,B737 100-200 &	JAA Type Rating \\
+%rating &	JAA,B737 300-500 &	JAA Type Rating \\
+%rating &	JAA,B737 600-900 &	JAA Type Rating \\
+%rating &	JAA,B747 100-300 &	JAA Type Rating \\
+%rating &	JAA,B747 400 &		JAA Type Rating \\
+%rating &	JAA,B757/767 &		JAA Type Rating \\
+%rating &	JAA,B777 &		JAA Type Rating \\
+%rating &	JAA,DC9 80/MD88/MD90 &	JAA Type Rating {\it Is this really one rating?} \\
+%rating &	JAA,DC10 &		JAA Type Rating \\
+%rating &	JAA,MD11 &		JAA Type Rating \\
+%\end{tabular}
+
+%\subsubsection{FAA Documents}
+
+%\begin{tabular}[htbp]{l|l|l}
+%{\bf Type} & {\bf Subtype} & {\bf Comment} \\
+%medical &	FAA,class1 &		FAA Medical \\
+%medical &	FAA,class2 &		FAA Medical \\
+%medical &	FAA,class3 &		FAA Medical \\
+%licence &	FAA,E &			FAA Flight Engineer Certificate \\
+%licence &	FAA,F &			FAA Flight Instructor Certificate \\
+%licence &	FAA,G &			FAA Ground Instructor Certificate \\
+%licence &	FAA,P,A &		FAA Airline Transport Pilot Certificate \\
+%licence &	FAA,P,C &		FAA Commercial Pilot Certificate \\
+%licence &	FAA,Z &			FAA Flight Attendant Certificate \\
+%rating &	FAA,A/AMEL &		FAA Multiengine Rating, A Level \\
+%rating &	FAA,C/AMEL &		FAA Multiengine Rating, C Level \\
+%rating &	FAA,C/INST &		FAA Instrument Rating, C Level \\
+%rating &	FAA,E/JET &		FAA Turbojet Rating \\
+%rating &	FAA,E/TPROP &		FAA Turbopropeller Rating \\
+%rating &	FAA,F/AME &		FAA Multiengine Instructor Rating \\
+%rating &	FAA,F/INSTA &		FAA Instrument Instructor Rating \\
+%rating &	FAA,G/FAR &		FAA FAR Instructor Rating \\
+%rating &	FAA,Z/GROUPI &		FAA Cabin Attendant Rating \\
+%rating &	FAA,Z/GROUPII &		FAA Cabin Attendant Rating \\
+%rating &	FAA,A-300 &		FAA Type Rating \\
+%rating &	FAA,A-310 &		FAA Type Rating \\
+%rating &	FAA,A-320 &		FAA Type Rating \\
+%rating &	FAA,A-340 &		FAA Type Rating \\
+%rating &	FAA,B-737 &		FAA Type Rating \\
+%rating &	FAA,B-747 &		FAA Type Rating \\
+%rating &	FAA,B-747-4 &		FAA Type Rating \\
+%rating &	FAA,B-757 &		FAA Type Rating \\
+%rating &	FAA,B-767 &		FAA Type Rating \\
+%rating &	FAA,B-777 &		FAA Type Rating \\
+%rating &	FAA,DC-9 &		FAA Type Rating \\
+%rating &	FAA,MD-11 &		FAA Type Rating \\
+%\end{tabular}
+
+\printindex
+
+\end{document}
+
+\endinput

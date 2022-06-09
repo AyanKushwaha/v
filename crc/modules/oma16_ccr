@@ -1,0 +1,115 @@
+/*  -*- crc -*- */
+
+module oma16_ccr inherits oma16
+
+import accumulators;
+import crew;
+import trip;
+import crew_pos;
+
+/* Block time in 28 days backwards from and including start day of duty period */
+export %block_time_in_last_28_days_start_day% =
+  accumulators.%block_time_in_period_caa_daily%(duty_period.%last_28_days_start_day_start%, duty_period.%last_28_days_start_day_end%);
+
+export %block_time_in_last_28_days_start_day_hb% =
+  accumulators.%block_time_in_period_caa_daily%(duty_period.%last_28_days_start_day_start_day%, duty_period.%last_28_days_start_day_end_hb%);
+
+/* Block time in 28 days backwards from and including one day after start day of duty period */
+export %block_time_in_last_28_days_end_day% =
+  accumulators.%block_time_in_period_caa_daily%(duty_period.%last_28_days_end_day_start%, duty_period.%last_28_days_end_day_end%);
+
+export %block_time_in_last_28_days_end_day_hb% =
+  accumulators.%block_time_in_period_caa_daily%(duty_period.%last_28_days_end_day_start_day%, duty_period.%last_28_days_end_day_end_hb%);
+
+
+/* Block time in calendar year */
+export %block_time_in_calendar_year% =
+  accumulators.%block_time_in_period_caa%(round_down_year(trip.%start_hb%),
+                                          nmin(trip.%end_hb%, round_up_year(trip.%start_hb%)) )
+  +
+  %oag_block_time_in_interval%(round_down_year(trip.%start_hb%),
+                             nmin(trip.%end_hb%, round_up_year(trip.%start_hb%)) );
+                             
+/* Block time in calendar year */
+export %block_time_in_12_calendar_months% =
+  accumulators.%block_time_in_period_caa%(add_months(round_up_month(trip.%start_hb%), -12),
+                                          nmin(trip.%end_hb%, round_up_month(trip.%start_hb%)) )
+  +
+  %oag_block_time_in_interval%(add_months(round_up_month(trip.%start_hb%), -12),
+                             nmin(trip.%end_hb%, round_up_month(trip.%start_hb%)) );                             
+
+export %oag_block_time_in_interval%(Abstime st, Abstime et) = 
+  %int2reltime%(sum(times(100) while (not (void (%_dt_per_month%(st, et,"oagblkhrs",%times_index_0%)))),
+     %_dt_per_month%(st, et,"oagblkhrs",%times_index_0%)));
+
+/* Duty time in current calendar year from 1JanXXXX 0:00 to 31DecXXXX 23:59 using DutyCalculation.caa */
+redefine export %duty_time_in_calendar_year% =
+  accumulators.%duty_time_in_period_caa%(round_down_year(duty.%start_UTC%), duty.%end_UTC%); 
+
+table crew_log_acc_mod_table(Abstime st, Abstime et, string acc_type,int ix) =
+  crew.%id%, st, et, acc_type, ix -> int %_dt_per_month%;
+  external "crew_log_acc_mod";
+  crew, <= tim, > tim, typ, match_number -> accvalue;
+  -,-,-,-,-                              -> void_int;
+end
+
+/* time since first lh duty in trip, including trip before if b2b operation */
+redefine %lh_tzd_duration_to_duty% =
+  let e = duty.%end_utc%;
+  if trip.%is_second_in_b2b% /* this implies the first trip has some duty w 4 h tzd */
+  then  e - prev(trip(chain),duty_period.%start_duty_period_in_trip_abs_tzd_exceed%(oma16_defs.%tz_diff_lh_rest%))
+  else e - duty_period.%start_duty_period_in_trip_abs_tzd_exceed%(oma16_defs.%tz_diff_lh_rest%);
+
+/* -- rest ---------------------- */
+
+redefine %crew_homebase% =
+  crew.%homebase%;
+
+export %first_weekly_rest%(Abstime sec_weekly_rest) =
+  default(
+    accumulators.%oma16_prev_weekly_rest%(sec_weekly_rest),
+    add_months(sec_weekly_rest, -1) /* void = Check any duties before first w rest */
+  );
+
+export %prev_lnr% =
+  accumulators.%prev_lnr%(duty.%start_utc%);
+
+export %prev_3_lnrs% =
+  accumulators.%prev_lnr%(accumulators.%prev_lnr%(accumulators.%prev_lnr%(duty.%start_lt%)));
+
+table w_e_transition_tbl =
+  duty.%sub_trip_max_west_tzd_hb_fwd%, duty.%sub_trip_max_east_tzd_hb_fwd% ->
+     redefine export %east_west_transition_ended%, export %east_west_transition_started%;
+  <4:00, <4:00	      -> false, void_abstime; /* no w or e tzd>=4:00 */
+  <4:00, (4:00, 6:00( -> true, accumulators.%prev_west6h_duty%(duty.%start_utc%); /* departure east 4 <= tzd < 6 */
+  <4:00, >=6:00       -> true, accumulators.%prev_west4h_duty%(duty.%start_utc%); /* departure east 6 <= tzd */
+  (4:00, 6:00(, -     -> true, accumulators.%prev_east6h_duty%(duty.%start_utc%); /* departure west 4 <= tzd < 6 */
+  >=6:00, -           -> true, accumulators.%prev_east4h_duty%(duty.%start_utc%); /* departure west 6 <= tzd */
+end  
+  
+redefine export %disruptive_dps_since_previous_weekly_rest% =
+  accumulators.%oma16_disruptive_dps%(%first_weekly_rest%(duty_period.%rest_start_before_utc%),duty_period.%rest_start_before_utc%);
+
+redefine %rest_between_standby% = 
+  duty.%is_standby% and next(duty(wop), duty.%is_standby%);
+
+/* Inflight rest */
+
+redefine export %rest_on_board_allowed% =
+  if any(leg(duty), leg.%is_long_haul%)
+  	and not duty_period.%is_split%
+  then 	if %is_cabin%
+				then %rest_on_board_allowed_cc%
+				else %rest_on_board_allowed_fd%
+  else false;
+
+redefine %possible_sleep_per_cc% =
+        if leg.%is_short_haul% then 0:00
+        else if default(crew_pos.%number_of_booked_cabin_crew%, 0) = 0
+		     then 0:00
+             else %possible_sleep_at_flight_cc%*leg.%nr_crew_bunk_cabin_crew%/default(crew_pos.%number_of_booked_cabin_crew%, 0);
+
+redefine %leg_number_of_booked_flight_deck_crew% = if leg.%is_short_haul% then 2 else default(crew_pos.%number_of_booked_flight_deck_crew%,0);
+
+/* end of file */
+

@@ -1,0 +1,193 @@
+/* -*- crc -*- 
+ * 
+ * 
+ * Purpose:
+ *   This module contains flight crew only government rules from the Civil Avaiation
+ *   Authority to be used in Carmen Crew Rostering and as studio only 
+ *   in Carmen Crew Tracking.
+ *
+ * Sections:
+ *   1.  Crew restriction rules
+ *
+ * Created by:
+ *   Henrik Albertson, 05-Oct-2006
+ *
+ * Major changes: Moved medical and licence rules to root module.
+ *
+ */
+module rules_caa_ccr_fc inherits rules_caa_ccr
+
+import crew_pos;
+import accumulators;
+import leg;
+import pp;
+import system_db_parameters;
+import training;
+import freedays;
+import base_calendar;
+import crew;
+import model_crew;
+
+/****************************************************************
+ * Section 1:
+ ***************************************************************/
+
+
+/*
+
+** Rule:
+**   Min 50 hrs or 20 legs on only second a/c type after ILC for MFF pilot on CCQ.
+**
+** Description:
+**
+**
+** Agreement:
+**   OM-A: 5.2.6.5 Additional Requirements
+**
+** JIRA:
+**   SKCMS-1528
+**   SKCMS-2326
+**
+** Note:
+**   Training rule also included in optimization otherwise
+**   the module rules_training_ccr_fc would have been more appropriate.
+**
+*/
+
+
+export rule trng_min_blk_or_legs_before_double_qual =
+  valid %valid_trng_min_blk_or_legs_before_double_qual%
+        and rule_exceptions.%rule_on%(leg.%start_UTC%);
+
+  %crew_has_sufficient_experience_for_second_LH_qual%;
+
+  startdate  = leg.%start_utc%;
+  severity = %severity_filter_int%(leg.%start_hb%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %trng_min_blk_or_legs_before_double_qual_failtext%;
+  remark "OMA: Min block time or legs before flying as double qualified",
+  planner "This rule is valid at CCQ courses and checks that following in OM-A:"
+          "5.2.6.5 Additional Requirements"
+          "After the ILC flight the pilot must serve at least 50 hours or 20 sectors"
+          "exclusively on the new type";
+end
+
+%trng_min_blk_or_legs_before_double_qual_failtext% =
+  let nr_legs_exp = %nr_legs_exp%,
+      nr_blh_exp  = %nr_blh_exp%;
+  concat(rules.%failtext_int%("OMA: Min block time or legs before flying as double qualified, legs: ", nr_legs_exp, %min_reqd_legs_exp%),
+         rules.%failtext_rel%(", blh: ", nr_blh_exp, %min_reqd_blh_exp%));
+
+export %valid_trng_min_blk_or_legs_before_double_qual% =
+   roster.%check_rules% and leg.%is_active_flight% and
+   (%A3A4_course_taken% or %A2A3_course_taken% or %A2A5_course_taken%) and
+   %_ac_leg_not_course_ac_family%;
+
+%A3A4_course_taken% =
+  (%crew_has_ac_qln_at_date%(leg.%start_utc%, "A3") and %crew_has_ac_qln_at_date%(leg.%start_utc%, "A4")) and
+  %course_CCQ_A3A4_A4A3_ILC_last_year%;
+
+%A2A3_course_taken% =
+  (%crew_has_ac_qln_at_date%(leg.%start_utc%, "A2") and %crew_has_ac_qln_at_date%(leg.%start_utc%, "A3")) and
+  %course_CCQ_A2A3_A3A2_A2A5_A5A2_ILC_last_year%;
+  
+%A2A5_course_taken% =
+  (%crew_has_ac_qln_at_date%(leg.%start_utc%, "A2") and %crew_has_ac_qln_at_date%(leg.%start_utc%, "A5")) and
+  %course_CCQ_A2A3_A3A2_A2A5_A5A2_ILC_last_year%;
+
+
+%crew_has_ac_qln_at_date%(Abstime date, String qual) =
+   /* Try to speed up things by checking what we can on chain level first.
+      %crew_aircraft_qlns_pp_start/end only needs to be evaluated once per crew. */
+   if date >= %pp_start% and date <= %pp_end% and
+      locate(qual, %crew_aircraft_qlns_pp_start%) = 0 and
+      locate(qual, %crew_aircraft_qlns_pp_end%) = 0 then
+     false
+   else
+     crew.%has_ac_qln_at_date%(date, qual);
+
+%crew_aircraft_qlns_pp_start% = crew.%aircraft_qlns_pp_start%;
+%crew_aircraft_qlns_pp_end% = crew.%aircraft_qlns_pp_end%;
+
+%_course_ac_qual_on_prev_ilc_date% = %course_ac_qual%(%end_hb_for_last_ilc_last_year%);
+%_course_ac_family% = %course_ac_family%(%_course_ac_qual_on_prev_ilc_date%);
+
+table course_ac_family_table(String ac_qual_on_prev_ilc_date) =
+  ac_qual_on_prev_ilc_date -> %course_ac_family%;
+  "A2" -> "A320";
+  "A3" -> "A330";
+  "A4" -> "A340";
+  "A5" -> "A350";
+   - -> void_string;
+end
+
+%_ac_leg_not_course_ac_family% =
+   not void(%_course_ac_family%)
+   and leg.%ac_family% <> %_course_ac_family%
+   and leg.%start_utc% >= %end_hb_for_last_ilc_last_year%;
+
+export %crew_has_sufficient_experience_for_second_LH_qual% =
+  %nr_blh_exp% >= %min_reqd_blh_exp% or
+  %nr_legs_exp% >= %min_reqd_legs_exp%;
+
+export %min_reqd_blh_exp% = 50:00;
+export %min_reqd_legs_exp% = 20;
+
+/* Training lookup returns start_utc for activity.
+** Start count 24:00 after ILC (to not include ILC itself).
+** Assumed that ILC flight is no longer than 24:00
+** All flights do not use block_time_of_ac_fam yet because
+** how A5 is to be treated is still under discussion.
+** As such it only applies to A2A3 pilots currently */
+export %nr_blh_exp% =
+  if (crew.%is_a2a3_qualified_at_date%(leg.%start_hb%) or crew.%is_a2a5_qualified_at_date%(leg.%start_hb%)) then
+    accumulators.%block_time_of_ac_fam%(%_course_ac_qual_on_prev_ilc_date%,
+                                          %end_hb_for_last_ilc_last_year%, leg.%start_hb%)
+  else
+    accumulators.%block_time_after_ilc%(%end_hb_for_last_ilc_last_year%, leg.%start_hb%);
+
+
+export %nr_legs_exp% =
+  if (crew.%is_a2a3_qualified_at_date%(leg.%start_hb%) or crew.%is_a2a5_qualified_at_date%(leg.%start_hb%)) then
+    accumulators.%nr_active_sectors_in_period%(%_course_ac_qual_on_prev_ilc_date%, %end_hb_for_last_ilc_last_year%,
+                                               leg.%start_hb%)
+  else
+    accumulators.%nr_active_flights_in_period%(
+                         "SH", %end_hb_for_last_ilc_last_year%, leg.%start_hb%) +
+    accumulators.%nr_active_flights_in_period%(
+                         "LH", %end_hb_for_last_ilc_last_year%, leg.%start_hb%);
+
+/*
+** SKCMS-2838
+** Defined a variable nr_legs_expr which will use accumulators which has no restriction with crew id for SH LH flights
+*/
+
+export %nr_legs_expr% =
+    accumulators.%nr_all_flights_in_period%(
+                         "SH", %end_hb_for_last_ilc_last_year%, leg.%start_hb%) +
+    accumulators.%nr_all_flights_in_period%(
+                         "LH", %end_hb_for_last_ilc_last_year%, leg.%start_hb%);
+
+
+/* SKCMS-2188: Accumulators only include data from the last year.
+** The training log now contains courses for the last three years.
+** Increasing accumulator period could be heavy, so instead we only
+** check for ILC course since pp_start - 1y to match period for accumulators. */
+export %end_hb_for_last_ilc% = training.%end_hb_last_perf_act_of_type%("ILC", leg.%end_utc%);
+export %end_hb_for_last_ilc_last_year% =
+  /* If no ILC during last year return start of time to be consistent with date_for_last_ilc */
+  if %end_hb_for_last_ilc% < add_years(%pp_start%, -1) then %abstimemin%
+  else %end_hb_for_last_ilc%;
+
+export %course_ac_qual%(Abstime date) = training.%course_acqual_1%(date);
+
+%course_name_CCQ_A3A4_ILC_at_date%(Abstime date) = default(training.%course_name%(date) = "CCQ-A3A4", False);
+%course_name_CCQ_A4A3_ILC_at_date%(Abstime date) = default(training.%course_name%(date) = "CCQ-A4A3", False);
+%course_CCQ_A3A4_A4A3_ILC_at_date%(Abstime date) = %course_name_CCQ_A3A4_ILC_at_date%(date) or %course_name_CCQ_A4A3_ILC_at_date%(date);
+
+%course_name_CCQ_A2A3_A2A5_ILC_at_date%(Abstime date) = default(training.%course_name%(date) = "CCQ from SH", False);
+%course_name_CCQ_A3A2_A5A2_ILC_at_date%(Abstime date) = default(training.%course_name%(date) = "CCQ from LH", False);
+%course_CCQ_A2A3_A3A2_A2A5_A5A2_ILC_at_date%(Abstime date) = %course_name_CCQ_A2A3_A2A5_ILC_at_date%(date) or %course_name_CCQ_A3A2_A5A2_ILC_at_date%(date);
+
+export %course_CCQ_A3A4_A4A3_ILC_last_year% = %course_CCQ_A3A4_A4A3_ILC_at_date%(%end_hb_for_last_ilc_last_year%);
+export %course_CCQ_A2A3_A3A2_A2A5_A5A2_ILC_last_year% = %course_CCQ_A2A3_A3A2_A2A5_A5A2_ILC_at_date%(%end_hb_for_last_ilc_last_year%);

@@ -1,0 +1,166 @@
+#!/bin/bash
+#
+# This script will, using SGE, try to find execution hosts with as much free
+# memory as possible. If there is a DISPLAY_HOST variable in the environment, and
+# this variable specifies an X11-server on an execution host that fullfills
+# the criteria in _sgeopts, we give preference to that host, within certain
+# limits. (See function _best_hosts for the definition of these limits).
+#
+# Update 2016: Handle SGE-names with periods and fail informatively on invalid input
+#
+# Arvid Mullern-Aspegren, Jeppesen 2012,2016
+
+####### S E T U P #####################################
+
+_sgeopts="$@"
+
+# Find directory to store when a host was last suggested
+_origin=`pwd`
+cd `dirname $0`
+while [ `pwd` != '/' -a ! -d "crc" ]
+do
+  cd ..
+done
+LATEST_DIR=`pwd`/current_carmtmp/load_balancing
+umask g+rwx
+mkdir -p $LATEST_DIR
+umask g-x
+cd $_origin
+
+RECENT_MINUTES=2
+
+# Extracts the hostname-part of the current display
+_display_host=`echo $DISPLAY_HOST | awk 'BEGIN {FS=":"} {print $1}'`
+[[ $_display_host != "" ]] && _display_host=`hostname -f` # Make sure that we get the full form
+
+####### F U N C T I O N   D E C L A R A T I O N S #######
+
+_there_is_a_display () {
+    if [[ -z "${DISPLAY_HOST}" ]]; then
+        false
+    else
+        true
+    fi
+}
+
+_sge_hosts () {
+    qhost_version=`/opt/Carmen/uge_current/bin/lx-amd64/qhost -help | head -n1`
+    case $qhost_version in
+        UGE\ 8*)
+            # UGE changed the default format, so we have to add an extra 
+            # flag to get back the old style.
+            /opt/Carmen/uge_current/bin/lx-amd64/qhost -ncb ${_sgeopts} | tail -n +3
+            ;;
+        GE*)
+            /opt/Carmen/uge_current/bin/lx-amd64/qhost ${_sgeopts} | tail -n +3
+            ;;
+        *)
+            echo "qhost.version.failure.in.get_host.script"
+            ;;
+    esac
+}
+
+_number_of_hosts () {
+    echo `_sge_hosts | wc -l`
+}
+
+_convert_and_summarize () {
+    # Reads a header-less qhost-listing from standard in and converts all
+    # MB to GB and strips out decimal characters. Then it calculates the
+    # free memory of each host, and prints a summary on the format
+    # "hostname mem_free" while read input_line
+    while read input_line; do
+        host_part=$(echo $input_line | cut -d ' ' -f1) # Handle FQDN names in UGE listing
+        the_rest=$(echo $input_line | cut -d ' ' -f2- | sed -e 's/G/000M/g' -e 's/\.//g')
+        if [[ $host_part == "h1cms32a" ]]; then
+            echo $host_part $the_rest | awk '{ printf "%s\t%s\t%s\n",$1,$4,640000-$6 ; }'
+        else
+            echo $host_part $the_rest | awk '{ printf "%s\t%s\t%s\n",$1,$4,$5-$6 ; }'
+        fi
+    done 
+}
+
+_remove_recent () {
+    # Removes hosts that were recently used (based on files in $LATEST_DIR)
+    # so that hosts where applications were just started are avoided.
+    # Based on the number of hosts, we can only avoid at most X hosts.
+    # If number_of_hosts is N, we want to avoid up to X hosts.
+    # N  X
+    # 4  2
+    # 2  1
+    # 1  0
+    # I.e. if we only have one host we can't avoid it even if it was recently used.
+    NUM_HOSTS_TO_AVOID=$((`_number_of_hosts` / 2))
+
+    while read input_line; do
+	_host_name=`echo $input_line | cut -d ' ' -f 1`
+	_recent_file=`find $LATEST_DIR -type f -cmin -$RECENT_MINUTES -printf "%T@ %f\n" | sort | cut -d' ' -f2 | tail -$NUM_HOSTS_TO_AVOID | grep $_host_name`
+	if [ -z "$_recent_file" ]
+        then
+            echo $input_line
+	fi
+    done 
+}
+
+_best_hosts () {
+    # Prints the N hosts with most free memory. To tighten or
+    # loosen the calculation of N, adjust the toplist_divisor
+    # below.
+
+    toplist_divisor=2
+
+    # We never want to end up with less than 1 host in the list.
+    if [[ `_number_of_hosts` -lt $toplist_divisor ]]; then
+        toplist_divisor=1
+    fi
+
+    _sge_hosts | \
+        _convert_and_summarize | \
+	_remove_recent | \
+        sort -n -r -k 3 | \
+        head -n $((`_number_of_hosts` / $toplist_divisor)) | \
+        awk '{print $1}' | \
+        xargs -L 1 host | awk '{ print $1 }' 
+}
+
+_current_display_among_best_hosts () {
+    if [[ ! -z `_best_hosts | grep "$_display_host"` ]]; then
+        true
+    else
+        false
+    fi
+}
+
+_validate_host () {
+    if [[ $1 == "Host" ]]; then
+        # "Host" is first word of output of host command if the input hostname is invalid.
+        false
+    else
+        true
+    fi
+}
+
+_best_host () {
+    best=$(_best_hosts | head -1)
+    _validate_host $best
+
+    if [[ $? -eq 0 ]]; then
+        echo $best
+    else
+        echo "identified.host.is.invalid.in.get_host.script"
+    fi
+}
+
+
+############### P R O G R A M   S T A R T ##################
+
+if _there_is_a_display && _current_display_among_best_hosts; then
+    _final_host="$_display_host"
+else
+    _final_host="`_best_host`"
+fi
+
+umask g+rw
+touch $LATEST_DIR/$_final_host
+echo $_final_host
+

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+    Manual FCM jobs. Used by the context menu in Studio.  Manual Crew Manifests can
+    be sent in case of system unavailablity.
+-->
+<process name="manifest_manual"
+    dbConn="profile:live"
+    dbSchema="%(db/dave/live/schema)"
+    messageAgeWarning="10m"
+    messageAgeError="30m"
+    inOrder="False"
+    threadPoolSize="40"
+    continueOnMessageError="True">
+    <start_cmd>%(programs/dig/start_cmd)</start_cmd>
+
+    <reader class="carmensystems.dig.scheduler.job.JobReader"
+        onlyLatest="False"
+        skipOlderThan="20"
+        readInterval="5"/>
+    <messagehandlers>
+        <messagehandler class="carmensystems.dig.scheduler.reports.ReportTranslator"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportHandler"
+            defaultServer="rs_publish"
+            rs_publish="%(API/getServiceUrl/portal_publish)"
+            contentIsReports="False"/>
+        <messagehandler class="dig.xhandlers.APISFallBackHandler"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.dave.DaveWriter"
+            cacheSize="0"
+            ignoreOutOfOrder="True"
+            ageTimeout="-1"
+            idleTimeout="-1"
+            raiseRetryErrors="False"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        <messagehandler class="dig.xhandlers.AddressInjector"
+            default_dests="dest,archive"
+            dest_protocol="file"
+            dest_file_filename="%(dig_settings/paths/crew_manifest)/Manual_FCM.__MSGCOUNT__.###.__TIMESTAMP__"
+            archive_protocol="file"
+            archive_file_filename="$(CARMDATA)/REPORTS/EXPORT/Manual_FCM.__MSGCOUNT__.###.__TIMESTAMP__"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher"
+            file_mkdirs="True" file_tempdir="%(dig_settings/paths/crew_manifest_temp)" file_basedir="%(dig_settings/paths/crew_manifest_base)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal"
+            class="carmensystems.dig.notifiers.mail.MailNotifier"
+            formatterClass="dig.notifiers.TracebackFormatter"
+            host="%(dig_settings/mail/host)"
+            port="%(dig_settings/mail/port)"
+            sender="%(dig_settings/mail/from)"
+            recipients="%(dig_settings/mail/to)"
+            subject="DIG channel 'manifest_manual' fatal error" />
+    </notifiers>
+</process>

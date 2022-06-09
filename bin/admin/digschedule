@@ -1,0 +1,320 @@
+#!/bin/env python
+# @(#) $Header: /opt/Carmen/CVS/sk_cms_user/bin/admin/digschedule,v 1.1 2010/03/03 12:48:10 adg348 Exp $
+
+"""
+Parse 'digscheduler.xml' and print out when different jobs run.
+"""
+
+# TODO: Let time string parsing be a separate module
+
+import datetime
+import logging
+import os
+import re
+import sys
+
+from optparse import OptionParser
+from xml.dom.minidom import parse as xml_parse
+
+
+logging.basicConfig()
+log = logging.getLogger('digschedule')
+
+try:
+    from utils.dt import str2dt
+except:
+    try:
+        sys.path = [os.path.join(os.environ['CARMUSR'], 'lib', 'python')] + sys.path
+        from utils.dt import str2dt
+    except:
+        log.error("Environment '$CARMUSR' must be set")
+
+
+__all__ = ['run']
+__version__ = '$Revision: 1.1 $'
+
+
+# Time range parsing (digscheduler.xml) =================================={{{1
+
+# TimeRangeError ---------------------------------------------------------{{{2
+class TimeRangeError(Exception):
+    """Indicates faulty time range."""
+    pass
+
+
+# TimeRange --------------------------------------------------------------{{{2
+class TimeRange:
+    """A 'crontab' time range with an optional 'step' indicator."""
+    time_re = re.compile(r'^(\d+)(-(\d+))?(/\d+)?$')
+    step_re = re.compile(r'\*/(\d+)$')
+
+    def __init__(self, min_, max_):
+        self.min_ = min_
+        self.max_ = max_
+
+    def __call__(self, s):
+        if s == '*':
+            return range(self.min_, self.max_ + 1)
+        m = self.step_re.match(s)
+        if m:
+            return range(self.min_, self.max_ + 1, int(m.group(1)))
+        L = []
+        for part in s.split(','):
+            try:
+                m = self.time_re.match(part)
+                first, _, last, step = m.groups()
+                if not step is None:
+                    if not last is None:
+                        L.extend(range(int(first), int(last) + 1, int(step)))
+                    else:
+                        L.extend(range(int(first), self.max_ + 1, int(step)))
+                else:
+                    if not last is None:
+                        L.extend(range(int(first), int(last) + 1))
+                    else:
+                        L.append(int(first))
+
+            except TimeRangeError, te:
+                raise
+
+            except Exception, e:
+                raise TimeRangeError('Cannot read entry "%s". [%s]' % (s, e))
+        return L
+
+
+# Tasks and Schedules ===================================================={{{1
+class Schedule(dict):
+    """Schedule for a task."""
+    time_attributes = {
+        'years': TimeRange(2000, 2100),
+        'months': TimeRange(1, 12), 
+        'days': TimeRange(1, 31),
+        'weekdays': TimeRange(0, 7),
+        'hours': TimeRange(0, 23),
+        'minutes': TimeRange(0, 59),
+    }
+
+    order = 'years', 'months', 'days', 'weekdays', 'hours', 'minutes'
+
+    def add(self, name, value):
+        """Add one of 'years', 'months', etc."""
+        self[str(name)] = self.time_attributes[name](value)
+
+    def __str__(self):
+        return '\n\t'.join(["%-8.8s : %s" % (x, ', '.join([str(y) for y in self[x]])) for x in self.order if x in self])
+
+    def matches(self, time):
+        """Check if the 'time' matches on of the scheduled start times."""
+        for x in self.order:
+            if x in self and not getattr(self, '_matches_' + x)(time):
+                return False
+        return True
+
+    def _matches_years(self, time):
+        return time.year in self['years']
+
+    def _matches_months(self, time):
+        return time.month in self['months']
+
+    def _matches_days(self, time):
+        return time.day in self['days']
+            
+    def _matches_weekdays(self, time):
+        z = self['weekdays']
+        if 7 in z:
+            z.insert(0, 0)
+        return time.isoweekday() in z
+
+    def _matches_hours(self, time):
+        return time.hour in self['hours']
+
+    def _matches_minutes(self, time):
+        return time.minute in self['minutes']
+
+
+class Task(dict):
+    """A task containing attributes and schedule."""
+    def __init__(self, task):
+        dict.__init__(self)
+        self.schedule = Schedule()
+        if task.hasAttributes():
+            for i in xrange(task.attributes.length):
+                attr = task.attributes.item(i)
+                self[str(attr.name)] = str(attr.value) 
+                if attr.name in self.schedule.time_attributes:
+                    self.schedule.add(attr.name, attr.value)
+
+    def __cmp__(self, other):
+        """For sorting tasks."""
+        if isinstance(other, Task):
+            return cmp(self['name'], other['name'])
+        if isinstance(other, str):
+            return cmp(self['name'], other)
+
+    def matches(self, time):
+        """Check if this task should run at time 'time'."""
+        return self.schedule.matches(time)
+
+    def __str__(self):
+        return "---\n%s:\n\t%s\n" % (self['name'], self.schedule)
+
+
+# XML file parsing ======================================================={{{1
+class DIGSchedule(dict):
+    """Parse XML file and build up a mapping of task names and Task objects."""
+    def __init__(self, file, task_class=Task):
+        dict.__init__(self)
+        dom = xml_parse(file)
+        for xschedule in dom.getElementsByTagName('schedule'):
+            for xtask in xschedule.getElementsByTagName('task'):
+                task = task_class(xtask) 
+                self[task['name']] = task
+
+    def print_tasks(self, task=None):
+        """Print out brief task info."""
+        if task is None:
+            for t in sorted(self):
+                print self[t]
+        else:
+            try:
+                print self[task]
+            except KeyError, k:
+                raise ValueError("The task '%s' is not defined." % task)
+
+    def print_info(self, taskname):
+        """Print full schedule for a given task."""
+        try:
+            task = self[taskname]
+        except:
+            raise ValueError("The task '%s' is not defined." % taskname)
+        print "# %s" % taskname
+        print "---"
+        for attrib in sorted(task):
+            if not attrib in task.schedule.time_attributes:
+                # Don't print these twice.
+                print "%-15.15s : %s" % (attrib, task[attrib])
+        print "%-15.15s : {" % 'schedule'
+        for ta in task.schedule.order:
+            if ta in task.schedule:
+                print "    %-11.11s : [%s]" % (ta, ', '.join(str(z) for z in task.schedule[ta]))
+        print "}"
+        print
+
+    def print_schedule(self, starttime, endtime, task=None):
+        """Print schedule for all tasks, or for a single task."""
+        if task is None:
+            lst = self
+        else:
+            try:
+                lst = {task: self[task]}
+            except:
+                raise ValueError("The task '%s' is not defined." % task)
+        time = starttime
+        while time <= endtime:
+            todo = []
+            for taskname in sorted(lst):
+                if self[taskname].matches(time):
+                    todo.append(taskname)
+            if todo:
+                if task is None:
+                    print "%s -> %s" % (time, ', '.join(todo))
+                else:
+                    print "%s" % time
+            time += datetime.timedelta(minutes=1)
+
+
+# Main - command line handler ============================================{{{1
+class Main:
+    """Handle command line parsing and present a general interface."""
+
+    default_filename = os.path.expandvars('$CARMUSR/etc/dig/digscheduler.xml')
+
+    def __call__(self, file=None, starttime=None, endtime=None, task=None, info=False):
+        if file is None:
+            file = self.default_filename
+        sch = DIGSchedule(file)
+        if starttime is not None and endtime is not None:
+            sch.print_schedule(starttime, endtime, task)
+        else:
+            if info:
+                sch.print_info(task)
+            else:
+                sch.print_tasks(task)
+        
+    def main(self, *argv):
+        try:
+            if len(argv) == 0:
+                argv = sys.argv[1:]
+            parser = OptionParser(version=get_version(__version__),
+                    description="Print out when DIG jobs are scheduled.")
+            parser.add_option("-d", "--debug",
+                action="store_true",
+                default=False,
+                dest="debug",
+                help="For tracing faults in this script.")
+            parser.add_option("-f", "--file",
+                dest="file",
+                help="XML file to parse, default is '%s'." % self.default_filename)
+            parser.add_option("-i", "--info",
+                action="store_true",
+                default=False,
+                dest="info",
+                help="Print info for a selected job.")
+            parser.add_option("-s", "--start-time",
+                dest="starttime",
+                help="Start time of schedule to display.")
+            parser.add_option("-e", "--end-time",
+                dest="endtime",
+                help="End time of schedule to display.")
+            parser.add_option("-t", "--task",
+                dest="task",
+                help="Limit selection to the named task.")
+            (opts, args) = parser.parse_args(argv)
+            self.debug = opts.debug
+            if opts.starttime is not None and opts.endtime is None:
+                parser.error("End time is missing, both start time and end time are needed.")
+            if opts.endtime is not None and opts.starttime is None:
+                parser.error("Start time is missing, both start time and end time are needed.")
+            if opts.info and not opts.task:
+                parser.error("The '--info' option requires a task ('--task' option).")
+            self(file=opts.file, starttime=str2dt(opts.starttime),
+                    endtime=str2dt(opts.endtime), task=opts.task,
+                    info=opts.info)
+
+        except SystemExit, se:
+            pass
+
+        except Exception, e:
+            raise
+            log.error(e)
+
+
+# functions =============================================================={{{1
+
+# get_version ------------------------------------------------------------{{{2
+def get_version(s):
+    regexp = re.compile('\$' + 'Revision: (.*)' + '\$$')
+    m = regexp.match(s)
+    if m:
+        return m.groups(0)
+    else:
+        return "0.0"
+
+
+# run --------------------------------------------------------------------{{{2
+# to be called from other modules
+run = Main()
+
+
+# main -------------------------------------------------------------------{{{2
+main = run.main
+
+
+# __main__ ==============================================================={{{1
+if __name__ == '__main__':
+    main()
+
+
+# modeline ==============================================================={{{1
+# vim: set fdm=marker:
+# eof

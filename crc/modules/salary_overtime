@@ -1,0 +1,2628 @@
+/* -*- crc -*-
+ *  
+ * Purpose:
+ *   This module contains values that are used in the Overtime module. 
+ *   It should encapsulate all overtime rules for the Overtime module 
+ *   to maximize the overtime given to the crew.
+ *   The balancing is done in Python.
+ *
+ * Sections:
+ *   Other allowances payment
+ *   Balanced values
+ *
+ * Created by:
+ *   Rickard Petzäll, 07-May-2009
+ *
+ * Major changes:
+*/
+
+module salary_overtime
+
+
+import wop;
+import roster;
+import trip;
+import duty;
+import duty_period;
+import leg;
+import levels;
+import fundamental;
+import system_db_parameters;
+import parameters;
+import rescheduling;
+import freedays;
+import crew;
+import crew_pos;
+import duty_time;
+import salary;
+import rest;
+import bought_days;
+import compdays;
+import hotel;
+import time_utils;
+import training;
+import salary_loss_of_rest;
+import accumulators;
+import recency;
+import oma16;
+import task;
+
+
+/*********************************
+ * Definitions of overtime types *
+ *********************************/
+%_ot_part_7x24_fwd% = rescheduling.%_ot_part_7x24_fwd%;
+%_ot_part_7x24_bwd% = rescheduling.%_ot_part_7x24_bwd%;
+%_ot_part_calendarweek% = rescheduling.%_ot_part_calendarweek%;
+%_ot_part_1x24_fwd% = rescheduling.%_ot_part_1x24_bwd%;
+%_ot_part_1x24_bwd% = rescheduling.%_ot_part_1x24_bwd%;
+%_ot_part_dutypass% = rescheduling.%_ot_part_dutypass%;
+%_ot_part_late_checkout_freeday% = rescheduling.%_ot_part_late_checkout_freeday%;
+%_ot_part_late_checkout_resched% = rescheduling.%_ot_part_late_checkout_resched%;
+%_ot_part_late_checkout_free_weekend% = rescheduling.%_ot_part_late_checkout_free_weekend%;
+%_ot_part_parttime_month% = rescheduling.%_ot_part_parttime_month%;
+%_mt_part_parttime_cc_month% = rescheduling.%_mt_part_parttime_cc_month%;
+%_ot_part_parttime_cc_month% = rescheduling.%_ot_part_parttime_cc_month%;
+%_mt_part_parttime_cc_3_months% = rescheduling.%_mt_part_parttime_cc_3_months%;
+%_ot_part_parttime_cc_3_months% = rescheduling.%_ot_part_parttime_cc_3_months%;
+%_ot_part_month% = rescheduling.%_ot_part_month%;
+%_ot_part_7_calendar_days% = rescheduling.%_ot_part_7_calendar_days%;
+
+/**********************************
+ * Definition of duty time type   *
+ **********************************/
+%_dt_part% = rescheduling.%_dt_part%;
+
+%ptd_duty_overtime%(String OvertimeType) = rescheduling.%duty_overtime_before_ptd%(OvertimeType);
+%ptd_duty_start%(String OvertimeType) = rescheduling.%duty_start_before_ptd%(OvertimeType);
+%ptd_duty_end%(String OvertimeType) = rescheduling.%duty_end_before_ptd%(OvertimeType);
+%ptd_duty_time%(String OvertimeType) = rescheduling.%duty_time_before_ptd%(OvertimeType);
+
+/**********************************
+ * Definition of regions          *
+ **********************************/
+export %is_SKN_month_start% = 
+    crew.%is_SKN_at_date%(salary.%salary_month_start%);
+export %is_SKS_month_start% =
+    crew.%is_SKS_at_date%(salary.%salary_month_start%);
+export %is_SKD_month_start% = 
+    crew.%is_SKD_at_date%(salary.%salary_month_start%);
+export %is_SKJ_month_start% = 
+    crew.%is_SKJ_at_date%(salary.%salary_month_start%);
+export %is_SKK_month_start% = 
+    crew.%is_SKK_at_date%(salary.%salary_month_start%);
+
+%is_SKN_month_end% = 
+    crew.%is_SKN_at_date%(salary.%salary_month_end%);
+%is_SKS_month_end% =
+    crew.%is_SKS_at_date%(salary.%salary_month_end%);
+%is_SKD_month_end% = 
+    crew.%is_SKD_at_date%(salary.%salary_month_end%);
+
+
+    
+/*************************************************************************
+
+ OTHER ALLOWANCES PAYMENT (not balanced)
+ These values are fed to the Overtime module in parallel with the balanced
+ values. They are considered to be 'extra' overtime payment and is only 
+ forwarded to the salary export.
+
+**************************************************************************/
+
+/***************************************************\
+|* 1) Maitre de cabin long haul in a salary monthy *|
+\***************************************************/
+export %MDC_LH% =   
+  if %is_SKD_month_start% then
+    round_up(sum(leg(roster), %maitre_de_cabin_long_haul_leg%)
+                 where(%leg_in_period%), 
+                 0:30)
+  else if (%is_SKS_month_start% and not %4exng_cc_ot_allowances_valid%) or
+         (%is_SKN_month_start% and not %agreement_valid%("no_mdc_skn", salary.%salary_month_start%)) then
+    sum(leg(roster), %maitre_de_cabin_long_haul_leg%)
+      where(%leg_in_period%)
+  else void_reltime;
+
+export %maitre_de_cabin_long_haul_leg% =
+  if (%is_SKD_month_start% or
+     (%is_SKS_month_start% and not %4exng_cc_ot_allowances_valid%) or
+     (%is_SKN_month_start% and not %agreement_valid%("no_mdc_skn", salary.%salary_month_start%)))
+     and %cabin_crew%
+  then
+    if %leg_is_long_haul_mdc% and %maitre_de_cabin_leg%
+       and leg.%is_active_flight%
+    then leg.%block_time%
+    else 0:00
+  else void_reltime;
+
+/***************************************************/
+/* 2) Maitre de cabin short haul in a salary month */
+/***************************************************/
+export %MDC_SH% = 
+  if %is_SKD_month_start% then
+    round_up(sum(leg(roster), %maitre_de_cabin_short_haul_leg%)
+             where(%leg_in_period%), 
+             0:30)
+  else if (%is_SKS_month_start% and not %4exng_cc_ot_allowances_valid%) or
+         (%is_SKN_month_start% and not %agreement_valid%("no_mdc_skn", salary.%salary_month_start%)) then
+    sum(leg(roster), %maitre_de_cabin_short_haul_leg%)
+      where(%leg_in_period%)
+  else void_reltime;
+export %maitre_de_cabin_short_haul_leg% =
+  if %_is_mdc_entitled%
+  then
+    if %leg_is_short_haul_mdc% and %maitre_de_cabin_leg%
+      and leg.%is_active_flight%
+    then
+      leg.%block_time% 
+      * (if %is_SKS_month_start% and not %agreement_valid%("K12_SKS_CC", leg.%start_utc%) and %num_temporary_CC%>0 then 2 else 1)
+    else 0:00
+  else void_reltime;
+  
+%num_temporary_CC% =
+  sum(equal_legs, 1) where (%is_roster% and not leg.%is_deadhead% and crew.%is_temporary_trip_start%);
+  
+table mdc_entitled_sh =
+	%cabin_crew%, %region% -> %_is_mdc_entitled%;
+	
+	true, "SKS"  -> not %4exng_cc_ot_allowances_valid%;
+	true, "SKD"  -> not %agreement_valid%("no_mdc_skd", leg.%end_UTC%);
+	true, "SKN"  -> not %agreement_valid%("no_mdc_skn", salary.%salary_month_start%);
+	-, - -> false;
+end
+
+%leg_is_long_haul_mdc% = 
+  if %is_SKD_month_start% 
+  then leg.%is_long_haul% and not %agreement_valid%("no_mdc_skd", leg.%end_UTC%)
+       and (leg.%ac_family% = "A330" or leg.%ac_family% = "A340")
+  else leg.%is_long_haul%;
+%leg_is_short_haul_mdc% = 
+  not %leg_is_long_haul_mdc%;
+
+export %maitre_de_cabin_leg% =
+  %cabin_crew% and not %crew_is_leased_leg% 
+  and not crew.%is_temporary_trip_start% and leg.%is_active_flight% 
+  and not (leg.%is_supernum% and not %is_SKS_month_start%) and %crew_is_mdc_entitled%;
+
+%crew_is_mdc_entitled% = 
+  if %is_SKD_month_start% then %crew_is_mdc_entitled_SKD%
+  else if %is_SKS_month_start% then
+    if not %4exng_cc_ot_allowances_valid% then %crew_is_mdc_entitled_SKS%
+    else false
+  else if %is_SKN_month_start% and not %agreement_valid%("no_mdc_skn", salary.%salary_month_start%) then %crew_is_mdc_entitled_SKN%
+  else %crew_is_mdc_entitled_default%;
+%crew_is_mdc_entitled_SKS% =
+  crew.%rank_leg_start% = "AP"
+  and not leg.%is_deadhead%
+  and not crew.%is_temporary_trip_start%;
+%crew_is_mdc_entitled_SKN% =
+  %crew_is_mdc_entitled_default%;
+%crew_is_mdc_entitled_default% =
+  crew.%rank_leg_start% = "AP"
+  and crew_pos.%assigned_function% = "AP"
+  and not leg.%is_deadhead%
+  and not crew.%is_temporary_trip_start%;
+%crew_is_mdc_entitled_SKD% =
+  let crew_id = crew.%id%;
+  %crew_is_mdc_entitled_default%
+  or
+  (crew_pos.%need_in_pos%(crew_pos.%func2pos%("AP")) = 1
+   and not any(equal_legs, crew_pos.%assigned_function% = "AP")
+           where (not (leg.%is_deadhead% or leg.%is_supernum%)
+                  and %is_roster% and crew.%id% <> crew_id)
+   and ((%leg_is_long_haul_mdc% 
+          and crew_pos.%assigned_function% = "AP" 
+          and crew_pos.%higher_rank%) 
+        or (%leg_is_short_haul_mdc% 
+            and %_senior_cabin_crew%(crew.%seniority_value%(leg.%start_UTC%))))
+   and crew.%is_scc%(leg.%start_UTC%));
+  
+%_senior_cabin_crew%(int seniority) = 
+  all(equal_legs, seniority <= crew.%seniority%)
+  where (not leg.%is_deadhead% 
+         and not leg.%is_supernum%
+         and not crew.%is_temporary_trip_start%
+         and %cabin_crew%
+         and crew.%is_scc%(leg.%start_UTC%));
+
+/* SKCMS-764 */ /* SKCMS-2807 */
+%_senior_cabin_crew_SVS%(int seniority) =
+  all(equal_legs, (seniority <= crew.%seniority_value%(leg.%start_hb%)))
+  where (leg.%is_active_flight%
+         and %cabin_crew%
+         and crew.%is_scc%(leg.%start_hb%));
+
+%_is_senior_cabin_crew_SVS% =
+   %is_SVS_CC%
+   and %_senior_cabin_crew_SVS%(crew.%seniority_value%(leg.%start_UTC%))
+   and leg.%is_active_flight%
+   and crew_pos.%assigned_pos% = 5 /**5 (AP) is the SCC position */
+   and crew.%is_scc%(leg.%start_UTC%);
+
+%nr_of_leg_as_SCC_SVS%(Abstime startTime, Abstime endTime) =
+   if (startTime <= endTime) then
+      count(leg(roster)) where (%_is_senior_cabin_crew_SVS%
+      and leg.%end_hb% < endTime
+      and leg.%end_hb% >= startTime)
+   else void_int;
+
+%_max_nr_of_compensated_SCC_SVS_legs% = 30;
+export %SCC_SVS% = nmin(%nr_of_leg_as_SCC_SVS%(%month_start%, %month_end%), %_max_nr_of_compensated_SCC_SVS_legs%);
+
+/*****************************************************/
+/* 3) Senior cabin crew allowance in a salary month  */
+/*****************************************************/
+export %SCC% =
+ if not %is_SVS_CC% then
+  if %4exng_cc_ot_allowances_valid% then
+    sum(leg(roster), %senior_cc_allowance_leg%)
+    where(%leg_in_period% and not (crew.%rank_leg_start% = "AP")) +
+    1:00 * count(duty(roster))
+    where(any(leg(duty), %leg_in_period% and not (crew.%rank_leg_start% = "AP") and
+                         %senior_cc_allowance_leg% > 0:00))
+  else
+    if %is_SKD_month_start% then
+      round_up(sum(leg(roster), %senior_cc_allowance_leg%)
+               where(%leg_in_period% and not (crew.%rank% = "AP"))
+              ,0:30)
+    else if %is_SKS_month_start% or %is_SKN_month_start% then
+      sum(leg(roster), %senior_cc_allowance_leg%)
+      where(%leg_in_period% and not (crew.%rank% = "AP"))
+    else
+      void_reltime
+ else
+   void_reltime;
+
+export %senior_cc_allowance_leg% =
+  if not (crew.%rank_leg_start% = "AP")
+  then 
+    if (%is_SKD_month_start% or %is_SKS_month_start% or %is_SKN_month_start% ) 
+       and %cabin_crew% 
+    then 
+      if ((crew_pos.%assigned_function% = "AP" 
+            and crew_pos.%higher_rank% 
+            and not crew.%is_temporary_trip_start%) 
+           or (crew_pos.%chief_of_cabin%))
+          and leg.%is_active_flight%
+          and crew.%is_scc_leg_start%
+          and not %crew_is_leased_leg%
+      then leg.%block_time%
+      else 0:00
+    else
+      void_reltime
+  else
+    void_reltime;
+
+/***************************************************************************/
+/* 4) Senior cabin crew with no purser planned allowance in a salary month */
+/***************************************************************************/
+export %SCC_no_purser% = 
+ if not (crew.%rank% = "AP")
+     and not (salary.%rank_salary_month_end% = "AP") 
+  then 
+  if %4exng_cc_ot_allowances_valid% then
+    sum(leg(roster), %senior_cc_allowance_no_purser_leg%)
+    where(%leg_in_period%) +
+    1:00 * count(duty(roster))
+    where(any(leg(duty), %leg_in_period% and
+                         %senior_cc_allowance_no_purser_leg% > 0:00))
+  else
+    if %is_SKD_month_start% then
+      round_up(sum(leg(roster), %senior_cc_allowance_no_purser_leg%)
+               where(%leg_in_period%)
+               , 0:30)
+    else if %is_SKN_month_start% then
+      sum(leg(roster), %senior_cc_allowance_no_purser_leg%)
+      where(%leg_in_period%)
+    else
+      void_reltime
+  else
+    void_reltime;
+export %senior_cc_allowance_no_purser_leg% =
+  if not (crew.%rank_leg_start% = "AP")
+  then
+    if %is_SKD_month_start% or %is_SKN_month_start% 
+    then
+      if leg.%is_active_flight% 
+         and %cabin_crew% 
+         and not crew.%is_temporary_trip_start% 
+         and crew.%is_scc%(leg.%start_UTC%) 
+         and crew_pos.%assigned_function% = "AP" 
+         and crew_pos.%higher_rank%
+         and crew_pos.%need_in_pos%(crew_pos.%func2pos%("AP")) = 0 
+         and not %crew_is_leased_leg%
+      then
+        leg.%block_time%
+      else 0:00
+    else
+      void_reltime
+  else
+    void_reltime;
+
+
+/*********************************************************************
+
+ BALANCED VALUES
+ These values are fed into a simple discrete optimizer to pick out the 
+ periods that yields the most overtime to the crew.
+
+**********************************************************************/
+
+/***************************************************************
+ 5) Overtime total in calendar month (SKS/SKD FC SH/CC, SKN CC)
+    or two calendar months (SKD FC SH)
+    Balancing between one or two months (SKD FC SH) is done here.
+****************************************************************/
+
+/*
+** Overtime for the current month.
+**
+** NB! This can be overtime for 1 calendar month, or in even months, it can be
+** overtime for 2 calendar months, if this is greater than any overtime for
+** 1 calendar month.
+*/
+
+export %overtime_calendar_month_ot% = 
+	if duty.%is_privately_traded% then
+		if not (%flight_crew% and %crew_is_long_haul%) then
+			/* The stored 7x24 fwd overtime can only belong to this variable for crew other than FC LH */
+			%ptd_duty_overtime%(%_ot_part_month%)		
+		else
+			void_reltime
+  else if %_can_have_mertid% then
+    if %_mertid_delta% > 0:00 then
+      round_up(%_mertid_delta%, 0:30)
+    else
+      void_reltime
+  else
+    %_overtime_calendar_month_ot%;
+  
+export %overtime_calendar_month_start% = if duty.%is_privately_traded% then %ptd_duty_start%(%_ot_part_month%)
+else if %_is_ot_two_calendar_months% then
+  add_months(%month_start%, -1)
+else
+  %month_start%;
+  
+export %overtime_calendar_month_end% = if duty.%is_privately_traded% then %ptd_duty_end%(%_ot_part_month%)
+else %month_end%;
+  
+%_overtime_calendar_month_ot% = 
+  if %is_valid_overtime_calendar_month% then
+      if %4exng_cc_ot_valid% and not %is_SNK_CC% then
+        void_reltime
+      else
+	      if %is_SKN_month_start% and not %is_SNK_CC% then
+	         round_up(nmax(0:00,
+	                       %duty_time_calendar_month%
+	                       - %max_duty_time_in_calendar_month%), 0:30)
+	      else if %is_SNK_CC% and not crew.%is_temporary% then
+	         round_up(nmax(0:00,
+	                       %duty_time_calendar_month%
+	                       - %max_duty_time_in_calendar_month%), 1:00)
+	      else
+	        if %is_SKS_month_start% and not crew.%is_temporary% then
+	          round_up(nmax(0:00,
+	                        %duty_time_calendar_month%
+	                        + %duty_time_compdays_monthly_SKS%
+	                        - %max_duty_time_in_calendar_month%), 1:00)
+	        else
+	          if %is_SKD_month_start% and 
+	             parameters.%k12_skd_cc_sp4_3_valid%(%month_start%) and
+	             not crew.%is_temporary% then
+	            %_ot_two_calendar_months%
+	          else
+	            void_reltime
+  else void_reltime;
+  
+export %overtime_calendar_month_duty% = 
+	if duty.%is_privately_traded% then
+		if not (%flight_crew% and %crew_is_long_haul%) then
+			%ptd_duty_time%(%_ot_part_month%)
+		else
+			void_reltime
+  else if %is_SKS_month_start% and not %flight_crew% and
+          not %4exng_cc_ot_valid% then 
+    %duty_time_calendar_month% + %duty_time_compdays_monthly_SKS%
+  else if %_is_ot_two_calendar_months% then
+    %duty_time_two_calendar_months%
+  else
+    %duty_time_calendar_month%;
+/***************************************************************
+ 5b) Overtime "mertid" for part time crew.
+
+ SKD CC K12 don't have 'mertid' - this is controlled by
+ table full_time_duty_2_months_table
+
+ 4EXNG: CC do not get mertid.
+****************************************************************/
+
+%_can_have_mertid% = false; /* Turned of in connection with SKCMS-894 */
+
+%_can_have_mertid_1_month% =
+  not %4exng_cc_ot_valid% and
+  crew.%is_part_time_at_date%(%month_start%) 
+  and %crew_is_short_haul%
+  and default(%full_time_duty_in_1_month%,0:00) > 0:00;
+
+%_can_have_mertid_2_months% =
+  not %4exng_cc_ot_valid% and
+  crew.%is_part_time_at_date%(%month_start%) 
+  and %crew_is_short_haul%
+  and default(%full_time_duty_in_2_months%,0:00) > 0:00;
+
+/*
+** Overtime for part-time crew for the current month.
+**
+** NB! This can be overtime for 1 calendar month, or in even months, it can be
+** overtime for 2 calendar months, if this is greater than any overtime for
+** 1 calendar month.
+*/
+%_mertid_delta% =
+  if %_is_ot_two_calendar_months% then
+    %_mertid_delta_2_months%
+  else
+    %_mertid_delta_1_month%;
+    
+%_mertid_delta_1_month% =
+  nmax(%overtime_calendar_month_duty%-default(%full_time_duty_in_1_month%,0:00), 0:00);
+
+%_mertid_delta_2_months% =
+  nmax(%overtime_calendar_month_duty%-default(%full_time_duty_in_2_months%,0:00), 0:00);
+
+/*
+** Mertid for part_time crew for the current month.
+**
+** NB! This can be mertid for 1 calendar month, or in even months, it can be
+** mertid for 2 calendar months, if this is greater than any mertid for
+** 1 calendar month.
+*/
+
+export %overtime_part_time_month_ot% = 
+	if duty.%is_privately_traded% then
+		%ptd_duty_overtime%(%_ot_part_parttime_month%)
+  else if %_can_have_mertid% then
+    round_up(nmax(%_overtime_calendar_month_ot% - %_mertid_delta%,0:00), 1:00)
+  else
+    void_reltime;
+
+export %overtime_part_time_month_start% = if duty.%is_privately_traded% then %ptd_duty_start%(%_ot_part_parttime_month%) else %overtime_calendar_month_start%;
+export %overtime_part_time_month_end% = if duty.%is_privately_traded% then %ptd_duty_end%(%_ot_part_parttime_month%) else %overtime_calendar_month_end%;
+export %overtime_part_time_month_duty% = if duty.%is_privately_traded% then %ptd_duty_time%(%_ot_part_parttime_month%) else %overtime_calendar_month_duty%;
+
+%is_valid_overtime_calendar_month% =
+  %cabin_crew% and
+  (not %crew_is_temporary% and
+   (not %is_SKD_month_start% or
+    (parameters.%k12_skd_cc_sp4_3_valid%(%month_start%) and
+     fundamental.%even_month_by_month_start%(%month_start%))));
+  
+%max_duty_time_in_calendar_month% =
+  if %flight_crew% then
+      if %is_part_time% then
+        %max_duty_time_in_calendar_month_pt_fc_k11%
+      else
+        %max_duty_time_in_calendar_month_ft_fc_k11%
+  else
+      if %is_SNK_CC% then %_max_duty_time_in_calendar_month_SNK_CC%
+      else last(duty(roster), duty_time.%max_in_month_overtime_cc%) where (%wop_in_period%);
+
+%_max_duty_time_in_calendar_month_SNK_CC% = 166:00;
+
+%max_duty_time_in_two_calendar_months% =
+  if %flight_crew% then
+    if %is_part_time% then
+      %max_duty_time_in_2_calendar_months_pt_fc_k11%
+    else
+      %max_duty_time_in_2_calendar_months_ft_fc_k11%
+  else
+    if %is_SKD_month_start% then
+      duty_time.%max_duty_time_2_months_cc%
+    else
+      void_reltime;
+
+/*
+** Mertid and overtime for part_time cabin crew for 1 and 3 month periods.
+**
+*/
+%_default_date% = 01Jan1986;
+%_part_time_cc% = %cabin_crew% and %is_part_time%;
+%_duty_time_cc_in_period% = 
+  duty_time.%duty_time_cc_in_period%(
+    round_down_month(trip.%start_utc%), 
+    round_up_month(trip.%start_utc%));
+%_max_mertid_part_time_cc% = 
+  default(nmax(duty_time.%max_in_month_cc_4exng% - 
+               duty_time.%max_duty_in_calendar_month_pt_cc%(round_down_month(trip.%start_utc%)), 0:00), 0:00);
+%_max_mertid_in_3_months_part_time_cc% =
+  default(nmax(duty_time.%max_in_3_months_cc_4exng% -
+               duty_time.%max_duty_in_3_months_pt_cc%(round_down_month(trip.%start_utc%)), 0:00), 0:00);
+%_duty_time_exceeding_max_month_4exng% = 
+  duty_time.%duty_time_cc_in_period%(round_down_month(trip.%start_utc%), round_up_month(trip.%start_utc%)) > 
+  duty_time.%max_in_month_cc_4exng%;
+%_duty_time_exceeding_max_in_3_months_4exng% =
+  duty_time.%actual_duty_time_in_3_months% > 
+  duty_time.%max_in_3_months_cc_4exng%;
+%_valid_part_time_cc_ot% =
+  trip.%is_last_on_duty_in_month% and 
+  trip.%start_utc% >= %month_start% and
+  trip.%start_utc% < %month_end%;
+%_crew_in_fixed_group% = 
+  crew.%in_fixed_group_entire_period_without_service_grade_change%(
+    duty_time.%actual_3_month_period_start%, 
+    duty_time.%actual_3_month_period_end%);
+
+
+%_one_month_excess_duty_time% =  
+  if %_valid_part_time_cc_ot% then
+    if %_duty_time_exceeding_max_month_4exng% then
+      %_max_mertid_part_time_cc%
+    else
+      default(nmax(%_duty_time_cc_in_period% - 
+                   duty_time.%max_duty_in_calendar_month_pt_cc%(round_down_month(trip.%start_utc%)),
+             0:00), 
+      0:00)
+  else
+    0:00;
+
+%_one_month_excess_duty_time_4exng% =   
+  if %_valid_part_time_cc_ot% then
+    if %_duty_time_exceeding_max_month_4exng% then
+      default(nmax(%_duty_time_cc_in_period% - 
+                   duty_time.%max_in_month_cc_4exng%, 
+              0:00), 
+      0:00)
+    else
+      0:00
+  else
+    0:00;
+
+%_three_months_excess_duty_time% =  
+  if %_valid_part_time_cc_ot% then
+    if %_duty_time_exceeding_max_in_3_months_4exng% then
+      %_max_mertid_in_3_months_part_time_cc%
+    else
+      default(nmax(duty_time.%actual_duty_time_in_3_months% - 
+                   duty_time.%max_duty_in_3_months_pt_cc%(round_down_month(trip.%start_utc%)), 0:00), 0:00)
+  else
+    0:00;
+
+%_three_months_excess_duty_time_4exng% =   
+  if %_valid_part_time_cc_ot% then
+    if %_duty_time_exceeding_max_in_3_months_4exng% then
+      default(nmax(duty_time.%actual_duty_time_in_3_months% - 
+                   duty_time.%max_in_3_months_cc_4exng%, 0:00), 0:00)
+    else
+      0:00
+  else
+    0:00;
+
+%_part_time_cc_month_start%(String code, int timespan)=
+  if %_part_time_cc% then 
+    if duty.%is_privately_traded% then
+      %ptd_duty_start%(code)
+    else
+      if %_valid_part_time_cc_ot% then
+        if timespan = 3 then
+          duty_time.%actual_3_month_period_start% + 0:01
+        else
+          round_down_month(trip.%start_utc%) + 0:01
+      else
+        %_default_date%
+  else
+    %_default_date%;
+
+%_part_time_cc_month_end%(String code, int timespan) =
+  if %_part_time_cc% then 
+    if duty.%is_privately_traded% then
+      %ptd_duty_end%(code)
+    else
+      if %_valid_part_time_cc_ot% then
+        if timespan = 3 then
+          duty_time.%actual_3_month_period_end% - 0:01
+        else
+          round_up_month(trip.%start_utc%) - 0:01
+      else
+        %_default_date%
+  else
+    %_default_date%;
+
+%_part_time_cc_month_duty%(String code, int timespan) =
+  if %_part_time_cc% then 
+    if duty.%is_privately_traded% then
+      %ptd_duty_time%(code)
+    else
+      if timespan = 3 and %_valid_part_time_cc_ot% then
+        duty_time.%actual_duty_time_in_3_months%
+      else if timespan = 1 and %_valid_part_time_cc_ot% then
+        duty_time.%duty_time_cc_in_period%(round_down_month(trip.%start_utc%), round_up_month(trip.%start_utc%))
+      else
+        0:00
+  else
+    0:00;
+
+/* Summary of overtime and mertid for 1 and three months. 
+ * 1 month should only be applicable to VG.
+ * 3 months should only be applicable to FG.
+ */
+export %mertid_part_time_cc_one_month% = 
+  if %_part_time_cc% and %agreement_valid%("part_time_cc_ot_validity", trip.%start_utc%) then
+    if duty.%is_privately_traded% then
+      %ptd_duty_overtime%(%_mt_part_parttime_cc_month%)
+    else if crew.%has_some_variable_group_in_month% then 
+      %_one_month_excess_duty_time%
+    else
+      0:00
+  else
+    0:00;
+export %mertid_part_time_cc_one_month_start% = %_part_time_cc_month_start%(%_mt_part_parttime_cc_month%,1);
+export %mertid_part_time_cc_one_month_end% = %_part_time_cc_month_end%(%_mt_part_parttime_cc_month%,1);
+export %mertid_part_time_cc_one_month_duty% = %_part_time_cc_month_duty%(%_mt_part_parttime_cc_month%,1);
+    
+export %mertid_part_time_cc_three_months% = 
+  if %_part_time_cc% and %agreement_valid%("part_time_cc_ot_validity", trip.%start_utc%) then
+    if duty.%is_privately_traded% then
+      %ptd_duty_overtime%(%_mt_part_parttime_cc_3_months%)
+    else if %_crew_in_fixed_group% then
+      %_three_months_excess_duty_time% 
+    else
+      0:00
+  else
+    0:00;
+export %mertid_part_time_cc_three_months_start% = %_part_time_cc_month_start%(%_mt_part_parttime_cc_3_months%,3);
+export %mertid_part_time_cc_three_months_end% = %_part_time_cc_month_end%(%_mt_part_parttime_cc_3_months%,3);
+export %mertid_part_time_cc_three_months_duty% = %_part_time_cc_month_duty%(%_mt_part_parttime_cc_3_months%,3);
+
+export %overtime_part_time_cc_one_month% = 
+  if %_part_time_cc% and %agreement_valid%("part_time_cc_ot_validity", trip.%start_utc%) then
+    if duty.%is_privately_traded% then
+      %ptd_duty_overtime%(%_ot_part_parttime_cc_month%)
+    else if crew.%has_some_variable_group_in_month% then
+      round_up(%_one_month_excess_duty_time_4exng%, 1:00)
+    else
+      0:00
+  else
+    0:00;
+export %overtime_part_time_cc_one_month_start% = %_part_time_cc_month_start%(%_ot_part_parttime_cc_month%,1);
+export %overtime_part_time_cc_one_month_end% = %_part_time_cc_month_end%(%_ot_part_parttime_cc_month%,1);
+export %overtime_part_time_cc_one_month_duty% = %_part_time_cc_month_duty%(%_ot_part_parttime_cc_month%,1);
+
+export %overtime_part_time_cc_three_months% = 
+  if %_part_time_cc% and %agreement_valid%("part_time_cc_ot_validity", trip.%start_utc%) then
+    if duty.%is_privately_traded% then
+      %ptd_duty_overtime%(%_ot_part_parttime_cc_3_months%)
+    else if %_crew_in_fixed_group% then
+      round_up(%_three_months_excess_duty_time_4exng%, 1:00)
+    else 
+      0:00
+  else
+    0:00;
+export %overtime_part_time_cc_three_months_start% = %_part_time_cc_month_start%(%_ot_part_parttime_cc_3_months%,3);
+export %overtime_part_time_cc_three_months_end% = %_part_time_cc_month_end%(%_ot_part_parttime_cc_3_months%,3);
+export %overtime_part_time_cc_three_months_duty% = %_part_time_cc_month_duty%(%_ot_part_parttime_cc_3_months%,3);
+
+/*
+** Maximum duty time in a calendar month for full-time FC SKD/SKN pre-K11 rules, 
+** which is also the limit for part-time FC for which 'mertid' is entitled
+** when exceeded:
+**
+**       P-days * 9:45
+*/
+
+/*
+%max_duty_time_in_calendar_month_ft_fc_skd_skn% =
+  9:45 * accumulators.%nr_actual_p_days_2_months_fc_skd_skn%(%month_start%, %sh_change_date%);
+*/
+/*
+** Maximum duty time in a calendar month for part-time FC SKD/SKN pre-K11 rules, 
+** for which overtime is entitled when exceeded:
+**
+**       P-days + LA-days * 9:45
+*/
+/*
+%max_duty_time_in_calendar_month_pt_fc_skd_skn% =
+  9:45 * accumulators.%nr_actual_p_and_pt_la_days_fc%(%month_start%, %sh_change_date%);
+*/
+/*
+** Maximum duty time in 2 calendar months for full-time FC SKD/SKN pre-K11 rules, 
+** which is also the limit for part-time FC for which 'mertid' is entitled
+** when exceeded:
+**
+**       P-days * 9:30
+*/
+/*
+%max_duty_time_in_2_calendar_months_ft_fc_skd_skn% =
+  let prev_month_start = add_months(%month_start%, -1);
+  
+  9:30 * accumulators.%nr_actual_p_days_2_months_fc_skd_skn%(prev_month_start, %sh_change_date%);
+*/
+/*
+** Maximum duty time in 2 calendar months for part-time FC SKD/SKN pre-K11 rules, 
+** for which overtime is entitled when exceeded:
+**
+**       P-days + LA-days * 9:30
+*/
+
+%max_duty_time_in_2_calendar_months_pt_fc_skd_skn% =
+  let prev_month_start = add_months(%month_start%, -1);
+  
+  9:30 * accumulators.%nr_actual_p_and_pt_la_days_fc%(prev_month_start, %sh_change_date%);
+
+/*
+** Maximum duty time in a calendar month for full_time FC K11 rules, 
+** which is also the limit for part-time FC for which 'mertid' is entitled
+** when exceeded:
+**
+**       P-days * 9:30
+*/
+
+%max_duty_time_in_calendar_month_ft_fc_k11% =
+  %k11_avg_duty% * accumulators.%nr_actual_p_days_2_months_fc%(%month_start%, %sh_change_date%);
+
+/*
+** Maximum duty time in a calendar month for part-time FC K11 rules, 
+** for which overtime is entitled when exceeded:
+**
+**       P-days + LA-days * 9:30
+*/
+
+%max_duty_time_in_calendar_month_pt_fc_k11% =
+  %k11_avg_duty% * accumulators.%nr_actual_p_and_pt_la_days_fc%(%month_start%, %sh_change_date%);
+
+/* Maximum duty time in calendar month for SKS crew */
+%max_duty_time_in_calendar_month_fg_fc_sks% =
+  %k11_avg_duty% * accumulators.%nr_actual_p_and_pt_la_days_fc_sks%(%month_start%, %sh_change_date%);
+
+/*
+** Maximum duty time in 2 calendar months for full-time FC K11 rules, 
+** which is also the limit for part-time FC for which 'mertid' is entitled
+** when exceeded:
+**
+**       P-days * 9:30
+*/
+
+%max_duty_time_in_2_calendar_months_ft_fc_k11% =
+  let prev_month_start = add_months(%month_start%, -1);
+  
+ %k11_avg_duty% * accumulators.%nr_actual_p_days_2_months_fc%(prev_month_start, %sh_change_date%);
+
+/*
+** Maximum duty time in 2 calendar months for part-time FC K11 rules, 
+** for which overtime is entitled when exceeded:
+**
+**       P-days + LA-days * 9:30
+*/
+
+%max_duty_time_in_2_calendar_months_pt_fc_k11% =
+  let prev_month_start = add_months(%month_start%, -1);
+  
+  %k11_avg_duty% * accumulators.%nr_actual_p_and_pt_la_days_fc%(prev_month_start, %sh_change_date%);
+
+%max_duty_time_in_previous_calendar_month% =
+  if %flight_crew% then
+      %max_duty_time_in_calendar_month_pt_fc_k11%
+  else 
+    void_reltime;
+  
+%is_part_time% = 
+  crew.%is_part_time_at_date%(wop.%start_day%);  
+ 
+%_is_ot_two_calendar_months% =
+  (fundamental.%even_month_by_month_start%(%month_start%) or
+   (%cabin_crew% and not %is_SKD_month_start%)) and  
+   default(%_ot_two_calendar_months%,0:00) >
+   default(%_ot_one_calendar_month%,0:00);
+
+/* Max part time factor in month for fixed group or 0 for variable group */
+%_fixed_pt_factor% =
+  if crew.%in_fixed_group%(%month_start%) then
+    if crew.%in_fixed_group%(%month_end%) then
+      nmax(crew.%part_time_factor_month_start%, crew.%part_time_factor_month_end%)
+    else
+      crew.%part_time_factor_month_start%
+  else
+    if crew.%in_fixed_group%(%month_end%) then
+      crew.%part_time_factor_month_end%
+    else
+      0;
+
+/* The minimum amount of duty time in a calendar month that pays overtime/"mertid". */
+matrix overtime_calendar_month_thresholds_fc =
+  %_fixed_pt_factor%, %region% -> %_ot_calendar_month_threshold%;
+           >80,  )50,80), )0,50),  <=0;
+  "SKS";  142:30, 128:00,  80:00, 0:00;
+  -;        0:00,   0:00,   0:00, 0:00;
+end
+  
+%_ot_one_calendar_month% = 
+  if %_can_have_mertid_1_month% then
+      default(round_up(nmax(%duty_time_calendar_month% - %max_duty_time_in_calendar_month_ft_fc_k11%,0:00), 1:00),
+              0:00)
+  else
+      default(round_up(nmax(0:00, %duty_time_calendar_month% - %max_duty_time_in_calendar_month%), 0:30),
+              0:00);
+    
+%_ot_two_calendar_months% = 
+  if %_can_have_mertid_2_months% and
+     %k11_fc_max_duty_rules_apply% then
+    default(round_up(nmax(%duty_time_two_calendar_months% -
+                          %max_duty_time_in_2_calendar_months_ft_fc_k11%,0:00),
+                     1:00),
+            0:00)
+  else
+      if %cabin_crew% then
+        if %is_SKD_month_start% then
+          default(round_up(nmax(0:00,
+                                %duty_time_two_calendar_months% -
+                                %max_duty_time_in_two_calendar_months%),
+                           0:30),
+                  0:00)
+        else
+          default(round_up(nmax(0:00,
+                                %duty_time_two_calendar_months% -
+                                %max_duty_time_in_two_calendar_months% -
+                                %_ot_prev_calendar_month%), 0:30),
+                  0:00)
+      else
+        void_reltime;
+    
+%_ot_prev_calendar_month% = 
+  default(
+    round_up(nmax(0:00, %duty_time_previous_calendar_month% - %max_duty_time_in_previous_calendar_month%), 0:30),
+    0:00);
+  
+/* Compensation days SKS, see Change Request 66 */
+export %duty_time_compdays_monthly_SKS% =
+  %duty_time_compdays_in_period_SKS%(%month_start%, %month_end%);
+%duty_time_compdays_in_period_SKS%(abstime st, abstime et) =
+  sum(trip(roster), %duty_time_compdays_SKS%(st,et))
+  where(compdays.%trip_is_compday_with_duty_time%
+        and (trip.%end_hb% > st) and (trip.%start_hb% < et));
+%duty_time_compdays_SKS%(abstime st, abstime et) = 
+  if compdays.%trip_is_compday_with_duty_time%
+     and not %crew_is_leased_trip%
+  then default(%trip_inf_prev_duty_time_compdays_SKS%(st,et), 0:00)
+  else 0:00;
+
+/*export %skd_fc_full_time_duty_in_month% = 
+  %max_duty_time_in_calendar_month_pt_fc_skd_skn%;
+ */
+ 
+export %skd_fc_full_time_duty_in_2_months% = 
+  %max_duty_time_in_2_calendar_months_pt_fc_skd_skn%;
+  
+/* 
+** These tables are used when dividing monthly overtime into
+** normal salary (mertid) and overtime. In some regions, part time 
+** crew working up to full time will not get overtime 
+** compensation, but a lower "full time salary"
+*/
+
+table full_time_duty_1_month_table =
+  crew.%region%, %flight_crew%
+  ->
+  export %full_time_duty_in_1_month%;
+  
+  -  , true -> %max_duty_time_in_calendar_month_pt_fc_k11%;
+  -  ,  -   -> 0:00;
+end
+
+table full_time_duty_2_months_table =
+  %k11_fc_max_duty_rules_apply%,
+  crew.%region%, %flight_crew%
+  ->
+  export %full_time_duty_in_2_months%;
+  
+  true ,    -  , true -> %max_duty_time_in_2_calendar_months_pt_fc_k11%;
+  false,  "SKD", true -> %max_duty_time_in_2_calendar_months_pt_fc_skd_skn%;
+  false,  "SKN", true -> %max_duty_time_in_2_calendar_months_pt_fc_skd_skn%;
+    -  ,    -  ,  -   -> 0:00;
+end
+
+/***********************************************************************/
+/* 7) Overtime in rolling periods 7x24 hours (FC + SKN CC + SKD CC K12)                  */
+/***********************************************************************/
+
+%_valid_rolling_7x24_ot% = not %4exng_cc_ot_valid% and not %4exng_fc_ot_valid%;
+
+export %overtime_rolling_7x24_fwd_ot% =
+  if %_valid_rolling_7x24_ot% and duty.%is_privately_traded% and %date_in_period%(duty.%start_utc% + 7*24:00) then
+	if %flight_crew% or 
+       %is_SKN_month_start% or
+       (%is_SKD_month_start% and
+        parameters.%k12_skd_cc_sp4_3_valid%(duty.%start_utc%)) then
+	/* The stored 7x24 fwd overtime can only belong to crew other than SKD cabin before K12 */
+	  %ptd_duty_overtime%(%_ot_part_7x24_fwd%)
+    else
+	  void_reltime
+  else if %is_valid_overtime_rolling_7x24_fwd% then
+    round_up(nmax(0:00, duty_time.%7x24_hrs_fwd_overtime%
+                        - %daily_overtime_before_month%(%overtime_rolling_7x24_fwd_start%)
+                        - %limit_rolling_7x24_hrs%), 0:30)
+  else void_reltime;
+
+export %overtime_rolling_7x24_fwd_start% =
+  if duty.%is_privately_traded% then
+    %ptd_duty_start%(%_ot_part_7x24_fwd%)
+  else
+    duty.%start_UTC%;
+export %overtime_rolling_7x24_fwd_end% =
+  if duty.%is_privately_traded% then
+    %ptd_duty_end%(%_ot_part_7x24_fwd%)
+  else
+    duty.%start_UTC_7x24%;
+export %overtime_rolling_7x24_fwd_duty% =
+  if duty.%is_privately_traded% then
+    %ptd_duty_time%(%_ot_part_7x24_fwd%)
+  else
+    duty_time.%7x24_hrs_fwd_overtime%;
+
+export %overtime_rolling_7x24_bwd_ot% =
+  if %_valid_rolling_7x24_ot% and duty.%is_privately_traded% and %date_in_period%(duty.%end_utc% - 7*24:00) then
+	if %flight_crew% or 
+       %is_SKN_month_start% or
+       (%is_SKD_month_start% and
+        parameters.%k12_skd_cc_sp4_3_valid%(duty.%start_utc%)) then
+	/* The stored 7x24 bwd overtime can only belong to crew other than SKD cabin before K12 */
+	  %ptd_duty_overtime%(%_ot_part_7x24_bwd%)
+    else
+	  void_reltime
+  else if %is_valid_overtime_rolling_7x24_bwd%
+  then round_up(nmax(0:00, duty_time.%7x24_hrs_bwd_overtime%
+                           - %daily_overtime_before_month%(%overtime_rolling_7x24_bwd_start%)
+                           - %limit_rolling_7x24_hrs%
+                           - duty.%short_stop_duty_time_contribution%), 0:30)
+  else void_reltime;
+export %overtime_rolling_7x24_bwd_start% =
+  if duty.%is_privately_traded% then
+    %ptd_duty_start%(%_ot_part_7x24_bwd%)
+  else
+    duty.%end_UTC% - 7*24:00;
+export %overtime_rolling_7x24_bwd_end% =
+  if duty.%is_privately_traded% then
+    %ptd_duty_end%(%_ot_part_7x24_bwd%)
+  else
+    duty.%end_UTC%;
+export %overtime_rolling_7x24_bwd_duty% =
+  if duty.%is_privately_traded% then
+    %ptd_duty_time%(%_ot_part_7x24_bwd%)
+  else
+    duty_time.%7x24_hrs_bwd_overtime%;
+  
+%is_valid_overtime_rolling_7x24_fwd% =
+  %_valid_rolling_7x24_ot% and
+  default(((%flight_crew% and 
+               (%is_SKD_month_start% and %agreement_valid%("overtime_7x24_fd_skd", duty.%end_UTC%) or
+                %is_SKN_month_start% and %agreement_valid%("overtime_7x24_fd_skn", duty.%end_UTC%) or
+                %is_SKS_month_start% and %agreement_valid%("overtime_7x24_fd_sks", duty.%end_UTC%))) or
+            %cabin_crew% and
+            (%is_SKN_month_start% or
+             (%is_SKD_month_start% and
+              parameters.%k12_skd_cc_sp4_3_valid%(duty.%start_utc%)))
+  		  and crew.%is_short_haul%(duty.%start_utc%))          
+          and %date_in_period%(duty.%start_utc% + 7*24:00)
+          and %duty_in_period%
+          and duty.%is_on_duty% and not duty.%has_no_duty_time_contribution%,
+          false);
+%is_valid_overtime_rolling_7x24_bwd% =
+  %_valid_rolling_7x24_ot% and
+  default(((%flight_crew% and
+               (%is_SKD_month_start% and %agreement_valid%("overtime_7x24_fd_skd", duty.%end_UTC%) or
+                %is_SKN_month_start% and %agreement_valid%("overtime_7x24_fd_skn", duty.%end_UTC%) or
+                %is_SKS_month_start% and %agreement_valid%("overtime_7x24_fd_sks", duty.%end_UTC%))) or
+            %cabin_crew% and
+            (%is_SKN_month_start% or
+             (%is_SKD_month_start% and
+              parameters.%k12_skd_cc_sp4_3_valid%(duty.%start_utc%)))
+  		  and crew.%is_short_haul%(duty.%end_utc% - 7*24:00))          
+          and %date_in_period%(duty.%end_utc% - 7*24:00)
+          and %duty_in_period%
+          and duty.%is_on_duty% and not duty.%has_no_duty_time_contribution%,
+          false);
+
+%limit_rolling_7x24_hrs% =
+  if %flight_crew% then
+    47:30
+  else
+  	if crew.%region% = "SKN" and
+       parameters.%k11_skn_cc_sp10_7_valid%(%month_start%) then
+      42:00 
+    else
+      if crew.%region% = "SKD" and
+         parameters.%k12_skd_cc_sp4_3_valid%(%month_start%) then
+        44:00
+      else
+        45:00;
+
+/*
+** 8) Overtime in 7x24 periods after time off (SKD CC before K12)
+**
+** Agreement reference CAU C.1.2, only forward is considered
+*/
+
+export %overtime_wop_7x24_ot% =
+  if duty.%is_privately_traded% and %date_in_period%(duty.%start_utc% + 7*24:00) then
+	if %cabin_crew% and %is_SKD_month_start% and
+       not parameters.%k12_skd_cc_sp4_3_valid%(%month_start%) then
+/* The stored 7x24 fwd overtime can only belong to SKD cabin crew */
+      %ptd_duty_overtime%(%_ot_part_7x24_fwd%)
+    else void_reltime
+  else if %is_valid_overtime_wop_7x24% then  
+    round_up(nmax(0:00,duty_time.%7x24_hrs_fwd_overtime% -
+                       %daily_overtime_before_month%(%overtime_wop_7x24_start%) -
+                       %limit_wop_7x24_hrs%),
+             0:30) 
+  else void_reltime;  
+export %overtime_wop_7x24_start% =
+  if duty.%is_privately_traded% then
+    %ptd_duty_start%(%_ot_part_7x24_fwd%)
+  else
+    duty.%start_utc%;  
+export %overtime_wop_7x24_end% =
+  if duty.%is_privately_traded% then
+    %ptd_duty_end%(%_ot_part_7x24_fwd%)
+  else
+    duty.%start_utc_7x24%;  
+export %overtime_wop_7x24_duty% =
+  if duty.%is_privately_traded% then
+    %ptd_duty_time%(%_ot_part_7x24_fwd%)
+  else if not %4exng_cc_ot_valid% and not %4exng_fc_ot_valid% then
+    duty_time.%7x24_hrs_fwd_overtime%
+  else
+    void_reltime;
+
+%is_valid_overtime_wop_7x24% =
+  not %4exng_cc_ot_valid% and not %4exng_fc_ot_valid% and
+  default(%cabin_crew% and %is_SKD_month_start% and
+          not parameters.%k12_skd_cc_sp4_3_valid%(%month_start%) and
+          is_first(duty(wop)) 
+          and not %crew_is_temporary%
+          and duty.%is_on_duty% and not duty.%has_no_duty_time_contribution% 
+          and %date_in_period%(duty.%start_utc% + 7*24:00), false);
+
+%limit_wop_7x24_hrs% = duty_time.%max_in_7x24_hrs%;
+
+
+/*************************************************************/
+/* 9) Overtime in a calendar week (SKS CC)                   */
+/*************************************************************/
+export %overtime_calendar_week_ot% =
+  let start_week = round_down_week(duty.%end_utc%),
+      end_week = round_up_week(duty.%end_utc%);
+	if duty.%is_privately_traded% and round_up_week(duty.%end_utc%) <= %month_end%
+      and round_up_week(duty.%end_utc%) > %month_start%
+	then
+		%ptd_duty_overtime%(%_ot_part_calendarweek%)
+  else if %is_valid_overtime_calendar_week_ot% then
+    nmax(0:00, round_up(roster.%duty_time_in_period%(start_week, end_week, False, duty.overtime)
+                        + %duty_time_compdays_in_period_SKS%(start_week, end_week)
+                        - %daily_overtime_before_month%(start_week)
+                        - %max_duty_time_in_calendar_week%, 1:00))
+  else 
+  	void_reltime;
+
+export %overtime_calendar_week_start% = if duty.%is_privately_traded% then round_down_week(%ptd_duty_start%(%_ot_part_calendarweek%)) else round_down_week(duty.%end_utc%);
+
+export %overtime_calendar_week_end% = if duty.%is_privately_traded% then round_up_week(%ptd_duty_end%(%_ot_part_calendarweek%)) else round_up_week(duty.%end_utc%);
+
+export %overtime_calendar_week_duty% = 
+  let start_week = round_down_week(duty.%end_utc%),
+      end_week = round_up_week(duty.%end_utc%);
+  if duty.%is_privately_traded% then
+		%ptd_duty_overtime%(%_ot_part_calendarweek%)
+  else roster.%duty_time_in_period%(start_week, end_week, False, duty.overtime)
+  + %duty_time_compdays_in_period_SKS%(start_week, end_week);
+
+%is_valid_overtime_calendar_week_ot% =
+  not %4exng_cc_ot_valid% and
+  %is_SKS_month_start% and %cabin_crew% and not crew.%is_temporary_trip_start% and
+  round_up_week(duty.%end_utc%) <= %month_end%
+  and round_up_week(duty.%end_utc%) > %month_start%;
+
+%max_duty_time_in_calendar_week% = duty_time.%max_in_calendar_week_SKS%;
+  
+  
+/***********************************************************/
+/* 10) Overtime in 1x24 periods (SKD SH CC) */
+/***********************************************************/
+/* Agreement reference CAU C.1.2 */
+export %overtime_1x24_fwd_ot% =
+	if duty.%is_privately_traded% and %date_in_period%(duty.%start_UTC%) then
+		%ptd_duty_overtime%(%_ot_part_1x24_fwd%)
+  else if %is_valid_overtime_1x24_fwd% then %_overtime_1x24_fwd_ot%
+  else void_reltime;
+  
+%_overtime_1x24_fwd_ot% =
+  if %cabin_crew% and crew.%is_temporary_trip_start% and %is_SKS_month_start% then
+    if is_first(duty(trip)) then
+      (3*%_trip_duty_time_in_period_temp_SKS%(%temp_crew_start%, %temp_crew_end%, duty.overtime, true))/2
+    else void_reltime
+  else
+    round_up(nmax(duty_time.%1x24_hrs_fwd_overtime% 
+                - %max_duty_time_in_1x24_hrs_fwd%, 0:00), 
+           0:30);
+export %overtime_1x24_fwd_start% = if duty.%is_privately_traded% then %ptd_duty_start%(%_ot_part_1x24_fwd%) else duty.%start_utc%; 
+export %overtime_1x24_fwd_end% = if duty.%is_privately_traded% then %ptd_duty_end%(%_ot_part_1x24_fwd%) else duty.%start_utc% + 24:00;
+export %overtime_1x24_fwd_duty% = if duty.%is_privately_traded% then %ptd_duty_time%(%_ot_part_1x24_fwd%) else duty_time.%1x24_hrs_fwd_overtime%;
+    
+export %overtime_1x24_bwd_ot% =
+	if duty.%is_privately_traded% and %duty_in_period% then
+		%ptd_duty_overtime%(%_ot_part_1x24_bwd%)	
+  else if %is_valid_overtime_1x24_bwd% then %_overtime_1x24_bwd_ot%
+  else void_reltime;
+%_overtime_1x24_bwd_ot% =
+  round_up(nmax(duty_time.%1x24_hrs_bwd_overtime% 
+                - %max_duty_time_in_1x24_hrs_bwd%, 0:00),
+           0:30);
+export %overtime_1x24_bwd_start% = if duty.%is_privately_traded% then %ptd_duty_start%(%_ot_part_1x24_bwd%) else duty.%end_utc% - 24:00;
+export %overtime_1x24_bwd_end% = if duty.%is_privately_traded% then %ptd_duty_end%(%_ot_part_1x24_bwd%) else duty.%end_utc%;
+export %overtime_1x24_bwd_duty% = if duty.%is_privately_traded% then %ptd_duty_time%(%_ot_part_1x24_bwd%) else duty_time.%1x24_hrs_bwd_overtime%;
+
+%max_duty_time_in_1x24_hrs_fwd% = 
+  if %is_SKD_month_start% then
+    if duty.%is_long_haul% then 13:00
+    else 14:00
+  else 99:00;
+                     
+%max_duty_time_in_1x24_hrs_bwd% = 
+  if %is_SKD_month_start% then
+    if duty.%is_long_haul% then 13:00
+    else 14:00
+  else 99:00;
+  
+%_night_upg_1x24_hrs_fwd% =
+	duty.%duty_time_in_period%(duty.%start_utc%, duty.%start_utc% + 24:00, fundamental.%night_upg%, duty.overtime)
+	- duty.%duty_time_in_period%(duty.%start_utc%, duty.%start_utc% + 24:00, false, duty.overtime);
+
+%_night_upg_1x24_hrs_bwd% = 
+	duty.%duty_time_in_period%(duty.%end_utc% - 24:00, duty.%end_utc%, fundamental.%night_upg%, duty.overtime)
+	- duty.%duty_time_in_period%(duty.%end_utc% - 24:00, duty.%end_utc%, false, duty.overtime);
+
+%is_valid_overtime_1x24_fwd% =
+  not %4exng_cc_ot_valid% and (
+  %_is_valid_overtime_1x24% and %date_in_period%(duty.%start_UTC%)
+  or
+  %cabin_crew% and crew.%is_temporary_trip_start% and %is_SKS_month_start%);
+%is_valid_overtime_1x24_bwd% =
+  not %4exng_cc_ot_valid% and
+  %_is_valid_overtime_1x24% and %duty_in_period%
+  and not (%cabin_crew% and %crew_is_temporary% and %is_SKS_month_start%);
+%_is_valid_overtime_1x24% =
+  default(%is_SKD_month_start% and %cabin_crew%
+          and not %crew_is_temporary%
+          and %duty_is_valid_overtime%, false);
+
+/**********************************************************/
+/* 11) Overtime in duty pass (ALL REGIONS CC)             */
+/**********************************************************/
+export %overtime_dutypass_ot% = 
+	if duty.%is_privately_traded% and %duty_in_period% then
+		%ptd_duty_overtime%(%_ot_part_dutypass%)
+	else if %is_valid_overtime_dutypass% then %_overtime_dutypass_ot%
+  else void_reltime;
+%_overtime_dutypass_ot% =
+  if %is_SKS_month_start% then
+    round_up(nmax(0:00, %dutypass_all% - %max_duty_time_in_duty_pass%), 1:00)
+  else
+    round_up(nmax(0:00, %dutypass_all% - %max_duty_time_in_duty_pass%), 0:30);
+export %overtime_dutypass_start% = 	if duty.%is_privately_traded% then %ptd_duty_start%(%_ot_part_dutypass%) else rest.%duty_period_start_UTC%(duty.overtime);
+export %overtime_dutypass_end% = if duty.%is_privately_traded% then %ptd_duty_end%(%_ot_part_dutypass%) else rest.%duty_period_end_UTC%(duty.overtime);
+export %overtime_dutypass_duty% = if duty.%is_privately_traded% then %ptd_duty_time%(%_ot_part_dutypass%) else %dutypass_all%;
+
+%is_valid_overtime_dutypass% = 
+  not %4exng_cc_ot_valid% and
+  %_is_valid_overtime_dutypass% and %duty_in_period%;
+%_is_valid_overtime_dutypass% = 
+  default(%cabin_crew% and %duty_is_valid_overtime% 
+          and (not %crew_is_temporary% or %is_SKN_month_start%), false);
+
+export %dutypass_all% =
+  if %is_SKS_month_start% then 
+    if %duty_is_long_haul_SKS% then 
+		duty.%duty_time%(duty.overtime, False)
+    else 
+		duty_time.%in_duty_period%(duty.overtime, false)
+  else
+    if duty.%is_long_haul% then 
+		duty.%duty_time%(duty.overtime, True)
+    else 
+		duty_time.%in_duty_period%(duty.overtime, fundamental.%night_upg%);
+
+%_duty_pass_lh_SKS% =
+  let duty_start = rest.%duty_period_start_UTC%(duty.overtime),
+      duty_end = duty.%start_UTC%;
+
+  duty.%duty_time%(duty.overtime, False) +
+  sum(duty(trip), duty.%duty_time%(duty.overtime, False))
+  where (not %duty_is_long_haul_SKS%
+         and duty.%start_UTC% >= duty_start
+         and duty.%end_UTC% <= duty_end);
+
+%_duty_pass_lh_SKD_SKN% = 
+  let duty_start = rest.%duty_period_start_UTC%(duty.overtime),
+      duty_end = duty.%start_UTC%;
+
+  sum(duty(trip), duty.%duty_time%(duty.overtime, True))
+  where (not duty.%is_long_haul%
+         and duty.%start_UTC% >= duty_start
+         and duty.%end_UTC% <= duty_end);
+  
+%max_duty_time_in_duty_pass% =
+  if %is_SKD_month_start% then
+    if duty.%is_long_haul% then 
+      13:00
+    else 
+      10:00 + salary_loss_of_rest.%add_hours%(duty_time.%dutypass_is_extended%,2:00)
+      + salary_loss_of_rest.%add_hours%(duty_time.%last_is_deadhead% and not duty_time.%dutypass_is_extended%, 1:00)
+  else if %is_SKS_month_start% then
+    if %duty_is_long_haul_SKS% then
+      duty_time.%max_in_duty_pass_lh_SKS%
+    else
+      duty_time.%max_in_duty_pass_sh_SKS%
+  else if %is_SKN_month_start% then
+    if duty.%is_long_haul% then
+      13:00
+    else
+      duty_time.%max_in_duty_period%
+  else duty_time.%max_in_duty_period%;
+  
+/*************************************************************/
+/* 12) Overtime in late checkout before free day (SKN CC)    */
+/*************************************************************/
+export %overtime_before_freeday_ot% =
+	if duty.%is_privately_traded% and %duty_in_period% then
+		%ptd_duty_overtime%(%_ot_part_late_checkout_freeday%)
+  else if %is_valid_overtime_before_freeday% then %_overtime_before_freeday_ot%
+  else void_reltime;
+%_overtime_before_freeday_ot% =
+  if %4exng_cc_ot_valid% then
+    if trip.%end_od% > 2:00 then
+      0:00
+    else
+      round_up(trip.%end_od%, 1:00)
+  else
+  nmin(round_up(trip.%end_od%, 0:30), 1:00);
+export %overtime_before_freeday_start% = 
+	if duty.%is_privately_traded% then
+		default(%ptd_duty_start%(%_ot_part_late_checkout_freeday%),
+						default(%ptd_duty_start%(%_ot_part_late_checkout_resched%),
+										%ptd_duty_start%(%_ot_part_late_checkout_free_weekend%)))
+  else duty.%start_utc%;
+export %overtime_before_freeday_end% = 
+	if duty.%is_privately_traded% then
+		default(%ptd_duty_end%(%_ot_part_late_checkout_freeday%),
+						default(%ptd_duty_end%(%_ot_part_late_checkout_resched%),
+										%ptd_duty_end%(%_ot_part_late_checkout_free_weekend%)))
+  else duty.%end_utc%;
+export %overtime_before_freeday_duty% =
+	if duty.%is_privately_traded% then
+		%ptd_duty_time%(%_ot_part_late_checkout_freeday%) 
+  else duty.%duty_time%(duty.overtime, True);
+
+%is_valid_overtime_before_freeday% =
+  %_is_valid_overtime_before_freeday% and %duty_in_period%;
+%_is_valid_overtime_before_freeday% =
+  default(not(%is_SKJ_month_start% or %is_SKK_month_start%) and %cabin_crew% 
+          and duty.%has_active_flight% 
+          and (next(trip(roster), %scheduled_trip_start_hb%) - %scheduled_trip_end_hb% 
+               >= 48:00 or is_last(duty(wop))) 
+          and is_last(duty(trip))
+          and %duty_is_valid_overtime%
+          and %scheduled_duty_end_day_hb% < %actual_duty_end_day_hb%, 
+          false); 
+
+export %disable_overtime_before_freeday_SKD_SKN_CC% =
+  ((crew.%has_agmt_group_skd_cc_at_date_non_resource_pool%(wop.%start_UTC%)
+    and system_db_parameters.%cau_co_on_freeday_comp%(wop.%end_hb%))
+   or
+   (crew.%has_agmt_group_skn_cc_at_date_non_resource_pool%(wop.%start_UTC%)
+    and system_db_parameters.%k20_skn_cc_co_on_freeday_comp%(wop.%end_hb%)))
+  and next(duty(chain), duty.%is_freeday%)
+  and time_of_day(wop.%end_hb%) > 00:00
+  and time_of_day(wop.%end_hb%) <= 02:00;
+
+/*************************************************************/
+/* 13) Overtime before a free weekend (SKS CC)               */
+/*************************************************************/
+export %overtime_before_free_weekend_ot% =
+	if duty.%is_privately_traded% and %duty_in_period% then
+		%ptd_duty_overtime%(%_ot_part_late_checkout_free_weekend%)
+  else if %is_valid_overtime_before_free_weekend_ot% then %_overtime_before_free_weekend_ot%
+  else void_reltime;
+%_overtime_before_free_weekend_ot% =
+  if %4exng_cc_ot_valid% then
+	  if duty.%end_od% > 2:00 then
+	      0:00
+	    else
+	     round_up(duty.%end_od%, 1:00)
+  else
+  round_up(nmax(duty.%end_hb% 
+                - (round_down(duty.%end_hb%, 24:00) 
+                + freedays.%free_we_latest_start%), 
+                0:00), 1:00);  
+export %overtime_before_free_weekend_start% = duty.%start_utc%;
+export %overtime_before_free_weekend_end% = duty.%end_utc%;
+export %overtime_before_free_weekend_duty% =
+	if duty.%is_privately_traded% then
+		%ptd_duty_time%(%_ot_part_late_checkout_free_weekend%)
+	else duty.%duty_time%(duty.overtime, False);
+
+%is_valid_overtime_before_free_weekend_ot% =
+  %_is_valid_overtime_before_free_weekend_ot% and %duty_in_period%;
+%_is_valid_overtime_before_free_weekend_ot% =
+  let friday = fundamental.%day_of_week%(duty.%end_hb%),
+      monday = round_down(duty.%end_hb%, 24:00) + 72:00;
+  default(%is_SKS_month_start% and %cabin_crew% and not %crew_is_temporary%
+          and is_last(duty(wop))
+          and %duty_is_valid_overtime%
+          and duty.%is_on_duty%
+          and duty.%end_scheduled_hb% < (round_down(duty.%end_hb%, 24:00) + 
+                                         freedays.%free_we_latest_start%)
+          and friday = 5
+          and not duty.%is_compensation_day%
+          and next(duty(roster),
+                   duty.%is_freeday% and
+                   fundamental.%day_of_week%(duty.%start_hb%) = 6 
+                   and next(duty(roster), duty.%start_hb%)
+                       where(duty.%is_on_duty%) 
+                       >= monday),
+          false);
+/*
+** Overtime due to later checkout after rescheduling (SKN FD) 
+**
+** NB! FC K11: The SKN rule is replaced by new rules applicable
+** to all FC SH regions.
+**
+** NB2! 4EXNG: Overtime due to late checkout after rescheduling is no longer valid at all for FC.
+*/
+
+export %overtime_late_checkout_rescheduling_ot% =
+  if duty.%is_privately_traded% and %duty_in_period% then
+    %ptd_duty_overtime%(%_ot_part_late_checkout_resched%)
+  else if %is_valid_overtime_late_checkout_rescheduling_ot% and
+     %_overtime_late_checkout_rescheduling_ot% > 0:00 then 
+    %_overtime_late_checkout_rescheduling_ot%
+  else void_reltime;
+  
+%_overtime_late_checkout_rescheduling_ot% =
+  if parameters.%k11_fc_sp3_2_valid%(%month_start%) then
+    if rescheduling.%due_problem_outside_own_schedule_k11_fc% then
+      round_up(nmax(trip.%end_hb% - rescheduling.%trip_inf_prev_checkout%,
+                    0:00), 0:30)
+    else
+      round_up(nmax(trip.%end_hb% - rescheduling.%trip_inf_prev_checkout% - 2:00,
+                    0:00), 0:30)
+  else
+    round_up(nmin(nmax(trip.%end_hb% - rescheduling.%trip_inf_checkout% - 2:00, 0:00),
+                  2:00), 0:30);
+
+export %overtime_late_checkout_rescheduling_duty% =
+  if duty.%is_privately_traded% then
+    %ptd_duty_time%(%_ot_part_late_checkout_resched%)
+  else duty.%duty_time%(duty.overtime, False);
+
+%is_valid_overtime_late_checkout_rescheduling_ot% =
+  if %cabin_crew% or not %4exng_fc_ot_valid% then
+    default(((parameters.%k11_fc_sp3_2_valid%(%month_start%) and
+              rescheduling.%valid_checkout_rescheduling_fc_k11%) or
+             (not parameters.%k11_fc_sp3_2_valid%(%month_start%) and
+              rescheduling.%valid_checkout_rescheduling_fc_skn%))
+            and %duty_in_period%
+            and %duty_is_valid_overtime%
+            and is_last(duty(trip)),
+            false)
+  else
+    false;
+
+/*********************************************************************
+
+ TEMPORARY CREW VALUES
+ These values are exported to the salary module. They are used in a 
+ different job, the "Temporary Crew" salary job, which is generated
+ for next month, instead of for three months later.
+
+**********************************************************************/
+
+/*********************************************************************/
+/* 14) Temporary crew hours in month SKD.                            */
+/*********************************************************************/
+
+export %temporary_crew_hours% =
+        if %is_QA_CC_temp% then
+            0:00
+        else
+           %temporary_crew_hours_in_period%(%temp_crew_start_day%, %temp_crew_end_day%);
+
+export %temporary_crew_hours_in_period%(Abstime start_utc, Abstime end_utc) =
+    let start_date = nmax(start_utc, %temp_crew_start_day%),
+        end_date = nmin(end_utc, %temp_crew_end_day%);
+
+    if (%_is_SKD% or %_is_SKS%) and %cabin_crew% and %crew_is_temporary% then
+        if %4exng_cc_tempcrew_valid% then
+            %temp_duty_time_in_period%(start_date, end_date, duty.overtime)
+        else
+            round_up(
+                %temp_duty_time_in_period%(start_date, end_date, duty.overtime), 
+                0:30)
+    else if %is_NKF_CC_temp% or %is_SNK_CC_temp% then /* SKCMS-754 */
+        %temporary_crew_hours_in_salary_month_NKF_SNK_CC%
+    else
+        void_reltime;
+
+/* 
+  Used in Work Schedule report to WFS 
+  Above function is adapted to return monthly values
+  despite its naming. This function will return the 
+  actual hour values for a range of dates. 
+*/
+export %temp_crew_hours_per_day%(Abstime date) =
+    if (%_is_SKD% or %_is_SKS%) and %cabin_crew% and %crew_is_temporary% then
+      if %4exng_cc_tempcrew_valid% then
+          %temp_duty_time_on_calendar_day_hb%(date, duty.overtime)
+      else
+          round_up(
+              %temp_duty_time_on_calendar_day_hb%(date, duty.overtime), 
+              0:30)
+        else if %is_NKF_CC_temp_TE%(date) or %is_SNK_CC_temp_TE%(date) then
+        (sum(duty(roster), %temp_crew_hours_per_duty_period_NKF_SNK_CC_TE%(date))
+          where(duty_period.%end_hb% >= date and duty.%end_hb% < date + 24:00 and not duty.%is_blank_day%)
+          + %_out_station_long_rest_period_duty_hrs%)
+    else
+        void_reltime;
+
+%_out_station_long_rest_period_duty_hrs% =
+  if void(%_out_station_long_rest_period_salary_hrs%) then 
+    0:00 
+  else 
+    %_out_station_long_rest_period_salary_hrs%;
+
+/* Adapted from %temp_duty_time_in_period% for WFS TimeEntry purposes */
+%temp_duty_time_on_calendar_day_hb%(Abstime date, DutyCalculation dutycalc) =
+  let start_dt = time_utils.%hb2utc%(date),
+      end_dt = start_dt + 24:00;
+  if %is_SKS_month_start% then
+    sum(trip(roster),
+      nmax(%_trip_duty_time_in_period_temp_SKS%(start_dt, end_dt, dutycalc, false),
+           %temp_production_cancelled_time_in_period%(start_dt, end_dt)))
+    from(first where(overlap(trip.%start_hb%, trip.%end_hb%, start_dt, end_dt) > 0:00))
+    while (trip.%start_hb% < end_dt)
+  else
+    if %is_SKD_month_start% then
+      sum(trip(roster),
+        nmax(%_trip_duty_time_in_period_temp_SKD%(start_dt, end_dt, dutycalc),
+             %temp_production_cancelled_time_in_period%(start_dt, end_dt)))
+      from(first where(overlap(trip.%start_hb%, trip.%end_hb%, start_dt, end_dt) > 0:00))
+      while (trip.%start_hb% < end_dt)
+    else
+      sum(trip(roster),
+       nmax(%trip_duty_time_in_period_excluding_initial_course%(start_dt, end_dt, dutycalc),
+            %temp_production_cancelled_time_in_period%(start_dt, end_dt)))
+      from(first where(overlap(trip.%start_hb%, trip.%end_hb%, start_dt, end_dt) > 0:00))
+      while (trip.%start_hb% < end_dt);
+
+/***
+These variable vary from the is_SKX-variables in that 
+they return true for the country if crew is not employed somewhere (else) at beginning of month
+***/
+%_is_SKD% = %is_SKD_month_start% or (not %_is_employed_at_month_start% and %is_SKD_month_end%);
+%_is_SKS% = %is_SKS_month_start% or (not %_is_employed_at_month_start% and %is_SKS_month_end%);
+%_is_SKN% = %is_SKN_month_start% or (not %_is_employed_at_month_start% and %is_SKN_month_end%);
+%_is_employed_at_month_start% = %is_SKD_month_start% or %is_SKS_month_start% or %is_SKN_month_start%;
+    
+  
+export %ill_temporary_crew_hours% =
+  if %is_SKD_month_start% and %cabin_crew% and %crew_is_temporary%
+  then default(%_ill_duty_time_in_period%(%temp_crew_start_day%, %unaltered_temp_crew_end_day%), 0:00)
+  else void_reltime;
+
+%trip_duty_time_in_period_excluding_initial_course%(Abstime a1,
+                                                    Abstime a2,
+                                                    DutyCalculation dutycalc) =
+  if not %trip_is_initial_course% then
+     trip.%duty_time_in_period%(a1,a2, false, dutycalc)
+  else
+    0:00;
+     
+%temp_duty_time_in_period%(Abstime a1, Abstime a2, DutyCalculation dutycalc) =
+  /* Summarize all relevant trips in the given period a1 - a2. */
+  if %is_SKS_month_start% then
+    sum(trip(roster),
+      nmax(%_trip_duty_time_in_period_temp_SKS%(a1, a2, dutycalc, false),
+           %temp_production_cancelled_time_in_period%(a1, a2)))
+    from(first where(overlap(trip.%start_utc%, trip.%end_utc%, a1, a2) > 0:00))
+    while (trip.%start_utc% < a2)
+  else
+    if %is_SKD_month_start% then
+      sum(trip(roster),
+        nmax(%_trip_duty_time_in_period_temp_SKD%(a1, a2, dutycalc),
+             %temp_production_cancelled_time_in_period%(a1, a2)))
+      from(first where(overlap(trip.%start_utc%, trip.%end_utc%, a1, a2) > 0:00))
+      while (trip.%start_utc% < a2)
+    else
+      sum(trip(roster),
+       nmax(%trip_duty_time_in_period_excluding_initial_course%(a1,a2,dutycalc),
+            %temp_production_cancelled_time_in_period%(a1, a2)))
+      from(first where(overlap(trip.%start_utc%, trip.%end_utc%, a1, a2) > 0:00))
+      while (trip.%start_utc% < a2);
+
+export %temp_duty_time_component% =
+    if %is_QA_CC_temp% or %is_NKF_CC_temp% or %is_SNK_CC_temp% then
+        0:00
+    else
+        %_temp_duty_time_component%;
+
+
+%_temp_duty_time_component% =
+  if %cabin_crew% and %crew_is_temporary% then
+     if %is_SKS_month_start% then
+        nmax(%_trip_duty_time_in_period_temp_SKS%(%temp_crew_start_day%, %temp_crew_end_day%, duty.overtime, false),
+           %temp_production_cancelled_time%(%temp_crew_end_day%))
+     else if %is_SKD_month_start% then
+        nmax(%trip_duty_time_in_period_excluding_initial_course%(%temp_crew_start_day%, %temp_crew_end_day%, duty.overtime),
+             %temp_production_cancelled_time%(%temp_crew_end_day%))
+      else void_reltime
+   else void_reltime;
+  
+%_has_later_trip_on_same_day%(Abstime et) =
+  default( 
+    next(trip(roster), trip.%start_hb% < et) where(trip.%is_on_duty%),
+	false);
+
+set temporary_crew_aborted_duty_codes_set = "UF", "UF1", "UF2", "UFO", "UFH", "UFP", "UFE", "LA91", "LA92", "IL7", "IL12", "LA42";
+%_has_illness_within_time%(Abstime end_time) =
+  default(
+    any(trip(roster) from(current) forwards while(trip.%start_utc% < end_time), trip.%code% in temporary_crew_aborted_duty_codes_set),
+    false);
+
+%_trip_duty_time_in_period_temp_SKS_day%(Abstime a1, Abstime a2, Int dayIndex) =
+  let st = round_down(trip.%start_hb%, 24:00) + (dayIndex-1)*24:00,
+      et = round_down(trip.%start_hb%, 24:00) + dayIndex*24:00;
+  if st < a1 or st >= a2 then
+    0:00
+  else
+    %_trip_duty_time_in_period_temp_SKS_day_helper%(st, et);
+
+%_trip_duty_time_in_period_temp_SKS_day_helper%(Abstime st, Abstime et) =
+    let duty_time_raw = %trip_duty_time_in_period_temp_SKS%(st, et),
+        prev_duty_time_raw = default(prev(trip(roster), %trip_duty_time_in_period_temp_SKS%(st, et)), 0:00);
+
+    if (duty_time_raw = 0:00) and (prev_duty_time_raw = 0:00) then
+      0:00
+    else
+      nmax(duty_time_raw,
+           if trip.%is_on_duty% and not %_has_later_trip_on_same_day%(et) and not %trip_is_initial_course%
+           and not %_has_illness_within_time%(et) then
+             04:00 - prev_duty_time_raw
+           else
+             0:00
+           );
+
+%trip_duty_time_in_period_temp_SKS%(Abstime st, Abstime et) =
+   /* SKCMS-765 */
+   if not %trip_is_initial_course% then
+      sum(duty(trip), %duty_time_SKS_CC_temp%)
+        where(duty_period.%is_first_duty_in_duty_period% and (duty_period.%start_utc% >= st) and (duty_period.%start_utc% < et))
+   else
+      0:00;
+
+/* When summarizing duty time for SKS CC temp,
+ * only include duty hours that the crew actually works.
+ * Following codes should be excluded:
+ * UF*: unfit for flight.
+ * LA91: child ill entire day, LA92: child ill during duty.
+ * IL7, IL7R: illness during duty.
+ * FN: Free day
+ * IL12: long-term illness.
+ */
+%unpaid_duty_SKS_CC_temp% =
+  %is_SKS_month_start% and %cabin_crew% and crew.%is_temporary% /* Only applicable for SKS CC temp */
+  and (duty.%has_unfit_for_flight_star% /* UF* (UF, UF1, UF2) */
+  or duty.%is_child_illness% /* LA91, LA91R, LA92, LA92R */
+  or duty.%is_illness_during_duty% /* IL7, IL7R */
+  or duty.%code% = "LA42" /* Leave of absence */
+  or duty.%is_freeday% /* FN */
+  or duty.%is_longterm_illness%); /* IL12 */
+
+%duty_time_SKS_CC_temp% =
+  if %unpaid_duty_SKS_CC_temp% then
+    0:00
+  else if system_db_parameters.%salary_sks_cc_rp_home_sb_valid%(duty.%start_hb%) then
+    %_duty_time_SKS_CC_temp%
+  else
+    duty_period.%time%;
+
+%_duty_time_SKS_CC_temp% =
+  if %_is_home_standby_with_callout% then
+     default(%_sby_salary_hrs_callout% + %_active_duty_time_callout%, 0:00)
+  else if duty.%is_standby_at_home% then
+     6:00
+  else
+     duty_period.%time%;
+
+%_trip_duty_time_in_period_temp_SKS%(Abstime a1, Abstime a2, DutyCalculation dutycalc, Bool overtime) =
+  let days = trip.%days%,
+      duty_time_limit = if %4exng_cc_ot_valid% then 999:00 else 12:00;
+  sum(times(days),
+    if dutycalc = duty.overtime then
+      if not overtime then
+        nmin(%_trip_duty_time_in_period_temp_SKS_day%(a1, a2, %times_index_0%),duty_time_limit)
+      else
+        nmax(%_trip_duty_time_in_period_temp_SKS_day%(a1, a2, %times_index_0%),duty_time_limit)-duty_time_limit
+    else
+      %_trip_duty_time_in_period_temp_SKS_day%(a1, a2, %times_index_0%)
+  );
+
+
+%_trip_duty_time_in_period_temp_SKD%(Abstime a1,
+                                     Abstime a2,
+                                     DutyCalculation dutycalc) =
+  if not %trip_is_initial_course% then
+     %trip_duty_time_in_period_temp_SKD%(a1, a2, false, dutycalc)
+  else
+    0:00;
+
+%trip_duty_time_in_period_temp_SKD%(Abstime a1, Abstime a2, Bool night_upg, DutyCalculation dutycalc) =
+  if trip.%end_UTC% <= a1 or trip.%start_UTC% >= a2 then
+    0:00
+  else if trip.%start_UTC% >= a1 and trip.%end_UTC% <= a2 then
+    %trip_duty_time_temp_SKD%(dutycalc, night_upg)
+  else
+    sum(duty(trip), %duty_duty_time_in_period_temp_SKD%(a1, a2, night_upg, dutycalc));
+
+
+%duty_duty_time_in_period_temp_SKD%(AbsTime a1, AbsTime a2, Bool night_upg, DutyCalculation dutycalc) =
+  if system_db_parameters.%salary_skd_cc_rp_home_sb_valid%(duty.%start_hb%) then
+    if %_is_home_standby_with_callout% then
+      if duty_period.%is_first_duty_in_duty_period% and duty.%start_utc% >= a1 and duty.%start_utc% < a2 then
+        default(%_sby_salary_hrs_callout% + %_active_duty_time_callout%, 0:00)
+      else
+        0:00
+    else if duty.%is_standby_at_home% then
+      if duty.%start_utc% >= a1 and duty.%start_utc% < a2 then
+        6:00
+      else
+        0:00
+    else
+      duty.%duty_time_in_period%(a1, a2, night_upg, dutycalc)
+  else
+    duty.%duty_time_in_period%(a1, a2, night_upg, dutycalc);
+  
+
+%trip_duty_time_temp_SKD%(DutyCalculation dutycalc, Bool night_upg) =
+    sum(duty(trip), %duty_duty_time_temp_SKD%(dutycalc, night_upg));
+
+%duty_duty_time_temp_SKD%(DutyCalculation dutycalc, Bool night_upg) =
+  if system_db_parameters.%salary_skd_cc_rp_home_sb_valid%(duty.%start_hb%) then
+    if %_is_home_standby_with_callout% then
+      if duty_period.%is_first_duty_in_duty_period% then
+        default(%_sby_salary_hrs_callout% + %_active_duty_time_callout%, 0:00)
+      else
+        0:00
+    else if duty.%is_standby_at_home% then
+      6:00
+    else
+      duty.%duty_time%(dutycalc, night_upg)
+  else
+    duty.%duty_time%(dutycalc, night_upg);
+
+
+%temp_production_cancelled_time%(Abstime end_time) =
+  if trip.%end_hb% < %temp_crew_start% or trip.%end_hb% >= %temp_crew_end% then
+    00:00
+  else if %is_SKS_month_start% and %_has_illness_within_time%(end_time) then
+    00:00
+  else if trip.%is_illness% or 
+  (%is_SKS_month_start% and trip.%is_child_illness%) or
+  (%is_SKD_month_start% and (trip.%is_child_illness_entire_day% or trip.%is_unfit_for_flight%)) then 
+    0:00 /* Illness is already reported in IDxx, so don't report twice */
+  else if default(rescheduling.%trip_inf_flag_prod_cancelled_late_tmp_cc%, false) then 
+    if %is_SKS_month_start% then 
+	    04:00
+	  else
+	    02:00
+  else if default(rescheduling.%trip_inf_flag_prod_cancelled_checkin_tmp_cc%, false) then
+  	if %is_SKD_month_start% then
+	    %compensate_with_min_planned_duty_time%
+    else
+	    04:00
+  else 00:00;
+
+%temp_production_cancelled_time_in_period%(Abstime start_utc, Abstime end_utc) =
+  if trip.%end_utc% <= start_utc or trip.%end_utc% > end_utc or trip.%start_utc% < start_utc then
+    00:00
+  else
+    %temp_production_cancelled_time%(end_utc);
+
+%compensate_with_min_planned_duty_time% =
+  sum(duty(trip), duty.%time%);
+  
+export %temp_ill_code% = 
+  let hours = %_ill_duty_time_in_period%(duty.%start_hb%, duty.%end_hb%); 
+  concat("ID",format_time(round_up(hours, 1:00), "%02H"));
+
+export %ill_temp_duty_time_day%(Int dayIndex) =
+  let st = round_down(trip.%start_hb%, 24:00) + dayIndex*24:00;
+	%ill_temp_duty_time_date%(st);
+    
+export %ill_temp_duty_time_date%(Abstime st) =
+  let et = st + 24:00;
+  nmax(0:00, rescheduling.%dt_inf_prev_duty_time%(st) - roster.%duty_time_in_period%(st, et, True, Duty.overtime));
+
+%_trip_is_valid_for_ill_temp_crew% =
+  not %crew_is_leased_trip%
+  and crew.%is_temporary_at_date%(trip.%start_hb%);
+  
+%_ill_duty_time_in_period%(abstime st, abstime et) =
+   %_ill_child_unfit_not_during_duty%(st, et) + %_ill_during_duty%(st, et)
+   + %unfit_child_ill_during_duty_dt%(st, et);
+
+%_ill_child_unfit_not_during_duty%(AbsTime st, AbsTime et) =
+   sum(trip(roster), %trip_inf_prev_duty_time%(st,et))
+  where ((trip.%is_illness% or
+         trip.%is_child_illness_entire_day% or
+         trip.%is_unfit_for_flight% or
+         (%_trip_unfit_salary_dk_temp% and %is_SKD_month_start%))
+         and %_trip_is_valid_for_ill_temp_crew%
+         and not trip.%is_illness_during_duty%
+         and not %unfit_during_duty%
+         and trip.%end_hb% > st
+         and trip.%end_hb% <= et);
+
+%_ill_during_duty%(AbsTime st, AbsTime et) =
+  sum(trip(roster),
+      nmax(rescheduling.%dt_inf_prev_duty_time%(trip.%start_day%)
+           - roster.%duty_time_in_period%(trip.%start_day_hb_utc%, trip.%end_utc%, false, duty.overtime),
+           0:00))
+  where (%_trip_is_valid_for_ill_temp_crew%
+         and trip.%is_illness_during_duty%
+         and trip.%end_hb% >= st
+         and trip.%end_hb% <= et);
+
+%trip_inf_prev_duty_time%(abstime st, abstime et) =
+  let days = %_trip_days_in_period%(st,et),
+      st_date = nmax(st,trip.%start_day%);
+  sum(times(days),
+      rescheduling.%dt_inf_prev_duty_time%(st_date + (%times_index_0%-1)*24:00));
+
+%trip_inf_prev_duty_time_compdays_SKS%(abstime st, abstime et) =
+  let days = %_trip_days_in_period%(st,et),
+      st_date = nmax(st,trip.%start_day%);
+  sum(times(days),
+      nmin(rescheduling.%dt_inf_prev_duty_time%(st_date + (%times_index_0%-1)*24:00),
+           9:00));
+
+%_trip_days_in_period%(abstime st, abstime et) = 
+  overlap(st,et,trip.%start_day%,trip.%end_day% + 24:00)/24:00;
+
+set dk_temp_cc_unfit_code_with_pay = "UF", "UF1", "UF2", "UFO", "UFH", "UFP", "UFE";
+%_unfit_salary_dk_temp% = task.%code% in dk_temp_cc_unfit_code_with_pay;
+%_trip_unfit_salary_dk_temp% = first(leg(trip), %_unfit_salary_dk_temp% );
+
+%unfit_during_duty% =
+  let unfit_start_day = trip.%start_day%;
+  %_trip_is_valid_for_ill_temp_crew% and
+  %is_SKD_month_start% and
+  %_trip_unfit_salary_dk_temp% and
+  (next(trip(roster), (trip.%is_on_duty% and trip.%start_day% = unfit_start_day)) or
+   prev(trip(roster), (trip.%is_on_duty% and trip.%end_day% = unfit_start_day)) );
+
+%child_ill_during_duty% =
+  %_trip_is_valid_for_ill_temp_crew%
+  and %is_SKD_month_start%
+  and trip.%is_child_illness_during_duty%;
+
+%prev_vs_current_duty% = rescheduling.%dt_inf_prev_duty_time%(trip.%start_day%)
+           - roster.%duty_time_in_period%(trip.%start_day_hb_utc%, (trip.%start_day_hb_utc%+24:00) , false, duty.overtime);
+
+%unfit_child_ill_during_duty_dt%(AbsTime st, AbsTime et) =
+   sum(trip(roster), %prev_vs_current_duty%)
+   where ((%unfit_during_duty% or %child_ill_during_duty%) and trip.%end_hb% >= st and trip.%end_hb% <= et);
+
+/* SKCMS-765 */
+%trip_is_initial_course% =
+%_is_initial_course_at_date%(trip.%is_course%,trip.%start_utc%);
+
+%_is_initial_course_at_date%(Bool is_course,Abstime start) =
+   default(    is_course
+           and ((recency.%last_flown%(start) = start and
+                crew.%has_ac_qln%(start,"FF")) or
+                (recency.%last_flown%(start) = 01JAN1986)),
+          false);
+
+%duty_is_initial_course% =
+%_is_initial_course_at_date%(duty.%is_course%,duty.%start_utc%);
+
+  
+/**********************************************************/
+/* 15) Temporary crew hours in month SKN (NKF SNK).       */
+/**********************************************************/
+
+/* SKCMS-754 and SKCMS-1083 */
+export %temporary_crew_hours_in_salary_month_NKF_SNK_CC% =
+          %_temporary_crew_hours_in_salary_month_NKF_SNK_CC% +
+          %_temporary_crew_rest_period_long_salary_hrs_salary_month_NKF_SNK_CC%;
+
+%_temporary_crew_hours_in_salary_month_NKF_SNK_CC% =
+  if (%is_NKF_CC_temp% or %is_SNK_CC_temp%) then
+     sum(duty(roster), %temp_crew_hours_per_duty_period_NKF_SNK_CC% )
+     where(duty_period.%end_hb% >= %month_start% and duty_period.%end_hb% < %month_end%)
+  else
+     0:00;
+
+%_lower_limit_hours_per_DP_NKF_SNK_CC_temp_crew% = 6:00;
+export %temp_crew_hours_per_duty_period_NKF_SNK_CC% =
+       if (%is_NKF_CC_temp% or %is_SNK_CC_temp%)
+          and %crew_is_temporary_not_full_duty%
+          and duty.%is_on_duty%
+          and not %duty_is_initial_course%  /* SKCMS-765 */
+          and duty_period.%is_last_duty_in_duty_period%
+       then
+          nmax(%_dp_salary_hrs_NKF_SNK_CC_temp%, %_lower_limit_hours_per_DP_NKF_SNK_CC_temp_crew%)
+       else
+          0:00;
+
+export %temp_crew_hours_per_duty_period_NKF_SNK_CC_TE%(AbsTime date) =
+       if (%is_NKF_CC_temp_TE%(date) or %is_SNK_CC_temp_TE%(date))
+          and %crew_is_temporary_not_full_duty%
+          and duty.%is_on_duty%
+          and not %duty_is_initial_course%  /* SKCMS-765 */
+          and duty_period.%is_last_duty_in_duty_period%
+       then
+          nmax(%_dp_salary_hrs_NKF_SNK_CC_temp%, %_lower_limit_hours_per_DP_NKF_SNK_CC_temp_crew%)
+       else
+          0:00;
+/*********** SBY SKCMS-1083 ************/
+
+/*********** HOME STANDBY with callout SKCMS-1083 ************/
+%_is_home_standby_with_callout% = duty_period.%has_standby_callout% and %_duty_period_has_home_standby%;
+
+export %_duty_period_has_home_standby% =
+  if duty_period.%is_first_duty_in_duty_period% then
+    first(leg(duty), leg.%is_standby_at_home%)
+  else
+    prev(duty(chain), first(leg(duty), leg.%is_standby_at_home%));
+
+%_standby_reduction_callout_const% = 4;
+%_sby_salary_hrs_callout% =
+   if %_is_home_standby_with_callout% then
+     round_up(duty_period.%standby_callout_utc% - duty_period.%start_utc%, 1:00)/%_standby_reduction_callout_const%
+   else void_reltime;
+
+%_active_duty_time_callout% =
+   if %_is_home_standby_with_callout% then
+     duty_period.%end_utc% - %_duty_period_ci_start_utc%
+   else
+     void_reltime;
+
+%_duty_period_ci_start_utc% =
+  if duty_period.%is_first_duty_in_duty_period% then
+    first(leg(duty), leg.%ci_start_utc%) where (leg.%has_check_in%)
+  else
+    prev(duty(chain), first(leg(duty), leg.%ci_start_utc%) where (leg.%has_check_in%));
+
+%_duty_salary_hrs_no_temp_cc_callout% =
+   if %_is_home_standby_with_callout% then
+      nmax(%_sby_salary_hrs_callout% + %_active_duty_time_callout%, %_lower_limit_hours_per_DP_NKF_SNK_CC_temp_crew%)
+   else void_reltime;
+
+
+/*********** Short night SKCMS-1083 ************/
+%_duty_time_acclim_period% =
+  if duty_period.%is_last_duty_in_duty_period% and duty_period.%is_split% then
+     nmax(duty_period.%split_duty_break_end_acclim% - duty_period.%split_duty_break_start_acclim%, 0:00)
+  else 0:00;
+
+%_split_duty_rest_salary_reduction_cont% = 2;
+%_dp_salary_hrs_NKF_SNK_CC_temp% =
+  %_duty_time_corrected% - %_duty_time_acclim_period%/%_split_duty_rest_salary_reduction_cont%;
+
+%_duty_time_corrected% =
+  if %_is_home_standby_with_callout% then
+     %_duty_salary_hrs_no_temp_cc_callout%
+  else if duty.%is_standby_at_home% then
+     %_lower_limit_hours_per_DP_NKF_SNK_CC_temp_crew%
+  else
+     duty_period.%time%;
+
+/********* long rest period at outstation SKCMS-1083 **********/
+%_arrives_at_outstation% = last(leg(duty), (not leg.%arrives_at_homebase%));
+%_outstation_co_utc% = last(leg(duty), leg.%co_end_utc%) where (not leg.%arrives_at_homebase%);
+%_outstation_ci_utc% =
+   if %_arrives_at_outstation% then
+      next(duty(trip), duty.%start_utc%)
+   else
+      void_abstime;
+%_time_off_at_outstation% =
+      if %_arrives_at_outstation% then
+         %_outstation_ci_utc% - %_outstation_co_utc%
+      else
+         void_reltime;
+%_is_outstation_stay_long% = %_time_off_at_outstation% > 24:00;
+%_time_without_salary_at_outstation% = 24:00;
+%_nr_of_started_24hr_periods_except_first_one_at_outstation% =
+  if %_is_outstation_stay_long% then
+     round_up(%_time_off_at_outstation% - %_time_without_salary_at_outstation%, 24:00)/24:00
+  else
+     void_int;
+
+%_out_station_long_rest_period_salary_hrs% =
+  %_nr_of_started_24hr_periods_except_first_one_at_outstation% * %_lower_limit_hours_per_DP_NKF_SNK_CC_temp_crew%;
+
+%_temporary_crew_rest_period_long_salary_hrs_salary_month_NKF_SNK_CC% =
+  if (%is_NKF_CC_temp% or %is_SNK_CC_temp%) then
+     sum(duty(roster), %_out_station_long_rest_period_salary_hrs%)
+     where(%_arrives_at_outstation% and duty_period.%end_hb% >= %month_start% and duty_period.%end_hb% < %month_end%)
+  else
+     0:00;
+
+/* SKCMS-754 and SKCMS-1083 end */
+
+%temporary_crew_hours_NO% =
+  if %is_SKN_month_start% and %cabin_crew% then
+    sum(trip(roster), 
+        sum(duty(trip), 
+        %temp_called_to_on_duty_after_inf_off_duty_hours_in_month%))
+    where(%_trip_in_month% 
+          and %crew_is_temporary_not_full_trip% 
+          and %trip_called_to_on_duty_after_inf_off_duty%)
+  else
+    void_reltime;
+
+%duty_called_to_on_duty_after_inf_off_duty% =
+    rescheduling.%duty_inf_any_flag%(rescheduling.%flag_freeday2prod%);
+
+%temp_called_to_on_duty_after_inf_off_duty_hours_in_month% =
+ let st = nmax(salary.%salary_month_start%, %_duty_start_day%),
+     et = nmin(salary.%salary_month_end%-24:00, %_duty_end_day%+24:00);
+    
+ if 
+    %trip_called_to_on_duty_after_inf_off_duty%
+    and trip.%is_on_duty%
+    and not %trip_is_initial_course% /* SKCMS-765 */
+    then
+         nmax( oma16.%duty_time_in_interval_indust%( st, et),
+         6:00 * %_duty_days_in_month%)
+    else 0:00;
+
+%trip_called_to_on_duty_after_inf_off_duty% = 
+    any(duty(trip), %duty_called_to_on_duty_after_inf_off_duty%
+    or duty.%is_privately_traded%);
+
+
+%trip_days_in_month_was_freeday% =
+    if %trip_called_to_on_duty_after_inf_off_duty%
+       and trip.%is_on_duty% then
+        %_trip_days_in_month%
+    else 0;
+
+export %is_QA_CC_temp% = %is_QA_CC% and crew.%is_temporary_at_date%(%month_start%);
+export %is_NKF_CC_temp% = %is_NKF_CC% and crew.%is_temporary_at_date%(%month_start%) and crew.%part_time_factor_at_date%(%month_start%) < 100;
+export %is_SNK_CC_temp% = %is_SNK_CC% and crew.%is_temporary_at_date%(%month_start%) and crew.%part_time_factor_at_date%(%month_start%) < 100;
+
+export %is_NKF_CC_temp_TE%(Abstime date) = 
+    %is_NKF_CC% and crew.%is_temporary_at_date%(date) and 
+    crew.%part_time_factor_at_date%(date) < 100;
+
+export %is_SNK_CC_temp_TE%(Abstime date) = 
+    %is_SNK_CC% and crew.%is_temporary_at_date%(date) and 
+    crew.%part_time_factor_at_date%(date) < 100;
+
+export %sum_QA_CC_temp_days% =
+    %sum_QA_CC_temp_days_to_from_date%(%month_start%, %month_end%);
+
+
+%sum_QA_CC_temp_days_to_from_date%(Abstime fromdate, Abstime todate) =
+    if not %is_QA_CC_temp% then
+        0
+    else
+        default(
+            sum(duty(roster), %days_before_midnight%)
+            where(   duty.%is_on_duty% 
+                     and duty.%start_day% >= fromdate 
+                     and duty.%start_day% <todate
+                     and not %duty_is_initial_course%) /* SKCMS-765 */
+            , 0);
+
+
+
+
+/* similar to trip.%days%, but uses day before in case last leg og trip crosses midnight*/
+%days_before_midnight% = (%end_day_before_midnight% - duty.%start_day% + 24:00) / 24:00;
+
+/* gets the end-date of the last leg before midnight */
+%end_day_before_midnight% =
+    default(
+        last(leg(duty), leg.%end_date%)
+        where(leg.%start_date% = leg.%end_date%)
+        , duty.%end_day%);
+
+
+
+export %temp_duty_day_component% = 
+  if %is_QA_CC_temp%
+     and %_trip_in_month% 
+     and trip.%is_on_duty% 
+     and %crew_is_temporary_not_full_trip% 
+     and not trip.%is_course%
+     and not %trip_called_to_on_duty_after_inf_off_duty%    
+  then
+    %_temp_nr_day_in_duty%
+  else
+    void_int;
+
+%_temp_nr_day_in_duty% =
+  let st = nmax(salary.%salary_month_start%, %_duty_start_day%),
+      et = nmin(salary.%salary_month_end%-24:00, %_duty_end_day%);
+  nmax(0, (et-st) / 24:00 + 1);
+
+%_trip_days_in_month% =
+	let st = nmax(salary.%salary_month_start%, %_trip_start_day%),
+			et = nmin(salary.%salary_month_end%-24:00, %_trip_end_day%);
+	nmax(0, (et - st) / 24:00 + 1);    
+
+%_duty_days_in_month% =
+	let st = nmax(salary.%salary_month_start%, %_duty_start_day%),
+			et = nmin(salary.%salary_month_end%-24:00, %_duty_end_day%);
+	nmax(0, (et - st) / 24:00 + 1);      
+    
+%_trip_in_month% =  %_trip_days_in_month% > 0;
+/* Nov08, Vazquez_H: as spoken with Rita Madssen, SKN, temp days
+   are considered until 01:00 in the morning */
+%_trip_start_day% =
+  if all(leg(trip), leg.%is_pact%) then
+    round_down(trip.%start_lt%, 24:00)
+  else
+    round_down(trip.%start_lt% - 1:00, 24:00);
+%_trip_end_day% =
+  if all(leg(trip), leg.%is_pact%) then
+    round_down(trip.%end_lt% - 0:01, 24:00)
+  else
+    round_down(trip.%end_lt% - 1:01, 24:00);
+%_duty_start_day% =
+  if all(leg(trip), leg.%is_pact%) then
+    round_down(duty.%start_lt%, 24:00)
+  else
+    round_down(duty.%start_lt% - 1:00, 24:00);
+%_duty_end_day% =
+  if all(leg(trip), leg.%is_pact%) then
+    round_down(duty.%end_lt% - 0:01, 24:00)
+  else
+    round_down(duty.%end_lt% - 1:01, 24:00);
+
+/**********************************************************/
+/* 16) Overtime for maximum duty time in 7 calendar days  */
+/**********************************************************/
+export %overtime_7_calendar_days_ot% =
+  if (duty.%is_bought% or duty.%is_privately_traded%) and %date_in_period%(duty.%end_utc%) then
+    %ptd_duty_overtime%(%_ot_part_7_calendar_days%)
+  else if %4exng_cc_ot_valid% and %duty_in_period% then
+    round_up(nmax(0:00, %7_days_start_day_duty_time% - %limit_7_calendar_days%), 1:00)
+  else if %4exng_fc_ot_valid% and %duty_in_period% then
+    round_up(nmax(0:00, %7_days_start_day_duty_time% - %limit_7_calendar_days%), 0:30)
+  else
+    void_reltime;   
+
+%limit_7_calendar_days% = 47:30;
+
+export %overtime_7_calendar_days_start% = %overtime_7_calendar_days_end% - 7*24:00+00:01;
+export %overtime_7_calendar_days_end% = if duty.%is_privately_traded% then %ptd_duty_end%(%_ot_part_7_calendar_days%) else round_up(duty.%end_utc%, 24:00)- duty.%homebase_tz_corrector%;
+export %overtime_7_calendar_days_duty% =
+  if duty.%is_bought% or duty.%is_privately_traded% then
+    %ptd_duty_time%(%_ot_part_7_calendar_days%)
+  else
+    if %overtime_7_calendar_days_ot% > 0:00 then %7_days_start_day_duty_time%
+    else void_reltime;
+
+export %7_days_start_day_duty_time% =
+  oma16.%duty_time_in_interval_indust%(
+                                       %overtime_7_calendar_days_start%,
+                                       %overtime_7_calendar_days_end%+00:01) -
+  duty_time.%passive_plus_reduction%(%overtime_7_calendar_days_start%,
+                                     %overtime_7_calendar_days_end%);
+
+            
+
+export %overtime_7_calendar_days_ot_45_50_svs% = 
+  if (duty.%is_bought% or duty.%is_privately_traded%) and %date_in_period%(duty.%end_utc%) then
+    void_reltime
+  else if crew.%planning_group_at_date%(duty.%start_utc%) = "SVS" and %7_days_start_day_duty_time% > %limit_7_calendar_days_SVS% and %duty_in_period% then
+      if %overtime% <= %limit_ot_svs% then 
+        %overtime%
+      else  %limit_ot_svs%
+  else
+    void_reltime; 
+
+export %overtime_7_calendar_days_ot_50_svs% = 
+  if (duty.%is_bought% or duty.%is_privately_traded%) and %date_in_period%(duty.%end_utc%) then
+    void_reltime
+  else if crew.%planning_group_at_date%(duty.%start_utc%) = "SVS" and %7_days_start_day_duty_time% > %limit_7_calendar_days_50_SVS% and %duty_in_period% then
+      nmax(0:00, %7_days_start_day_duty_time% - %limit_7_calendar_days_50_SVS%)
+  else
+    void_reltime; 
+
+
+%limit_7_calendar_days_SVS% = 45:00;
+%limit_7_calendar_days_50_SVS% = 50:00;
+%limit_ot_svs% =  5:00 ;
+%overtime% = nmax(0:00, %7_days_start_day_duty_time% - %limit_7_calendar_days_SVS%);
+       
+
+/*******************************************************
+
+             Help variables
+             
+*******************************************************/
+
+/*  Salary month start and month end */
+%month_start% = salary.%salary_month_start%;
+%month_end% = salary.%salary_month_end%;
+%salary_month_is_even% = fundamental.%even_month_by_month_start%(%month_start%);
+export %4exng_cc_ot_valid% = parameters.%4exng_cc_ot_valid%(%month_start%);
+%4exng_cc_tempcrew_valid% = parameters.%4exng_cc_tempcrew_valid%(%month_start%);
+%4exng_cc_ot_allowances_valid% = parameters.%4exng_cc_ot_allowances_valid%(%month_start%);
+export %4exng_fc_ot_valid% = parameters.%4exng_fc_ot_valid%(%month_start%);
+
+/** Definition of duty valid for overtime (all regions) **/
+%duty_is_valid_overtime% =
+  duty.%is_on_duty% and not duty.%has_no_duty_time_contribution%
+  and not %crew_is_leased_duty% 
+  and default(not duty.%is_passive_transfer_act%, true)
+  and default(not (duty.%is_meeting% and not duty.%has_active_flight%), true)
+  and default(not salary_loss_of_rest.%is_loss_of_rest_duty_pass%, true)
+  and default(not training.%duty_is_valid_school_activity%, true)
+  and (%is_SKS_month_start% or not %duty_is_mixed_bought%);
+
+/* duty is bought and next duty is not bought, or viceversa */
+%duty_is_mixed_bought% = salary_loss_of_rest.%duty_is_mixed_bought%;
+
+/* Crew is leased at scheduled start of the activity */
+export %crew_is_leased_leg% = crew.%is_leased_without_overtime%(%leg_scheduled_start_hb%);
+%crew_is_leased_duty% = crew.%is_leased_without_overtime%(duty.%start_lt%);
+%crew_is_leased_trip% = crew.%is_leased_without_overtime%(trip.%start_lt%);
+
+/* Crew is temporary */
+export %crew_is_temporary% = salary_loss_of_rest.%crew_is_temporary%;
+%temp_crew_start% = salary_loss_of_rest.%temp_crew_start%;
+%temp_crew_end% = salary_loss_of_rest.%temp_crew_end%;
+
+%temp_crew_start_day% = round_down(%temp_crew_start%,24:00);
+%temp_crew_end_day% = round_up(%temp_crew_end%,24:00)-0:01;
+%unaltered_temp_crew_end_day% = round_up(%temp_crew_end%,24:00);
+
+/* crew is full time (100%) / part time*/
+export %crew_is_full_time% = salary_loss_of_rest.%crew_is_full_time%;
+    
+/* crew is temporary and not full time (SKN) */
+%crew_is_temporary_not_full_trip% =
+  crew.%is_temporary_trip_start%
+  and crew.%part_time_factor_trip_start% < 100;
+
+%crew_is_temporary_not_full_duty% =
+  crew.%is_temporary_at_date%(duty.%start_hb%)
+  and crew.%part_time_factor_duty_start% < 100;
+
+
+/* this is used in overtime report temporary crew, for checking two months */
+export %crew_is_temporary_two_months% =
+  (crew.%is_temporary_at_date%(add_months(%month_start%,-1))
+   or crew.%is_temporary_at_date%(%month_start%)
+   or crew.%is_temporary_at_date%(%month_end%))
+  and not (%is_SKN_month_start% and not any(wop(roster), crew.%part_time_factor_wop_start% < 100)
+                            where (%wop_in_2_months_period%));
+
+/* crew is convertible */
+export %crew_is_convertible% = salary.%crew_is_convertible%(%month_start%);
+
+/* crew is short haul / long haul*/
+export %crew_is_short_haul% = crew.%is_short_haul%(%month_start%);
+export %crew_is_long_haul% = crew.%is_long_haul%(%month_start%);
+
+/* duty is short haul / long haul SKS */
+%duty_is_long_haul_SKS% = 
+  all(leg(duty), leg.%is_charter% 
+                 or leg.%block_time_scheduled% > 4:00
+                 or not (default(service_type, "") = "J"))
+  where (not leg.%is_deadhead%)
+  or duty.%is_long_haul%;
+
+/* Crew changing from SH to LH or viceversa in month */
+%sh_change_date% =
+  let st = %month_start%, et = %month_end%,
+      month_days = (et - %month_start%) / 24:00;
+  default(first(times(month_days), st + (%times_index_0% - 1) * 24:00)
+          where (crew.%is_long_haul%(st + (%times_index_0% - 1) * 24:00)), et);
+
+%lh_change_date% =
+  let st = %month_start%, et = %month_end%,
+      month_days = (et - %month_start%) / 24:00;
+  default(first(times(month_days), st + (%times_index_0% - 1) * 24:00)
+          where (not crew.%is_long_haul%(st + (%times_index_0% - 1)* 24:00)), et);
+
+/* Crew has fixed group contract in month */
+%is_fg_in_month% =
+  let st = %month_start%, et = %month_end%,
+      month_days = (et-st)/24:00;
+  default(first(times(month_days), true)
+          where(crew.%in_fixed_group%(st + (%times_index_0% - 1)*24:00)), false);
+
+/* Crew salary region
+**
+** NB! These definitions must not be used when checking legality rules/limits!
+** They use salary definitions based on crew's homebase, but crew may be
+** stationed at other bases, in which case they are to be checked with that
+** base's rules, not their homebase rules.
+** Therefore, all references to %is_skd%/%is_skn%/%is_sks% have been modified to
+** use %is_SKD_month_start%/%is_SKN_month_start%/%is_SKS_month_start%.
+** Region needs to be evaluated at the start of the month of the current trip. 
+** Otherwise crew changes might not be registered. 
+
+*/
+
+export %is_SKD% = salary.%is_SKD%;
+export %is_SKN% = salary.%is_SKN%;
+export %is_SKS% = salary.%is_SKS%;
+export %is_QA%  = salary.%is_QA%;
+export %is_QA_CC% = salary.%is_QA_CC%;
+export %is_QA_FD% = salary.%is_QA_FD%;
+export %is_QA_FD_or_CJ% = %is_QA_FD% or %is_CJ%;
+export %is_NKF_CC% = salary.%is_NKF_CC%;
+export %is_SNK_CC% = salary.%is_SNK_CC%;
+/*SKCMS-2807 */
+export %is_SVS%  = salary.%is_SVS%;
+export %is_SVS_CC% = salary.%is_SVS_CC%;
+export %is_SVS_FD% = salary.%is_SVS_FD%;
+
+export %is_CJ% = crew.%has_ac_qln%(%month_start%, "CJ");
+export %is_FC% = crew.%titlerank_at_date%(%month_start%) = "FC";
+export %is_FP% = crew.%titlerank_at_date%(%month_start%) = "FP";
+
+export %region% =
+ if %is_SKD% or %is_QA% then "SKD"
+ else if %is_SKN% then "SKN"
+ else if %is_SKS% then "SKS"
+ else "SKI";
+
+/* salary periods */
+export %leg_in_period% = 
+  salary_loss_of_rest.%leg_in_period%;
+
+export %duty_in_period% = salary.%duty_in_period%;
+
+export %trip_in_period% = salary.%trip_in_period%;
+
+export %wop_in_period% = salary.%wop_in_period%;
+
+export %wop_in_period_sh% =
+  %wop_in_period% and crew.%is_short_haul%(wop.%start_utc%);
+  
+%wop_in_2_months_period% =
+  add_months(%month_start%, -1) <= wop.%end_utc% and wop.%end_utc% < %month_end%;
+  
+export %date_in_period%(Abstime date) =
+  %month_start% <= date and date < %month_end%;
+
+/* rewrite of some basic values */
+%leg_scheduled_start_hb% = leg.%activity_scheduled_start_time_hb%;
+%scheduled_trip_start_hb% =
+  first(leg(trip), leg.%duty_start_hb%);
+%scheduled_trip_end_hb% =
+  last(leg(trip), leg.%co_end_scheduled_hb%);
+
+%scheduled_duty_end_day_hb% =
+  round_down(last(leg(duty), leg.%co_end_scheduled_hb%), 24:00);
+%actual_duty_end_day_hb% =
+  round_down(last(leg(duty), leg.%co_end_hb%), 24:00);
+ 
+/* calendar month in salary period */
+%duty_time_calendar_month% =
+  let night_upg = not (%is_SKS_month_start% or
+                       (%cabin_crew% and %is_SKN_month_start%)) and
+                  fundamental.%night_upg%;
+  
+  if %flight_crew% then
+      accumulators.%actual_duty_time_2_months_fc%(%month_start%, %sh_change_date%)
+  else
+      roster.%duty_time_in_period%(%month_start%, %month_end%, night_upg, duty.overtime);
+    
+%duty_time_two_calendar_months% =
+  let prev_month_start = add_months(%month_start%, -1);
+  
+  if %flight_crew% then
+    accumulators.%actual_duty_time_2_months_fc%(prev_month_start, %sh_change_date%)
+  else
+    if %is_SKD_month_start% then
+      duty_time.%duty_time_cc_in_period%(prev_month_start,%month_end%)
+    else
+      void_reltime;
+ 
+%duty_time_previous_calendar_month% =
+  let prev_month_start = add_months(%month_start%, -1);
+  
+  if %flight_crew% then
+      if %salary_month_is_even% then
+        accumulators.%actual_duty_time_2_months_fc%(prev_month_start, %month_start%)
+      else
+        void_reltime
+  else 
+    void_reltime;
+
+/* NB! K11 rule applies to VG crew on loan to SKS (station not "STO") */ 
+%k11_fc_max_duty_rules_apply% =
+  parameters.%k11_fc_sp10_7_valid%(%month_start%) and
+  (%is_SKD_month_start% or %is_SKN_month_start% or
+   (%is_SKS_month_start% and
+    (crew.%in_fixed_group%(%month_start%) or
+     crew.%homestation% <> "STO")));
+ 
+%k11_avg_duty% = parameter 9:30;
+
+/**************************************************************/
+/*            Daily values from previous month                */
+/*       (used to remember what was paid previously)          */
+/**************************************************************/
+
+%daily_overtime_before_month%(Abstime date) =
+  if date < %month_start% then  
+    default(sum(duty(roster), %max_overtime_daily%)
+            where (duty.%end_utc% >= date 
+                   and duty.%end_utc% < %month_start%
+                   and %duty_is_valid_overtime%),
+            0:00)
+  else 0:00;
+
+%max_overtime_daily% =
+  nmax(0:00,
+       default(%overtime_1x24_fwd_prev_month%, 0:00),
+       default(%overtime_1x24_bwd_prev_month%, 0:00),
+       default(%overtime_dutypass_prev_month%, 0:00),
+       default(%overtime_before_freeday_prev_month%, 0:00),
+       default(%overtime_before_free_weekend_prev_month%, 0:00));
+
+/* copy of all variables, but checking if it belongs to previous month */
+%overtime_1x24_fwd_prev_month% =
+  if %_is_valid_overtime_1x24% and (duty.%start_utc%) < %month_start%
+  then %_overtime_1x24_fwd_ot%
+  else 0:00;
+%overtime_1x24_bwd_prev_month% =
+  if %_is_valid_overtime_1x24% then %_overtime_1x24_bwd_ot%
+  else 0:00;
+%overtime_dutypass_prev_month% =
+  if %_is_valid_overtime_dutypass% then %_overtime_dutypass_ot%
+  else 0:00;
+%overtime_before_freeday_prev_month% =
+  if %_is_valid_overtime_before_freeday% then %_overtime_before_freeday_ot%
+  else 0:00;
+%overtime_before_free_weekend_prev_month% =
+  if %_is_valid_overtime_before_free_weekend_ot% then %_overtime_before_free_weekend_ot%
+  else 0:00;
+
+
+
+
+
+
+
+
+%OT_CJ% =
+    /* Overtime Cimber flight captain and flight pilot (FC and FP).
+      Number of OT hours commenced in [0:01..> */
+    let
+      followed_by_freeday = duty.%is_followed_by_freeday%,
+      CO_after_midnight = duty.%check_out_after_midnight%,
+      CO = time_of_day(duty.%end_hb%);
+      if %is_CJ% and followed_by_freeday and CO_after_midnight then
+        round_up(CO, 1:00) / 1:00
+      else
+        0;
+
+
+%OT_CC_QA% =
+    /* Overtime Cimber cabin crew (CC).
+      Number of OT hours commenced in [1:01..3:00] (ie, max 2)
+      But if checkout (CO) is afther 3:00, then 0! */
+    let
+      followed_by_freeday = duty.%is_followed_by_freeday%,
+      CO_after_midnight = duty.%check_out_after_midnight%,
+      CO = time_of_day(duty.%end_hb%),
+      CO_after_one = CO > 01:00,
+      CO_within_three = CO <= 03:00;
+      if %is_QA_CC% and followed_by_freeday and CO_after_midnight and CO_after_one and CO_within_three then
+        round_up((CO - 01:00), 1:00) / 1:00
+      else
+        0;
+
+%OT_CJ_valid% =
+    parameters.%k15qa_feb16_valid%(%month_start%);
+
+export %apply_OT_QA% =
+  /* Indicates whether the following OT calculations should be applied or not */
+    if %is_QA_CC% then
+        true
+    else
+        %is_CJ% and %OT_CJ_valid%;
+
+
+export %apply_OT_FC_CJ% =
+        %is_CJ% and %is_FC% and %OT_CJ_valid%;
+
+export %apply_OT_FP_CJ% =
+        %is_CJ% and %is_FP% and %OT_CJ_valid%;
+
+export %QA_OT% =
+    if %apply_OT_QA% then
+        if %is_QA_CC% then
+            %OT_CC_QA%
+        else
+            %OT_CJ%
+    else
+        0;
+
+export %QA_start% = duty.%start_UTC%;
+export %QA_end% = duty.%end_UTC%;
+export %QA_duty% = %QA_end% - %QA_start%;
+
+
+export %sum_QA_OT% =
+   %sum_QA_OT_from_to_date%(%month_start%, %month_end%);
+
+%sum_QA_OT_from_to_date%(Abstime fromdate, Abstime todate) =
+    default(
+        sum(duty(roster), %QA_OT%)
+        where (duty.%start_UTC% >= fromdate and duty.%start_UTC% <= todate)
+        , 0);
+
+export %QA_CC_temp_days% =
+    if duty.%is_on_duty% and not %duty_is_initial_course% then
+        %days_before_midnight%     
+    else 0;
+
+/*******************************
+Overtime estimate for flight-deck - all agreement groups except CJ (including SK)
+Ref SKCMS-691
+*******************************/
+
+
+export %OT_FD_qualified_crew_at_date%(Abstime start) =
+    parameters.%f3_overtime_comp_valid%(start) and %OT_FD_qualified_crew%;
+
+export %OT_FD_qualified_crew% =
+    fundamental.%flight_crew% and not %is_CJ%;
+
+
+%duty_ends_in_planned_rest_not_UF_ILL% =
+    let
+        followed_by_planned_rest = duty.%is_followed_by_planned_rest_not_UF_ILL%,
+        next_duty_start_day = default(next(duty(chain), duty.%start_day%), 31Dec2035),
+        duty_end_time_after_freeday_start = duty.%end_HB% > next_duty_start_day;
+
+    followed_by_planned_rest and duty_end_time_after_freeday_start;
+
+
+export %OT_FD_time% =
+    /* Returns Reltime after midnight, if is followed by freeday.*/
+    let
+         is_private_passive = last(leg(duty), leg.%is_private_passive%),
+         is_qualified = %OT_FD_qualified_crew_at_date%(duty.%start_hb%),
+         ends_in_planned_rest = %duty_ends_in_planned_rest_not_UF_ILL%,
+         CO_after_midnight = duty.%check_out_after_midnight%,
+         overtime = time_of_day(duty.%end_HB%);
+
+    if not is_private_passive and is_qualified and CO_after_midnight and ends_in_planned_rest and not duty.%is_freeday% then
+        overtime
+    else
+        0:00;
+
+
+export %OT_FD_units% =
+    /* Returns value of %OT_FD% divided into "units" - i.e. started half hours - max 4. */
+    let
+        OT = %OT_FD_time%,
+        units = round_up(OT, 0:30) / 0:30;
+    if units > 4 then
+        4
+    else
+        units;
+
+export %OT_FD_F3_source_str% =
+    /* Don't change this. It used in f3_overtime_replacement.py and again as search */
+    "F3 comp. day";
+
+export %OT_FD_F3_balance% =
+    let day = duty.%end_day%;
+    sum(times(50),
+        compdays.%leave_account_entry_amount%("F3", day, day, %times_index_0%))
+        where (compdays.%leave_account_entry_source%("F3", day, day, %times_index_0%) = %OT_FD_F3_source_str%)
+        while (not void (compdays.%leave_account_entry_amount%("F3", day, day, %times_index_0%)));
+
+export %OT_FD_netto% =
+    let units = %OT_FD_units%,
+        balance = %OT_FD_F3_balance%;
+    if balance > 0 then
+            0
+    else
+        units;
+
+export %sum_OT_FD_units% =
+    %sum_OT_FD_units_to_from_date%(%month_start%, %month_end%);
+
+%sum_OT_FD_units_to_from_date%(Abstime fromdate, Abstime todate) =
+        default(
+            sum(duty(roster), %OT_FD_units%)
+            where(duty.%is_on_duty% and duty.%start_day% >= fromdate and duty.%start_day% <= todate)
+            , 0);
+
+export %sum_OT_FD_netto% =
+    %sum_OT_FD_netto_to_from_date%(%month_start%, %month_end%);
+
+
+%sum_OT_FD_netto_to_from_date%(Abstime fromdate, Abstime todate) =
+        default(
+            sum(duty(roster), %OT_FD_netto%)
+            where(duty.%is_on_duty% and duty.%start_day% >= fromdate and duty.%start_day% <= todate)
+            , 0);
+
+
+
+
+
+export %bought_FD_F15_source_str% =
+    /* Don't change this. It used in fxx_boughtday_replacement.py and again as search */
+    "F15 comp. day";
+
+export %bought_FD_F16_source_str% =
+    /* Don't change this. It used in fxx_boughtday_replacement.py and again as search */
+    "F16 comp. day";
+
+
+export %QA_FD_Fxx_balance% =
+    let day = duty.%end_day%;
+    sum(times(50),
+        compdays.%leave_account_entry_amount%("F15", day, day, %times_index_0%))
+        where (compdays.%leave_account_entry_source%("F15", day, day, %times_index_0%) = %bought_FD_F15_source_str%)
+        while (not void (compdays.%leave_account_entry_amount%("F15", day, day, %times_index_0%)))
+    + sum(times(50),
+        compdays.%leave_account_entry_amount%("F16", day, day, %times_index_0%))
+        where (compdays.%leave_account_entry_source%("F16", day, day, %times_index_0%) = %bought_FD_F16_source_str%)
+        while (not void (compdays.%leave_account_entry_amount%("F16", day, day, %times_index_0%)))
+        ;
+
+export %is_bought_day% =
+    duty.%is_bought% and duty_period.%is_first_duty_in_duty_period%;
+
+
+export %bought_comp_day_QA_FD_netto% =
+    let bought_day = if %is_bought_day% then 1 else 0,
+        balance = %QA_FD_Fxx_balance%;
+
+    if balance > 0 then 0 else bought_day;
+
+
+export %sum_bought_comp_days_QA_FD_netto% =
+    %sum_bought_comp_days_QA_FD_netto_from_to_date%(%month_start%, %month_end%);
+
+
+%sum_bought_comp_days_QA_FD_netto_from_to_date%(Abstime fromdate, Abstime todate) =
+        default(
+            sum(duty(roster), %bought_comp_day_QA_FD_netto%)
+            where(duty.%is_on_duty% and duty.%start_day% >= fromdate and duty.%start_day% < todate)
+            , 0);
+
+
+export %sum_bought_comp_days_QA_FD% =
+    %sum_bought_comp_days_QA_FD_from_to_date%(%month_start%, %month_end%);
+
+
+%sum_bought_comp_days_QA_FD_from_to_date%(Abstime fromdate, Abstime todate) =
+        default(
+            count(duty(roster)
+                where(
+                    duty.%is_on_duty% and duty.%start_day% >= fromdate and duty.%start_day% <= todate
+                    and %is_bought_day%))
+            , 0);
+
+
+/* Regulates whether menu-item is "grayed out" or not - used in CustomMenuStates.py */
+export %is_fxx_replace_applicable% =
+    %is_QA_FD_or_CJ% and leg.%is_bought% and parameters.%fxx_boughtday_comp_valid_at_date%(duty.%start_day%);
+
+/* End of file */

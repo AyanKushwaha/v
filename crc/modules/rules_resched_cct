@@ -1,0 +1,238 @@
+/* -*- crc -*-
+ * 
+ *
+ * Purpose:
+ *
+ * Created by:
+ *   Stefan Hansson, 20-Jun-2007
+ *
+ * Major changes:
+ * 2015-08-18 Lars Westerlind: a major cleanup, removal of rules not valid since k4ExNg and K11, in this module and derived
+ */
+
+root module rules_resched_cct
+
+import bought_days;
+import checkinout;
+import crew;
+import fundamental;
+import system_db_parameters;
+import iterators;
+import levels;
+import wop;
+import trip;
+import duty;
+import leg;
+import publish;
+import rest;
+import rescheduling;
+import rule_exceptions;
+import standby;
+import duty_time;
+import rules;
+import parameters;
+import calendar;
+import theme_prod;
+
+/*******************************************************************************
+* NOTIFICATION DEADLINE
+*******************************************************************************/
+
+/*
+** The %crew_notification_deadline_[removed/changed]_roster_utc% functions are
+** used in the save-plan process, when creating automatic notifications
+** (see carmusr.tracking.CrewNotificationFunctions.py).
+**
+** The process includes calling one of these functions for each added, modified
+** or removed leg in a change notification, and using the minimum of the
+** returned values for deadline.
+**
+** 'change_start_utc' is the scheduled start time of a removed activity (leg).
+**
+** Performance is not a big issue, as long as we keep within reasonable limits.
+*/
+  
+/* Calculate deadline for a deleted activity.
+*
+* If a part of a multi-day activity was removed, 'change_start_utc' should
+* indicate the removed part of the activity.
+*/
+export %crew_notification_deadline_removed_roster_utc%(Abstime change_start_utc) =
+  %default_notification_deadline_utc%(change_start_utc);
+  
+/* Calculate deadline for new or modified activity.
+*/
+export %crew_notification_deadline_changed_roster_utc%(Abstime change_start_utc) =
+  nmin(%default_notification_deadline_utc%(change_start_utc),
+       default(last(trip(roster), %trip_notification_deadline_utc%)
+               where(%trip_sched_st_utc% <= change_start_utc),
+               31Dec2099));
+
+/* Debug (useful in e.g. Rave Evaluator) */
+%leg_ndrr% = %crew_notification_deadline_removed_roster_utc%(
+                     leg.%activity_scheduled_start_time_UTC%);
+%leg_ndcr% = %crew_notification_deadline_changed_roster_utc%(
+                     leg.%activity_scheduled_start_time_UTC%);
+
+/* The default deadline is the minimum of:
+*  - Standby callout time if within a callout trip, or 30 minutes before change.
+*  - One minute before check-in, if the change is on a check-in leg.
+*  - End of previous leg in duty pass.
+*    Use 8h connection time to determine if we're in the same original duty.
+*    This is to be sure to catch all cases, and it will probably lead to very
+*    few cases when the deadline is set unnecessarily early.
+*
+* So:
+* - If there has been a duty check-in change, the deadline will be before the
+*   new check-in, so an alert will appear not considering the change's check-in.
+* - If a deleted leg was within a duty (not first), and the leg before now has
+*   a check-out, deadline will be at the end of the new check-out leg.
+*   This ensures that the crew is informed before the duty ends.
+*/
+export %default_notification_deadline_utc%(Abstime change_start_utc) =
+  nmin(
+    default(%crew_leg_standby_callout_time_utc%(change_start_utc),
+            change_start_utc
+            - %_default_deadline_time_before_change%(change_start_utc)),
+    default(min(leg(roster), checkinout.%leg_checkin_utc% - 0:01)
+            where(leg.%activity_scheduled_start_time_utc% = change_start_utc
+                  and %_leg_has_rescheduled_mandatory_checkin%),
+            31Dec2099),
+    default(max(leg(roster), leg.%end_utc%)
+            where(leg.%end_utc% >= change_start_utc - 8:00
+                  and leg.%has_check_out%
+                  and leg.%end_utc% < change_start_utc),
+            31Dec2099));
+
+%_leg_has_rescheduled_mandatory_checkin% =
+  checkinout.%leg_has_mandatory_ci%
+  and checkinout.%leg_checkin_lt%
+      <> rescheduling.%dt_inf_checkin%(checkinout.%leg_checkin_lt%);
+      
+
+/* Normally, the default deadline is 30 minutes before the change, however:
+ * If a changed leg has a mandatory check-in, and the new check-in is exactly
+ * the same as informed AND its start (typically flight duty changed to airport
+ * standby), then the default notification deadline shall be AT the check-in 
+ * (not before). It is considered sufficient if the crew is informed
+ * about the change at check-in.
+ */
+%_default_deadline_time_before_change%(Abstime change_start_utc) =
+  default(
+    if any(leg(roster),
+           checkinout.%leg_has_mandatory_ci%
+           and checkinout.%leg_checkin_utc%
+               = leg.%activity_scheduled_start_time_UTC%
+           and checkinout.%leg_checkin_lt%
+               = rescheduling.%dt_inf_checkin%(checkinout.%leg_checkin_lt%))
+       where(checkinout.%leg_checkin_utc% = change_start_utc)
+    then 0:00
+    else 0:30, 0:30);
+  
+/* If change_start_utc corresponds to a leg in a standby callout trip,
+* then the standby callout time is returned, else void.
+*
+* Note 1: For this function, airport standby callouts are also considered, 
+*         since want the notification deadline to be set in relation to the
+*         airport standby. (In other aspects throughout the rave code, there is
+*         no special treatment of airport sby; they're handled as normal duty.)
+* Note 2: A duty can be both a hime/hotel callout and an airport callout.
+*         In that case, the callout time is taken from the airport callout.
+*         It is assumed that the airport standby is a tail originating from an
+*         earlier normal standby callout, and that the crew already has been
+*         informed about that callout when the airport callout is made.
+*/
+export %crew_leg_standby_callout_time_utc%(Abstime change_start_utc) =
+  last(leg(roster), default(%_leg_airport_callout_time_utc%,
+                            %_leg_homehotel_callout_time_utc%))
+  where(leg.%activity_scheduled_start_time_UTC% = change_start_utc);
+
+%lsct% = %crew_leg_standby_callout_time_utc%(leg.%activity_scheduled_start_time_UTC%);
+
+/* If the duty is a callout from a home or hotel standby,
+* then the end of the standby leg is returned; otherwise void.
+*/
+%_leg_homehotel_callout_time_utc% =
+  if standby.%duty_is_standby_callout%
+     and (rescheduling.%leg_inf_is_homehotel_standby%
+          or rescheduling.%leg_inf_is_homehotel_callout%)
+  then first(leg(duty), if leg.%is_standby_callout%
+                        then leg.%end_utc%
+                        else prev(leg(chain), leg.%end_utc%))
+  else void_abstime;
+
+/* If the duty is a callout from a home or hotel standby,
+* then the end of the standby leg is returned; otherwise void.
+*/
+%_leg_airport_callout_time_utc% =
+  if standby.%duty_is_airport_callout%
+     and (rescheduling.%leg_inf_is_airport_standby%
+          or rescheduling.%leg_inf_is_airport_callout%)
+  then default(last(leg(duty), leg.%end_utc%) where(leg.%is_airport_callout%),
+	             prev(duty(chain), duty.%end_utc%))
+  else void_abstime;
+
+export %crew_informed_activity_maincat%(Abstime change_start_utc) =
+  rescheduling.%pcat_name%(
+    rescheduling.%dt_inf_pcat%(rescheduling.%crew_time_hb%(change_start_utc)));
+  
+%trip_sched_st_utc% =
+  min(leg(trip), leg.%activity_scheduled_start_time_utc%);
+
+/*
+** Rule based deadline, calculated for the trip where the change occured.
+** (Will not be used for changes that only cover removed legs.)
+**
+** Every rescheduling rule that stipulates an inform-at-latest limit must
+** provide its deadline contribution to this value, in case the rule will be
+** violated if the crew is not informed in time.
+*/
+
+%trip_notification_deadline_utc% =
+  default(rescheduling.%crew_time_utc%(%trip_notification_deadline%),31dec2099);
+
+%trip_notification_deadline% =
+   nmin(default(%trip_notification_deadline_common%, 31dec2099),
+        default(%trip_notification_deadline_FC%,     31dec2099),
+        default(%trip_notification_deadline_CC%,     31dec2099));
+
+%trip_notification_deadline_FC% = void_abstime;
+%trip_notification_deadline_CC% = void_abstime;
+%trip_notification_deadline_common% = void_abstime;
+
+/** SKCMS-732 **/
+export %trip_inf_is_standby_block% =
+  rescheduling.%trip_inf_any_flag%(rescheduling.%flag_standby_home%); /* SKCMA-731 */
+
+export %inf_first_trip_in_standby_block% =
+  %trip_inf_is_standby_block% and
+  (is_first(trip(wop)) or
+   prev(trip(wop), not (%trip_inf_is_standby_block% and trip.%no_days_btw_trips_fwd%)));
+
+export %inf_last_duty_in_standby_block% =
+  %trip_inf_is_standby_block% and
+  (is_last(duty(wop)) or
+   next(duty(wop), not (%trip_inf_is_standby_block% and duty.%no_days_btw_duties_bwd%)));
+
+export %inf_last_trip_in_standby_block% = any(duty(trip),%inf_last_duty_in_standby_block%);
+
+export %inf_standby_block_days_trip% =
+   if %inf_first_trip_in_standby_block% and not %inf_last_trip_in_standby_block% then
+      (round_up(next(trip(wop), trip.%end_hb%) where (%inf_last_trip_in_standby_block%), 24:00) - trip.%start_day% )/24:00
+   else if not %inf_first_trip_in_standby_block% and %inf_last_trip_in_standby_block% then
+      (round_up(trip.%end_hb%,24:00) - round_down(prev(trip(wop), trip.%start_hb%) where (%inf_first_trip_in_standby_block%), 24:00) )/24:00
+   else if %inf_first_trip_in_standby_block% and %inf_last_trip_in_standby_block% then 1
+   else if %trip_inf_is_standby_block% and not %inf_first_trip_in_standby_block% and not %inf_last_trip_in_standby_block% then
+      (round_up(next(trip(wop), trip.%end_hb%) where (%inf_last_trip_in_standby_block%), 24:00) - round_down(prev(trip(wop), trip.%start_hb%) where (%inf_first_trip_in_standby_block%), 24:00))/24:00 
+   else void_int;
+
+export %trip_inf_is_standby_line% =
+  rescheduling.%trip_inf_any_flag%(rescheduling.%flag_standby_line%);
+
+export %inf_is_standby_block_length_5_days% =
+   if %inf_standby_block_days_trip% = 5 then true
+   else false;
+
+/*
+** End of file
+*/

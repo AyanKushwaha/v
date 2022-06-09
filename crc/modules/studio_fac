@@ -1,0 +1,491 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   Definitions for the Find Assignable Crew fouctionality used in tracking.
+ *
+ * Sections:
+ *   1. Crew rank test function
+ *   2. Crew qualification test function
+ *   3. Crew region test function
+ *   4. Days off test function
+ *   5. Voluenteer test functionFX
+ *   6. Standby test function
+ *   7. Function for testing if crew starts on station
+ *   8. Function for testing if crew ends at station
+ *   9. Function for sorting found crew
+ *   10. Function for detecting removable legs
+ *   11. Function for detecting if crew is late
+ *   12. Rules that are important to FAC
+ * 
+ * Created by:
+ *   Markus Kollind
+ *
+ * Major changes:
+ *
+ */
+ 
+root module studio_fac
+
+import leg;
+import duty;
+import trip;
+import levels;
+import crew;
+import crew_pos;
+import fundamental;
+import checkinout;
+import annotations;
+import pp;
+import connection;
+import studio_select;
+/*Rules import*/ 
+import rules_indust_ccp;
+import rules_studio_ccp;
+import rules_caa_common;
+import rules_indust_ccr;
+import rules_training_ccr;
+import rules_caa_ccr;
+import rules_qual_ccr;
+import rules_indust_cct;
+import rules_soft_cct;
+import rules_resched_cct;
+import rules_studio_ccr;
+import rules_caa_cct;
+import rules_meal_ccp;
+
+/****************************************************************
+* Section 1: Crew rank test function, making sure all cabin crew
+             is suggested if a cabin position should be covered
+             and all flight deck with a higher rank is suggeste
+             if a flight deck or training position should be covered.
+*****************************************************************/
+%crew_has_allowed_rank%(Abstime t1, String func, Bool allow_below_rank) =
+  let fac_cat = crew_pos.%func2cat%(func),
+      fac_pos = crew_pos.%func2pos%(func),
+      rank = crew.%rank_at_date%(t1);
+  if allow_below_rank then
+    if fac_cat = "C" then
+      crew.%is_cabin%
+    else
+      crew.%is_pilot% and
+      fac_pos >= crew_pos.%func2pos%(rank)
+  else
+    rank = func;
+
+
+/*****************************************************
+* Section 2: Crew qualification test function
+******************************************************/
+%crew_has_ac_qual%(Abstime t1, Abstime t2, String ac_qual) =
+  ac_qual = "" or crew.%has_qln_in_period%("ACQUAL", ac_qual, t1, t2);
+  
+/*****************************************************
+* Section 3: Crew region test function
+******************************************************/
+%crew_has_region%(Abstime t, String region) =
+  region = crew.%region_at_date%(t);
+
+/*****************************************************
+* Section 4: Days off test function
+******************************************************/
+%roster_days_off_candidate%(Abstime t1, Abstime t2) =
+  let t1_d = round_down(t1, 24:00), t2_d = round_up(t2, 24:00);
+  if %roster_volunteer_candidate%(t1,t2,"") then false else
+    any(times(60), %is_day_off%(%_date_ix%(t1_d, %times_index_0%)))
+    while (%_date_ix%(t1_d, %times_index_0%) < t2_d);
+
+%is_day_off%(Abstime t1) =
+  not any(trip(roster), 
+    overlap(trip.%start_UTC%, trip.%end_UTC%, t1, t1+24:00) > 0:00) 
+  where (not trip.%is_freeday% or trip.%is_illness%);
+
+%_date_ix%(Abstime t1, Int ix) = t1+(ix-1)*24:00;
+
+/*******************************************************
+* Section 5: Voluenteer test function
+********************************************************/
+%roster_volunteer_candidate%(Abstime t1, Abstime t2, String s1) =
+  let t1_d = round_down(t1, 24:00), t2_d = round_down(t2, 24:00),
+      stop = round_up(t2, 24:00);
+  any(times(60),
+      annotations.%any_code_active_in_interv%("FX",
+                                              %_date_ix%(t1_d, %times_index_0%),
+                                              %_date_ix%(t2_d, %times_index_0%)))
+  while (%_date_ix%(t1_d, %times_index_0%) < stop);
+
+%trip_voluntary_type% = "";
+
+/****************************************************
+*Section 6: Standby test function
+*****************************************************/
+%roster_standby_candidate%(Abstime t1, Abstime t2) =
+  %roster_standby%(t1, t2);
+
+%roster_standby%(Abstime t1, Abstime t2) =
+  any(duty(roster), duty.%has_standby% or duty.%has_standby_at_airport%)
+   where (duty.%start_utc% < t2 and duty.%end_utc% > t1 and duty.%has_standby%);
+
+%roster_blankday%(Abstime t1, Abstime t2) =
+  any(duty(roster), duty.%is_blank_day%)
+  where (duty.%start_utc% <= t1 and duty.%end_utc% >= t2) or
+  studio_select.%blank_day%(t1, t2);
+
+%roster_blankday_and_informed_bl%(Abstime t1, Abstime t2) =  /* Same logic as in MiniSelect */
+  studio_select.%activity_code%("BL*, J7", t1, t2) or
+  studio_select.%has_informed_blank_day_in_period%(t1, t2);
+
+%allowed_blankday_time%(Abstime t) = 
+  let lim = if crew.%is_pilot% then 24:00 - 18:00 else 24:00 - 15:00;
+  round_down(t, 24:00) - lim >= %now%;
+
+/************************************************************
+* Section 7: Function for testing if crew starts on station
+*************************************************************/
+/*This variable look for crew that is at departure station
+one/two hour(s) before the departure and one/five hour(s) after the scheduled 
+departure, cnx_tol=2:00(1:00) and cnx_tol_fwd=1:00(5:00)*/
+%roster_start_station_candidate%(String stn, Abstime t1, Abstime t2,
+                                 Reltime cnx_tol, Reltime cnx_tol_fwd) =
+  default(any(duty(roster),
+    %duty_valid_cnx_bwd%(stn, t1, cnx_tol, cnx_tol_fwd) 
+     or %duty_valid_cnx_fwd%(stn, t1, cnx_tol_fwd, cnx_tol)
+      or %duty_valid_ci%(stn, t1, cnx_tol, cnx_tol_fwd))
+      where (duty.%is_flight_duty%), false);
+
+%duty_valid_cnx_bwd%(String stn, Abstime t, Reltime cnx_tol, Reltime cnx_tol_fwd) =
+  any(leg(duty), leg.%end_station% = stn)
+  from (last) backwards
+  while (%leg_cnx_end% >= nmax(fundamental.%now%, t - cnx_tol))
+  where (%leg_cnx_start% <= t + cnx_tol_fwd);
+
+%duty_valid_ci%(String stn, Abstime t, Reltime cnx_tol, Reltime cnx_tol_fwd) =
+  duty.%start_station% = stn and
+  %duty_check_in% >= nmax(fundamental.%now%, t - cnx_tol) and
+  %duty_check_in% < t + cnx_tol_fwd;
+
+/* On first duty in trip crew must have checked in. Then it returns check in
+** time otherwise 01jan1986. On an other duty it is assumed that crew is
+** on time (scheduled value is used). */
+%duty_check_in% =
+  if %crew_is_late% then
+    01jan2035
+  else if first(leg(duty), leg.%checked_in%) then
+    checkinout.%cio_ciotime%
+  else duty.%start_utc%;
+
+%leg_cnx_start% = leg.%end_utc%;
+%leg_cnx_end% =
+  if is_last(leg(duty))
+  then duty.%end_utc%
+  else next(leg(duty), leg.%start_utc%);
+
+/***********************
+** GROUND/OFFICE DUTY **
+***********************/
+
+%roster_ground_duty_candidate%(Abstime t1, Abstime t2, String stn) =
+  any(trip(roster),
+    not trip.%is_standby%
+    and trip.%is_ground_duty%
+    and first(duty(trip), duty.%start_station%) = stn)
+  where (
+    overlap(trip.%start_utc%,trip.%end_utc%,
+      t1,
+      t2)>0:00
+    and trip.%start_utc% > fundamental.%now%)
+  and not %crew_is_unavailable%(t1, t2);
+
+%crew_is_unavailable%(Abstime t1, Abstime t2) =
+  any(trip(roster), overlap(trip.%start_utc%, trip.%end_utc%, t1, t2) > 0:00)
+  where (%trip_is_vacation% or first(leg(trip), leg.%is_illness%));
+
+%trip_is_vacation% =
+  trip.%is_vacation%
+  /* For some reason, hack? reserves are considered same as vacation... /ML */
+  and not trip.%is_standby%;
+
+  
+/**************************************
+** APPEND LEGS BEFORE CREW CHECKS IN **
+**************************************/
+
+%roster_ci_earlier%(String stn1, String stn2,
+                    Abstime t1, Abstime t2, Reltime max_duty) =
+  default(
+    stn1 = stn2
+    and any(duty(roster), duty.%start_station% = stn1)
+      from (first where (first(leg(duty), leg.%start_utc%) >= t2
+                    /* Limit the search a bit... */
+                    and duty.%start_utc% <= t2 + max_duty))
+      while (duty.%end_utc% <= t1 + max_duty)
+      where (duty.%is_flight_duty%), false);
+
+/**********************************
+** ARRIVE BEFORE A SPECIFIC TIME **
+**********************************/
+
+%roster_arrive_before%(String stn1, String stn2, Abstime t1, 
+                       Abstime t_max, Reltime cnx_tol) =
+  default(
+    any(leg(roster), leg.%end_station% = stn2 and
+    %leg_has_prev_dep_from_stn%(stn1, t1))
+    from (last where (leg.%co_end_utc% <= t_max)) backwards
+    while (leg.%end_utc% >= t_max - cnx_tol)
+    where (leg.%is_flight_duty%), false);
+
+%leg_has_prev_dep_from_stn%(String stn1, Abstime t1) =
+  any(leg(trip), leg.%start_station% = stn1)
+  from (current) backwards
+  while (leg.%start_utc% >= t1);
+
+/*********************************
+** DEPART AFTER A SPECIFIC TIME **
+*********************************/
+
+%roster_depart_after%(String stn1, String stn2, Abstime t_min, 
+                      Abstime t2, Reltime cnx_tol) =
+  default(  
+    any(leg(roster), leg.%start_station% = stn1 and 
+    %leg_has_next_arr_to_stn%(stn2, t2))
+    from (first where (leg.%start_utc% + leg.%check_in% >= t_min)) forwards
+    while (leg.%start_utc% <= t_min + cnx_tol)
+    where (leg.%is_flight_duty%), false);
+
+%leg_has_next_arr_to_stn%(String stn, Abstime t2) =
+  any(leg(trip), leg.%end_station% = stn)
+  from (current) forwards
+  while (leg.%end_utc% <= t2);
+
+
+/************************************************************
+* Section 8: Function for testing if crew ends at station
+*************************************************************/
+/*This variable look for crew that is at the arrival station
+two hours after the arrival and one hour before the scheduled 
+arrival, cnx_tol=2:00 and cnx_tol_bwd=1:00*/
+%roster_end_station_candidate%(String stn, Abstime t1, Abstime t2,
+                               Reltime cnx_tol, Reltime cnx_tol_bwd) =
+  default(
+    any(duty(roster),
+      %duty_valid_cnx_fwd%(stn, t2, cnx_tol, cnx_tol_bwd)
+      or %duty_valid_cnx_bwd%(stn, t2, cnx_tol, cnx_tol_bwd)
+      or %duty_valid_ci%(stn, t2, cnx_tol, cnx_tol_bwd)) 
+      where (duty.%is_flight_duty%), false);
+
+%duty_valid_cnx_fwd%(String stn, Abstime t, Reltime cnx_tol, Reltime cnx_tol_bwd) =
+  any(leg(duty), leg.%end_station% = stn)
+  from (first) forwards
+  while (%leg_cnx_start% >= nmax(fundamental.%now%, t - cnx_tol))
+  where (%leg_cnx_end% <= t + cnx_tol_bwd);
+  
+/************************************************************
+* Section 9: Functions for sorting found crew
+*************************************************************/
+
+%roster_sort_default_new%(Abstime t1) =
+  default(
+    first(duty(chain),duty.%end_utc%-t1)
+    where (duty.%end_utc% >= t1), 0:00);
+
+%roster_sort_work_time% = pp.%duty_time%/0:01;
+
+%roster_sort_sby%(Abstime t1) =
+  default(
+    first(duty(chain),
+      (if duty.%is_standby_at_airport% then -1000:00 else 0:00)
+      + duty.%end_utc%-t1)
+    where (duty.%end_utc% >= t1 and duty.%start_utc% <= t1), 0:00);
+
+/* The different cost functions returns an integer representing the cost for 
+   the specific type, if the roster is of that type. If the crew is of another 
+   type a zero is returned. 
+   Each cost can then be weigthed in the sort function. */
+
+%roster_sort_default%(Abstime t1, Abstime t2) =
+  1000000 * %freeday_cost%(t1, t2)  + 100000 * %standby_cost%(t1, t2) + 
+  10000 * %blankday_cost%(t1, t2) + 1 * %swap_cost%(t1, t2);
+
+%freeday_cost%(Abstime t1, Abstime t2) = 
+  if %roster_days_off_candidate%(t1, t2) then 100
+  else if %roster_volunteer_candidate%(t1, t2,"") then 10
+  else 0;
+
+%standby_cost_old%(Abstime t1, Abstime t2) = 
+  if not %roster_standby%(t1, t2) then 0
+  else 1;
+  
+%standby_cost%(Abstime t1, Abstime t2) =
+  if not %roster_standby%(t1, t2) then 0
+  else
+    default(first(duty(chain),
+                  (if duty.%is_standby_at_airport% then 1 else 30)
+                  + (duty.%end_utc%-t1)/1:00)
+               where (duty.%end_utc% >= t1 and duty.%start_utc% <= t1), 
+               50);
+
+%blankday_cost%(Abstime t1, Abstime t2) =
+  if not %roster_blankday%(t1, t2) then 0
+  else 1;
+
+%swap_cost%(Abstime t1, Abstime t2) = 
+   default(if %deadhead_flight%(t1, t2) then 0
+           else if %cancelled_flight%(t1, t2) then 10 
+           else if %over_crewed_flight%(t1, t2) then 20 
+           else 50, 70);
+
+%over_crewed_flight%(Abstime t1, Abstime t2) =
+  any(leg(chain), %leg_is_overcrewed%) where 
+      (leg.%start_utc% <= t1 and leg.%end_utc% >= t1
+       or leg.%start_utc% <= t2 and leg.%end_utc% >= t2);
+      
+%deadhead_flight%(Abstime t1, Abstime t2) = 
+  any(leg(chain), leg.%is_deadhead%) where 
+      (leg.%start_utc% <= t1 and leg.%end_utc% >= t1
+       or leg.%start_utc% <= t2 and leg.%end_utc% >= t2);
+
+      %cancelled_flight%(Abstime t1, Abstime t2) = 
+  any(leg(chain), leg.%is_not_operating%) where 
+      (leg.%start_utc% <= t1 and leg.%end_utc% >= t1 
+       or leg.%start_utc% <= t2 and leg.%end_utc% >= t2);
+
+/************************************************************
+* Section 10: Function for detecting removable legs, that is 
+             legs that can be deassigned without loosing
+             production (deadheads, non operating legs, etc). 
+*************************************************************/
+
+%removable_leg% =
+  default(leg.%is_deadhead%,false)
+  or default(extra_seat,false)
+  or default(leg.%is_not_operating%, false) 
+  or default(%leg_is_overcrewed%,false);
+  
+%leg_is_overcrewed% = leg.%is_active_flight% and
+         (crew_pos.%overrostered_flight_crew% or 
+          crew_pos.%overrostered_cabin_crew%) and
+         (crew_pos.%leg_assigned_pos%(1) > 0 and
+          crew_pos.%leg_booked_pos%(1) > crew_pos.%n_pos1% or
+          crew_pos.%leg_assigned_pos%(2) > 0 and
+          crew_pos.%leg_booked_pos%(2) > crew_pos.%n_pos2% or
+          crew_pos.%leg_assigned_pos%(3) > 0 and
+          crew_pos.%leg_booked_pos%(3) > crew_pos.%n_pos3% or
+          crew_pos.%leg_assigned_pos%(4) > 0 and
+          crew_pos.%leg_booked_pos%(4) > crew_pos.%n_pos4% or
+          crew_pos.%leg_assigned_pos%(5) > 0 and
+          crew_pos.%leg_booked_pos%(5) > crew_pos.%n_pos5% or
+          crew_pos.%leg_assigned_pos%(6) > 0 and
+          crew_pos.%leg_booked_pos%(6) > crew_pos.%n_pos6% or
+          crew_pos.%leg_assigned_pos%(7) > 0 and
+          crew_pos.%leg_booked_pos%(7) > crew_pos.%n_pos7% or
+          crew_pos.%leg_assigned_pos%(8) > 0 and
+          crew_pos.%leg_booked_pos%(8) > crew_pos.%n_pos8%);
+
+/**********************************************************
+* Section 11: Function for detecting if crew is late, used
+              for detecting if it is a check-in problem 
+***********************************************************/
+%crew_is_late% =
+  checkinout.%crew_late_for_check_in%;
+
+/**************************
+** CNX TIMES and Problems**
+***************************/
+
+%leg_cnx_time_before% =
+  default(departure - prev(leg(duty), arrival), 2:00);
+
+%leg_cnx_time_after% =
+  default(next(leg(duty),departure) - arrival, 2:00);
+  
+%leg_cnx_problem% =
+  default(prev(leg(duty), leg.%connection_time% < %connection_time%),False); 
+          
+%connection_time% = if connection.%is_btw_coterminals% then 
+          connection.%min_time_when_coterminals%
+         else
+          connection.%min_time_connection%;
+  
+
+  
+/************************************************************************
+** Section 12:                                                         **
+** This sections lista all rules that are important for FAC.           **
+** Table common_semi_legal_rules are the rules that are                **
+** common for Flight crew and Cabin crew                               **
+**                                                                     **
+** NOTE: If you change any rule name YUO MUST CHANGE IN BOTH COLUMNS!! **
+*************************************************************************/
+
+%_semi_legal_rule_bool%(int ix) = void_boolean;
+%_semi_legal_rule_name%(int ix) = void_string;
+%_turned_off_rule_bool%(int ix) = void_boolean;
+%_turned_off_rule_name%(int ix) = void_string;
+%_form_turned_off_rule_bool%(int ix) = void_boolean;
+%_form_turned_off_rule_name%(int ix) = void_string;
+
+%always_turned_off_rules%(Int ix) =
+  default(default(%_turned_off_rule_name%(ix), %turned_off_rule_name%(ix)), "");
+  
+table turned_off_rules(Int ix) =
+  ix -> bool %turned_off_rule_bool%, String %turned_off_rule_name%;
+  - ->  void_bool, void_string;
+end
+
+%form_dependent_rules%(Int ix) =
+  default(default(%_form_turned_off_rule_name%(ix), %form_turned_off_rule_name%(ix)), "");
+  
+table form_turned_off_rules(Int ix) =
+  ix -> bool %form_turned_off_rule_bool%, String %form_turned_off_rule_name%;
+  1 -> rule_on(rules_resched_cct.resched_r136_all), "rules_resched_cct.resched_r136_all";
+  2 -> rule_on(rules_resched_cct.resched_r138_all), "rules_resched_cct.resched_r138_all";
+  3 -> rule_on(rules_indust_ccr.ind_min_free_weekend_in_period_all), "rules_indust_ccr.ind_min_free_weekend_in_period_all";
+  - ->  void_bool, void_string;
+end
+  
+%semi_legal_rules_for_FAC%(Int ix) =
+  default(default(%_semi_legal_rule_name%(ix), %semi_legal_rule_name%(ix)), "");
+  /*cat(times(102), default(default(%_rule_name_crew%(%times_index_0%), %rule_name%(%times_index_0%)), ""), ",");*/
+  
+table common_semi_legal_rules(Int ix) =
+  ix -> bool %semi_legal_rule_bool%, String %semi_legal_rule_name%;
+  1 -> rule_on(rules_indust_ccp.ind_max_duty_time_in_duty_period_all), "rules_indust_ccp.ind_max_duty_time_in_duty_period_all";
+  2 -> rule_on(rules_meal_ccp.ind_max_time_btw_meal_breaks_all), "rules_meal_ccp.ind_max_time_btw_meal_breaks_all";
+  3 -> rule_on(rules_indust_ccp.ind_min_connection_time_all), "rules_indust_ccp.ind_min_connection_time_all";
+  4 -> rule_on(rules_indust_ccp.ind_night_rest_surrounding_short_stop_fc_skd_sks), "rules_indust_ccp.ind_night_rest_surrounding_short_stop_fc_skd_sks";
+  5 -> rule_on(rules_indust_ccp.ind_min_rest_after_duty_period_all), "rules_indust_ccp.ind_min_rest_after_duty_period_all";
+  6 -> rule_on(rules_indust_ccp.ind_min_rest_in_24hrs_from_ci_fc_skd_sks), "rules_indust_ccp.ind_min_rest_in_24hrs_from_ci_fc_skd_sks";  
+  7 -> rule_on(rules_indust_ccp.ind_plausible_connection_all), "rules_indust_ccp.ind_plausible_connection_all";
+  8 -> rule_on(rules_studio_ccp.sft_need_greater_than_max_crew_seats_all), "rules_studio_ccp.sft_need_greater_than_max_crew_seats_all";  
+  9 -> rule_on(rules_indust_ccr.ind_max_duty_time_in_7x24_hrs_all), "rules_indust_ccr.ind_max_duty_time_in_7x24_hrs_all";
+  10 -> rule_on(rules_indust_ccr.ind_max_duty_time_in_calendar_month_fc_skn_skl_sks), "rules_indust_ccr.ind_max_duty_time_in_calendar_month_fc_skn_skl_sks";
+  11 -> rule_on(rules_indust_ccr.ind_max_night_duties_in_working_period_fc_skd_skn_skl), "rules_indust_ccr.ind_max_night_duties_in_working_period_fc_skd_skn_skl";
+  12 -> rule_on(rules_indust_ccr.ind_min_rest_after_trip_all), "rules_indust_ccr.ind_min_rest_after_trip_all";
+  13 -> rule_on(rules_indust_ccr.ind_no_duty_same_day_when_late_check_out_fc_skd_sks), "rules_indust_ccr.ind_no_duty_same_day_when_late_check_out_fc_skd_sks";
+  14 -> rule_on(rules_indust_ccr.ind_check_in_time_limit_for_wop_all), "rules_indust_ccr.ind_check_in_time_limit_for_wop_all";
+  15 -> rule_on(rules_indust_ccr.ind_check_out_time_limit_for_wop_all), "rules_indust_ccr.ind_check_out_time_limit_for_wop_all";
+  16 -> rule_on(rules_caa_ccr.caa_valid_licence_all), "rules_caa_ccr.caa_valid_licence_all";
+  17 -> rule_on(rules_caa_ccr.caa_valid_medical_all), "rules_caa_ccr.caa_valid_medical_all";
+  18 -> rule_on(rules_caa_ccr.caa_valid_vaccination_all), "rules_caa_ccr.caa_valid_vaccination_all";
+  19 -> rule_on(rules_caa_ccr.caa_valid_visa_all), "rules_caa_ccr.caa_valid_visa_all";
+  20 -> rule_on(rules_training_ccr.qln_recency_ok_all), "rules_training_ccr.qln_recency_ok_all";
+  21 -> rule_on(rules_qual_ccr.qln_all_required_recurrent_dates_registered_all), "rules_qual_ccr.qln_all_required_recurrent_dates_registered_all";
+  22 -> rule_on(rules_qual_ccr.qln_ac_type_ok_all), "rules_qual_ccr.qln_ac_type_ok_all";
+  23 -> rule_on(rules_training_ccr.qln_absence_flight_training_performed_all), "rules_training_ccr.qln_absence_flight_training_performed_all";
+  24 -> rule_on(rules_training_ccr.qln_absence_ground_training_performed_all), "rules_training_ccr.qln_absence_ground_training_performed_all";
+  25 -> rule_on(rules_training_ccr.trng_min_initial_flights_performed_all), "rules_training_ccr.trng_min_initial_flights_performed_all";
+  26 -> rule_on(rules_qual_ccr.qln_recurrent_training_performed_all), "rules_qual_ccr.qln_recurrent_training_performed_all";
+  27 -> rule_on(rules_training_ccr.trng_crew_should_not_be_considered_as_new_restr_all), "rules_training_ccr.trng_crew_should_not_be_considered_as_new_restr_all";
+  28 -> rule_on(rules_qual_ccr.trng_all_training_flights_performed_all), "rules_qual_ccr.trng_all_training_flights_performed_all";
+  29 -> rule_on(rules_training_ccr.comp_max_nr_crew_performing_training_type_on_flight_all), "rules_training_ccr.comp_max_nr_crew_performing_training_type_on_flight_all";
+  30 -> rule_on(rules_training_ccr.comp_max_restricted_new_all), "rules_training_ccr.comp_max_restricted_new_all";
+  31 -> rule_on(rules_qual_ccr.qln_recurrent_training_must_not_be_planned_too_early_all), "rules_qual_ccr.qln_recurrent_training_must_not_be_planned_too_early_all";
+  32 -> rule_on(rules_training_ccr.comp_trainee_assigned_in_correct_position_all), "rules_training_ccr.comp_trainee_assigned_in_correct_position_all";
+  33 -> rule_on(rules_training_ccr.trng_flight_max_days_from_training_start_all), "rules_training_ccr.trng_flight_max_days_from_training_start_all";
+  34 -> rule_on(rules_training_ccr.comp_crew_with_training_flight_has_good_companion_all), "rules_training_ccr.comp_crew_with_training_flight_has_good_companion_all";
+  35 -> rule_on(rules_studio_ccr.sft_comp_crew_not_fly_with), "rules_studio_ccr.sft_comp_crew_not_fly_with";
+  -  -> void_bool, void_string;
+end
+
+/* end of file */

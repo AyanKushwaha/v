@@ -1,0 +1,709 @@
+<?xml version="1.0" ?><!-- @(#) $Header$ --><dig>
+
+<!--
+    ****************************************************************
+    ***
+    *** Request/Reply Channels
+    ***
+    ****************************************************************
+ -->
+
+<!--
+    R1      GetReportList
+    32.3.2  Get Crew Act List              (R2 GetReport)
+    32.3.3  Get Flight Leg                 (R2 GetReport)
+    32.3.7  Get Simulator Acts             (R2 GetReport)
+    32.3.9  Get Crew Accum Info            (R2 GetReport)
+    32.13.2 Overtime Presentation          (R2 GetReport)
+    32.13.3 Crew Slip                      (R2 GetReport)
+    32.14   Duty Calculation
+    32.15   Future Activities
+    32.17   Vacation and Balance           (R2 GetReport)
+    32.21   Compensation Days presentation (R2 GetReport)
+    CrewBasicService
+    CrewFlightService
+    CrewListService
+    CrewRosterService
+ -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" inOrder="False" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/services.log" maxMessagesInChannel="40" messageAgeWarning="10s" name="services" threadPoolSize="40">
+    <reader allowExpiry="True" altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="CQFREQ%(site/mq/sk_qsuffix)" timeout="0.1"/>
+    <!-- Temp config, to read from PROD queues on TEST system -->
+    <!--reader class="carmensystems.dig.readers.jmq.MQReader"
+        host="%(site/mq/server_prod)" 
+        port="%(site/mq/port_prod)" 
+        manager="%(site/mq/manager_prod)" 
+        altUser="%(site/mq/altuser_prod)"
+        channel="%(site/mq/channel_prod)" 
+        queue="CQFREQ%(site/mq/sk_qsuffix_prod)" 
+        timeout="0.1"
+        allowExpiry="True"
+        numToRead="-1"/-->
+    <messagehandlers>
+        <messagehandler class="dig.filehandlers.MessageRecorder" log_directory="$(CARMTMP)/logfiles/DIG" log_file_prefix="CQFREQ_LIVE"/>
+        <messagehandler class="dig.xhandlers.ReportRequestBuilder" configFile="$(CARMUSR)/data/config/dig/queries/reports.services" delta="False" overrideServerArgs="True" paramSeparator="," serviceLookupClass="dig.xhandlers.RSLookup"/>
+        <messagehandler cachingRequests="CrewBasic,CheckInOut,CrewRoster" class="dig.dispatchers.ReportCacheDispatcher" contentIsReports="False" defaultServer="rs_publish" rs_historic_12="%(API/getServiceUrl/portal_historic_12)" rs_historic_15="%(API/getServiceUrl/portal_historic_15)" rs_historic_18="%(API/getServiceUrl/portal_historic_18)" rs_historic_21="%(API/getServiceUrl/portal_historic_21)" rs_historic_24="%(API/getServiceUrl/portal_historic_24)" rs_historic_27="%(API/getServiceUrl/portal_historic_27)" rs_historic_3="%(API/getServiceUrl/portal_historic_3)" rs_historic_6="%(API/getServiceUrl/portal_historic_6)" rs_historic_9="%(API/getServiceUrl/portal_historic_9)" rs_latest="%(API/getServiceUrl/portal_latest)" rs_publish="%(API/getServiceUrl/portal_publish)" rs_publish_future="%(API/getServiceUrl/portal_publish_future)" rs_scheduled="%(API/getServiceUrl/portal_scheduled)" timeout="40"/>
+        <messagehandler class="dig.xhandlers.CustomDaveWriter" relaxTables="crew_notification,ci_frozen"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        <messagehandler class="dig.xhandlers.ReportCachePostProc"/>
+        
+        <messagehandler ALL_dests="REPLY" REPLY_protocol="mqreply" class="dig.xhandlers.AddressInjector"/><messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher" mqreply_altUser="%(site/mq/altuser)" mqreply_channel="%(site/mq/channel)" mqreply_host="%(site/mq/server)" mqreply_port="%(site/mq/port)"/>
+        <!-- Temp config, to reply to PROD queues on TEST system -->
+        <!--messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher"
+            mqreply_host="%(site/mq/server_prod)"
+            mqreply_port="%(site/mq/port_prod)"
+            mqreply_channel="%(site/mq/channel_prod)"
+            mqreply_altUser="%(site/mq/altuser_prod)"/-->
+    </messagehandlers>
+    <notifiers>
+        <notifier category="performance" class="carmensystems.dig.notifiers.file.FileNotifier" filename="$(CARMTMP)/logfiles/DIG/performance/services.log" formatterClass="dig.notifiers.PerformanceFormatter"/>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'services' fatal error"/>
+    </notifiers>
+</channel>
+
+<!-- Config, to also read from CrewServices TEST queue (Z) on TEST system -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" inOrder="False" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/services_T.log" messageAgeWarning="10s" name="services_T">
+    <reader allowExpiry="True" altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="CQFREQ%(site/mq/crew_services_qsuffix)" timeout="0.1"/>
+    <messagehandlers>
+        <messagehandler class="dig.filehandlers.MessageRecorder" log_directory="$(CARMTMP)/logfiles/DIG" log_file_prefix="CQFREQ_LIVE_T"/>
+        <messagehandler class="dig.xhandlers.ReportRequestBuilder" configFile="$(CARMUSR)/data/config/dig/queries/reports.services" delta="False" overrideServerArgs="True" paramSeparator="," serviceLookupClass="dig.xhandlers.RSLookup"/>
+        <messagehandler cachingRequests="CrewBasic,CheckInOut" class="dig.dispatchers.ReportCacheDispatcher" contentIsReports="False" defaultServer="rs_publish" rs_historic_12="%(API/getServiceUrl/portal_historic_12)" rs_historic_15="%(API/getServiceUrl/portal_historic_15)" rs_historic_18="%(API/getServiceUrl/portal_historic_18)" rs_historic_21="%(API/getServiceUrl/portal_historic_21)" rs_historic_24="%(API/getServiceUrl/portal_historic_24)" rs_historic_27="%(API/getServiceUrl/portal_historic_27)" rs_historic_3="%(API/getServiceUrl/portal_historic_3)" rs_historic_6="%(API/getServiceUrl/portal_historic_6)" rs_historic_9="%(API/getServiceUrl/portal_historic_9)" rs_latest="%(API/getServiceUrl/portal_latest)" rs_publish="%(API/getServiceUrl/portal_publish)" rs_publish_future="%(API/getServiceUrl/portal_publish_future)" rs_scheduled="%(API/getServiceUrl/portal_scheduled)" timeout="40"/>
+        <messagehandler class="dig.xhandlers.CustomDaveWriter" relaxTables="crew_notification,ci_frozen"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        <messagehandler class="dig.xhandlers.ReportCachePostProc"/>
+        
+        <messagehandler ALL_dests="REPLY" REPLY_protocol="mqreply" class="dig.xhandlers.AddressInjector"/><messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher" mqreply_altUser="%(site/mq/altuser)" mqreply_channel="%(site/mq/channel)" mqreply_host="%(site/mq/server)" mqreply_port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="performance" class="carmensystems.dig.notifiers.file.FileNotifier" filename="$(CARMTMP)/logfiles/DIG/performance/services_T.log" formatterClass="dig.notifiers.PerformanceFormatter"/>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'services_T' fatal error"/>
+    </notifiers>
+</channel>
+
+
+
+<!--
+    ****************************************************************
+    ***
+    *** Subscription Channels
+    ***
+    ****************************************************************
+ -->
+
+
+<!--
+    16.2    Update slot time
+    32.2    Operational info
+    41.3    Passenger prognosis, Short Term
+ -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/digxml.log" maxMessagesInChannel="40" name="digxml" threadPoolSize="0">
+    <reader allowExpiry="True" altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" forceBinary="True" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="CQFDIGX%(site/mq/sk_qsuffix)"/>
+    <!-- Temp config, to read from PROD queues on TEST system -->
+    <!--reader class="carmensystems.dig.readers.jmq.MQReader"
+        host="%(site/mq/server_prod)" 
+        port="%(site/mq/port_prod)" 
+        manager="%(site/mq/manager_prod)" 
+        altUser="%(site/mq/altuser_prod)"
+        channel="%(site/mq/channel_prod)" 
+        queue="CQFDIGX%(site/mq/sk_qsuffix_prod)" 
+        forceBinary="True"
+        allowExpiry="True"
+        numToRead="-1"/-->
+    <messagehandlers>
+        <messagehandler class="dig.filehandlers.MessageRecorder" log_directory="$(CARMTMP)/logfiles/DIG" log_file_prefix="CQFDIGX_LIVE"/>
+        <messagehandler class="dig.extendedsuffix.DigxmlSuffixBlaster"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.digxml.DigXMLParser" ignoreOutOfOrder="True"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="message" class="carmensystems.dig.notifiers.file.FileNotifier" filename="$(CARMTMP)/logfiles/DIG/errmsg/CQFDIGX.msg" formatterClass="dig.notifiers.SKLogFormatter"/>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'digxml' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/ssim_file.log" name="ssim_file">
+    <reader class="carmensystems.dig.readers.file.FileReader" filename="$(CARMTMP)/ssim.txt"/>
+        <!--host="$(MQSERVER)"
+        port="$(MQPORT)"
+        manager="$(MQMANAGER)"
+        channel="$(MQCHANNEL)"
+        altUser="$(MQALTUSER)"
+        queue="CQFTITA$(MQ_SK_QSUFFIX)"
+        numToRead="-1"/-->
+    <messagehandlers>
+        <messagehandler class="dig.messagesplitfilter.MessageSplitFilter" linesize="200"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.ssim.SSIMHandler"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.aircrew.CrewAttacher"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'ssim_file' fatal error"/>
+    </notifiers>
+</channel>
+
+<!--
+    36.1    Long Term Flight Schedule
+    36.2.1  Short Term Flight Schedule changes
+    36.2.2  Ad Hoc flight Schedule changes
+
+    CR180: This channel now also handles message of following types:
+    37.1    Aircraft rotations, Initial Load
+    37.2    Flight Movements
+    37.3    Aircraft Rotation changes
+    37.4    Schooling and Training Flights
+ -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/flt_planning.log" maxMessagesInChannel="40" name="flt_planning" threadPoolSize="0">
+    <reader allowExpiry="True" altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" decode="False" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="CQFTITA%(site/mq/sk_qsuffix)"/>
+    <!-- Temp config, to read from PROD queues on TEST system -->
+    <!--reader class="carmensystems.dig.readers.jmq.MQReader"
+        host="%(site/mq/server_prod)" 
+        port="%(site/mq/port_prod)" 
+        manager="%(site/mq/manager_prod)" 
+        channel="%(site/mq/channel_prod)" 
+        altUser="%(site/mq/altuser_prod)"
+        queue="CQFTITA%(site/mq/sk_qsuffix_prod)" 
+        allowExpiry="True"
+        numToRead="-1"/-->
+    <messagehandlers>
+        <messagehandler class="dig.filehandlers.MessageRecorder" log_directory="$(CARMTMP)/logfiles/DIG" log_file_prefix="CQFTITA_LIVE"/>
+        <messagehandler class="dig.messagesplitfilter.MessageSplitFilter" linesize="200"/>
+        <messagehandler class="dig.dispatchers.OpusSsimDispatcher" flightFilter="dig.xhandlers.isValidFlight"/>
+		<messagehandler class="carmensystems.dig.messagehandlers.aircrew.CrewAttacher"/>
+        <messagehandler class="dig.extendedsuffix.AttributeRemover"/>
+        <messagehandler class="dig.extpublishclient.PublicationHandler"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="message" class="carmensystems.dig.notifiers.file.FileNotifier" filename="$(CARMTMP)/logfiles/DIG/errmsg/CQFTITA.msg" formatterClass="dig.notifiers.SKLogFormatter"/>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'flt_planning' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!--
+    37.1    Aircraft rotations, Initial Load
+    37.2    Flight Movements
+    37.3    Aircraft Rotation changes
+    37.4    Schooling and Training Flights
+
+    CR180: This channel now also handles message of following types:
+    36.1    Long Term Flight Schedule
+    36.2.1  Short Term Flight Schedule changes
+    36.2.2  Ad Hoc flight Schedule changes
+ -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/flt_execution.log" maxMessagesInChannel="40" messageAgeWarning="10s" name="flt_execution" threadPoolSize="0">
+    <reader allowExpiry="True" altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" decode="False" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="CQFMVTD%(site/mq/sk_qsuffix)"/>
+    <!-- Temp config, to read from PROD queues on TEST system -->
+    <!--reader class="carmensystems.dig.readers.jmq.MQReader"
+        host="%(site/mq/server_prod)" 
+        port="%(site/mq/port_prod)" 
+        manager="%(site/mq/manager_prod)" 
+        channel="%(site/mq/channel_prod)" 
+        altUser="%(site/mq/altuser_prod)"
+        queue="CQFMVTD%(site/mq/sk_qsuffix_prod)" 
+        forceBinary="True"
+        allowExpiry="True"
+        numToRead="-1"/-->
+    <messagehandlers>
+        <messagehandler class="dig.filehandlers.MessageRecorder" log_directory="$(CARMTMP)/logfiles/DIG" log_file_prefix="CQFMVTD_LIVE"/>
+        <messagehandler class="dig.messagesplitfilter.MessageSplitFilter" linesize="200"/>
+        <messagehandler class="dig.dispatchers.OpusSsimDispatcher" flightFilter="dig.xhandlers.isValidFlight"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.aircrew.CrewAttacher"/>
+        <messagehandler class="dig.extendedsuffix.AttributeRemover"/>
+        <messagehandler class="dig.extpublishclient.PublicationHandler"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="performance" class="carmensystems.dig.notifiers.file.FileNotifier" filename="$(CARMTMP)/logfiles/DIG/performance/flt_execution.log" formatterClass="dig.notifiers.PerformanceFormatter"/>
+        <notifier category="message" class="carmensystems.dig.notifiers.file.FileNotifier" filename="$(CARMTMP)/logfiles/DIG/errmsg/CQFMVTD.msg" formatterClass="dig.notifiers.SKLogFormatter"/>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'flt_execution' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!-- 38     Flight Leg Ownership -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/flt_ownership.log" messageAgeError="30m" messageAgeWarning="10m" name="flt_ownership" threadPoolSize="0">
+    <reader class="carmensystems.dig.readers.file.DirectoryReader" createDirectories="True" dir="$(CARMTMP)/ftp/in" finishByMove="$(CARMTMP)/ftp/imported" pattern="FIA*"/>
+    <messagehandlers>
+        <messagehandler class="dig.fiaparser.FIAParser"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'flt_ownership' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!-- 40.2   Passenger Actuals -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/ldm.log" maxMessagesInChannel="40" name="ldm" threadPoolSize="0">
+    <reader allowExpiry="True" altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="CQF402%(site/mq/sk_qsuffix)"/>
+    <!-- Temp config, to read from PROD queues on TEST system -->
+    <!--reader class="carmensystems.dig.readers.jmq.MQReader"
+        host="%(site/mq/server_prod)" 
+        port="%(site/mq/port_prod)" 
+        manager="%(site/mq/manager_prod)" 
+        channel="%(site/mq/channel_prod)" 
+        altUser="%(site/mq/altuser_prod)"
+        queue="CQF402%(site/mq/sk_qsuffix_prod)" 
+        allowExpiry="True"
+        numToRead="-1"/-->
+    <messagehandlers>
+        <messagehandler class="dig.filehandlers.MessageRecorder" log_directory="$(CARMTMP)/logfiles/DIG" log_file_prefix="CQF402_LIVE"/>
+        <messagehandler class="dig.ldmparser.LDMHandler"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="message" class="carmensystems.dig.notifiers.file.FileNotifier" filename="$(CARMTMP)/logfiles/DIG/errmsg/CQF402.msg" formatterClass="dig.notifiers.SKLogFormatter"/>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'ldm' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!-- 43.6   Crew Info Synchronization -->
+<!-- granlund 2008-10-02:  Reinserted forceBinary="True" 
+     This is used to get more control over the encoding in the parser. -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/crewinfo.log" maxMessagesInChannel="40" messageAgeError="4h" name="crewinfo" threadPoolSize="0">
+    <reader allowExpiry="True" altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" forceBinary="True" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="CQF436%(site/mq/sk_qsuffix)"/>
+    <messagehandlers>
+        <messagehandler class="dig.filehandlers.MessageRecorder" log_directory="$(CARMTMP)/logfiles/DIG" log_file_prefix="CQF436_LIVE"/>
+        <messagehandler class="dig.crewinfoparser.CrewInfoParser"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="message" class="carmensystems.dig.notifiers.file.FileNotifier" filename="$(CARMTMP)/logfiles/DIG/errmsg/CQF436.msg" formatterClass="dig.notifiers.SKLogFormatter"/>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" formatterClass="dig.notifiers.TruncatingFormatter" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'crewinfo' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!-- 45.2  Currency, Exchange Rates -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/currency.log" name="currency" threadPoolSize="0">
+    <reader class="carmensystems.dig.readers.file.DirectoryReader" createDirectories="True" delimiter="\n" dir="$(CARMTMP)/ftp/in" finishByMove="$(CARMTMP)/ftp/imported" pattern="CUR*"/>
+    <messagehandlers>
+        <messagehandler class="dig.currencyparser.CurrencyParser"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'currency' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!--
+    ****************************************************************
+    ***
+    *** Publish Channels
+    ***
+    ****************************************************************
+ -->
+
+
+<!-- scheduler -->
+<channel dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/scheduler.log" name="scheduler">
+    <reader class="carmensystems.dig.scheduler.task.TaskReader"/>
+    <messagehandlers>
+        <messagehandler class="carmensystems.dig.scheduler.task.TaskHandler"/>
+    </messagehandlers>
+</channel>
+
+
+<!--
+    X1/X2    Replicate Perkey and Name.
+-->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/x1.log" name="x1" threadPoolSize="0">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="X1_TEST"/>
+    <messagehandlers>
+        <messagehandler class="dig.replicationhandlers.MiradorHandler" exportDir="$(CARMTMP)/ftp/out" exportFilename="X1.TXT" interface="X1"/>
+        <messagehandler altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.messagehandlers.jmq.ReplyMQWriter" host="%(site/mq/server)" port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'x1' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!--
+    X3    Vacation Trade Snapshot.
+-->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/x3.log" name="x3" threadPoolSize="0">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="X3_TEST"/>
+    <messagehandlers>
+        <messagehandler class="dig.replicationhandlers.MiradorHandler" exportDir="$(CARMTMP)/ftp/out" exportFilename="X3.TXT" interface="X3"/>
+        <messagehandler altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.messagehandlers.jmq.ReplyMQWriter" host="%(site/mq/server)" port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'x3' fatal error"/>
+    </notifiers>
+</channel>
+
+<!--
+    32.4   Meal Orders
+    32.4   Meal Orders, Forecast 
+-->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" inOrder="False" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/meal.log" maxMessagesInChannel="20" messageAgeError="10m" messageAgeWarning="5m" name="meal">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="MEAL_TEST"/>
+    <messagehandlers>
+        <messagehandler class="dig.xhandlers.ReportRequestBuilder" configFile="$(CARMUSR)/data/config/dig/test/reports.publish.test" delta="True" overrideServerArgs="True" paramSeparator=","/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="False" defaultServer="rs_latest_batch" rs_latest="%(API/getServiceUrl/portal_latest)" rs_latest_batch="%(API/getServiceUrl/portal_latest_batch)"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        
+        <messagehandler ALL_dests="REPLY" REPLY_protocol="mqreply" class="dig.xhandlers.AddressInjector"/><messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher" mqreply_altUser="%(site/mq/altuser)" mqreply_channel="%(site/mq/channel)" mqreply_host="%(site/mq/server)" mqreply_port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="jfa@sas.dk" sender="CMOS@SAS.DK" subject="DIG channel 'meal' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!--
+    33.4   Hotel Bookings
+    33.4   Hotel Bookings, Forecast 
+    33.4   Hotel Bookings, Performed
+    33.4   Transport Bookings
+    33.4   Transport Bookings, Performed
+-->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/hotel.log" messageAgeError="5h" messageAgeWarning="30m" name="hotel">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="HOTEL_TEST"/>
+    <messagehandlers>
+        <messagehandler class="dig.xhandlers.ReportRequestBuilder" configFile="$(CARMUSR)/data/config/dig/test/reports.publish.test" delta="True" overrideServerArgs="True" paramSeparator=","/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="False" defaultServer="rs_latest" rs_latest="%(API/getServiceUrl/portal_latest)" rs_publish="%(API/getServiceUrl/portal_publish)"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        <messagehandler ALL_dests="REPLY" REPLY_protocol="mqreply" class="dig.xhandlers.AddressInjector"/><messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher" mqreply_altUser="%(site/mq/altuser)" mqreply_channel="%(site/mq/channel)" mqreply_host="%(site/mq/server)" mqreply_port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'hotel' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!-- 33.8   Crew Manifest US -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/manifest_us.log" name="manifest_us">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="MANIFEST_US_TEST"/>
+    <messagehandlers>
+        <messagehandler class="dig.xhandlers.ReportRequestBuilder" configFile="$(CARMUSR)/data/config/dig/test/reports.publish.test" delta="True" paramSeparator=","/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="False" defaultServer="rs_publish" rs_publish="%(API/getServiceUrl/portal_publish)"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        
+
+        <messagehandler ALL_dests="REPLY" REPLY_protocol="mqreply" class="dig.xhandlers.AddressInjector"/><messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher" mqreply_altUser="%(site/mq/altuser)" mqreply_channel="%(site/mq/channel)" mqreply_host="%(site/mq/server)" mqreply_port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'manifest_us' fatal error"/>
+    </notifiers>
+</channel>
+
+<!-- 
+  33.9 Crew Manifest to China. (also described in CR 136)
+  There are four different messages involved:
+  (1)  PDF file to be sent 12 hours before departure.
+  (2)  EDIFACT message to be sent 60 minutes before departure.
+  (3)  EDIFACT message to be sent 30 minutes before departure.
+  (4)  EDIFACT message to be sent 120 minutes before arrival.
+  -->
+
+<!--
+  33.9   Crew Manifest CN (PDF report channel) 
+  NOTE: We will probably remove this in a near future.
+
+  Now changed to run daily and to create mail messages with PDF attachments
+  for the next five days.
+  -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/manifest_cn.log" name="manifest_cn_pdf">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="MANIFEST_CN_PDF_TEST"/>
+    <messagehandlers>
+        <messagehandler class="dig.xhandlers.ReportRequestBuilder" configFile="$(CARMUSR)/data/config/dig/test/reports.publish.test" delta="True" overrideServerArgs="True" paramSeparator=","/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="False" defaultServer="rs_publish" rs_publish="%(API/getServiceUrl/portal_publish)"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        
+        <messagehandler ALL_dests="REPLY" REPLY_protocol="mqreply" class="dig.xhandlers.AddressInjector"/><messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher" mqreply_altUser="%(site/mq/altuser)" mqreply_channel="%(site/mq/channel)" mqreply_host="%(site/mq/server)" mqreply_port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'manifest_cn_pdf' fatal error"/>
+    </notifiers>
+</channel>
+
+<!-- 33.9   Crew Manifest CN (departure channel) -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/manifest_cn.log" name="manifest_cn_dep">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="MANIFEST_CN_DEP_TEST"/>
+    <messagehandlers>
+        <messagehandler class="dig.xhandlers.ReportRequestBuilder" configFile="$(CARMUSR)/data/config/dig/test/reports.publish.test" delta="True" paramSeparator=","/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="False" defaultServer="rs_publish" rs_publish="%(API/getServiceUrl/portal_publish)"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        
+        <messagehandler ALL_dests="REPLY" REPLY_protocol="mqreply" class="dig.xhandlers.AddressInjector"/><messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher" mqreply_altUser="%(site/mq/altuser)" mqreply_channel="%(site/mq/channel)" mqreply_host="%(site/mq/server)" mqreply_port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'manifest_cn_dep' fatal error"/>
+    </notifiers>
+</channel>
+
+<!-- 33.9   Crew Manifest CN (arrival channel) -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/manifest_cn.log" name="manifest_cn_arr">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="MANIFEST_CN_ARR_TEST"/>
+    <messagehandlers>
+        <messagehandler class="dig.triggers.FlightArrivalTrigger" destCountry="CN" minutesBefore="120" minutesCycle="4" outputClass="dig.triggers.CrewManifestRequestBuilder"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="False" defaultServer="rs_publish" rs_publish="%(API/getServiceUrl/portal_publish)"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        
+        <messagehandler ALL_dests="REPLY" REPLY_protocol="mqreply" class="dig.xhandlers.AddressInjector"/><messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher" mqreply_altUser="%(site/mq/altuser)" mqreply_channel="%(site/mq/channel)" mqreply_host="%(site/mq/server)" mqreply_port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'manifest_cn_arr' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!-- CR12   Crew Manifest JP -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/manifest_jp.log" name="manifest_jp">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="MANIFEST_JP_TEST"/>
+    <messagehandlers>
+        <!-- TODO: Confirm minutesBefore and minutesCycle -->
+        <messagehandler class="dig.xhandlers.ReportRequestBuilder" configFile="$(CARMUSR)/data/config/dig/test/reports.publish.test" delta="True" paramSeparator=","/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="False" defaultServer="rs_publish" rs_publish="%(API/getServiceUrl/portal_publish)"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        
+        <messagehandler ALL_dests="REPLY" REPLY_protocol="mqreply" class="dig.xhandlers.AddressInjector"/><messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher" mqreply_altUser="%(site/mq/altuser)" mqreply_channel="%(site/mq/channel)" mqreply_host="%(site/mq/server)" mqreply_port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'manifest_jp' fatal error"/>
+    </notifiers>
+</channel>
+
+<!-- 
+  CR 140 Crew Manifest to UK.
+  There are two different messages involved:
+  (1)  EDIFACT message to be sent 60 minutes before *scheduled* departure.
+  (2)  EDIFACT message to be sent at *actual* time of departure. 
+  -->
+<!-- CR140   Crew Manifest UK  APIS-60, to be sent 60m before STD -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/manifest_uk.log" name="manifest_uk_60">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="MANIFEST_UK_60_TEST"/>
+    <messagehandlers>
+        <messagehandler class="dig.triggers.FlightScheduledTimeTrigger" destCountry="GB" minutesBefore="60" minutesCycle="4" outputClass="dig.triggers.CrewManifestRequestBuilder"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="False" defaultServer="rs_publish" rs_publish="%(API/getServiceUrl/portal_publish)"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        
+        <messagehandler ALL_dests="REPLY" REPLY_protocol="mqreply" class="dig.xhandlers.AddressInjector"/><messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher" mqreply_altUser="%(site/mq/altuser)" mqreply_channel="%(site/mq/channel)" mqreply_host="%(site/mq/server)" mqreply_port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'manifest_uk_60' fatal error"/>
+    </notifiers>
+</channel>
+
+<!-- CR140   Crew Manifest UK  APIS-0, to be sent at ATD -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/manifest_uk.log" name="manifest_uk_00">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="MANIFEST_UK_00_TEST"/>
+    <messagehandlers>
+        <!-- Cannot search for ATD in positive time -->
+        <messagehandler class="dig.triggers.FlightActualTimeTrigger" destCountry="GB" minutesBefore="-30" minutesCycle="30" outputClass="dig.triggers.CrewManifestRequestBuilder"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="False" defaultServer="rs_publish" rs_publish="%(API/getServiceUrl/portal_publish)"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        
+        <messagehandler ALL_dests="REPLY" REPLY_protocol="mqreply" class="dig.xhandlers.AddressInjector"/><messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher" mqreply_altUser="%(site/mq/altuser)" mqreply_channel="%(site/mq/channel)" mqreply_host="%(site/mq/server)" mqreply_port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'manifest_uk_00' fatal error"/>
+    </notifiers>
+</channel>
+
+<!-- CR164   Crew Manifest IN -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/manifest_in.log" name="manifest_in">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="MANIFEST_IN_TEST"/>
+    <messagehandlers>
+        <!-- TODO: Confirm minutesBefore and minutesCycle -->
+        <messagehandler class="dig.xhandlers.ReportRequestBuilder" configFile="$(CARMUSR)/data/config/dig/test/reports.publish.test" delta="True" paramSeparator=","/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="False" defaultServer="rs_publish" rs_publish="%(API/getServiceUrl/portal_publish)"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        
+        <messagehandler ALL_dests="REPLY" REPLY_protocol="mqreply" class="dig.xhandlers.AddressInjector"/><messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher" mqreply_altUser="%(site/mq/altuser)" mqreply_channel="%(site/mq/channel)" mqreply_host="%(site/mq/server)" mqreply_port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'manifest_in' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!-- CR26   Crew Manifest TH -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/manifest_th.log" name="manifest_th">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="MANIFEST_TH_TEST"/>
+    <messagehandlers>
+        <!-- TODO: Confirm minutesBefore and minutesCycle -->
+        <messagehandler class="dig.xhandlers.ReportRequestBuilder" configFile="$(CARMUSR)/data/config/dig/test/reports.publish.test" delta="True" paramSeparator=","/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="False" defaultServer="rs_publish" rs_publish="%(API/getServiceUrl/portal_publish)"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        
+        <messagehandler ALL_dests="REPLY" REPLY_protocol="mqreply" class="dig.xhandlers.AddressInjector"/><messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher" mqreply_altUser="%(site/mq/altuser)" mqreply_channel="%(site/mq/channel)" mqreply_host="%(site/mq/server)" mqreply_port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'manifest_th' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!-- 40.1    Crew Baggage Reconciliation -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/baggage.log" name="baggage">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="BAGGAGE_TEST"/>
+    <messagehandlers>
+        <messagehandler class="dig.triggers.BaggagePickUpTrigger" minutesBefore="240" minutesCycle="2" outputClass="dig.triggers.CrewBaggageRequestBuilder"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="False" defaultServer="rs_latest" rs_latest="%(API/getServiceUrl/portal_latest)" rs_publish="%(API/getServiceUrl/portal_publish)"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        
+        <messagehandler ALL_dests="REPLY" REPLY_protocol="mqreply" class="dig.xhandlers.AddressInjector"/><messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher" mqreply_altUser="%(site/mq/altuser)" mqreply_channel="%(site/mq/channel)" mqreply_host="%(site/mq/server)" mqreply_port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'baggage' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!-- 41.1   Number of Crew to Load Sheet -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/loadsheet.log" name="loadsheet">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="LOADSHEET_TEST"/>
+    <messagehandlers>
+        <messagehandler class="dig.xhandlers.DebugLogger"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="True" defaultServer="rs_latest" rs_latest="%(API/getServiceUrl/portal_latest)" rs_publish="%(API/getServiceUrl/portal_publish)"/>
+        
+        <messagehandler ALL_dests="REPLY" REPLY_protocol="mqreply" class="dig.xhandlers.AddressInjector"/><messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher" mqreply_altUser="%(site/mq/altuser)" mqreply_channel="%(site/mq/channel)" mqreply_host="%(site/mq/server)" mqreply_port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'loadsheet' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!-- 42    Passive Bookings -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" inOrder="False" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/passive.log" maxMessagesInChannel="40" name="passive" threadPoolSize="40">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="PASSIVE_TEST"/>
+    <messagehandlers>
+        <messagehandler class="dig.xhandlers.ReportRequestBuilder" configFile="$(CARMUSR)/data/config/dig/test/reports.publish.test" delta="True" overrideServerArgs="True" paramSeparator=","/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="False" defaultServer="rs_latest" rs_latest="%(API/getServiceUrl/portal_latest)" rs_publish="%(API/getServiceUrl/portal_publish)"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        
+        <messagehandler ALL_dests="REPLY" REPLY_protocol="mqreply" class="dig.xhandlers.AddressInjector"/><messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher" mqreply_altUser="%(site/mq/altuser)" mqreply_channel="%(site/mq/channel)" mqreply_host="%(site/mq/server)" mqreply_port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'passive' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!--
+    43.2        Ambi List
+    43.5.1.1    Vacation days performed (DK)
+    43.5.1.1.2  Vacation days remaining (DK)
+    43.5.2      Vacation days/year account (DK)
+    43.5.2      Vacation days/year account (NO)
+    43.5.2      Vacation days/year account (SE)
+    43.5.3      Vacation days-year account CPH (DK)
+    43.5.4      Vacation days-year account OSL (NO)
+    44.1        Per Diem (DK)
+    44.1        Per Diem (NO)
+    44.1        Per Diem (SE)
+    44.2        Instructor Allowance (DK)
+    44.2        Instructor Allowance (NO)
+    44.2        Instructor Allowance (SE)
+    44.3        Overtime and Allowances (DK)
+    44.3        Overtime and Allowances (NO)
+    44.3        Overtime and Allowances (SE)
+    44.5        Bought days and compensation days (DK)
+    44.5        Bought days and compensation days (NO)
+    44.5        Bought days and compensation days (SE)
+    44.6        Vacation Lists STO (SE)
+    44.6.2      Vacation Lists OSL (NO)
+-->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" inOrder="False" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/salary.log" maxMessagesInChannel="20" messageAgeError="2h" messageAgeWarning="60m" name="salary">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="SALARY_TEST"/>
+    <messagehandlers>
+        <messagehandler class="dig.xhandlers.ReportRequestBuilder" configFile="$(CARMUSR)/data/config/dig/test/reports.publish.test" delta="True" overrideServerArgs="True" paramSeparator=","/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="False" defaultServer="rs_latest" rs_latest="%(API/getServiceUrl/portal_latest_batch)" rs_publish="%(API/getServiceUrl/portal_publish)"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        
+        <messagehandler ALL_dests="REPLY" REPLY_protocol="mqreply" class="dig.xhandlers.AddressInjector"/><messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher" mqreply_altUser="%(site/mq/altuser)" mqreply_channel="%(site/mq/channel)" mqreply_host="%(site/mq/server)" mqreply_port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'salary' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!-- Manual salary jobs. Used by the salary application -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" inOrder="False" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/salary_manual.log" maxMessagesInChannel="40" messageAgeError="2h" messageAgeWarning="60m" name="salary_manual" threadPoolSize="40">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="SALARY_MANUAL_TEST"/>
+    <messagehandlers>
+        <messagehandler RSWorker="SAS_RS_WORKER_LATEST_BATCH" RSWorkerCustom="SAS_RS_WORKER_LATEST_CUSTOM" class="dig.salaryhandlers.SalaryCustomHandler" customServer="rs_latest_custom"/>
+        <messagehandler class="dig.xhandlers.ReportRequestBuilder" configFile="$(CARMUSR)/data/config/dig/test/reports.publish.test" delta="True" overrideServerArgs="True" paramSeparator=","/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="False" defaultServer="rs_latest" rs_latest="%(API/getServiceUrl/portal_latest_batch)" rs_latest_custom="%(API/getServiceUrl/portal_latest_custom)" rs_publish="%(API/getServiceUrl/portal_publish)"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+        <messagehandler class="dig.salaryhandlers.StopCustomServer"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'salary_manual' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!--
+    32_12   Office List
+    33_1    List12
+    33_2    List9
+    33_9    Master Crew List
+ -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/crewreports.log" messageAgeError="30m" name="crewreports">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="CREWREPORTS_TEST"/>
+    <messagehandlers>
+        <messagehandler class="dig.xhandlers.ReportRequestBuilder" configFile="$(CARMUSR)/data/config/dig/test/reports.publish.test" delta="True" overrideServerArgs="True" paramSeparator=","/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="False" defaultServer="rs_latest_batch" rs_latest_batch="%(API/getServiceUrl/portal_latest_batch)" rs_publish="%(API/getServiceUrl/portal_publish)"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportContentSwitcher"/>
+        
+        <messagehandler ALL_dests="REPLY" REPLY_protocol="mqreply" class="dig.xhandlers.AddressInjector"/><messagehandler class="carmensystems.dig.messagehandlers.transport.TransportDispatcher" mqreply_altUser="%(site/mq/altuser)" mqreply_channel="%(site/mq/channel)" mqreply_host="%(site/mq/server)" mqreply_port="%(site/mq/port)"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'crewreports' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!-- Noncore Statistics -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/noncore_statistics.log" messageAgeError="4h" messageAgeWarning="2h" name="noncore_statistics">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="NONCORE_STATISTICS_TEST"/>
+    <messagehandlers>
+        <messagehandler class="dig.xhandlers.ReportRequestBuilder" configFile="$(CARMUSR)/data/config/dig/test/reports.publish.test" delta="True" overrideServerArgs="True" paramSeparator=","/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="True" defaultServer="rs_publish" rs_publish="%(API/getServiceUrl/portal_publish)"/>
+        <messagehandler class="dig.replicationhandlers.StatisticsHandler" directory="$(CARMDATA)/REPORTS/STATISTICS"/>
+        <messagehandler class="dig.filehandlers.FilePacker" directory="$(CARMDATA)/REPORTS/STATISTICS" numberOfFiles="100" outputName="statistics" outputTimestamp="True" pattern="*.x*"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'noncore_statistics' fatal error"/>
+    </notifiers>
+</channel>
+
+
+<!-- CR 184 Batch job with updates of crew landings based on A/C type. -->
+<channel continueOnMessageError="True" dbConn="%(API/getServiceUrl/database)" dbSchema="%(data_model/schema)" logCategories="+D" logFile="$(CARMTMP)/logfiles/DIG/job_crewlandings.log" messageAgeError="4h" messageAgeWarning="1h" name="job_crewlandings">
+    <reader altUser="%(site/mq/altuser)" channel="%(site/mq/channel)" class="carmensystems.dig.readers.jmq.MQReader" host="%(site/mq/server)" manager="%(site/mq/manager)" numToRead="-1" port="%(site/mq/port)" queue="JOB_CREWLANDINGS_TEST"/>
+    <messagehandlers>
+        <messagehandler class="dig.xhandlers.ReportRequestBuilder" configFile="$(CARMUSR)/data/config/dig/test/reports.publish.test" delta="True" overrideServerArgs="True" paramSeparator=","/>
+        <messagehandler class="carmensystems.dig.messagehandlers.reports.ReportRequestHandler" contentIsReports="False" defaultServer="rs_latest" rs_latest="%(API/getServiceUrl/portal_latest)"/>
+        <messagehandler ageTimeout="-1" cacheSize="0" class="carmensystems.dig.messagehandlers.dave.DaveWriter" idleTimeout="-1" ignoreOutOfOrder="True" raiseRetryErrors="False"/>
+    </messagehandlers>
+    <notifiers>
+        <notifier category="fatal" class="carmensystems.dig.notifiers.mail.MailNotifier" host="%(site/mail/host)" port="%(site/mail/port)" recipients="%(site/mail/to)" sender="%(site/mail/from)" subject="DIG channel 'job_crewlandings' fatal error"/>
+    </notifiers>
+</channel>
+
+</dig><!-- vim: set ts=4 sw=4 et: -->

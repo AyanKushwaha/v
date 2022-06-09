@@ -1,0 +1,88 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose: 
+ *   Defines automatic and manual duty-codes to be printed on rosters
+ *   and reports
+ *
+ * Created by:
+ *   David Lennartsson, 18-Aug-2006
+ *
+ * Major changes:
+ *   [acosta:08/043@13:21]
+ *     Added duty codes 'L', 'LL', 'H' and 'HH'.
+ *   Eliasson Hasse, 8Aug2009
+ *     Moved deadhead condition definition to leg_crr module.
+ *
+ */
+
+module duty_code_ccr inherits duty_code
+
+import crew_pos;
+import crew;
+import training;
+
+redefine export %leg_code% =
+  /* First we check for manual code */
+  if %leg_has_manual_duty_code% then 
+    %leg_manual_duty_code%
+  /* Next we check flight duty codes */
+  else if leg.%is_flight_duty% and leg.%is_deadhead% then 
+    if leg.%is_private_passive% then
+      concat(leg.%deadhead_code%, "P")
+    else
+      leg.%deadhead_code%
+  else if %is_roster% then
+      /* Training codes have the position code included in definition */
+      if leg.%is_flight_duty% and training.%has_duty_code% then 
+        training.%duty_code%
+      /* Special case for training, NEW legs doesn't require training attr 
+         Only applicable to cabin crew. */
+      else if crew.%is_cabin% and leg.%is_new% then
+        "N"
+      else if crew.%is_cabin% and leg.%is_release% then
+        "R"
+      else if crew.%is_cabin% and leg.%is_x_supernum% then
+        "UX"
+      /* Simulator codes don't have position code */
+      else if leg.%is_simulator% and training.%has_simulator_duty_code% then
+        training.%simulator_duty_code%
+      else if leg.%is_ground_duty% and leg.%has_training_code% then
+        if leg.%is_ol123_supervis% then
+          "IO"
+        else if leg.%is_ol123_instr% then
+          "ISV"
+        else if leg.%is_cc_instr_ausc% then "IA"
+        else if leg.%is_cc_instr_exam% then "IE"
+        else if leg.%is_cc_instr_sen% then "IES"
+        else if leg.%is_pc_change_month_RENEWAL% then "R"
+        else if leg.%is_pc_change_month_CHANGE% then "N"
+        else ""
+      else if leg.%is_school_flight% then
+        if (crew.%has_restr_training_capt_leg_start% or 
+            crew.%has_restr_training_dct_foc_refr_leg_start%) then
+            concat("I", crew_pos.%code%)
+        else if crew.%is_instructor_leg_start% then
+            "I"
+        else
+            ""
+      else if leg.%is_flight_duty% and
+                crew_pos.%assigned_pos% = 1 and
+                crew_pos.%leg_booked_pos%(4) > 0 and
+                any(equal_legs, crew_pos.%assigned_pos% = 4) where (%is_roster% and leg.%is_active_flight%) then
+            "F"
+      /* If nothing else matched we use the position code */
+      else if leg.%is_active_flight% then
+        crew_pos.%code%
+      else
+        ""
+   else
+        "";
+
+export %leg_has_duty_code% = default(%leg_code% <> "", false);
+%leg_has_manual_duty_code% = not void(%leg_manual_duty_code%);
+%leg_manual_duty_code% = void_string;
+
+
+/* End of file */

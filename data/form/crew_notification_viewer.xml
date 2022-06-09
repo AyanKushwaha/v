@@ -1,0 +1,179 @@
+<!-- 
+
+     $Header$ 
+     
+     Purpose: List notifications
+
+     Created by: Yaser Mohamed, 08-01-2007
+
+-->
+
+<views style.resize="true">
+
+<head>
+
+<title>Notification Viewer - ${tmp_cn_view_form_info2[0, crew_info]}</title>
+
+<alias id="filtered_list" source="tmp_cn_crew_notification"/>
+
+<on-loaded>
+  setEventEnabled(on-changed,false);  
+  model("init_wave_client");
+</on-loaded>
+
+<on-opened>
+  setEventEnabled(on-changed,false);  
+  setFontSize("notification_list", "11");
+  update_filter();
+  setValue("crew_info", "${tmp_cn_view_form_info2[0,crew_info]}");
+  setEventEnabled(on-changed,true);  
+</on-opened>
+
+<!-- Filter the view depending on the setting of the crew filter -->
+<action name="update_filter" args=""><![CDATA[
+context.action('setFilter', 'filtered_list',
+  '(&(|(&(${deadline_filter_on}=true)(deadline>${deadline_filter}))' \
+      '(${deadline_filter_on}=false))' \
+    '(|(&(${undelivered_filter_on}=true)(delivered=NULL))' \
+      '(${undelivered_filter_on}=false)))')
+]]></action>
+
+<!-- Set value of check-box 'generate_alert' depending on subtype of notification -->
+<action name="update_gen_alert" args="typ"><![CDATA[
+subtype = typ.split('+')[-1]
+context.action('setValue', 'generate_alert', ('false', 'true')[subtype != '!NoAlert'])
+]]></action>
+
+</head>  
+
+<!-- Top menu -->
+<menu-bar>
+  <menu label="File">
+    <menu-item ref="exit_button"/>
+  </menu>
+  <menu label="Edit">
+    <menu-item ref="toggle_delivered_button"/>
+  </menu>
+</menu-bar>
+
+<!-- Crew notification box -->
+<box style.width="800" style.orientation="border">
+  <box style.constraints="North" style.orientation="vertical"> 
+    <box style.orientation="border">
+      <box style.constraints="Center">
+        <text-field id="crew_info" editable="false" style.border="none"
+              style.font.size="20" />
+      </box>
+    </box>
+    <box label="Filter Options" style.constraints="North" style.orientation="border">
+      <box style.constraints="West" style.orientation="horizontal">
+        <check-box id="deadline_filter_on" value="false" label="Deadline After:"
+                   tooltip="Only show notifications with deadline after specified time">
+          <on-changed>
+            update_filter();
+          </on-changed>
+        </check-box>
+        <table-cell id="deadline_filter" label="" style.left="1" style.width="140"
+            source="tmp_cn_view_form_info2" row="0" column="deadline_filter">
+          <on-changed>
+            update_filter();
+          </on-changed>
+        </table-cell>
+      </box>
+
+      <box style.constraints="East">
+          <check-box id="undelivered_filter_on" value="true" label="Undelivered"
+                     tooltip="Only show non-delivered notifications">
+              <on-changed>
+                update_filter();
+              </on-changed>
+          </check-box>
+      </box>
+    </box>
+  </box>
+
+  <!-- Notifications view -->
+  <box style.constraints="Center" style.orientation="vertical">
+    <box label="Crew Notifications">
+      <table id="notification_list" style.constraints="Center" source="filtered_list"
+              columns="idnr,deadline,crew,crew_employee_number,message,typ,system,created,delivered,recipients,si"
+              style.grid="false" editable="false" table.selectionmode="SINGLE"
+              sort.column="deadline" style.height="160">
+        <columninfo column="idnr" visible="false"/>
+        <columninfo column="deadline" label="Deadline" width="120"/>
+        <columninfo column="crew" style.display.column="logname" visible="false"/>
+        <columninfo column="crew_employee_number" visible="false"/>
+        <columninfo column="typ" label="Type" style.display.column="typ" width="80"/>
+        <columninfo column="message" label="Notification" width="240"/>
+        <columninfo column="system" visible="false"/>
+        <columninfo column="created" label="Created" width="120"/>
+        <columninfo column="delivered" label="Delivered" width="120"/>
+        <columninfo column="recipients" label="Recipients" width="120"/>
+        <columninfo column="si" label="SI" width="140"/>
+        <on-selection-changed>
+          model("submit_trans");
+          model("cn_format_notification","${notification_list[idnr]}", "${notification_list[crew]}");
+          refreshClient();
+          setValue("notification_text", "${tmp_cn_view_form_info2[0,not_show]}");
+          setValue("created_by_text", "${tmp_cn_view_form_info2[0,cb_show]}");
+          setValue("si_text", "${tmp_cn_view_form_info2[0,si_show]}");
+          setValue("selected_type", "${notification_list[typ]}");
+          update_gen_alert("${notification_list[typ]}");
+        </on-selection-changed>
+      </table>
+    </box>
+
+    <box label="Selected Crew Notification" style.orientation="border">
+      <box style.constraints="Center" style.orientation="vertical">
+        <text-field id="notification_text" label="Message:"
+              editable="false" style.nrows="3"/>
+        <text-field id="created_by_text" label="Created By:" editable="false"
+              style.width="20"/>
+         <text-field id="si_text" label="Supplemental:" editable="false"
+             style.nrows="2"/>
+         <check-box id="generate_alert" label="Generates Alert"
+             enabled="false"/>
+         <text-field id="selected_type" visible="false" value=""/>
+      </box>
+      <box style.constraints="South" style.orientation="horizontal">
+        <button label="Toggle _D_elivered" 
+            id="toggle_delivered_button"
+            style.width="120"
+            tooltip="Toggle delivered on/off for selected notification (Manual notifications only)"
+            filter.enabled="(&amp;(selected_type>=Manual+)(selected_type&lt;Manual,))">
+            <!-- (The button filter looks for values starting with "Manual+"...) -->
+          <on-click>
+              model("submit_opaq", "Deliver Notification ${tmp_cn_view_form_info2[0, crew_info]}");
+              model("cn_set_delivered","${notification_list[idnr]}","${notification_list[crew]}");
+              refreshClient();
+          </on-click>
+        </button>
+        <button label="_R_emove"
+            id="remove_button"
+            style.width="120"
+            tooltip="Remove notification(s). Note that there is no guarantee that the message has not already been read."
+            filter.enabled="(&amp;(selected_type>=Manual+)(selected_type&lt;Manual,))">
+          <on-click>
+              model("submit_opaq", "Cancel Notification ${tmp_cn_view_form_info2[0, crew_info]}");
+              model("cn_remove","${notification_list[idnr]}","${notification_list[crew]}");
+              refreshClient();
+          </on-click>
+        </button>
+      </box>
+    </box>
+  </box>
+      
+  <box style.constraints="South">
+    <button label="_C_lose"
+            id="exit_button"
+            tooltip="Close this form"
+            style.width="75">
+        <on-click>
+          closeForm();
+        </on-click>
+    </button>
+  </box>
+</box>
+
+</views>
+<!-- vim:set ts=4 sw=4 et nowrap: -->

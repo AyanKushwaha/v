@@ -1,0 +1,77 @@
+/* -*- crc -*-
+ *
+ * 
+ *
+ * Support module for batch report 43.1 Illness report
+ *
+ * The report will return all crew with have reported illness within the past eight days.
+ * It is run as a batch job every Tuesday at 04:00Z.
+ *
+ * [acosta:06/227@11:56] first version.
+ * [acosta:06/228@11:07] Times in homebase time.
+ */
+
+module report_illness
+
+import fundamental;
+import leg;
+import levels;
+import task;
+
+
+/* Exported variables ************************************************ {{{1 */
+export %has_illness_in_period% =
+  any(leg(chain), %is_ill%)
+  where (%in_period%);
+
+export %is_ill_in_period% = %is_ill% and %in_period%;
+
+export %sickperiod_starts% = min(leg(roster), leg.%start_hb%) 
+                             from (current) backwards while (%is_ill%) 
+                             where (%edate% = next(leg(roster),%sdate%));
+  
+export %sickperiod_ends% = max(leg(roster), leg.%end_hb%) 
+                             from (current) forwards while (%is_ill%)
+                             where (%sdate% = prev(leg(roster),%edate%));
+
+export %day_in_sickness_period% = 
+  (leg.%start_hb% - 
+   round_down(%sickperiod_starts% + 0:01, 24:00)) / 24:00 + 1;
+  
+export %is_report_back% =
+  leg.%is_report_back%;
+
+
+/* Private variables ************************************************* {{{1 */
+%is_ill% = default(task.%group_code% = "ILL", false);
+
+/*
+ * Crew will be reported, if the illness started the gone week, and if 
+ * it does not belong fully to previous period.
+ *
+ *                                               %today%
+ *       %period_start%                          | %now%
+ *       |                                       | |
+ *       v                                       v v
+ *   -Su-|-Mo- -Tu- -We- -Th- -Fr- -Sa- -Su- -Mo-|-Tu- -We-
+ *    30   01   02   03   04   05   06   07   08   09   10
+ *   ---- (NOT reported, ended in previous period)
+ *   +++++++++ (ends in period)
+ *             ++++++++++++++ (starts in period)
+ *                                           ++++ (starts in period)
+ *                                           +++++++++++++++++ (starts in period,
+ *                                                               open endtime)
+ *                                                ---- (NOT reported,
+ *                                                       starts on current day)
+ */
+
+%sdate% = leg.%start_date%;
+%edate% = round_down(leg.%end_hb%, 24:00); /* Should this be  leg.%end_date%? */
+
+%period_start% = fundamental.%now_date% - 192:00; /* 8*24:00 = 192:00 */
+/*%in_period% = (%edate% >= %period_start%) and (%sdate% < fundamental.%now_date%);*/
+%in_period% = (%sickperiod_ends% >= %period_start%) and (%sickperiod_starts% < fundamental.%now_date%);
+
+/* modeline ********************************************************** {{{1 */
+/* vim: set fdm=marker: */
+/* eof */

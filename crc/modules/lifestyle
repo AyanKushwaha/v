@@ -1,0 +1,520 @@
+/* -*- crc -*-
+ *
+ * Models lifestyle bidding
+ *
+ */
+root module lifestyle
+
+import bid;
+import crew;
+import duty;
+import fundamental;
+import levels;
+import pp;
+import time_utils;
+import trip;
+import wop;
+
+
+group lifestyle_parameters =
+    %lifestyle_header%,
+    %morning_person_latest_start_p%,
+    %evening_person_earliest_start_p%,
+    %sec_lifestyle_fulfillment_p%,
+    %sec_lifestyle_fulfill_either_one_general_p%,
+    %sec_lifestyle_fulfill_commuter_pattern_p%,
+    %sec_lifestyle_fulfill_nights_at_home_pattern_p%;
+
+%lifestyle_header% =
+    parameter ""
+    remark "#HEADER#Lifestyle parameters";
+
+export %chosen_lifestyle% =
+    bid.%str1_by_type%("Preference");
+
+export %has_lifestyle_bid% =
+    not void(%chosen_lifestyle%);
+
+export %nights_at_home_string% = "nights_at_home_pref";
+export %morning_person_string% = "early_ends_pref";
+export %evening_person_string% = "late_starts_pref";
+
+export %nights_at_home_early_ends_string% = "nights_at_home_early_ends_pref";
+export %nights_at_home_late_starts_string% = "nights_at_home_late_starts_pref";
+
+export %commuter_2_3_days_string% = "comm23_days_pref";
+export %commuter_2_3_days_early_ends_string% = "comm23_days_early_ends_pref";
+export %commuter_2_3_days_late_starts_string% = "comm23_days_late_starts_pref";
+
+export %commuter_3_5_days_string% = "comm35_days_pref";
+export %commuter_3_5_days_early_ends_string% = "comm35_days_early_ends_pref";
+export %commuter_3_5_days_late_starts_string% = "comm35_days_late_starts_pref";
+
+export %west_destinations_string% = "west_destinations_pref";
+export %east_destinations_string% = "east_destinations_pref";
+export %any_longhaul_destinations_string% = "any_longhaul_destinations_pref";
+
+/* Percentage */
+export %crew_fulfillment% =
+    %fulfillment% + %_sec_fulfillment%;
+
+/* Refactored to have option for functional call. */
+export %fulfillment% =
+    %fulfillment_func%(%chosen_lifestyle%);
+%fulfillment_func%(String lifestyle) =
+    %div_rounds%(100 * %num_days_satisfying_fulfillment_func%(lifestyle),
+                 %num_days_available_for_fulfillment%);
+
+/* Refactored to have option for functional call. */
+%num_days_satisfying_fulfillment% =
+    %num_days_satisfying_fulfillment_func%(%chosen_lifestyle%);
+%num_days_satisfying_fulfillment_func%(String lifestyle) =
+    count(times(pp.%days%))
+    where(%day_available_for_fulfillment%(times_index(0)) and
+          %day_satisfies_fulfillment%(lifestyle, times_index(0)));
+
+%day_satisfies_fulfillment%(String lifestyle, Int ix) =
+    not %day_overlaps_any_disregarded_activity%(ix) and
+    any(wop(roster), %wop_satisfies_lifestyle%(lifestyle, ix));
+
+%num_days_available_for_fulfillment% =
+    count(times(pp.%days%))
+    where(%day_available_for_fulfillment%(times_index(0)));
+
+%day_available_for_fulfillment%(Int ix) =
+    %day_overlaps_any_assignment%(ix) and
+    not %day_overlaps_any_disregarded_activity%(ix);
+
+%wop_satisfies_lifestyle%(String lifestyle, Int ix) =
+    if %day_overlaps_wop%(ix) then
+        %lifestyle_wop_satisfied%(lifestyle, ix) and
+        any(trip(wop), %trip_satisfies_lifestyle%(lifestyle, ix))
+    else
+        False;
+
+%trip_satisfies_lifestyle%(String lifestyle, Int ix) =
+    if %day_overlaps_trip%(ix) then
+        %lifestyle_trip_satisfied%(lifestyle, ix)
+        or any(duty(trip), %duty_satisfies_lifestyle%(lifestyle, ix))
+    else
+        False;
+
+%duty_satisfies_lifestyle%(String lifestyle, Int ix) =
+    if %day_overlaps_duty%(ix) then
+        %lifestyle_duty_satisfied%(lifestyle, ix)
+    else
+        False;
+
+%day_overlaps_wop%(Int ix) =
+    time_utils.%times_overlap%(
+    wop.%start_utc%, wop.%end_utc%,
+    time_utils.%pp_day_2_abstime_utc%(ix), time_utils.%pp_day_2_abstime_utc%(ix) + 24:00);
+
+%day_overlaps_trip%(Int ix) =
+    time_utils.%times_overlap%(
+    trip.%start_utc%, trip.%end_utc%,
+    time_utils.%pp_day_2_abstime_utc%(ix), time_utils.%pp_day_2_abstime_utc%(ix) + 24:00);
+
+%day_overlaps_duty%(Int ix) =
+    time_utils.%times_overlap%(
+    duty.%start_utc%, duty.%end_utc%,
+    time_utils.%pp_day_2_abstime_utc%(ix), time_utils.%pp_day_2_abstime_utc%(ix) + 24:00);
+
+%day_overlaps_any_disregarded_activity%(Int ix) =
+    any(wop(roster), %day_overlaps_any_disregarded_wop_activity%(ix));
+
+%day_overlaps_any_disregarded_wop_activity%(Int ix) =
+    any(trip(wop), %day_overlaps_trip%(ix))
+    where(trip.%is_locked% or
+          not trip.%has_only_flight_duty% or
+          trip.%is_standby% or
+          trip.%is_standby_line%);
+
+%day_overlaps_any_assignment%(Int ix) =
+    any(trip(roster), %day_overlaps_trip%(ix));
+
+table lifestyle_conditions_table(String lifestyle, Int ix) =
+    lifestyle ->
+            Bool %lifestyle_wop_satisfied%,
+            Bool %lifestyle_trip_satisfied%,
+            Bool %lifestyle_duty_satisfied%;
+
+    "nights_at_home_pref" ->
+            True,
+            False,
+            %nights_at_home_duty_satisfied%(ix);
+
+    "early_ends_pref" ->
+            True,
+            False,
+            %duty_is_morning_duty_lifestyle%;
+
+    "late_starts_pref" ->
+            True,
+            False,
+            %duty_is_evening_duty_lifestyle%;
+
+    "nights_at_home_early_ends_pref" ->
+            True,
+            False,
+            %nights_at_home_early_ends_duty_satisfied%(ix);
+
+    "nights_at_home_late_starts_pref" ->
+            True,
+            False,
+            %nights_at_home_late_starts_duty_satisfied%(ix);
+
+    "comm23_days_pref" ->
+            true,
+            %commuter_2_3_days_trip_satisfied%,
+            False;
+
+    "comm23_days_early_ends_pref" ->
+            True,
+            %commuter_2_3_days_early_ends_trip_satisfied%,
+            False;
+
+    "comm23_days_late_starts_pref" ->
+            True,
+            %commuter_2_3_days_late_starts_trip_satisfied%,
+            False;
+
+    "comm35_days_pref" ->
+            true,
+            %commuter_3_5_days_trip_satisfied%,
+            False;
+
+    "comm35_days_early_ends_pref" ->
+            True,
+            %commuter_3_5_days_early_ends_trip_satisfied%,
+            False;
+
+    "comm35_days_late_starts_pref" ->
+            True,
+            %commuter_3_5_days_late_starts_trip_satisfied%,
+            False;
+
+    "west_destinations_pref" ->
+            True,
+            %trip_is_west_bound_lifestyle%,
+            False;
+
+    "east_destinations_pref" ->
+            True,
+            %trip_is_east_bound_lifestyle%,
+            False;
+
+    "any_longhaul_destinations_pref" ->
+            True,
+            %trip_is_west_or_east_bound_lifestyle%,
+            False;
+
+end
+
+/*
+ * Commuter
+ */
+
+%commuter_2_3_days_early_ends_trip_satisfied% =
+    %commuter_2_3_days_trip_satisfied% and %trip_is_morning_duty_lifestyle%;
+
+%commuter_2_3_days_late_starts_trip_satisfied% =
+    %commuter_2_3_days_trip_satisfied% and %trip_is_evening_duty_lifestyle%;
+
+%commuter_3_5_days_early_ends_trip_satisfied% =
+    %commuter_3_5_days_trip_satisfied% and %trip_is_morning_duty_lifestyle%;
+
+%commuter_3_5_days_late_starts_trip_satisfied% =
+    %commuter_3_5_days_trip_satisfied% and %trip_is_evening_duty_lifestyle%;
+
+table commuter_trip_satisfied =
+    trip.%days%, %nights_away_from_base%, trip.%is_long_haul% ->
+        export Bool %commuter_2_3_days_trip_satisfied%,
+        export Bool %commuter_3_5_days_trip_satisfied%;
+
+    2, 1, False     -> True, False;
+    3, 2, False     -> True, True;
+    3, -, True      -> True, True;
+    >3, -, True     -> True, True;
+    4, 3, False     -> False, True;
+    5, 4, False     -> False, True;
+    -, -, -         -> False, False;
+end
+
+/*
+ * Nights at home
+ */
+%nights_at_home_duty_satisfied%(Int ix) =
+    if %is_roster% then
+        if %_nights_at_home_last_duty_should_be_checked% then
+            %duty_night_is_at_home%(ix)
+            and %all_duty_in_wop_is_night_at_home%
+        else
+            %duty_night_is_at_home%(ix)
+    else
+        duty.%layover_station% = %crew_homeairport%;
+
+%_nights_at_home_last_duty_should_be_checked% =
+    (is_last(trip(wop)) and trip.%num_duties% > 1 and is_last(duty(wop)))
+    or is_last(duty(wop));
+
+%duty_night_is_at_home%(Int ix) =
+    duty.%layover_station% = %crew_homeairport%
+    and duty.%start_utc% >= time_utils.%pp_day_2_abstime_utc%(ix)
+    and duty.%start_utc% <= time_utils.%pp_day_2_abstime_utc%(ix) + 24:00;
+
+%all_duty_in_wop_is_night_at_home% =
+    all(duty(wop), duty.%layover_station% = %crew_homeairport%);
+
+%nights_away_from_base% =
+    count(duty(trip))
+    where(not duty.%is_last_in_trip% and
+          duty.%layover_station% <> %crew_homeairport%);
+
+%nights_at_home_early_ends_duty_satisfied%(Int ix) =
+    %nights_at_home_duty_satisfied%(ix) and %duty_is_morning_duty_lifestyle%;
+
+%nights_at_home_late_starts_duty_satisfied%(Int ix) =
+    %nights_at_home_duty_satisfied%(ix) and %duty_is_evening_duty_lifestyle%;
+
+
+/*
+ * Morning / Evening Person
+ */
+
+export %duty_is_morning_duty_lifestyle% =
+    duty.%start_od_lt% <= %morning_person_latest_start_p%;
+
+export %duty_is_evening_duty_lifestyle% =
+    duty.%start_od_lt% >= %evening_person_earliest_start_p%;
+
+
+export %trip_is_morning_duty_lifestyle% =
+    all(duty(trip), duty.%start_od_lt% <= %morning_person_latest_start_p%);
+
+export %trip_is_evening_duty_lifestyle% =
+    all(duty(trip), duty.%start_od_lt% >= %evening_person_earliest_start_p%);
+
+%morning_person_latest_start_p% =
+    parameter 09:00
+    remark "Morning Person: latest trip start";
+
+%evening_person_earliest_start_p% =
+    parameter 10:00
+    remark "Evening Person: earliest trip start";
+
+/* debug variables */
+
+%trip_has_morning_duty% =
+    any(duty(trip), duty.%start_od_lt% <= %morning_person_latest_start_p%);
+
+%trip_has_evening_duty% =
+    any(duty(trip), duty.%start_od_lt% >= %evening_person_earliest_start_p%);
+
+/*
+ * East / west / any longhaul
+ */
+
+export %trip_is_west_bound_lifestyle% =
+    default(trip.%is_west_bound%, false);
+
+export %trip_is_east_bound_lifestyle% =
+    default(trip.%is_east_bound%, false);
+
+export %trip_is_west_or_east_bound_lifestyle% =
+    %trip_is_west_bound_lifestyle% or %trip_is_east_bound_lifestyle%;
+
+/* Set by the planner, shared with crew members */
+%scheduler_note_p% =
+    parameter ""
+    remark "Scheduler's note for the crew members";
+
+/*
+ * CREW HOMEAIRPORT
+ *  For trip filtering on bid there is a need to override the chains "crew.%homeairport%"
+ *  so that unassigned chains can relate to a crew member's lifestyle.
+ */
+
+%crew_homeairport% =
+  if not %is_roster% and length(%filter_crew_homeairport_override_p%) = 3 then
+    %filter_crew_homeairport_override_p%
+  else
+    crew.%homeairport%;
+
+export %filter_crew_homeairport_override_p% =
+  parameter ""
+  remark "LIFESTYLE FILTER: This is a variable used by the trip select filters, should be empty";
+
+%filter_trip_satisfied% =
+    default(%lifestyle_trip_satisfied%(%chosen_lifestyle%, 0)
+            or %lifestyle_duty_satisfied%(%chosen_lifestyle%, 0), false);
+
+/*
+ *
+ * Lifestyle Secondary fulfillment
+ * Secondary fulfillment presents counts fulfillment
+ * for work days matching either one of the two combined lifestyles
+ *
+ */
+
+ /* Percentage */
+
+export %sec_fulfillment% =
+    %div_rounds%(100 * %sec_num_days_satisfying_fulfillment%,
+                     %num_days_available_for_fulfillment%);
+
+%_sec_fulfillment% =
+    (%sec_fulfillment% * %sec_lifestyle_fulfillment_p% / 100);
+
+%sec_num_days_satisfying_fulfillment% =
+    count(times(pp.%days%))
+    where(%day_available_for_fulfillment%(times_index(0)) and
+          %sec_day_satisfies_fulfillment%(times_index(0)));
+
+%sec_day_satisfies_fulfillment%(Int ix) =
+    not %day_overlaps_any_disregarded_activity%(ix) and
+    not %day_satisfies_fulfillment%(%chosen_lifestyle%, ix) and
+    any(wop(roster), %sec_wop_satisfies_lifestyle%(ix));
+
+%sec_wop_satisfies_lifestyle%(Int ix) =
+    if %day_overlaps_wop%(ix) then
+        %sec_lifestyle_wop_satisfied%(ix) and
+        any(trip(wop), %sec_trip_satisfies_lifestyle%(ix))
+    else
+        False;
+
+%sec_trip_satisfies_lifestyle%(Int ix) =
+    if %day_overlaps_trip%(ix) then
+        %sec_lifestyle_trip_satisfied%(ix)
+        or any(duty(trip), %sec_duty_satisfies_lifestyle%(ix))
+    else
+        False;
+
+%sec_duty_satisfies_lifestyle%(Int ix) =
+    if %day_overlaps_duty%(ix) then
+        %sec_lifestyle_duty_satisfied%(ix)
+    else
+        False;
+
+table combo_lifestyle_conditions_table(Int ix) =
+    %chosen_lifestyle% ->
+            Bool %sec_lifestyle_wop_satisfied%,
+            Bool %sec_lifestyle_trip_satisfied%,
+            Bool %sec_lifestyle_duty_satisfied%;
+
+    "nights_at_home_early_ends_pref" ->
+            True,
+            False,
+            %sec_nights_at_home_early_ends_duty_satisfied%(ix);
+
+    "nights_at_home_late_starts_pref" ->
+            True,
+            False,
+            %sec_nights_at_home_late_starts_duty_satisfied%(ix);
+
+    "comm23_days_early_ends_pref" ->
+            True,
+            %sec_commuter_2_3_days_early_ends_trip_satisfied%,
+            False;
+
+    "comm23_days_late_starts_pref" ->
+            True,
+            %sec_commuter_2_3_days_late_starts_trip_satisfied%,
+            False;
+
+    "comm35_days_early_ends_pref" ->
+            True,
+            %sec_commuter_3_5_days_early_ends_trip_satisfied%,
+            False;
+
+    "comm35_days_late_starts_pref" ->
+            True,
+            %sec_commuter_3_5_days_late_starts_trip_satisfied%,
+            False;
+    - ->
+            False,
+            False,
+            False;
+end
+
+%sec_nights_at_home_early_ends_duty_satisfied%(Int ix) =
+    if %nights_at_home_early_ends_duty_satisfied%(ix) then
+        False
+    else if default(%sec_lifestyle_fulfill_either_one_general_p%,false) then
+        %nights_at_home_duty_satisfied%(ix) or %duty_is_evening_duty_lifestyle%
+    else if default(%sec_lifestyle_fulfill_nights_at_home_pattern_p%, false) then
+        %nights_at_home_duty_satisfied%(ix)
+    else
+       %duty_is_morning_duty_lifestyle%;
+
+
+%sec_nights_at_home_late_starts_duty_satisfied%(Int ix) =
+     if %nights_at_home_late_starts_duty_satisfied%(ix) then
+        False
+     else if default(%sec_lifestyle_fulfill_either_one_general_p%,false) then
+        %nights_at_home_duty_satisfied%(ix) or %duty_is_evening_duty_lifestyle%
+    else if default(%sec_lifestyle_fulfill_nights_at_home_pattern_p%, false) then
+        %nights_at_home_duty_satisfied%(ix)
+    else
+        %duty_is_evening_duty_lifestyle%;
+
+
+%sec_commuter_2_3_days_early_ends_trip_satisfied% =
+    if %commuter_2_3_days_early_ends_trip_satisfied% then
+        False
+    else if default(%sec_lifestyle_fulfill_either_one_general_p%,false) then
+        %commuter_2_3_days_trip_satisfied% or %trip_is_morning_duty_lifestyle%
+    else if default(%sec_lifestyle_fulfill_commuter_pattern_p%, false) then
+        %commuter_2_3_days_trip_satisfied%
+    else
+        %trip_is_morning_duty_lifestyle%;
+
+
+%sec_commuter_2_3_days_late_starts_trip_satisfied% =
+    if %commuter_2_3_days_late_starts_trip_satisfied% then
+        False
+    else if default(%sec_lifestyle_fulfill_either_one_general_p%,false) then
+        %commuter_2_3_days_trip_satisfied% or %trip_is_evening_duty_lifestyle%
+   else if default(%sec_lifestyle_fulfill_commuter_pattern_p%, false) then
+       %commuter_2_3_days_trip_satisfied%
+   else
+       %trip_is_evening_duty_lifestyle%;
+
+
+%sec_commuter_3_5_days_early_ends_trip_satisfied% =
+    if %commuter_3_5_days_early_ends_trip_satisfied% then
+        False
+    else if default(%sec_lifestyle_fulfill_either_one_general_p%,false) then
+        %commuter_3_5_days_trip_satisfied% or %trip_is_morning_duty_lifestyle%
+    else if default(%sec_lifestyle_fulfill_commuter_pattern_p%, false) then
+        %commuter_3_5_days_trip_satisfied%
+    else
+        %trip_is_morning_duty_lifestyle%;
+
+
+%sec_commuter_3_5_days_late_starts_trip_satisfied% =
+    if %commuter_3_5_days_late_starts_trip_satisfied% then
+        False
+    else if default(%sec_lifestyle_fulfill_either_one_general_p%,false) then
+        %commuter_3_5_days_trip_satisfied% or %trip_is_evening_duty_lifestyle%
+   else if default(%sec_lifestyle_fulfill_commuter_pattern_p%, false) then
+       %commuter_3_5_days_trip_satisfied%
+   else
+       %trip_is_evening_duty_lifestyle%;
+
+export %sec_lifestyle_fulfillment_p% =
+  parameter 50 minvalue 0 maxvalue 100
+  remark "Lifestyle Secondary fulfillment(%): This is a variable used for combination lifestyle if not both can be fulfilled.";
+
+export %sec_lifestyle_fulfill_either_one_general_p% =
+parameter True
+remark "Lifestyle Secondary fulfillment: Either one of the combination lifestyles will fulfill (True)";
+
+export %sec_lifestyle_fulfill_commuter_pattern_p% =
+parameter True
+remark "Lifestyle Secondary fulfillment: Nights away from home trips fulfill (True) or Evening/Morning trips fulfill (False)";
+
+export %sec_lifestyle_fulfill_nights_at_home_pattern_p% =
+parameter True
+remark "Lifestyle Secondary fulfillment: Nights at home trips fulfill (True) or Evening/Morning trips fulfill (False)";
+

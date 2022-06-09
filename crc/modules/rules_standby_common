@@ -1,0 +1,267 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains standby rules used common for crew in Carmen Crew Rostering
+ *   and Crew Tracking
+ *
+ * Sections:
+ *   Standby rules
+ *
+ * Created by:
+ *   Johan Astrom, 2008-06-02
+ *
+ * Major changes:
+ *
+ */
+
+root module rules_standby_common
+
+import fundamental;
+import base_utils;
+import levels;
+import crew;
+import wop;
+import roster;
+import duty;
+import leg;
+import rule_exceptions;
+import parameters;
+import base_product;
+import accumulators;
+
+/****************************************************************
+ * Section 1: Standby rules
+ ***************************************************************/
+
+/*
+** Rule: 
+**    Standby duration accumulated over a duty must not exceed 10 hours.
+**
+** Description:
+**    Check that standby duration accumulated over a duty doesnt exceed
+**    10 hours.
+**
+** Agreement:
+**    CAU K04 B2 F1.1.5  F2.1.3
+**    SCCA K04 E.1.B E 2.2.A
+**    NKF K06
+**    FC SH 2.3 A.b
+**    FC LH praxis
+**    4ExNG
+**    Cimber is excluded SKCMS-596
+*/
+rule sby_max_duration_standby_ALL =
+  valid roster.%check_rules% and
+        duty.%in_pp_extended% and
+        duty.%has_standby% and
+        not crew.%is_leased_duty_start% and
+        not ( duty.%has_standby_at_hotel% and
+              (crew.%has_agmt_group_snk_cc_at_date%(duty.%start_UTC%) or
+               crew.%has_agmt_group_nkf_cc_at_date%(duty.%start_UTC%)) );
+	
+	%standby_duration_duty% <= %maximum_standby_duration_duty% + 
+				   rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+
+  startdate = duty.%start_UTC%;
+  failobject = duty.%failobject_start%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(Reltime val, Reltime limit) = 
+    concat("SBY: ", %reltime2str%(val), 
+           " hrs of standby duty in duty. Only ", %reltime2str%(limit),
+           " allowed.");
+  remark "SBY: Maximum duration of standby in duty is 10 hours (or 16 hours for QA CC and QA FD(CJ)).",
+  planner "The rule checks that the maximum duration of accumulated standby in"
+	  " a duty is 10 hours (or 16 hours for QA CC and QA FD(CJ)).";
+end
+
+%standby_duration_duty% =
+  sum(leg(duty), %standby_time%) 
+    where (
+        if %is_Cimber% then
+            leg.%is_standby_at_home%
+        else
+            leg.%is_standby% and
+            (%cabin_crew% or
+                not (leg.%is_standby_at_airport%))
+     );
+
+/* redefined in inherited modules */
+%standby_time% = 
+  leg.%time%;
+
+
+%is_Cimber% =
+     %is_QA_CC% or (%is_Danish_FD% and %is_CJ%);
+
+%is_QA_CC% =
+    default(crew.%has_agmt_group_qa_CC%, false);
+
+%is_Danish_FD% =
+    default(crew.%has_agmt_group_qa_FD%, false) or default(crew.%has_agmt_group_skd_fd%, false);
+
+%is_CJ% =
+    %is_CJ_at_date%(leg.%start_UTC%);
+
+%is_CJ_at_date%(Abstime date) =
+    crew.%has_ac_qln%(date, "CJ");
+
+%maximum_standby_duration_duty% =
+    if %is_Cimber% then
+        16:00
+    else
+        10:00;
+
+/*
+** Rule:
+**    Airport standby duration must not exceed 4 hours. 
+**    Moved from CC to all as part of 4ExNG
+**
+** Description:
+**    Check that airport standby duty duration time doesnt exceed 4 hours
+**    An airport standby is considered a single activity of type airport standby.
+**    The rule is only valid for danish cabin crew.
+**
+** Agreement:
+**    CAU K04 B2 F2.1.9
+**    SASCMS-6103. CC SKN, 2 hours if prev leg duty is less than 6 hours
+*/
+rule stb_max_duration_airport_standby_CC_SKD_SKN_SKL =
+  valid roster.%check_rules% and
+        wop.%in_pp_extended% and
+        ((crew.%is_cabin% and 
+          (crew.%is_SKD% or
+           crew.%is_SKN%)) or
+          parameters.%k4exng_fc_sp5_1_valid%(wop.%start_utc%) or
+          crew.%k4exng_cc_sp5_1_valid%(wop.%start_utc%)) and
+        wop.%has_airport_standby% and
+        leg.%is_standby_at_airport% and
+        not leg.%is_waiting_at_airport% and
+        not crew.%is_leased_wop_start%;
+
+        %duty_airport_standby% <= %maximum_duty_airport_standby% +
+                                  rule_exceptions.%overshoot_rel%(wop.%start_UTC%);
+
+  startdate = wop.%start_UTC%;
+  failobject = %duty_failobject_start_airport_standby%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failtext(Reltime val, Reltime limit) =
+    concat("SBY: ", %reltime2str%(val),
+           " hrs in airport SBY. Only ", %reltime2str%(limit),
+           " allowed.");
+  remark "SBY: Maximum duration of airport standby is 4 (2 CC SKN) hours.",
+  planner "The rule checks that the maximum duration of airport standby"
+          " is 4 (2 CC SKN) hours. CC SKN, 2 hours if prev leg duty is less than 6 hours";
+end
+
+set airport_standby_cancelled_production = "AC", "AO","WP","WO";
+
+%duty_airport_standby% =
+  max(leg(wop),  leg.%time%)
+  /* Airport standby due to cancelled duty is excepted */
+  where (leg.%is_standby_at_airport% and
+         not (leg.%code% in airport_standby_cancelled_production) and
+         not leg.%is_waiting_at_airport%);
+
+%duty_airport_standby_date% =
+  first(duty(wop),duty.%start_UTC%)
+  where (duty.%is_standby_at_airport%);
+
+%duty_failobject_start_airport_standby% =
+  first(leg(wop),leg.%failobject_departure%)
+  where (leg.%is_standby_at_airport% and
+         not (leg.%code% in airport_standby_cancelled_production) and
+         not leg.%is_waiting_at_airport% and
+         leg.%time% > (%maximum_duty_airport_standby% +
+                                  default(rule_exceptions.%overshoot_rel%(wop.%start_UTC%), 0:00)
+                  ));
+
+%_prev_leg_duty_time% =
+  prev(leg(duty), leg.%block_time%) +
+  prev(leg(duty), leg.%check_in%) +
+  prev(leg(duty), leg.%check_out%);
+
+%maximum_duty_airport_standby% =
+  if default(prev(leg(duty), leg.%is_active_flight%), false) and
+     crew.%is_cabin% and 
+     crew.%is_SKN% and
+     leg.%is_standby% and
+     leg.%start_utc% - prev(leg(duty), leg.%end_utc%) < 3:00 and
+     %_prev_leg_duty_time% < 6:00
+  then
+    2:00
+  else
+    4:00;
+
+/*
+** Rule: 
+**    Maximum duration of standby block is X consecutive days
+**
+** Description:
+**    Check that the duration of standby block doesnt exceed X consecutive days. 
+**    Assumption is that a standby block/line is inside wop range.
+**    From an agreement point of view this is only a cabin crew rule, but we need it
+**    for flight crew to functionally limit the length og standby blocks.
+**
+** Agreement:
+**    CAU K04 B2 F1.1
+**    CAU K04 B2 F2.1
+**    SCCA B2 E.1
+**    NKF B6 in same wop
+**    Flight crew - Functional
+*/
+
+rule sby_max_duration_standby_block_ALL =
+    valid %sby_max_duration_standby_block_ALL_valid%;
+
+    wop.%standby_block_days% <= %max_days_in_standby_block% + rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+
+    startdate   = wop.%start_UTC%;
+    failobject  = wop.%failobject_start%;
+    severity    = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+    failtext(int val, int limit) =
+        concat("SBY: ", %int2str%(val), " days of SBY in block. Only ", %int2str%(limit), " allowed.");
+    remark "SBY: Maximum duration of standby block exceeded",
+    planner "The rule checks that the requirement maximum duration of days in standby block is fulfilled.";
+end
+
+
+%sby_max_duration_standby_block_ALL_valid% =
+    roster.%check_rules% and
+    wop.%in_pp_extended% and
+    not wop.%has_scattered_standby% and
+    (wop.%is_standby_line% or
+        (wop.%is_standby% and
+            (fundamental.%flight_crew% or crew.%is_SKD%))) and
+    not crew.%is_leased_wop_start%;
+
+
+%_4exng_region% =
+    if crew.%k4exng_cc_sp5_1_valid%(wop.%start_UTC%) then
+        default(crew.%region%, default(leg.%homebase_region%, "all"))
+    else
+        crew.%region%;
+
+%max_days_in_standby_block% =
+    if %is_QA_CC% or (%is_Danish_FD% and %is_CJ_at_date%(wop.%start_UTC%)) then
+        7
+    else
+        %_max_days_in_standby_block%;
+
+table standby_block_size_limit =
+  fundamental.%cabin_crew%,
+  wop.%is_standby_line%,
+  %_4exng_region%,
+  crew.%k4exng_cc_sp5_1_valid%(wop.%start_UTC%) ->
+    %_max_days_in_standby_block%;
+  true,  false, "SKD", - -> 5;
+  true,  true,  "SKD", - -> 25;
+  true,  true,  "SKN", - -> 25;
+  true,  true,  "SKS", - -> 28;
+  false, false, -, - -> 6;
+&
+    -,     -,     -,     -     -> 500;
+end
+
+/* end of file */

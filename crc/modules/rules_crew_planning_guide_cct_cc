@@ -1,0 +1,108 @@
+/* -*- crc -*-
+ * 
+ *
+ * Purpose:
+ *   Implements definitions and rules for Crew Planning Guide cabin crew. 
+ *
+ * Created by:
+ *   Ulf Hansryd, 27-Jun-2013
+ *
+ * Major changes:
+ *
+ */
+
+module rules_crew_planning_guide_cct_cc inherits rules_crew_planning_guide_cct
+
+import crew;
+import fundamental;
+import levels;
+import leg;
+import duty;
+import trip;
+import rescheduling;
+import rule_exceptions;
+import standby;
+import parameters;
+import rules;
+
+/**************************************************************
+* 
+*  Section 1: Callout on airport standby
+*
+***************************************************************/
+
+/*
+  Crew planning guide 1.7.5.
+  Max number of layovers at outstation on airport standby
+  Rule should not be checked for standby codes AC and AO (cancellation).
+*/
+rule cpg_limit_on_layovers_after_apsby_callout_CC =
+  valid %cabin_crew%
+        and %is_roster%
+        and duty.%in_pp_extended%
+        and standby.%duty_is_airport_callout%
+        and duty.%duty_has_airport_standby_code_A%; 
+  
+  %nr_overnights_after_callout% <= %allowed_overnights_after_apsby_callout% + 
+				   rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+  
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %sby_limit_on_overnights_after_apsby_callout_CC_failobject%;
+  failtext(int value, int limit) = 
+    rules.%failtext_int%("CPG: Overnights after airp sby",value,limit);
+  remark "(CCT) CPG: Limit on overnights on AP SBY callout",
+  planner "Limits the number of overnights on AP SBY callout. "
+          "The rule is valid for CC.";
+end
+
+%sby_limit_on_overnights_after_apsby_callout_CC_failobject% =
+  let nr_overnights = %nr_overnights_after_callout%,
+      overshoot = rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+  last(duty(trip),duty.%failobject_end%) 
+    where (nr_overnights - %nr_overnights_after_callout% <= 
+           %allowed_overnights_after_apsby_callout% +
+           overshoot); 
+
+%nr_overnights_after_callout% = 
+  count(duty(trip)) from (current) while(not duty.%arrives_at_homebase%);
+  
+%allowed_overnights_after_apsby_callout% = 2;
+
+
+/*
+** Rule:
+**   Check for a longhaul after airport standby.
+**
+** Description:
+**   Checks for a longhaul when airport standby with call-out is followed by 
+**   production. The cabin crew has to accept a 
+**   longhaul in this case, so a warning is a reminder for trackers.
+**
+** Agreement:
+**   Crew planning guide 1.7.5.
+**   
+**
+**   
+*/
+
+rule cpg_longhaul_after_airport_sby_CC =
+  valid %cabin_crew%
+        and %is_roster%
+        and duty.%has_active_flight%
+        and trip.%in_pp_extended%
+        and first(duty(trip), standby.%duty_is_airport_callout%)
+        and rescheduling.%duty_inf_flag_had_sba% and
+        rule_exceptions.%rule_on%(duty.%start_UTC%);
+        
+        duty.%is_short_haul%;
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = first(leg(duty),leg.%failobject_departure%)
+                 where (leg.%is_standby_at_airport%);
+  failtext "CPG: Callout for LH duty after A-sby must be accepted by crew";
+  remark  "(CCT) CPG: Callout for LH duty after A-sby must be accepted by crew",
+  planner "This rule checks if production is shorthaul, when it follows"
+          " an airport standby callout."
+          " A longhaul duty must be accepted by the crew.";
+end

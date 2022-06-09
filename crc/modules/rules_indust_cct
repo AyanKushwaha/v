@@ -1,0 +1,429 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains industrial rules used in tracking
+ *
+ * Sections:
+ *   Section 1: Freeday Rules
+ *   Section 2: Duty time Rules
+ *
+ * Created by:
+ *   Peter Jonsson 20-Mar-2006
+ *
+ * Major changes:
+ *
+ */
+
+root module rules_indust_cct
+import fundamental;
+import levels;
+import crew;
+import leg;
+import duty;
+import trip;
+import wop;
+import roster;
+import freedays;
+import rule_exceptions;
+import rules;
+import bought_days;
+import compdays;
+import parameters;
+import rules_indust_ccr;
+import salary_overtime;
+import calendar;
+import duty_period;
+import oma16;
+import fdp;
+import system_db_parameters;
+
+
+/****************************************************************
+ * Section 1: Freeday Rules
+ ***************************************************************/
+
+/*
+** Rule: 
+**    Maximum number of working days between freedays
+**    Rule redefined for Tracking
+**
+** Description:
+**    Check that the maximum number of working days between freedays 
+**    (i.e. in a wop) is not exceeded. The limits can be found implicitly
+**    in the paragraphs below.
+**
+**    NB! Three implementations are done. One in CCP checking trip length,
+**    one in CCR checking working period length and this one in CCT that takes
+**    into account that only off duty objects and not holes are considered free
+**    for Tracking.
+**
+** Agreement:
+**    FC 1:18 2.5b
+**    CAU J.1.1, J.2.1.3
+**    NKF ???
+**    SCCA H.1 H.2.3
+**
+**    4ExNG - rule applies to SKD temps
+*/
+
+export rule (on) ind_max_working_days_btw_freedays_ALL =
+    valid %ind_max_working_days_btw_freedays_ALL_valid%;
+
+    %work_days_btw_freedays% <= rules_indust_ccr.%max_days_btw_freedays% +
+		rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+
+  startdate  = wop.%start_UTC%;
+  severity = %ind_max_working_days_btw_freedays_ALL_severity%;
+
+  failobject = %ind_max_working_days_btw_freedays_ALL_failobject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("(CCT) Coll: Workdays btw F-days", value, limit);
+  remark "(CCT) Coll: Max working days between freedays",
+  planner "The rule checks that the maximum allowed working days are"
+          " not exceeded. The limits are 5 days (SH) and 12 days (LH)"
+          " and for Cimber limit is 7 days";
+end
+
+
+%ind_max_working_days_btw_freedays_ALL_severity% =
+    if %ind_max_working_days_btw_freedays_ALL_alert% then
+       first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%))
+    else
+        %severity_filter_ignorable%;
+
+
+%ind_max_working_days_btw_freedays_ALL_alert% =
+    /* Invalidates rule in alertmonitor at end of published period.
+        To avoid double rule-fails, if the alert-variety is valid, then the non-alert variety is not valid.
+    */
+    calendar.%is_in_published_period%(%next_free_period_start%);
+
+
+%ind_max_working_days_btw_freedays_ALL_valid% =
+   %is_roster% and
+    wop.%in_pp_extended% and
+    duty.%is_on_duty% and
+    not (all(duty(wop), duty.%is_standby_line%)) and
+    not duty.%is_bought% and
+    (is_first(duty(wop)) or %duty_has_free_block_before%) and
+    not freedays.%non_qualifying_ground_duty_period% and
+    not (crew.%is_skj% or crew.%is_skk%) and
+    not crew.%is_leased_duty_start%;
+
+
+%ind_max_working_days_btw_freedays_ALL_failobject% =
+  let overshoot = default(rule_exceptions.%overshoot_int%(wop.%start_UTC%),0),
+      prev_free_period_end = %prev_free_period_end%,
+      max_days = rules_indust_ccr.%max_days_btw_freedays%;
+  default(   
+  if %_nr_of_days_prev_timeoff%(prev_free_period_end) <= max_days + overshoot then
+    next(duty(chain),duty.%failobject_start%) where 
+      (duty.%is_on_duty% and (%_nr_of_days_prev_timeoff%(prev_free_period_end) > 
+      max_days + overshoot))
+  else
+    prev(duty(chain), next(duty(chain),duty.%failobject_start%) where (duty.%is_on_duty% and not duty.%is_bought%))  
+    while (not next(duty(chain),%duty_has_free_block_before%)) where 
+      (%_nr_of_days_prev_timeoff%(prev_free_period_end) <= 
+      max_days + overshoot),
+  wop.%failobject_start%);
+  
+%_nr_of_days_prev_timeoff%(Abstime start) =
+  (duty.%end_day% - start) / 24:00;
+
+
+export %work_days_btw_freedays% = 
+  ((%next_free_period_start% - %prev_free_period_end%) / 24:00) - 1 -
+  wop.%standby_line_days%; 
+
+%prev_free_period_end% = 
+  if %duty_has_free_block_before% then
+    prev(duty(chain), duty.%end_day%) 
+  else
+    prev(duty(chain),prev(duty(chain),duty.%end_day%)) where 
+      (%duty_has_free_block_before%);
+  
+%next_free_period_start% =
+  default(
+    first(duty(chain), next(duty(chain), duty.%start_day%)) from (current)
+    where(%duty_has_free_block_after%),
+    last(duty(chain), round_up(duty.%end_hb%, 24:00)));
+
+%duty_has_free_block_before% = 
+  if %flight_crew% and crew.%in_5_4_flex_group_wop_start% then
+    prev(duty(chain), duty.%days% >= 1) 
+    where (duty.%is_off_duty% or duty.%is_bought%)
+  else
+    is_first(duty(wop)) or
+    prev(duty(chain), duty.%days% >= 2 and (duty.%is_off_duty% or duty.%is_bought%)) 
+    or
+    prev(duty(chain), duty.%days% = 1 and (duty.%is_off_duty% or duty.%is_bought%) and 
+         duty.%consecutive_duties_bw% and 
+         prev(duty(chain), duty.%days% >= 1 and (duty.%is_off_duty% or duty.%is_bought%)));
+
+%duty_has_free_block_after% =
+  if %flight_crew% and crew.%in_5_4_flex_group_wop_start% then
+    next(duty(chain), duty.%days% >= 1 and (duty.%is_off_duty% or duty.%is_bought%))   
+  else 
+    is_last(duty(wop)) or
+    next(duty(chain), duty.%days% >= 2 and (duty.%is_off_duty% or duty.%is_bought%)) 
+    or
+    next(duty(chain), duty.%days% = 1 and (duty.%is_off_duty% or duty.%is_bought%) and duty.%consecutive_duties_fw% and 
+         next(duty(chain), duty.%days% >= 1 and duty.%is_off_duty% or duty.%is_bought%));
+
+/*
+** Rule:
+**    Maximum number of sold days in calendar year.
+**
+** Description:
+**    Check that the maximum number of sold days doesnt exceed yearly limits.
+**    The rule is valid for FD and SKK CC.
+**
+** Agreement:
+**    NKF/BSK K06 12.2
+**    SASCMS-4758 Rule is not valid for CC SKS
+**    SKCMS-1645 Rule is now valid for FD  SKD/SKID
+*/
+
+export rule ind_max_num_sold_days_year_ALL =
+  valid roster.%check_rules% and
+  (%flight_crew% or not crew.%is_homebase_scand%) and 
+  wop.%in_pp% and
+  wop.%is_last_on_duty_in_pp_start_month% and
+  not crew.%is_leased_wop_start%;
+  
+  %bought_days_in_calendar_year% <= %max_sold_days_in_calendar_year% + 
+				    rule_exceptions.%overshoot_int%(wop.%start_UTC%);
+
+  startdate  = wop.%start_utc%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_num_sold_days_year_SKN_SKL_SKS_failobject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("Coll: Sold days in year", value, limit);
+  remark "(CCR) Coll: Max sold days in calendar year exceeded.",
+  planner "Check that the number of sold days in calendar year "
+          "doesnt exceed limit"
+          " The rule is valid for FD and SKK CC.";
+end
+
+%ind_max_num_sold_days_year_SKN_SKL_SKS_failobject% =
+ let yr_start=round_down_year(wop.%start_UTC%);
+ 
+  if(first(duty(roster), %bought_days_in_cal_yr_until_now%(yr_start) > %max_sold_days_in_calendar_year% + 
+           rule_exceptions.%overshoot_int%(wop.%start_UTC%))) then
+              default(first(duty(roster), duty.%failobject_start%) where
+                        (duty.%is_bought%), 
+                      first(duty(roster), duty.%failobject_start%))
+  else if last(duty(roster), %bought_days_in_cal_yr_until_now%(yr_start) <= %max_sold_days_in_calendar_year% + 
+           rule_exceptions.%overshoot_int%(wop.%start_UTC%)) then
+              last(duty(roster), duty.%failobject_end%)
+  else
+      first(duty(roster), duty.%failobject_start%)
+      where(duty.%start_hb% >= fundamental.%pp_start% and
+            duty.%is_bought% and
+            %bought_days_in_cal_yr_until_now%(yr_start) >= %max_sold_days_in_calendar_year% +  
+            rule_exceptions.%overshoot_int%(wop.%start_UTC%));
+      
+%bought_days_in_cal_yr_until_now%(Abstime sp) =
+  bought_days.%bought_days_in_period%(sp, duty.%end_day%);
+
+
+%max_sold_days_in_calendar_year% =
+  if %flight_crew% then 20 
+  else if crew.%has_agmt_group_skk_cc% then 12
+  else 0;
+
+%bought_days_in_calendar_year% =
+  compdays.%bought_days_in_calendar_year%(wop.%start_UTC%);
+
+/*
+** Rule: 
+**   Actual check-out on a free day 
+**
+** Description:
+**   Check if a duty has actual check-out on a freeday, SAS CC after 02:00/ QA CC after 03:00, with
+**   a warning instructing that an F3 day must be updated in Crew Accounts.
+**
+**   SKCMS-2121 - Addition: Agreement group SKS_CC_AG shall receive F32 when checking out after 00:00,
+**                If they checkout after 02:00, the same functionality as before will be used.
+**   SKCMS-2509 - Same applies to SKD CC
+**   SKCMS-2595 - SKN CC gets an F3 day no matter if they check out 00.01-02.00 or later.
+**
+** Agreement:
+**   4ExNG FC 6.1.5.2
+**   4ExNG CC 6.11.2.b
+*/
+
+export rule ind_check_out_on_freeday_ALL =
+  valid %ind_check_out_on_freeday_ALL_valid%;
+
+  time_of_day(wop.%end_hb%) <= %limit_to_use% + rule_exceptions.%overshoot_rel%(wop.%start_UTC%);
+
+  startdate  = wop.%start_UTC%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = next(wop(roster), wop.%failobject_start%);
+
+  failtext(Reltime value, Reltime limit) =
+    rules.%failtext_rel%(concat("Coll: C/O on free day", %compensation_string%), value, limit);
+
+  remark "(CCT) Coll: C/O on free day, please assign F3 in Crew Account",
+  planner "The rule checks if actual check-out is on a freeday (CC after 02:00)."
+          " If so, an F3 day must be added to Crew Account."
+          " If check-out is 00:01-02:00 then for SKD CC an F32 day must be added. Not valid for temps CC."
+          " SKN CC must be given F3 also if check-out is 00:01-02:00. Not valid for temps CC.";
+end
+
+%ind_check_out_on_freeday_ALL_valid% =
+    not salary_overtime.%OT_FD_qualified_crew_at_date%(wop.%start_day%) and
+    (crew.%k4exng_cc_sp5_1_valid%(wop.%start_day%) or
+         parameters.%k4exng_fc_sp5_1_valid%(wop.%start_day%) or
+         crew.%has_agmt_group_skd_cc_at_date_non_resource_pool%(wop.%start_UTC%)) and
+    wop.%in_pp_extended% and
+    wop.%is_on_duty% and
+    not next(wop(roster),wop.%is_on_duty%) and
+    wop.%last_leg_has_landed% and
+    wop.%end_day% = next(wop(roster),wop.%start_day%) and
+    not last(duty(wop),duty.%is_bought%) and
+    not crew.%is_leased_wop_start%;
+
+
+/*
+ * SKCMS-2121: Addition of one more interval for F days given to crew with agreement group "SKS_CC_AG".
+ * This group shall receive F32 if the checkout is between 00:01-02:00. After this, they shall get regular F3.
+ * Earlier there was an if else implementation for the different groups but due to more, different intervals
+ * a table solution as below gives more flexibility. Due to keeping the old rule, as well as its stored rule exceptions
+ * which relied on %overshoot_rel%, the table returns a Reltime to compare with.
+ */
+
+
+table F_type_compensation_table =
+  %crew_group_deciding_F_compensation%,
+  time_of_day(wop.%end_hb%)
+    ->
+  Reltime %limit_to_use%,
+  String %compensation_string%;
+
+  "FLIGHT_CREW",            (00:00, 23:59) -> 00:00,   ", please assign F3 in Crew Account";
+  "HAS_AGMT_GROUP_QA_CC",   (00:00, 23:59) -> 03:00,   " after 03:00, please add FX day of type BOUGHT_CC_QA";
+  "SKS_CC_AG_F32",          (00:00, 02:00) -> 00:00,   " between 00:01-02.00, please assign F32 in Crew Account";
+  "SKS_CC_AG_F32",          (02:01, 23:59) -> 02:00,   " after 02:00, please assign F3 in Crew Account";
+  "SKD_CC_AG_F32",          (00:00, 02:00) -> 00:00,   " between 00:01-02.00, please assign F32 in Crew Account";
+  "SKD_CC_AG_F32",          (02:01, 23:59) -> 02:00,   " after 02:00, please assign F3 in Crew Account";
+  "SKN_CC_AG_F3",           (00:00, 23:59) -> 00:00,   ", please assign F3 in Crew Account";
+  "ANY",                    (00:00, 23:59) -> 02:00,   " after 02:00, please assign F3 in Crew Account";
+end
+
+%crew_group_deciding_F_compensation% =
+  if %flight_crew% then
+    "FLIGHT_CREW"
+  else if crew.%has_agmt_group_qa_cc% then
+    "HAS_AGMT_GROUP_QA_CC"
+  else if crew.%has_agmt_group_sks_cc_at_date_non_resource_pool%(wop.%start_UTC%) and system_db_parameters.%scca_co_on_freeday_comp%(wop.%end_hb%) then
+    "SKS_CC_AG_F32"
+  else if crew.%has_agmt_group_skd_cc_at_date_non_resource_pool%(wop.%start_UTC%) and system_db_parameters.%cau_co_on_freeday_comp%(wop.%end_hb%) then
+    "SKD_CC_AG_F32"
+  else if crew.%has_agmt_group_skn_cc_at_date_non_resource_pool%(wop.%start_UTC%) and system_db_parameters.%k20_skn_cc_co_on_freeday_comp%(wop.%end_hb%) then
+    "SKN_CC_AG_F3"
+  else
+    "ANY";
+
+
+/****************************************************************
+ * Section 1: Freeday Rules
+ ***************************************************************/
+/*
+** Rule:
+**   Coll - maximum duty in a Flight Duty Period.
+**          If the duty starts with an airport standby directly
+**          followed by a flight duty. This time is included in the FDP
+**          Valid for SKS-FD_AG, SKN-FD_AG and SKI-FD-AG Swedish and 
+**          Norwegian crew
+**
+** Description:
+**    Check maximum duty in a Flight Duty Period.
+**
+** Agreement:
+**  SKCMS-687 & SKCMS-1054
+*/
+rule ind_max_duty_time_in_fdp_SKN_SKS_SKI_FC_CC =
+  valid trip.%check_rules% and
+    duty.%in_pp_extended% and
+    duty_period.%is_on_duty% and
+    duty_period.%is_fdp% and
+    duty_period.%is_first_duty_in_duty_period% and
+    (
+      crew.%has_agmt_group_sks_fd% or
+          crew.%has_agmt_group_skn_fd% or
+          (crew.%has_agmt_group_skn_cc% and system_db_parameters. %cba16_oct_valid%(duty.%start_utc%)) or
+          crew.%has_agmt_group_skin_fd% or
+          crew.%has_agmt_group_skis_fd%
+        ) and
+        duty.%is_airport_callout%
+        and (%extra_time_from_activity_for_union_rule% > 0:00); /* Only needed for activities not counting FDP, at the moment only "A" */
+
+  (fdp.%time% + %extra_time_from_activity_for_union_rule%) <=
+    oma16.%max_daily_fdp% +
+    rule_exceptions.%overshoot_rel_on_off%(duty.%start_UTC%);
+    
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_duty_time_in_fdp_SKN_SKS_SKI_failobject%;
+  failtext(Reltime value, Reltime limit) = 
+    %ind_max_duty_time_in_fdp_SKN_SKS_SKI_failtext%(value, limit);
+  remark "Coll: Max duty in FDP",
+  planner "The rule checks that duty time in a FDP is less than the maximum"
+          " allowed. Valid for FD SE and FD NO and SKN_CC. For SKN_CC, if duty",
+          " starts with airport sby directly followed by a flight duty,",
+          " the airport sby is included in the FDP.";
+end
+
+
+%ind_max_duty_time_in_fdp_SKN_SKS_SKI_failtext%(Reltime value, Reltime limit) =
+  rules.%failtext_rel%(concat("Coll: Max FDP ", 
+                              format_time(fdp.%start_utc%,"%d%b"), "-",
+                              format_time(fdp.%end_utc%,"%d%b"),
+                              " (max unf: ",
+                              format_time(oma16.%max_daily_fdp_uc%, "%h:%02M"),
+                              ")"), value, limit);
+                              
+
+%ind_max_duty_time_in_fdp_SKN_SKS_SKI_failobject% =
+  let start_fdp = fdp.%start_utc%,
+      end_fdp = fdp.%end_utc%,
+      max_duty_fdp = oma16.%max_daily_fdp%,
+      overshoot = default(rule_exceptions.%overshoot_rel%(duty.%start_UTC%), 0:00);
+  default(  last(leg(duty),
+              prev  ( leg(chain), next(leg(chain),leg.%failobject_departure%) ) 
+              where (   fdp.%time_in_interval%(start_fdp,leg.%end_utc%) + 
+                        %extra_time_from_activity_for_union_rule%
+                     <= max_duty_fdp +  overshoot)
+            ) 
+            where (leg.%start_utc% < end_fdp), 
+          duty.%failobject_start%);
+
+/*
+ * SKCMS-2137 - Airport standby does not contribute to FDP time when the code is "A"
+ * Updated an existing implementation to add the time from those activities. Used generic name instead of just using
+ * variant of "A" in case extension is needed in the future
+ */
+%extra_time_from_activity_for_union_rule% =
+  default(
+    first(leg(duty), %duty_starts_with_activity_not_providing_time_to_FDP%)
+  ,0:00);
+
+
+%duty_starts_with_activity_not_providing_time_to_FDP% =
+  if %activity_not_providing_time_to_FDP_if_at_start% then
+    leg.%time%
+  else
+    0:00;
+
+%activity_not_providing_time_to_FDP_if_at_start% =
+  leg.%code% in activity_codes_not_providing_time_to_FDP_if_at_start;
+
+set activity_codes_not_providing_time_to_FDP_if_at_start = "A";
+
+
+/* End of file */
+

@@ -1,0 +1,109 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module defines rules for use in tracking
+ *
+ * Sections:
+ *   Section 1: Redefines Meal Rules from rules_meal_ccp
+ *   Section 2: Tracking specific Meal Rules.
+ *
+ * Created by:
+ *   Hasse Eliasson 090506
+ *
+ * Major changes:
+ *
+ */
+
+module rules_meal_cct inherits rules_meal_ccp
+import roster;
+import report_meal;
+
+/****************************************************************
+ * Section 1: Redefines Meal Rules from rules_meal_ccp
+ ***************************************************************/
+/*
+**    This is a redefintion using actual flight times.
+**    See original in rules_meal_ccp_cc for all details.
+**    Note! that every part of original definition is valid,
+**          unless redefined here
+*/
+redefine export rule ind_max_time_btw_meal_breaks_ALL =
+  valid trip.%check_rules% and
+        trip.%in_pp_extended% and
+        duty.%start_hb% >= %pp_start% and
+        /* Avoid illegal subchains */
+        duty.%is_closed% and
+        meal.%is_required% and
+        duty.%is_short_haul% and
+          /* Only to avoid checking the rule for each leg */
+        (is_last(leg(duty) where(not meal.%is_standby%)) or
+         meal.%is_a_meal_break%) and
+        /* Not valid when Special case for SKS CC: late stop...*/
+        not meal.%late_stop_for_CC_SKS_needed_X_leg%
+        and not meal.%has_meal_rules_off_QA_CC_FD%;
+  meal.%time_act_to_meal_break% <=
+    meal.%max_time_to_meal_break% +
+    rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%);
+end
+
+
+/* This is a test variable that is used in the meal regression test */
+%valid% = 
+default(trip.%check_rules% and
+        trip.%in_pp_extended% and
+        duty.%start_hb% >= %pp_start% and
+        /* Avoid illegal subchains */
+        duty.%is_closed% and
+        meal.%is_required% and
+        duty.%is_short_haul% and
+          /* Only to avoid checking the rule for each leg */
+        (is_last(leg(duty) where(not meal.%is_standby%)) or
+         meal.%is_a_meal_break%) and
+        /*Not valid when Special case for SKS CC: late stop...*/
+        not meal.%late_stop_for_CC_SKS_needed_X_leg%, False);
+
+/* This is a test variable that is used in the meal regression test */
+%fail% = %valid% and not  
+         (meal.%time_act_to_meal_break% <= meal.%max_time_to_meal_break%);
+
+
+/****************************************************************
+ * Section 2: Tracking specific Meal Rules.
+ ***************************************************************/
+/*
+** Rule: 
+**    Meal stop is to short.
+**
+** Description:
+**    Check that an assigned Meal Stop is long enough.
+**    The Meal stop is assigned based on scheduled flight times.
+**    The relaxed limit it used, so this rule must only be active
+**    after order has been sent to supplier.
+**    The connection time is based on planed actual times.
+*/
+export rule ind_meal_stop_is_to_short_ALL =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        duty.%start_hb% >= %pp_start% and 
+        meal.%leg_is_in_dayofop% and
+        meal.%is_assigned_meal_stop%
+        and not meal.%has_meal_rules_off_QA_CC_FD%;
+        
+  leg.%ground_time% >=
+    meal.%meal_stop_req_connection_time_relaxed% -
+    rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%);
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%, %duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext(Reltime value, Reltime limit) =
+    rules.%failtext_rel%(concat("Coll: Meal stop time for ", leg.%flight_name%),
+                         value, limit);
+  remark "Coll: Min meal stop time.",
+  planner "The rule checks that the minimum allowed"
+          " meal stop time is satisfied";
+end
+
+/* end of file */
+

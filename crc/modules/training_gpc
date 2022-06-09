@@ -1,0 +1,1008 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains common definitions dependent on Studio-only
+ *   keywords etc.
+ *
+ * Sections:
+ *
+ * Created by:
+ *   Erik Gustafsson, 14-Jun-2007
+ *
+ * Major changes:
+ *
+ */
+module training_gpc inherits training
+
+import base_product;
+import roster;
+import iterators;
+
+/* Crew training to FC must be to the day before ILC.
+   Check rules_training_ccr_fc.%trigger_trng_correct_restrictions% cases.
+*/
+%_new_rank% = crew.%has_restr_new_rank%(leg.%start_utc%);
+
+export %leg_trainee_pos% = %trainee_pos%(crew_pos.%assigned_pos%, 
+                                  crew.%rank_leg_start%, crew.%region%,
+                                  %leg_training_code_safe%,
+                                  leg.%is_long_haul_aircraft%, leg.%qual%, %lcp_on_flight%,
+                                  leg.%start_utc%, %_new_rank%, false);
+export %leg_instructor_pos% = %instructor_pos%(crew_pos.%assigned_pos%, 
+                                  crew.%rank_leg_start%, crew.%region%,
+                                  %leg_training_code_safe%, 
+                                  leg.%is_long_haul_aircraft%, leg.%qual%, %lcp_on_flight%,
+                                  leg.%start_utc%, %_new_rank%, false);
+%leg_trainee_duty_code% = %trainee_duty_code%(%assigned_pos%, 
+                                  crew.%titlerank_leg_start%, crew.%region%,
+                                  %leg_training_code_safe%, 
+                                  leg.%is_long_haul_aircraft%, leg.%qual%, %lcp_on_flight%,
+                                  leg.%start_utc%, %_new_rank%, false);
+
+%_leg_instructor_duty_code% = %_instructor_duty_code%(%assigned_pos%,
+                                  crew.%titlerank_leg_start%, crew.%region%,
+                                  %leg_training_code_safe%,
+                                  leg.%is_long_haul_aircraft%, leg.%qual%, %lcp_on_flight%,
+                                  leg.%start_utc%, %_new_rank%, false);
+
+
+/* Special handling of 2 FC on LC, they should alternate duty code.
+   Assigned FC should get S on first leg */
+%two_fc_on_lc% =
+    crew.%rank_leg_start% = "FC" and leg.%is_lc% and
+    count(equal_legs)
+    where (leg.%is_lc% and crew.%rank_leg_start% = "FC") > 1;
+    
+%assigned_pos% =
+    if %two_fc_on_lc% and leg.%is_even% then
+        if crew_pos.%assigned_pos% = 1 then 2
+        else 1
+    else
+        crew_pos.%assigned_pos%;
+
+/* This is for the various assign training functions.
+   If a manual attribute isn't supplied we find the needed one. */
+%training_attribute_validated%(String qual, Abstime date) = 
+  if not void(%course_completion%(date)) then
+    ""
+  else if (%first_unplanned_course_acqual%(date) = "" or
+           %first_unplanned_course_acqual%(date) = qual) then
+    %first_unplanned_course_attribute%(date)
+  else
+    void_string;
+    
+%find_simulator_rank%(Abstime date, String attr, String simtype)  = 
+    let rank = crew.%rank_at_date%(date);
+    if attr = "SIM INSTR SUPERVIS" or 
+       attr = "SIM INSTR OL" or
+       attr = "SIM INSTR SUPOL" then "FU"
+    else if simtype = "ASF" or simtype = "FFS" then "TL"
+    else if simtype = "OPC" and rank = "FR" then "FP"
+    else rank;
+
+%simulator_instructor_pos% = 10;
+
+/* This variable is used during assignment only */
+%find_trainee_pos%(String attr, Bool is_lh, 
+                   String qual, Abstime date, Int first_open) =
+  let rank = crew.%rank_at_date%(date),
+      region = crew.%region_at_date%(date),
+      new_rank = crew.%has_restr_new_rank%(date),
+      startpos = nmax(first_open-1, %_start_pos%);
+  first(times(4), %trainee_pos%(startpos + %times_index_0%, rank, region, attr, is_lh, qual, false, date, new_rank, true))
+  where (not void(%trainee_pos%(startpos + %times_index_0%, rank, region, attr, is_lh, qual, false, date, new_rank, true)));
+
+%find_instructor_pos%(String attr, Bool is_lh, String qual, Abstime date) =
+  let rank = crew.%rank_at_date%(date),
+      region = crew.%region_at_date%(date),
+      new_rank = crew.%has_restr_new_rank%(date);
+  first(times(4), %instructor_pos%(%_start_pos% + %times_index_0%, rank, region, attr, is_lh, qual, false, date, new_rank, true))
+  where (not void(%instructor_pos%(%_start_pos% + %times_index_0%, rank, region, attr, is_lh, qual, false, date, new_rank, true)));
+
+export %find_supervising_instructor_rank%(String attr) =
+   if attr="FLT INSTR OL" then
+      if trip.%is_FR_booked_on_first_leg% then "FR" else "FU"
+   else "";
+
+%_start_pos% = 
+  if crew.%is_pilot% then 0
+  else 4;
+
+/* Variables used for check-in/out */ 
+redefine export %is_instr_first_zftt_lifus% =  
+  %_is_instr_first_zftt_lifus% and
+  any(equal_legs, %is_first_zftt_lifus%)
+  where(%is_roster% and crew.%is_pilot%); 
+
+redefine export %is_instr_first_lifus% =  
+  %_is_instr_first_lifus% and
+  any(equal_legs, %is_first_lifus%)
+  where(%is_roster% and crew.%is_pilot%);
+
+redefine export %course_extends_zftt_lifus_ci% =
+  any(equal_legs, default(not (training.%course_name%(leg.%start_utc%) in no_extra_zftt_lifus_ci_courses), false))
+  where(%is_roster% and crew.%is_pilot%);
+
+set no_extra_zftt_lifus_ci_courses = "CCQ-A3A4", "CCQ-A4A3";
+
+redefine export %is_instr_first_x_supernum_except_skd% =
+  %verify_position_for_x_supernum_except_skd% and
+  any(equal_legs, %is_first_x_supernum%)
+  where(%is_roster% and crew.%is_cabin%);
+
+%verify_position_for_x_supernum_except_skd% =
+  if not (default(base_product.%is_tracking%, false)) then
+    %assigned_pos% = %instr_pos_x_supernum_except_skd%
+  else
+    leg.%is_x_supernum_instructor%;
+
+redefine export %is_instr_first_fam_flt% =  
+  %_is_instr_first_fam_flt% and
+  any(equal_legs, %is_first_fam_flt%)
+  where(%is_roster% and crew.%is_pilot%);
+
+
+redefine export %is_instr_release% =
+  (
+    if leg.%has_instructor_code% then
+      default(%leg_duty_code_by_instr_attr%, "") = %instr_duty_code_release%
+      else
+        %duty_code% = %instr_duty_code_release%
+  ) and
+  any(equal_legs, leg.%is_release%)
+  where(%is_roster% and crew.%is_cabin%);
+
+redefine export %is_lcp_last_ilc% =
+    %is_lcp_on_ilc% and
+    any(equal_legs, %is_last_ilc%)
+    where(%is_roster% and crew.%is_pilot%);
+redefine export %is_lcp_last_lc% =
+    %is_lcp_on_lc% and
+    any(equal_legs, %is_last_lc%)
+    where(%is_roster% and crew.%is_pilot%);
+    
+redefine export %is_lcp_on_ilc_for_new_capt% =
+  %is_lcp_on_ilc% and
+  any(equal_legs, crew.%has_restr_training_capt_leg_start%)
+    where (%is_roster% and leg.%is_ilc%);
+
+%_has_any_equal_leg_X_LIFUS% =
+   any(equal_legs, leg.%is_x_lifus%)
+    where (%is_roster%);
+
+%_duty_code_supervisor_FLT_INSTR_OL% =
+    if %_has_any_equal_leg_X_LIFUS% then "X IO" else "IO";
+
+%_has_any_equal_leg_FLT_INSTR_OL% =
+   any(equal_legs, attributes.%is_leg_training_code_FLT_INSTR_OL%)
+    where (%is_roster%);
+
+/*
+ * Qualifications needed: TRI, TRE, SFE and LIFUS will always be in position 1
+ * Check is more lenient in Rostering where an illegality will not occur if
+ * there is no FC at all rostered.
+ */
+
+export %lifus_instructor_for_inexperienced_trainee_has_enough_quals% =
+  if base_product.%is_rostering% then
+    default(
+      any(equal_legs, default(%acceptable_companion%("LIFUS unexp"), true))
+      where (crew_pos.%acting_commander%)
+    , true)
+  else
+    default(
+      any(equal_legs, %acceptable_companion%("LIFUS unexp"))
+      where (leg.%instructor_code_safe% = "LIFUS")
+    , false);
+
+%_duty_code_instructor_X_LIFUS% =
+   if %_has_any_equal_leg_FLT_INSTR_OL% then "X IP" else "X";
+
+%_duty_code_instructor_LIFUS% =
+   if %_has_any_equal_leg_FLT_INSTR_OL% then "IP" else "I";
+
+%_duty_code_instructor_ZFTT_LIFUS% =
+   if %_has_any_equal_leg_FLT_INSTR_OL% then "Z IP" else "Z";
+
+%_duty_code_instructor_ZFTT_X% =
+   if %_has_any_equal_leg_FLT_INSTR_OL% then "ZX IP" else "ZX";
+
+export %lcp_crew_id% =  min(equal_legs, crew.%id%) where (training.%is_lcp_on_ilc%);
+
+/* General table look-up */
+table expected_positions_trainee(Int ass_pos, String rank, String region,
+                                 String training_attr, Bool is_lh, String qual,
+                                 Bool lcp_on_flight, Abstime date, Bool new_rank, Bool during_assign) =
+  ass_pos,
+     rank,
+             region,
+                      training_attr,
+                                            is_lh,
+                                                   qual,
+                                                           new_rank,
+                                                                  during_assign
+                                                                         ->
+                                                                             Int %trainee_pos%,
+                                                                                Int %instructor_pos%,
+                                                                                    String %trainee_duty_code%,
+                                                                                           String %_instructor_duty_code%;
+  /*******************************************************
+   * Flight crew
+   *******************************************************/
+
+  /* Line-check, Short haul */
+  1, "FC"  , -      , "LC"                , False, -     , -    , -      ->  1, 4 , "S"  , "UZ";
+  2, "FC"  , -      , "LC"                , False, -     , -    , -      ->  2, 4 , "LS" , "UZ";
+  2, "FP"  , -      , "LC"                , False, -     , -    , -      ->  2, 4 , "S"  , "UZ";
+  /* Line-check, Long haul */
+  1, "FC"  , -      , "LC"                , True , -     , -    , -      ->  1, 3 , "S"  , "LLZ";
+  2, "FP"  , -      , "LC"                , True , -     , -    , -      ->  2, 3 , "S"  , "LLZ";
+  3, "FR"  , -      , "LC"                , True , -     , -    , -      ->  3, 1 , "S"  , "Z";
+
+  /* Initial line-check, Short haul */
+  1, "FC"  , -      , "ILC"               , False, -     , False, -      ->  1, 4 , "B"  , "BU";
+  2, "FP"  , -      , "ILC"               , False, -     , False, -      ->  2, 4 , "B"  , "BU";
+  /* Initial line-check, Long haul */
+  1, "FC"  , -      , "ILC"               , True , -     , False, -      ->  1, 3 , "B"  , "BLL";
+  2, "FP"  , -      , "ILC"               , True , -     , False, -      ->  2, 3 , "B"  , "BLL";
+  3, "FR"  , -      , "ILC"               , True , -     , False, -      ->  3, 1 , "B"  , "B";
+  3, "FC"  , -      , "ILC"               , True , -     , True , -      ->  3, 1 , "BLL", "B";
+
+  /* Initial line-check, Candi makes ILC. WP CCR 589 TRAINING+CAPT */
+  4, "FC"  , -      , "ILC"               , -    , -     , true , -      ->  4, 1 , "BU" , "B";
+  4, "FP"  , -      , "ILC"               , -    , -     , true , -      ->  4, 1 , "BU" , "B";
+
+  2, "FC"  , -      , "NEW HIRE FOLLOW UP", -    , -     , -    , -      ->  2, 1 , "NS" , "NZ";
+  2, "FP"  , -      , "NEW HIRE FOLLOW UP", -    , -     , -    , -      ->  2, 1 , "NS" , "NZ";
+
+  /* Lifus */
+  2, "FC"  , -      , "LIFUS"             , -    , -     , -    , -      ->  2, 1 , "IL" , "I";
+  2, "FP"  , -      , "LIFUS"             , -    , -     , -    , -      ->  2, 1 , "I"  , "I";
+  2, "FR"  , -      , "LIFUS"             , -    , -     , -    , -      ->  2, 1 , "I"  , "I";
+  /* ZFFT Lifus */
+  2, "FC"  , -      , "ZFTT LIFUS"        , -    , -     , -    , -      ->  2, 1 , "ZL" , "Z";
+  2, "FP"  , -      , "ZFTT LIFUS"        , -    , -     , -    , -      ->  2, 1 , "Z"  , "Z";
+  2, "FR"  , -      , "ZFTT LIFUS"        , -    , -     , -    , -      ->  2, 1 , "Z"  , "Z";
+  /* X Lifus */
+  2, "FC"  , -      , "X LIFUS"           , -    , -     , -    , -      ->  2, 1 , "LX" , "X";
+  2, "FP"  , -      , "X LIFUS"           , -    , -     , -    , -      ->  2, 1 , "X"  , "X";
+  2, "FR"  , -      , "X LIFUS"           , -    , -     , -    , -      ->  2, 1 , "X"  , "X";
+  /* ZFTT X */
+  2, "FC"  , -      , "ZFTT X"            , -    , -     , -    , -      ->  2, 1 , "ZXL", "ZX";
+  2, "FP"  , -      , "ZFTT X"            , -    , -     , -    , -      ->  2, 1 , "ZX" , "ZX";
+  2, "FR"  , -      , "ZFTT X"            , -    , -     , -    , -      ->  2, 1 , "ZX" , "ZX";
+
+  /* T-flight */
+  2, "FC"  , -      , "T-FLIGHT"          , -    , -     , -    , -      ->  2, 1 , "LT" , "T";
+  2, "FP"  , -      , "T-FLIGHT"          , -    , -     , -    , -      ->  2, 1 , "T"  , "T";
+
+  /* Release */
+  2, "FC"  , -      , "RELEASE"           , -    , -     , -    , -      ->  2, 1 , "RL" , "R";
+  2, "FP"  , -      , "RELEASE"           , -    , -     , -    , -      ->  2, 1 , "R"  , "R";
+
+  /* Flight Base flying */
+  2, -     , -      , "FBF"               , -    , -     , -    , -      ->  2, 1 , concat("L", %fbf_suffix%(lcp_on_flight)),
+                                                                                           concat("", %fbf_suffix%(lcp_on_flight));
+
+  /* FAM FLT */
+  2, "FC"  , -      , "FAM FLT"           , -    , -     , -    , -      ->  2, 1 , "CL" , "C";
+  2, "FP"  , -      , "FAM FLT"           , -    , -     , -    , -      ->  2, 1 , "C"  , "C";
+  3, "FR"  , -      , "FAM FLT"           , -    , -     , -    , -      ->  3, 1 , "C"  , "C";
+
+  /* LR REFRESH */
+  1, "FC"  , -      , "LR REFRESH"        , -    , -     , -    , -      ->  1, 2 , "C" , "C";
+  2, "FP"  , -      , "LR REFRESH"        , -    , -     , -    , -      ->  2, 1 , "C"  , "C";
+  3, "FR"  , -      , "LR REFRESH"        , -    , -     , -    , -      ->  3, 1 , "C"  , "C";
+
+  /* Captains Nomination Flight */
+  4, -     , -      , "CNF"               , -    , -     , -    , -      ->  4, 1 , "NU" , "N";
+
+  /* BU Dual */
+  2, "FC"  , -      , "BU DUAL"           , -    , -     , -    , -      ->  2, 1 , "CL" , "C";
+  2, "FP"  , -      , "BU DUAL"           , -    , -     , -    , -      ->  2, 1 , "C"  , "C";
+
+  /* SuperNumary */
+  4, -     , -      , "SUPERNUM"          , -    , -     , -    , -      ->  4, 1 , "SNT", "I";
+
+  /* SCHOOLFLIGHT */
+  2, -     , -      , "SCHOOLFLIGHT"      , -    , -     , -    , -      ->  2, 1 , "SFL", "I";
+
+  /*ETOPS LIFUS/LC*/
+  4, "FP"  , -      , "ETOPS LIFUS/LC"    , -    , -     ,-     , -      ->  4, 1,   "EL", "E";
+  4, "FC"  , -      , "ETOPS LIFUS/LC"    , -    , -     ,-     , -      ->  4, 1,   "ELL", "E";
+  2, "FP"  , -      , "ETOPS LIFUS/LC"    , -    , -     ,-     , -      ->  2, 1,   "E",  "E";
+  2, "FC"  , -      , "ETOPS LIFUS/LC"    , -    , -     ,-     , -      ->  2, 1,   "EL", "E";
+  /* 3 & 9 months check: FOLLOW UP */
+/*  2, "FC", -, "FOLLOW UP", -, -, -, -      ->  2, 1, "NS", "NZ"; */
+/*  2, "FP", -, "FOLLOW UP", -, -, -, -      ->  2, 1, "NS", "NZ"; */
+
+  /*******************************************************
+   * Cabin crew
+   crew_pos.%assigned_pos%, crew.%rank%, crew.%region%,
+   leg.%training_code_safe%, leg.%is_long_haul_aircraft%, leg.%qual% ->
+    Int %trainee_pos%,
+    Int %instructor_pos%,
+    String %trainee_duty_code%,
+    String %_instructor_duty_code%;
+   *******************************************************/
+  /* - CJ has no AP position */
+  8,   "AP", -      , "RELEASE"           , false, "CJ"  , -    , -      ->  8, 7 , "LR" , %instr_duty_code_release%;
+  8, <>"AP", -      , "RELEASE"           , false, "CJ"  , -    , -      ->  8, 7 , "R"  , %instr_duty_code_release%;
+  8, -     , -      , "SUPERNUM"          , -    , "CJ"  , -    , -      ->  8, 7 , "U"  , "I";
+  8, -     , -      , "X SUPERNUM"        , -    , "CJ"  , -    , -      ->  8, 7 , "UX" , "IX";
+  7, -     , -      , "NEW"               , -    , "CJ"  , -    , -      ->  7, -1, ""   , "";
+  &
+  /* Release */
+  /* - RELEASE flights should never be performed in JAROPS need.
+     SKD has service need on most flights, other areas don't.
+     A rule in rules_training_ccr_cc checks this. */
+  7,   "AP",   "SKD", "RELEASE"           , false, <>"CJ", -    , -      ->  7, 5 , "LR" , %instr_duty_code_release%;
+  7, <>"AP",   "SKD", "RELEASE"           , false, <>"CJ", -    , -      ->  7, 5 , "R"  , %instr_duty_code_release%;
+  7,   "AP", <>"SKD", "RELEASE"           , false, -     , -    , false  ->  7, 5 , "LR" , %instr_duty_code_release%;
+  7, <>"AP", <>"SKD", "RELEASE"           , false, -     , -    , false  ->  7, 5 , "R"  , %instr_duty_code_release%;
+  /*         - Short haul */
+  8,   "AP", -      , "RELEASE"           , false, <>"CJ", -    , -      ->  8, 5 , "LR" , %instr_duty_code_release%;
+  8, <>"AP", -      , "RELEASE"           , false, <>"CJ", -    , -      ->  8, 5 , "R"  , %instr_duty_code_release%;
+  /*         - Long haul*/
+  7, "AP"  , -      , "RELEASE"           , true , -     , -    , -      ->  7, 5 , "LR" , %instr_duty_code_release%;
+  6, "AS"  , -      , "RELEASE"           , true , -     , -    , -      ->  6, 5 , "R"  , %instr_duty_code_release%;
+  7, "AH"  , -      , "RELEASE"           , true , -     , -    , -      ->  7, 5 , "R"  , %instr_duty_code_release%;
+
+  /* SUPERNUM */
+  8, -     , -      , "SUPERNUM"          , -    , -     , -    , -      ->  8, 5 , "U"  , "I";
+
+  8, -     ,   "SKD", "X SUPERNUM"        , -    , -     , -    , -      ->  8, %instr_pos_x_supernum_skd%,
+                                                                                    "UX" , "IX";
+
+  8, -     , <>"SKD", "X SUPERNUM"        , -    , -     , -    , -      ->  8, %instr_pos_x_supernum_except_skd%, "UX" , "IX";
+  /* New
+     These flights don't have an instructor in a specific position. */
+  5, "AP"  , -      , "NEW"               , -    , -     , -    , -      ->  5, -1, ""   , "";
+  6, "AS"  , -      , "NEW"               , true , -     , -    , -      ->  6, -1, ""   , "";
+  7, -     , -      , "NEW"               , -    , -     , -    , -      ->  7, -1, ""   , "";
+
+  /* AS Training */
+  6, <>"AP", -      , "AS TRAINING"       , -    , -     , -    , -      ->  6, 6 , "SU" , "IS";
+
+  /* AP Training */
+  8, -     , -      , "AP TRAINING"       , -    , -     , -    , -      ->  8, 5 , "PU" , "IP";
+
+
+  /* SAS Link cabin crew FAM FLT, LINE FLIGHT and ILC */
+  8, -     , -      , "FAM FLT"          , -    , -     , -    , -      ->  8, -1 , "FU" , "IF";
+  7, -     , -      , "LINE FLIGHT"      , -    , -     , -    , -      ->  7, -1 , "LT" , "";
+  7, -     , -      , "ILC"              , -    , -     , -    , -      ->  7, %instr_pos_lc_ilc_svs% , "C" , "IC";
+  7, -     , -      , "LC"               , -    , -     , -    , -      ->  7, %instr_pos_lc_ilc_svs% , "B" , "IB";
+
+  /* Flight Crew Supervising instructor LIFUS, ZFTT and X LIFUS */
+  /* Flight Crew Supervising instructor LIFUS, ZFTT and X LIFUS */
+  -, -     , -      , "FLT INSTR OL"      , -    , -     , -    , -      ->  3, 1 , %_duty_code_supervisor_FLT_INSTR_OL%,
+                                                                                           "XX IP";
+
+  -, -     , -      , -                   , -    , -     , -    , -      ->  void_int,
+                                                                                void_int,
+                                                                                    void_string,
+                                                                                           void_string;
+end
+
+%instr_pos_lc_ilc_svs% =
+    if crew_pos.%total_cabin_crew_booked% >= 4 and not leg.%leg_has_fam_flt% then
+        8
+        else
+        7;
+
+%instr_duty_code_release% = "IR";
+
+%instr_pos_x_supernum_except_skd% = 5;
+
+%instr_pos_x_supernum_skd% = 
+  if %student_needs_mentor% then 
+    if crew_pos.%service_need_in_pos7% = 0 then 
+      8 
+    else 
+      7
+  else
+    5;
+
+%student_needs_mentor% =
+  leg.%is_x_supernum% and 
+  (%logged_release%(leg.%start_UTC%, leg.%qual%) or
+   %logged_qual_start%(leg.%start_UTC%, leg.%qual%) or
+   %logged_requal_start%(leg.%start_UTC%, leg.%qual%));  
+
+/*********************************************/
+
+                                         
+table expected_positions_inst(Int instr_pos, String region, String training_attr, Bool is_lh, 
+                              String qual, Abstime date) =
+  instr_pos, training_attr, is_lh, qual, region ->
+    String %_instructor_duty_code_by_INSTR_attr%;
+  /*******************************************************
+   * Flight crew
+   *******************************************************/
+  /* Line-check, Short haul */
+  4, "LC", False, -, -      ->  "UZ";
+  /* Line-check, Long haul */
+  3, "LC", True, -, -       ->  "LLZ";
+  1, "LC", True, -, -        ->  "Z";
+  /* Initial line-check, Short haul */
+  4, "ILC", False, -, -      ->  "BU";
+  /* Initial line-check, Long haul */
+  3, "ILC", True, -, -       ->  "BLL";
+  /* Initial line-check, Candi makes ILC. WP CCR 589 TRAINING+CAPT */
+  1, "ILC", -, -, -          ->  "B"; 
+  /* Lifus */
+  1, "LIFUS", -, -, -        ->  %_duty_code_instructor_LIFUS%;
+  /* ZFFT Lifus */
+  1, "ZFTT LIFUS", -, -, -   ->  %_duty_code_instructor_ZFTT_LIFUS%;
+  /* X Lifus */
+  1, "X LIFUS", -, -, -      ->  %_duty_code_instructor_X_LIFUS%;
+  /* ZFTT X*/
+  1, "ZFTT X", -, -, -      ->  %_duty_code_instructor_ZFTT_X%;
+  /* FAM FLT */
+  1, "FAM FLT", -, -, -      ->  "C";
+  /* LR REFRESH */
+  1, "LR REFRESH", -, -, -   ->  "C";
+  2, "LR REFRESH", -, -, -   ->  if crew.%rank% = "FC" then "CL" else "C";
+  /* T-flight */
+  1, "T-FLIGHT", -, -, -     ->  "T";
+  /* Release */
+  1, "RELEASE", -, -, -      ->  "R"; 
+  /* Flight Base flying */
+  1, "FBF", -, -, -          ->  if crew.%has_qln_lcp_leg_start% then "T" else "";
+  /* Captains Nomination Flight */
+  1, "CNF", -, -, -          ->  "N";
+  /* BU Dual */
+  1, "BU DUAL", -, -, -      ->  "N";
+  /* FOLLOW UP */
+/*  1, "FOLLOW UP", -, -, -    ->  "NZ"; */
+  /* NEW HIRE FOLLOW UP */
+  1, "NEW HIRE FOLLOW UP", -, -, -    ->  "NZ";
+  /*ETOPS LIFUS/LC*/
+  1, "ETOPS LIFUS/LC", - , -, - -> "E";
+
+  /*******************************************************
+   * Cabin crew
+   crew_pos.%assigned_pos%, leg.%training_code_safe%, 
+   leg.%is_long_haul_aircraft%, leg.%qual%, crew.%region% ->
+    Int %trainee_pos%,
+    Int %instructor_pos%,
+    String %trainee_duty_code%,
+    String %_instructor_duty_code%;
+   *******************************************************/
+  7, "X SUPERNUM", -, <>"CJ", "SKD"   -> if crew_pos.%service_need_in_pos7% = 0 then void_string else "IX";
+  8, "X SUPERNUM", -, -,      "SKD"   -> if crew_pos.%service_need_in_pos7% = 0 then "IX" else void_string;
+  &
+  /* CJ training flights */
+  7, "RELEASE",    -, "CJ", -    ->  %instr_duty_code_release%;
+  7, "SUPERNUM",   -, "CJ", -    ->  "I";
+  7, "X SUPERNUM", -, "CJ", -    ->  "IX";
+  &
+  /* Release */
+  5, "RELEASE",    -, -, -       ->  %instr_duty_code_release%; 
+  /* Supernum */
+  5, "SUPERNUM",   -, -, -       ->  "I";
+  5, "X SUPERNUM", -, -, -       ->  "IX";
+  
+  /* New 
+     These flights don't have an instructor in a specific position. */
+  -, "NEW", -, -, -              ->  "";
+  /* AS Training */
+  6, "AS TRAINING", -, -, -      ->  "IS";
+  /* AP Training */
+  5, "AP TRAINING", -, -, -      ->  "IP";
+  /* IO Supervisor */
+  8, "IO SUPERVISOR", -, -, -      ->  "IO";
+  /* ISV Supervision */
+  10, "ISV SUPERVISION", -, -, -      ->  "ISV";
+
+  
+  /* SAS Link cabin crew training attributes */
+  -, "FAM FLT"   , -, -, -       ->  "IF";
+  -, "LINE FLIGHT", -, -, -      ->  "";
+  8, "ILC"        , -, -, -      ->  "IC";
+  8, "LC"         , -, -, -      ->  "IB";
+  7, "ILC"        , -, -, -      ->  "IC";
+  7, "LC"         , -, -, -      ->  "IB";
+  -,  -, -, -, -                 ->   void_string;
+end
+/*******************************************/
+
+%fbf_suffix%(bool lcp_on_flight) = 
+  if lcp_on_flight then
+    "T"
+  else
+    "";
+    
+export %has_acceptable_companion% =
+    not void(%acceptable_companion_id%);
+
+/* "NEW" flights don't have an instructor in a specific position. */
+redefine export %acceptable_companion_id% =
+  default(%_acceptable_companion_id%,   
+          %leg_non_loaded_special_instructor_id%);
+  
+%_acceptable_companion_id% =
+  let main_cat = fundamental.%main_cat%,
+      type = %training_type%,
+      position = %instructor_position%,
+      lifus = leg.%is_any_lifus%;
+  max(equal_legs, crew.%id%)
+  where((leg.%is_active_flight% or leg.%is_simulator%) and
+        main_cat = fundamental.%main_cat% and
+        (type = "NEW" or type = "FAM FLT" or crew_pos.%assigned_pos% = position) and 
+        (if type = "NEW" or leg.%is_simulator% or not %instr_tag_required% then
+            /* Simulators and NEW/FAM flights won't have the instructor tagged.
+               For NEW flights there is no instructor,for FAM flights there is 
+               a need for SCC which is mandatory on every flight anyway
+               For simulators the instructor doesn't need tag since the position
+               is restricted to instructors */
+            %acceptable_companion%(type)
+         else
+            /* ILC and LC can be performed at once. The instructor will be tagged
+               with ILC */
+            (leg.%instructor_code_safe% = type or 
+            leg.%instructor_code_safe% = "ILC" and type = "LC") and
+            (not lifus or %acceptable_companion%(type))));
+  
+export %training_type% =
+    if %leg_is_own_sim% then %sim_type_for_qual_check%
+    else if leg.%is_school_flight% then "School flt"
+    else %leg_training_code_safe%;
+
+export %instructor_position% =
+    if leg.%is_simulator% then 10
+    else if leg.%is_school_flight% then 1
+    else %leg_instructor_pos%;
+
+%lcp_on_flight% = 
+  /* Only matters for FBF */
+  leg.%is_fbf% and any(equal_legs, crew.%has_qln_lcp_leg_start%);
+
+export %supernum_pilot_onboard% =
+  default(
+    any(equal_legs, crew_pos.%is_supernum_cockpit%)
+    where (not crew.%has_restr_new_leg_start%)
+  ,false);
+
+/* At Publish we only tag such crew that already are dynamically calculated to 
+   be correctly assigned. /EKG 090219 */
+%instructor_to_be_tagged_at_publish% =
+    %has_leg_instructor_duty_code%;
+
+export %instr_tag_required% =
+  not leg.%is_school_flight% and
+  leg.%start_hb% < attributes.%crew_last_published% and
+  not leg.%is_cc_fam_flt% and
+  not leg.%is_cc_line_flight% and
+  (not(leg.%is_lc% or leg.%is_ilc% or crew_pos.%assigned_pos% = 4) or
+  not any(equal_legs, crew.%rank% = "FC" and leg.%is_release%)) and
+  not any(equal_legs, crew.%rank_end% = "AH" and (leg.%is_x_supernum% or leg.%is_release%));
+  
+  
+    
+export %leg_instructor_duty_code% =
+  if %crew_instructing_release_leg% then
+     "IR"
+  else if %crew_instructing_x_supernum_leg% then
+     "IX"
+  else if leg.%has_instructor_code% then 
+      %leg_duty_code_by_instr_attr%
+  else if not %instr_tag_required% then
+      %leg_instructor_duty_code_equal_legs%
+  else
+      "";
+
+%crew_instructing_release_leg% =
+    crew_pos.%assigned_pos% = 5 and
+    any(equal_legs, leg.%is_release%);
+
+%crew_instructing_x_supernum_leg% =
+    crew_pos.%assigned_pos% = 5 and
+    any(equal_legs, leg.%is_x_supernum%);
+
+export %has_leg_instructor_duty_code% =
+  %leg_instructor_duty_code% <> "";
+  
+%leg_duty_code_by_instr_attr% =
+    %_instructor_duty_code_by_INSTR_attr%(crew_pos.%assigned_pos%,
+                                          crew.%region%,
+                                          leg.%instructor_code_safe%,
+                                          leg.%is_long_haul_aircraft%, 
+                                          leg.%qual%, leg.%start_utc%);
+
+export %leg_instructor_duty_code_equal_legs% =
+ /* For assigned_pos = 6 or 7 (AS, AH) dynamic code will be empty. Tagging is required */
+    let mypos = crew_pos.%assigned_pos%;
+    if (mypos = 6 or mypos = 7 or not leg.%has_any_training_code_any_crew%) then ""
+    else 
+        default(%_instructor_duty_code_by_INSTR_attr%(mypos,
+                                                      crew.%region%,
+                                                      %instructor_for_training_type%,
+                                                      leg.%is_long_haul_aircraft%, 
+                                                      leg.%qual%, 
+                                                      leg.%start_utc%), "");
+/* It is possible to have multiple training on the same leg, 
+   where crew is valid instructor.
+   But since the priority is:
+   FD: ILC > LC
+   CC: AP TRAINING > RELEASE > X SUPERNUM > SUPERNUM
+   doing a "min" actually will work ok. 
+   It might fail for (X) SUPERNUM, but that combination is illegal anyway 
+   /EKG 090219 */
+%instructor_for_training_type% =
+    let mypos = crew_pos.%assigned_pos%,
+        crewid = crew.%id%;
+    if leg.%has_any_training_code_any_crew% then
+        min(equal_legs, leg.%training_code_safe%)
+        where (leg.%has_training_code% and 
+               %leg_instructor_pos% = mypos and
+               %has_acceptable_companion% and
+               crewid = %acceptable_companion_id%)
+    else void_string;
+
+export %has_duty_code% = %duty_code% <> "";
+
+export %duty_code% =
+  concat(default(%leg_instructor_duty_code%, ""),
+         default(%leg_trainee_duty_code%, ""));
+
+export %has_simulator_duty_code% = default(%simulator_duty_code% <> "", false);
+
+export %leg_is_training% =
+  leg.%is_school_flight% or
+  leg.%is_new% or
+  leg.%has_training_code%;
+ 
+
+/* We can not rely on the table to be clean of old attributes referring to 
+   deassigned crew. But we can make a faster limitation by checking for 
+   attribute independent of crew */
+redefine export %crew_on_skill_test% =
+    %_crew_on_skill_test% and
+    any(equal_legs, leg.%is_skill_test%);
+
+export %assists_on_sim% =
+  first(leg(trip), %assists_on_sim_leg%)
+  where (leg.%is_simulator%);
+        
+export %assists_on_sim_leg% =
+  count(equal_legs)
+  where (%is_roster% and %assigned_as_assist%);
+
+export %sim_is_fully_assigned% =
+    %crew_on_sim% = %reqd_crew_on_sim%;
+    
+export %crew_on_sim% =
+  first(leg(trip), %crew_on_sim_leg%)
+  where (leg.%is_simulator%);
+        
+/* This variable should only count against student need */
+export %crew_on_sim_leg% =
+  count(equal_legs)
+  where (%is_roster% and crew_pos.%assigned_pos% <> 4 and crew_pos.%assigned_pos% <> 10);
+  
+/* This variable is a stricter requirement on T-flights */
+redefine export %leg_has_tri_tre% =
+    let crew_id = crew.%id%,
+        main_func = fundamental.%main_cat%;
+    any(equal_legs, %ok_tri_tre_instr%)
+    where (main_func = crew.%main_func% and crew_id <> crew.%id%);
+    
+%ok_tri_tre_instr% =
+    if %instr_tag_required% then
+        leg.%instructor_code_safe% = "T-FLIGHT"
+    else
+        crew.%is_tri_instr_leg_start% or crew.%is_tre_instr_leg_start%;
+
+table crew_courses(Int nr) = 
+  nr, crew.%id%, %pp_end%, %pp_start% ->
+    export String %non_relesed_course_name%, 
+    export Abstime %non_relesed_course_start%, 
+    export Abstime %non_relesed_course_end%; 
+  external %course_participants_table%;
+  match_number, crew, >startofcourse, <endofcourse -> 
+    c_name, startofcourse, endofcourse;
+  - , -, -, - -> void_string, void_abstime, void_abstime;
+end
+
+table select_crew_courses(String course_nr) = 
+  course_nr, crew.%id%, %pp_end%, %pp_start% ->
+    export String %select_non_released_course_name%;
+  external %course_participants_table%;
+  c_name, crew, >startofcourse, <endofcourse -> c_name;
+  -, -, -, - -> void_string;
+end
+table select_crew_courses_count =
+  crew.%id%, %pp_end%, %pp_start% ->
+    export int %count_crew_course_name%;
+  external %course_participants_table%;
+  crew, >startofcourse, <endofcourse -> count(row_number);
+end
+table select_crew_courses_match(int match_id) =
+  match_id, crew.%id%, %pp_end%, %pp_start% ->
+    export String %course_name_ix%;
+  external %course_participants_table%;
+  match_number, crew, >startofcourse, <endofcourse -> c_name;
+  -, -, -, - -> void_string;
+end
+table select_crew_courses_all =
+  crew.%id%, %pp_end%, %pp_start% ->
+    export String %course_name_found%;
+  external %course_participants_table%;
+  crew, >startofcourse, <endofcourse -> c_name;
+  -, -, - -> void_string;
+end
+
+%course_block_table% = "course_block";
+
+table select_activity_code_match(int match_id, String course_nr, AbsTime leg_start, AbsTime leg_end) =
+  match_id, course_nr, leg_start, leg_end ->
+    export String %course_activity_code_ix%;
+  external %course_block_table%;
+  nr, c_name, <"enddate", >"startdate" -> actcode;
+  -, -, -, - -> void_string;
+end
+
+table select_activity_course_block(String course_nr, AbsTime leg_start, AbsTime leg_end) =
+  course_nr, leg_start, leg_end ->
+    export String %course_activity_course_block%;
+  external %course_block_table%;
+  c_name, <"enddate", >"startdate" -> cbtype;
+   -, -, - -> void_string;
+end
+
+table select_crew_courses_block_count(String course_nr) =
+  course_nr, %pp_end%, %pp_start% ->
+    export int %count_crew_course_block%;
+  external %course_block_table%;
+c_name, >"startdate", <"enddate" -> count(row_number);
+end
+
+%temp_string% = parameter "";
+
+%crew_has_course_in_pp% =
+  let s_ix = locate("*",%temp_string%);
+
+  if %temp_string% = "*"
+  then
+    not void(%course_name_found%)
+  else if s_ix > 0
+  then
+    %crew_match_this_course%(substr(%temp_string%,1,s_ix-1))
+  else
+    not void(%select_non_released_course_name%(%temp_string%));
+
+%crew_match_this_course%(String course) =
+  any(times(%count_crew_course_name%), default(locate(course,%course_name_ix%(%times_index_0%),1) >0, false));
+  
+
+
+
+
+/*************************************************************************
+ New Hire follow up:  SKCMS-36, SKCMS-302 
+ *************************************************************************/
+
+/* Filter funtions for crew */
+
+/*
+    New-hired crew that has not performed a new-hire follow up flight within 
+    the follow up interval that ends before the end of this planning period.
+    This is also used in legality.  
+*/
+export %crew_needs_follow_up_in_pp% =
+  let interval = %current_follow_up_interval%;
+  crew.%crew_is_in_new_hire_program% and 
+  %crew_has_last_follow_up_date_before_end_pp%(interval) and 
+  not %crew_has_valid_follow_up_scheduled_in_interval%(interval);
+
+
+export %crew_can_have_follow_up_in_pp% =
+    let interval = %current_follow_up_interval%;
+    crew.%crew_is_in_new_hire_program% and 
+    %crew_has_first_follow_up_date_before_end_pp%(interval) and
+    not %crew_has_performed_follow_up_before_pp_start%(interval);
+
+
+export %scheduled_follow_up_in_pp% =
+    first(trip(roster), trip.%start_UTC%)
+    where (trip.%is_new_hire_follow_up_trip%);
+
+
+/* 
+   Determine which follow up interval we are interested in.
+   follow up interval 1 is valid until pp touches follow up 
+   interval 2 etc.
+*/   
+export %current_follow_up_interval% = 
+    if %pp_end% < crew.%new_hire_follow_up_2_start_date% 
+    then 
+        1
+    else 
+        2;
+
+
+/*
+    Get the new-hire followup end date that is closest before this planning period     
+*/
+export %current_new_hire_follow_up_end_date% = 
+    let interval = %current_follow_up_interval%;
+    %new_hire_follow_up_end_date%(interval);		
+    
+
+
+%new_hire_follow_up_end_date%(Int interval) =
+   if interval = 1 
+   then
+       crew.%new_hire_follow_up_1_end_date%
+   else if interval = 2 
+   then
+       crew.%new_hire_follow_up_2_end_date%
+   else
+       void_abstime;
+
+
+%new_hire_follow_up_start_date%(Int interval) =
+    if interval = 1 
+    then
+       crew.%new_hire_follow_up_1_start_date%
+    else if interval = 2 
+    then
+       crew.%new_hire_follow_up_2_start_date%
+    else 
+      void_abstime;
+
+
+/* 
+    All crew that has a last follow up date earlier than end of pp 
+    is a candidate for a follow up flight. 
+*/    
+%crew_has_last_follow_up_date_before_end_pp%(Int interval) =
+    %pp_end% >= %new_hire_follow_up_end_date%(interval);
+  	
+%crew_has_first_follow_up_date_before_end_pp%(Int interval) =
+    %pp_end% > %new_hire_follow_up_start_date%(interval);
+
+
+/*
+    True if the crew has a scheduled flight tagged as NEW HIRE FOLLOW UP within the specified interval.
+    Both the training log and the current plan is checked.         
+*/ 
+%crew_has_follow_up_in_ival%(Abstime istart, Abstime iend) =
+    %nr_acts_of_type_in_ival%("NEW HIRE FOLLOW UP", istart, iend) > 0;
+
+%crew_has_follow_up_before_pp_start%(Abstime istart) =
+    %nr_acts_of_type_and_code_in_ival_table%("NEW HIRE FOLLOW UP","", istart, %pp_start%) > 0; 
+
+
+/*
+    True if the crew has a scheduled flight tagged as NEW HIRE FOLLOW UP within the interval specified 
+    by the parameter. 
+*/
+%crew_has_valid_follow_up_scheduled_in_interval%(Int interval) =
+    if interval = 1 
+    then 
+        %crew_has_follow_up_in_ival%(crew.%new_hire_follow_up_1_start_date%, crew.%new_hire_follow_up_1_end_date%)
+    else if interval = 2 
+    then
+        %crew_has_follow_up_in_ival%(crew.%new_hire_follow_up_2_start_date%, crew.%new_hire_follow_up_2_end_date%)
+    else
+  		false; 
+ 
+
+/*
+
+*/
+%crew_has_performed_follow_up_before_pp_start%(Int interval) =
+    if interval = 1 
+    then 
+        %crew_has_follow_up_before_pp_start%(crew.%new_hire_follow_up_1_start_date%)
+    else if interval = 2 
+    then
+        %crew_has_follow_up_before_pp_start%(crew.%new_hire_follow_up_2_start_date%)
+    else
+  		false;    
+
+/*
+    Trip starts in any of the valid follow up intervals 
+*/
+export %trip_starts_in_valid_new_hire_follow_up_interval% = 
+    (trip.%start_UTC% >= crew.%new_hire_follow_up_1_start_date% and trip.%start_UTC% < crew.%new_hire_follow_up_1_end_date%) or
+    (trip.%start_UTC% >= crew.%new_hire_follow_up_2_start_date% and trip.%start_UTC% < crew.%new_hire_follow_up_2_end_date%);
+
+
+
+/*********************************************************************************************
+   Expressions used by python script NewHireFollowUpHandler.py to initiate the new_hire_follow_up
+    table in the database  when a new-hired crew has performed its ILC  
+*/
+
+
+/*
+    Crew is considered new-hired one year from employment date
+*/
+export %one_year_ago% = add_years(%now%,-1);
+export %crew_is_new_hired% = crew.%employment_date% >= %one_year_ago%;
+
+
+/*
+    
+*/
+export %crew_has_performed_first_ilc% = 
+     %crew_is_new_hired%                      and   /* Crew is employed within the last year */
+     not crew.%crew_is_in_new_hire_program%   and   /* Crew is not already in new_hire_follow_up table */
+     training.%is_last_ilc%                   and   /* ILC is performed after last leg in ILC Trip*/
+     not void(%new_hire_init_mentor%)         and   /* ILC is not valid if it is not performed with a valid instructor */
+     %new_hire_init_ilc_date% < %now%;              /* Crew has performed ILC */
+
+
+/* %new_hire_init_ilc_date%  = first(leg(trip), leg.%end_utc%) where (training.%is_last_ilc%); */
+
+%new_hire_init_ilc_date% = leg.%end_utc%;
+%new_hire_init_mentor% = %lcp_crew_id%;
+
+
+%new_hire_init_follow_up_1_start_date% = %planned_new_hire_follow_up_1_start_date%(%new_hire_init_ilc_date%);
+%new_hire_init_follow_up_1_end_date%   = %planned_new_hire_follow_up_1_end_date%(%new_hire_init_ilc_date%);
+%new_hire_init_follow_up_2_start_date% = %planned_new_hire_follow_up_2_start_date%(%new_hire_init_ilc_date%);
+%new_hire_init_follow_up_2_end_date%   = %planned_new_hire_follow_up_2_end_date%(%new_hire_init_ilc_date%);
+%new_hire_init_follow_up_3_start_date% = %planned_new_hire_follow_up_3_start_date%(%new_hire_init_ilc_date%);
+%new_hire_init_follow_up_3_end_date%   = %planned_new_hire_follow_up_3_end_date%(%new_hire_init_ilc_date%);
+
+
+/* 
+    Table used to calculate the intervals when a new-hire follow up should be performed
+*/
+table planned_new_hire_follow_up_intervals(AbsTime ilc_date) =
+    ilc_date -> AbsTime %planned_new_hire_follow_up_1_start_date%, AbsTime %planned_new_hire_follow_up_1_end_date%, 
+                AbsTime %planned_new_hire_follow_up_2_start_date%, AbsTime %planned_new_hire_follow_up_2_end_date%,
+                AbsTime %planned_new_hire_follow_up_3_start_date%, AbsTime %planned_new_hire_follow_up_3_end_date%;
+
+    - ->  add_months(round_up_month(ilc_date),2), add_months(round_up_month(ilc_date),3),
+          add_months(round_up_month(ilc_date),5), add_months(round_up_month(ilc_date),6),
+          add_months(round_up_month(ilc_date),8), add_months(round_up_month(ilc_date),9);
+end
+
+/*redefine export %wt_last_performed_in_log%(String crew_id, Abstime s, Abstime e, String code) =
+   training_log.%last_training_log%(crew_id, s, e, "COURSE", code);
+*/
+
+/*Cabin initial training */
+
+/*
+* Rule: Max 2 instructors during initial supernumerary legs.
+*/
+
+rule max_2_instructors_during_initial_supernum_training =
+    valid training.%crew_has_any_supernum_leg_assigned%(crew.%id%);
+    %num_instructors_during_cabin_initial_training% <= 2;
+    remark "Studio rule: Max 2 instructors during initial supernum training";
+    startdate = %pp_start%;
+end
+
+%num_instructors_during_cabin_initial_training% =
+    let trainee_id = crew.%id%;
+    count(cabin_initial_training_instructor_set)
+    where(training.%supernum_leg_has_trainee_assigned%(trainee_id));
+
+iterator cabin_initial_training_instructor_set =
+  partition(leg)
+  by(%leg_instructor_crew_id%);
+end
+
+%leg_instructor_crew_id% =
+    max(equal_legs, crew.%id%)
+    where(crew_pos.%assigned_pos% = 5);
+
+/* Used to filter out "good" training trips, i.e. trainee & instructor slice is the same */
+%trip_has_instructor_need% =
+          void(crr_crew_id)
+          and crew_pos.%trip_assigned_pos%(5) > 0
+          and trip.%has_active_flight%
+          and trip.%starts_after_pp_start%;
+
+/* end of file */
+

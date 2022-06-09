@@ -1,0 +1,341 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   Definitions for the Crew Properties report.
+ *
+ * Created by:
+ *   Erik Gustafsson, 18-Mar-2008
+ *
+ * Major changes:
+ *
+ */
+ 
+root module report_crew_properties
+ 
+import crew;
+import fundamental;
+import base_utils;
+import training;
+import compdays;
+import recency;
+import calendar;
+import accumulators;
+import task;
+
+/* Props table is iterated through by %basic_count%
+   %specific_prop_entries% should be the # of non-ofdx entries
+   any other numbers sent to the table are assumed to be ofdx */
+table props(Int ix) =
+    ix  -> String %basic_name%, String %basic_val%;
+    1   -> "Seniority", %int2str%(crew.%seniority%);
+    2   -> "Homebase", %base%;
+    3   -> "Rank", %rank%;
+    4   -> "Contract", %contract%;
+    5   -> "Parttime factor", %parttime%;
+    6   -> "PM attended", %int2str%(accumulators.%pm_attended%);
+    7   -> if void(accumulators.%pm_last_attend%) then void_string else "Last PM",  %abstime2str%(accumulators.%pm_last_attend%);
+    8   -> "Agreement group", crew.%agmt_group_desc%;
+    -   -> %ofdx_desc%(ix, %pp_start%), %ofdx_attended%(ix, %pp_start%);
+end
+
+%specific_prop_entries% = 8;
+
+%ofdx_desc%(Int ix, Abstime d) =
+    let ofdx_id = ix - %specific_prop_entries%;
+    if ix > %basic_count% then void_string else
+    if training.%ofdx_id_valid_for_crew%(ofdx_id, d)
+    then task.%ofdx_long_desc%(ofdx_id, d)
+    else void_string;
+
+%ofdx_attended%(Int ix, Abstime d) =
+    let ofdx_id = ix - %specific_prop_entries%;
+    if ix > %basic_count% then void_string else
+    %int2str%(training.%ofdx_attended%(ofdx_id, %pp_start%));
+
+/* specific prop entries plus ofdx_count */
+%basic_count% = %specific_prop_entries% + task.%ofdx_count%;
+
+%basic_name_ix% = %basic_name%(%py_index%);
+%basic_val_ix% = %basic_val%(%py_index%);
+
+%multi_prop_format%(String prop1, String prop2, Abstime date) =
+    format_time(date,
+                concat(prop1, " (", prop2, " from %d%b)"));
+
+%multi_prop%(Bool change, Abstime date, String prop1, String prop2) =
+    default(if change then %multi_prop_format%(prop1, prop2, date)
+            else prop1,
+            "NA");
+%base% =
+    %multi_prop%(crew.%homebase_change_in_pp%, 
+                 crew.%homebase_pp_start_valid_to%,
+                 crew.%homebase%, 
+                 crew.%homebase_next_different_in_pp%);
+               
+%rank% = 
+    %multi_prop%(crew.%rank_change_in_pp%,
+                 crew.%rank_pp_start_valid_to%,
+                 crew.%rank%, 
+                 crew.%rank_next_different_in_pp%);
+    
+%contract% = 
+    %multi_prop%(crew.%agreement_change_in_pp%,
+                 crew.%agreement_pp_start_valid_to%,
+                 crew.%group_detailed_pp_start%, 
+                 crew.%group_detailed_next_in_pp%);
+    
+%parttime% = 
+    %multi_prop%(crew.%part_time_change_in_pp%,
+                 default(crew.%part_time_change_in_pp_date%, 31dec2099),
+                 %int2str%(crew.%part_time_factor_pp_start%),
+                 %int2str%(crew.%part_time_factor_at_date%(crew.%part_time_factor_pp_start_validto%)));
+
+/* 
+ * Recurrent Documents 
+ */
+%rec_elements% = 10;
+%rec_type_ix% = 
+    training.%recurrent_activity_wrapped_ix%(%py_index%);
+
+set rec_types_with_acq = "PC", "OPC", "LC";
+%rec_type_expiry_ix% =
+    let acq = training.%recurrent_type_expiry_ac_qual%(%rec_type_ix%,
+                                                       %any_ac_qual%, 
+                                                       %pp_start%);
+    if %rec_type_ix% in rec_types_with_acq and 
+        /* Handles crew that lacks a needed qual at date, as well as where upcoming lc qual is "A3 or A4" 
+           This should not happen today with how the acq is looked up, but is here for any future changes */
+        not crew.%has_ac_qual_override_a3a4%(acq, %pp_start%) then
+        concat("(", %_rec_type_expiry_ix%, " ", acq, ")")
+    else
+        %_rec_type_expiry_ix%;
+
+%_rec_type_expiry_ix% =
+    concat(%_rec_type_exp_ix%,
+           if %rec_type_will_change_ix% then "*"
+           else "");
+%_rec_type_exp_ix% =
+    %expiry_month_inclusive%(training.%recurrent_type_expiry_date_pp_start_ix%(%py_index%));
+%rec_type_will_change_ix% =
+  training.%recurrent_type_expiry_date_incl_performed_ix%(%py_index%) <>
+  training.%recurrent_type_expiry_date_pp_start_ix%(%py_index%);
+
+/* 
+ * Training Activities 
+ */
+%ctl_items% = training.%ctl_rows%;
+%ctl_type_ix% = training.%ctl_type%(%py_index%);
+%ctl_code_ix% = training.%ctl_code%(%py_index%);
+%ctl_attr_ix% = default(training.%ctl_attr%(%py_index%), "");
+%ctl_time_ix% = training.%ctl_time%(%py_index%);
+%ctl_time_str_ix% = format_time(%ctl_time_ix%, "%02d%b%Y %02H:%02M");
+%ctl_time_limit% = format_time(training.%ctl_time_limit%, "%d%b%Y");
+
+/* 
+ * Accounts 
+ */
+%account_items% = compdays.%nr_account_set_entries%;
+%_account_type_ix% = compdays.%account_id%(%py_index%);
+%account_type_ix% =
+    if %_account_balance_ix% = 0 then void_string
+    else %_account_type_ix%;
+%_account_balance_ix% =
+    compdays.%available_balance_at_date%(%_account_type_ix%, %pp_start%);
+%account_balance_ix% = 
+    %format_decimal%(%_account_balance_ix%, 100);
+    
+%format_decimal%(int number, int precision) =
+  let p = number / precision;
+  concat(format_int(p, "%i"), format_int(abs(number - p * 100), ".%i"));
+
+/*
+ *  Qualifications
+ */
+%qualification_items% = %qual_items% + %qual_pos_items%;
+%qualification_desc_ix% =
+    if %py_index% <= %qual_items% then
+        %qual_desc_ix%
+    else
+        %qual_pos_desc_ix%;
+%qualification_date_ix% =
+    if %py_index% <= %qual_items% then
+        %qual_date_ix%
+    else
+        %qual_pos_validto_ix%;
+        
+%qual_items% = crew.%number_of_qualifications%;
+%qual_desc_ix% =
+    concat(crew.%qln_type%(%py_index%), " ", crew.%qln_subtype%(%py_index%));
+%qual_expiry_ix% =
+    if crew.%qln_type%(%py_index%) = "ACQUAL" then
+        format_time(recency.%expiry_date%(%pp_end%, crew.%qln_subtype%(%py_index%)),
+                    "Recent until %d%b%02y ")
+    else
+        "";
+%qual_validto_ix% =
+    if crew.%qln_validfrom%(%py_index%) > %pp_start% then
+        format_time(crew.%qln_validfrom%(%py_index%), "Valid from: %02d%b")
+    else if crew.%qln_validto%(%py_index%) < %pp_end% then
+        format_time(crew.%qln_validto%(%py_index%), "Valid to: %02d%b")
+    else
+        "";
+%qual_date_ix% =
+    concat(%qual_expiry_ix%, %qual_validto_ix%);
+
+/* CR43 Qual_pos */
+%qual_pos_items% = crew.%qacq_rows%;
+%index_qualpos% = %py_index% - %qual_items%;
+%qual_pos_desc_ix% =
+    concat(crew.%qacq_acqqual_type%(%index_qualpos%), " ", 
+           crew.%qacq_acqqual_subtype%(%index_qualpos%), " for: ",
+           crew.%qacq_acqual_type%(%index_qualpos%), " ", 
+           crew.%qacq_acqual_subtype%(%index_qualpos%));
+%qual_pos_validto_ix% =
+    if crew.%qacq_validfrom%(%index_qualpos%) > %pp_start% then
+        format_time(crew.%qacq_validfrom%(%index_qualpos%), "Valid from: %02d%b")
+    else if crew.%qacq_validto%(%index_qualpos%) < %pp_end% then
+        format_time(crew.%qacq_validto%(%index_qualpos%)-0:01, "Valid to: %02d%b")
+    else
+        "";
+
+/*
+ *  Restrictions
+ */
+%restriction_items% = %restr_items% + %qrestr_items%;
+%restriction_desc_ix% =
+    if %py_index% <= %restr_items% then
+        %restr_desc_ix%
+    else
+        %qrestr_desc_ix%;
+%restriction_date_ix% =
+    if %py_index% <= %restr_items% then
+        %restr_date_ix%
+    else
+        %qrestr_date_ix%;
+        
+%restr_items% = crew.%restr_rows%;
+%restr_typ_ix% = 
+    if %restr_validfrom_ix% >= %pp_end% or %restr_validto_ix% < %pp_start% then
+        void_string
+    else
+        crew.%restr_type%(%py_index%);
+%restr_subtyp_ix% = crew.%restr_subtype%(%py_index%);
+
+%restr_desc_ix% = 
+    concat(%restr_typ_ix%, " ", %restr_subtyp_ix%);
+
+%restr_validfrom_ix% = crew.%restr_validfrom%(%py_index%);
+%restr_validto_ix% = crew.%restr_validto%(%py_index%);
+
+%restr_date_ix% = 
+    concat("Valid: ", fundamental.%time_span_str%(%restr_validfrom_ix%, 
+                                                  %restr_validto_ix% - 0:01));
+
+%qrestr_items% = crew.%qrestr_rows%;
+%index_qrestr% = %py_index% - %restr_items%;
+%qrestr_desc_ix% =
+    concat(crew.%qrestr_restr_type%(%index_qrestr%), " ", 
+           crew.%qrestr_restr_subtype%(%index_qrestr%), " for: ",
+           crew.%qrestr_qual_type%(%index_qrestr%), " ", 
+           crew.%qrestr_qual_subtype%(%index_qrestr%));
+    
+%qrestr_validfrom_ix% = crew.%qrestr_validfrom%(%index_qrestr%);
+%qrestr_validto_ix% = crew.%qrestr_validto%(%index_qrestr%);
+
+%qrestr_date_ix% = 
+    concat("Valid: ", fundamental.%time_span_str%(%qrestr_validfrom_ix%, 
+                                                  %qrestr_validto_ix% - 0:01));
+/*
+ *  Free Weekends
+ */
+%weekends_free_in_quarters% =
+  concat("Weekends in ", format_int(calendar.%quarter_current%, "%i")," quarter: ",
+  calendar.%month_name%(calendar.%month_number%(calendar.%quarter_1_month_start%))," ",
+  format_int(%num_weekends_in_quarter_month_1%, "%i"), " ",
+  calendar.%month_name%(calendar.%month_number%(calendar.%quarter_2_month_start%))," ",
+  format_int(%num_weekends_in_quarter_month_2%, "%i"), " ",
+  calendar.%month_name%(calendar.%month_number%(calendar.%quarter_3_month_start%))," ",
+  format_int(%num_weekends_in_quarter_month_3%, "%i")
+    );
+
+%num_weekends_in_quarter_month_1% = 
+  if %round_up_sunday%(%weekend_found_1_quarter_1%) < calendar.%quarter_1_month_start%
+  then 0
+  else if %round_up_sunday%(%weekend_found_2_quarter_1%) < calendar.%quarter_1_month_start%
+  then 1
+  else if %round_up_sunday%(%weekend_found_3_quarter_1%) < calendar.%quarter_1_month_start%
+  then 2
+  else if %round_up_sunday%(%weekend_found_4_quarter_1%) < calendar.%quarter_1_month_start%
+  then 3
+  else if %round_up_sunday%(%weekend_found_5_quarter_1%) < calendar.%quarter_1_month_start%
+  then 4
+  else 5;
+
+%num_weekends_in_quarter_month_2% = 
+  if %round_up_sunday%(%weekend_found_1_quarter_2%) < calendar.%quarter_2_month_start%
+  then 0
+  else if %round_up_sunday%(%weekend_found_2_quarter_2%) < calendar.%quarter_2_month_start%
+  then 1
+  else if %round_up_sunday%(%weekend_found_3_quarter_2%) < calendar.%quarter_2_month_start%
+  then 2
+  else if %round_up_sunday%(%weekend_found_4_quarter_2%) < calendar.%quarter_2_month_start%
+  then 3
+  else if %round_up_sunday%(%weekend_found_5_quarter_2%) < calendar.%quarter_2_month_start%
+  then 4
+  else 5;
+
+%num_weekends_in_quarter_month_3% = 
+  if %round_up_sunday%(%weekend_found_1_quarter_3%) < calendar.%quarter_3_month_start%
+  then 0
+  else if %round_up_sunday%(%weekend_found_2_quarter_3%) < calendar.%quarter_3_month_start%
+  then 1
+  else if %round_up_sunday%(%weekend_found_3_quarter_3%) < calendar.%quarter_3_month_start%
+  then 2
+  else if %round_up_sunday%(%weekend_found_4_quarter_3%) < calendar.%quarter_3_month_start%
+  then 3
+  else if %round_up_sunday%(%weekend_found_5_quarter_3%) < calendar.%quarter_3_month_start%
+  then 4
+  else 5;
+
+%round_up_sunday%(Abstime date) = round_up_week(date) - 24:00;
+
+%weekend_found_1_quarter_1% =
+  default(accumulators.%last_free_weekend%(calendar.%quarter_1_month_end%), 1Jan1986); 
+%weekend_found_2_quarter_1% =
+  default(accumulators.%last_free_weekend%(%weekend_found_1_quarter_1%), 1Jan1986); 
+%weekend_found_3_quarter_1% =
+  default(accumulators.%last_free_weekend%(%weekend_found_2_quarter_1%), 1Jan1986); 
+%weekend_found_4_quarter_1% =
+  default(accumulators.%last_free_weekend%(%weekend_found_3_quarter_1%), 1Jan1986); 
+%weekend_found_5_quarter_1% =
+  default(accumulators.%last_free_weekend%(%weekend_found_4_quarter_1%), 1Jan1986); 
+
+%weekend_found_1_quarter_2% =
+  default(accumulators.%last_free_weekend%(calendar.%quarter_2_month_end%), 1Jan1986); 
+%weekend_found_2_quarter_2% =
+  default(accumulators.%last_free_weekend%(%weekend_found_1_quarter_2%), 1Jan1986); 
+%weekend_found_3_quarter_2% =
+  default(accumulators.%last_free_weekend%(%weekend_found_2_quarter_2%), 1Jan1986); 
+%weekend_found_4_quarter_2% =
+  default(accumulators.%last_free_weekend%(%weekend_found_3_quarter_2%), 1Jan1986); 
+%weekend_found_5_quarter_2% =
+  default(accumulators.%last_free_weekend%(%weekend_found_4_quarter_2%), 1Jan1986); 
+
+%weekend_found_1_quarter_3% =
+  default(accumulators.%last_free_weekend%(calendar.%quarter_3_month_end%), 1Jan1986); 
+%weekend_found_2_quarter_3% =
+  default(accumulators.%last_free_weekend%(%weekend_found_1_quarter_3%), 1Jan1986); 
+%weekend_found_3_quarter_3% =
+  default(accumulators.%last_free_weekend%(%weekend_found_2_quarter_3%), 1Jan1986); 
+%weekend_found_4_quarter_3% =
+  default(accumulators.%last_free_weekend%(%weekend_found_3_quarter_3%), 1Jan1986); 
+%weekend_found_5_quarter_3% =
+  default(accumulators.%last_free_weekend%(%weekend_found_4_quarter_3%), 1Jan1986); 
+
+
+/* Cached */
+%any_ac_qual% = training.%any_ac_qual%;
+
+/* end of file */

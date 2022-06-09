@@ -1,0 +1,99 @@
+/* -*- crc -*- 
+  This module contains common date functionality for
+  CRG. It contains formatting of dates and indexing in 
+  weeks.
+*******************************************************/
+module crg_date
+import fundamental;
+import crg_basic;
+
+
+/* Config Items */
+%date_format_string% = "%02d%02b%Y"; /* NB: Will not change report header */
+%reltime_format_string% = "%2hh%02M";
+
+export %print_reltime%(Reltime RTime) = 
+  format_time(RTime, %reltime_format_string%);
+
+export %etab_abs%(Abstime Date) = format_time(Date, "%02d%02b%Y %02H:%02M");
+export %etab_date%(Abstime Date) = format_time(Date, "%02d%02b%Y");
+
+export %print_abs%(Abstime Date) = format_time(Date, "%02d%02b%Y %02H:%02M");
+export %print_date%(Abstime Date) = format_time(Date, %date_format_string%);
+export %print_time%(Abstime Date) = format_time(Date, "%02H:%02M");
+export %print_time2%(Abstime Date) = format_time(Date, "%02H%02M");
+export %print_time_end%(Abstime Date) =
+  let TimeStr = %print_time%(Date);
+  if TimeStr = "00:00" then "24:00" else TimeStr;
+export %print_time2_end%(Abstime Date) =
+  let TimeStr = %print_time2%(Date);
+  if TimeStr = "0000" then "2400" else TimeStr;
+export %print_day%(Abstime Date) = format_time(Date,"%2d"); 
+export %print_day2%(Abstime Date) = format_time(Date,"%d"); 
+export %print_weekday%(Abstime Date) = format_time(Date, "%a");
+export %print_day_month%(Abstime Date) = format_time(Date,"%02d%02b");
+export %date%(Abstime Start, Int DayNr) = Start + 24:00 * DayNr - 24:00;
+export %now_abs% = %print_abs%(time);
+export %abs2int%(Abstime ATime) = (ATime - 1jan1986) / 0:01;
+export %abs2rel%(Abstime ATime) = ATime - round_down(ATime,24:00);
+
+export %ix% = %date%(crg_basic.%report_pp_start%,%py_index%);
+export %ix_is_new_week% = time_of_week(%ix%) < 24:00; 
+export %ix_day% = %print_day%(%ix%);
+export %ix_day2% = %print_day2%(%ix%);
+export %ix_weekday% = %print_weekday%(%ix%);
+
+export %ix1% =  %date%(crg_basic.%report_pp_start%,%py_index1%);
+export %ix1_is_new_week% = time_of_week(%ix1%) < 24:00; 
+export %ix1_day% = %print_day%(%ix1%);
+export %ix1_weekday% = %print_weekday%(%ix1%);
+
+export %print_pp% =
+  %print_period%(crg_basic.%report_pp_start%, crg_basic.%report_pp_end%-0:01);
+  
+export %print_period%(Abstime PStart, Abstime PEnd) =
+  let year_pp_start = format_time(PStart,"%Y"),
+      year_pp_end = format_time(PEnd,"%Y"),
+      month_pp_start = format_time(PStart,"%02b"),
+      month_pp_end = format_time(PEnd,"%02b");
+  concat(
+    format_time(PStart,"%02d"),
+    if month_pp_start = month_pp_end then "" else month_pp_start,
+    if year_pp_start = year_pp_end then "" else year_pp_start,
+    " - ",
+    format_time(PEnd,"%02d"),
+    month_pp_end,
+    year_pp_end);
+
+/* Formating dates for Crew Info report*/
+export %detailed_formatter%(abstime a) =
+  format_time(a,"%b %d, %Y");
+
+export %print_abs_range%(Abstime PStart, Abstime PEnd) =
+  if overlap(PStart,PEnd,%pp_start%,%pp_end%) = 0:00 then "n/a"
+  else if PStart<=%pp_start% and PEnd >= %pp_end% then ""
+  else if PStart<%pp_start% then concat("->",%print_abs%(PEnd))
+  else if PEnd>%pp_end% then concat(%print_abs%(PStart),"->")
+  else if (PStart+24:00)=PEnd then %print_abs%(PStart)
+  else concat(%print_day%(PStart),"-",%print_abs%(PEnd));
+
+/* Used in BidsCrew Report*/
+export %print_abs_range2%(Abstime PStart, Abstime PEnd, Reltime CarryOut) =
+  let pp_end = %publ_period_end% + CarryOut;
+  if overlap(PStart, PEnd, %pp_start%, pp_end) = 0:00 then "n/a"
+  else if PStart <= %pp_start% and PEnd >= pp_end then ""
+  else if PStart < %pp_start% then concat("->", %etab_date%(PEnd))
+  else if PEnd > pp_end then concat(%etab_date%(PStart), "->")
+  else if PStart + 23:59 = PEnd or PStart + 24:00 = PEnd then %etab_date%(PStart)
+  else concat(%print_day%(PStart), "-", %etab_date%(PEnd-0:01));
+
+export %print_weekday_range%(Reltime PStart, Reltime PEnd) =
+  /* !!! Should not be used if not complete days are used */
+  let PEndm = PEnd - 0:01;
+  if PStart = PEnd then
+    (if PStart = 0:00 then "" else format_time(6Jan1986 + PStart, "%a"))
+  else
+    (if PEnd - PStart <= 24:00 and PEnd > PStart then
+       format_time(6Jan1986 + PStart, "%a")
+     else
+       concat(format_time(6Jan1986 + PStart, "%a-"), format_time(6Jan1986 + PEndm, "%a")));

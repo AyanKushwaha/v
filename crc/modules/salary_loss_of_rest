@@ -1,0 +1,506 @@
+/* -*- crc -*-
+ *  
+ * Purpose:
+ *   Loss of rest calculations used for reporting and salary export.
+ *
+ * Sections:
+ *
+ * Created by:
+ *   Rickard Petzäll, 07-May-2009
+ *
+ * Major changes:
+ */
+
+module salary_loss_of_rest
+
+import crew;
+import rest;
+import rescheduling;
+import duty_time;
+import wop;
+import trip;
+import duty;
+import leg;
+import levels;
+import salary;
+import standby;
+import fundamental;
+import base_utils;
+
+
+/* **********************************************************************/
+/*                      Loss of rest calculations                       */
+/* **********************************************************************/
+
+/* limits */
+
+%min_rest_sh_24hrs_SKD% = last(leg(duty), rest.%min_time_in_24hrs%);
+%min_rest_sh_outstation_SKD% = 10:00 + %add_hours%(duty_time.%duty_is_extended%,2:00);
+%min_rest_sh_homebase_SKD% = 12:00;
+%min_rest_lh_SKD% = 16:00;
+%min_rest_sh_outstation_SKS% = 10:00;
+
+%min_rest_sh_homebase_SKS% =
+  12:00 + %add_hours%(duty.%duty_time%(duty.overtime, True) > 10:30, 2:00);
+
+%min_rest_lh_homebase_SKS% = 12:00;
+
+%min_rest_lh_outstation_SKS% = 
+  if last(leg(duty), leg.%arrival_is_intercont%) then
+    nmax(rest.%min_at_station_lh%(false, true), 16:00)
+  else 
+    10:00;
+
+%min_rest_lh_24hrs_SKS% = 10:00;
+
+%min_rest_sh_homebase_NKF_SKN% =
+  %_min_rest_sh_hb_NKF_SKN_night_duty% + 2 * %_default_transport% 
+  - %delay_by_own_program_SKN% 
+  - %add_hours%(%next_leg_is_sby_at_home%, %_default_transport%) 
+  - %add_hours%(last(leg(duty), leg.%is_standby_at_home%), %_default_transport%);
+
+%_default_transport% = last(leg(duty), rest.%local_transport_default%);
+
+%_min_rest_sh_hb_NKF_SKN_night_duty% =
+  if %_night_duty% or default(next(duty(chain), %_night_duty%), false) then
+    15:00 
+  else 
+    12:00;
+
+%_night_duty% = default(duty.%is_night_duty%, false);
+
+%delay_by_own_program_SKN% = 
+  if %is_SKN% and not %_night_duty% 
+     and trip.%end_UTC% > last(leg(trip),leg.%activity_scheduled_end_time_utc%)
+                          where (leg.%is_on_duty%)
+  then 0:15
+  else 0:00;
+
+%next_leg_is_sby_at_home% =
+  default(next(duty(chain), first(leg(duty), leg.%is_standby_at_home%)), true);
+
+%min_rest_sh_outstation_low_SKN% =
+  8:00 + 2 * last(leg(duty), rest.%local_transport_time%); 
+%min_rest_lh_SKN% = 16:00;
+  
+/* Loss of rest low SKD, SKN */
+export %loss_of_rest_low_roster% =
+  if %cabin_crew% then
+    if %is_SKD% and not %crew_is_temporary% then
+      %loss_rest_sh_outstation_low_SKD% + %loss_rest_sh_homebase_SKD%
+    else if %is_SKN% then
+      %loss_rest_sh_homebase_NKF_SKN%
+    else if %is_SKS% then
+      %loss_rest_sh_outstation_SKS% + %loss_rest_sh_homebase_SKS% 
+      + %loss_rest_lh_homebase_SKS% + %loss_rest_lh_outstation_SKS%
+      + %loss_rest_lh_24hrs_SKS%
+    else 0
+ else
+  0;
+  
+export %is_loss_of_rest_low% = 
+  if %cabin_crew% then
+    if %is_SKD% and not %crew_is_temporary% then
+      if not %is_loss_rest_sh_24hrs_SKD% then
+        %is_loss_rest_sh_outstation_low_SKD% or %is_loss_rest_sh_homebase_SKD%
+      else false
+    else if %is_SKS% then
+      %is_loss_rest_sh_outstation_SKS% or %is_loss_rest_sh_homebase_SKS%
+      or %is_loss_rest_lh_homebase_SKS% or %is_loss_rest_lh_outstation_SKS%
+      or %is_loss_rest_lh_24hrs_SKS%
+    else if %is_SKN% then
+      %is_loss_rest_sh_homebase_NKF_SKN%
+    else false
+  else false;
+  
+/* Loss of rest high SKD, SKS */
+export %loss_of_rest_high_roster% =
+  if %cabin_crew% then
+    if %is_SKD% and not %crew_is_temporary% then
+      %loss_rest_sh_24hrs_SKD% 
+      + %loss_rest_sh_outstation_high_SKD% 
+      + %loss_rest_lh_SKD%
+    else if %is_SKN% then
+      %loss_rest_lh_SKN%
+    else 0
+  else 0;
+
+export %is_loss_of_rest_high% =
+  if %cabin_crew% then
+    if %is_SKD% and not %crew_is_temporary% then
+      %is_loss_rest_sh_24hrs_SKD% 
+      or %is_loss_rest_lh_SKD% 
+      or %is_loss_rest_sh_outstation_high_SKD%
+    else if %is_SKN% then
+      %is_loss_rest_lh_SKN%
+    else false
+  else false;
+  
+/* general is loss of rest boolean */
+export %is_loss_of_rest% = %is_loss_of_rest_high% or %is_loss_of_rest_low%;
+
+export %is_loss_of_rest_duty_pass% =
+  let duty_pass_start = rest.%duty_period_start_utc%(duty.overtime),
+      duty_pass_end = rest.%duty_period_end_utc%(duty.overtime);
+  any(duty(trip), %is_loss_of_rest%)
+  where((duty.%start_utc% >= duty_pass_start) and (duty.%end_utc% <= duty_pass_end));
+
+/* general validation of loss of rest variables */
+%is_valid_loss_rest% =
+  %in_loss_rest_period%
+  and default(not %crew_is_leased_duty%, true)
+  and default(not duty.%is_rest%, true)
+  and default(not %rest_between_courses%, true)
+  and default(not %rest_in_day_stop%, true)
+  and default(not %is_standby_callout_rest%, true);
+  
+export %duty_is_mixed_bought% =
+  default((duty.%is_bought% and next(duty(trip), not duty.%is_bought%))
+          or (not duty.%is_bought% and next(duty(trip), duty.%is_bought%)), false);
+
+%rest_between_courses% =
+  last(leg(duty), leg.%is_course%)
+  and default(next(duty(chain), first(leg(duty), leg.%is_course%)) 
+              where (duty.%is_on_duty%), false);
+			  
+%rest_in_day_stop% =
+  round_up(duty.%rest_start_lt% - 08:00, 24:00) = round_up(duty.%rest_end_lt%, 24:00);
+
+%is_standby_callout_rest% = standby.%duty_is_standby_callout% or standby.%duty_is_airport_callout%;
+
+%duty_is_short_haul_rest% =
+  duty.%is_short_haul% or
+  duty.%is_ground_duty% or
+  duty.%is_standby%;
+
+%is_late_informed_short_stop% = 
+  let start_date = duty.%start_day%;  
+  last(leg(duty), 
+    rescheduling.%is_late_informed_short_stop%) 
+  and not (
+      duty.%is_standby_callout% 
+    or 
+      prev(duty(roster), duty.%end_day% = start_date and duty.%is_standby_callout%));
+      
+%is_late_informed_short_stop_OLD% =
+  last(leg(duty), rescheduling.%is_late_informed_short_stop%);
+
+/********************/
+/* Loss of rest SKD */
+/********************/
+
+/* Rest short haul, in 24 hours; SKD high Agreement: CAU H.1.1.1 d */
+%loss_rest_sh_24hrs_SKD% = 
+  count(duty(roster))
+  where(%is_loss_rest_sh_24hrs_SKD%);
+
+export %is_loss_rest_sh_24hrs_SKD% = 
+  default(%is_valid_loss_rest%
+          and not %duty_is_mixed_bought%
+          and %duty_is_short_haul_rest% 
+          and last(leg(duty), rest.%in_24hrs% < %min_rest_sh_24hrs_SKD%)
+          and %is_late_informed_short_stop%,
+          false);
+  
+/* Rest short haul, at homebase; SKD low Agreement: CAU H.1.1.1 b */
+%loss_rest_sh_homebase_SKD% = 
+  count(duty(roster))
+  where(%is_loss_rest_sh_homebase_SKD% and not %is_loss_rest_sh_24hrs_SKD%);
+
+export %is_loss_rest_sh_homebase_SKD% = 
+  default(%is_valid_loss_rest%
+          and duty.%arrives_at_homebase%
+          and %duty_is_short_haul_rest%  
+          and duty.%rest_time% < %min_rest_sh_homebase_SKD%,
+          false);
+
+/* Rest short haul, at outstation; SKD low Agreement: CAU H.1.1.1 c */
+%loss_rest_sh_outstation_low_SKD% = 
+  count(duty(roster))
+  where (%is_loss_rest_sh_outstation_low_SKD%
+         and not %is_loss_rest_sh_24hrs_SKD%);
+
+export %is_loss_rest_sh_outstation_low_SKD% =
+  default(%is_valid_loss_rest%
+          and not %duty_is_mixed_bought%
+          and not duty.%arrives_at_homebase%
+          and %duty_is_short_haul_rest%
+          and duty.%rest_time% < %min_rest_sh_outstation_SKD%
+          and %is_late_informed_short_stop%,
+          false);
+
+/* Rest at short haul, outstation; SKD high */
+%loss_rest_sh_outstation_high_SKD% = 
+  count(duty(roster))
+  where (%is_loss_rest_sh_outstation_high_SKD%
+         and not %is_loss_rest_sh_24hrs_SKD%);
+
+export %is_loss_rest_sh_outstation_high_SKD% =
+  default(%is_valid_loss_rest%
+          and not %duty_is_mixed_bought%
+          and not duty.%arrives_at_homebase%
+          and %duty_is_short_haul_rest%
+          and duty.%rest_time% < %min_rest_sh_outstation_SKD%
+          and not %is_late_informed_short_stop%
+          and %next_duty_longer_than_rest%,
+          false);
+
+%next_duty_longer_than_rest% = 
+  default(next(duty(trip), duty.%duty_time%(duty.overtime, True)) > duty.%rest_time%, false);
+
+/* Rest long haul; SKD high Agreement: CAU H.2.1.1 */
+%loss_rest_lh_SKD% = 
+  count(duty(roster)) where(%is_loss_rest_lh_SKD%);
+  
+export %is_loss_rest_lh_SKD% =
+  default(%is_valid_loss_rest%
+          and not %duty_is_short_haul_rest% 
+          and duty.%duty_time%(duty.overtime, False) > %min_rest_lh_SKD%,
+          false);
+  
+
+/********************/
+/* Loss of rest SKS */
+/********************/
+
+/* Rest short haul, at homebase; SKS low */
+%loss_rest_sh_homebase_SKS% =
+  count(duty(roster)) where(%is_loss_rest_sh_homebase_SKS%);
+  
+export %is_loss_rest_sh_homebase_SKS% = 
+  default(%is_valid_loss_rest%
+          and not duty.%is_bought%
+          and duty.%arrives_at_homebase%
+          and %duty_is_short_haul_rest%  
+          and duty.%rest_time% < %min_rest_sh_homebase_SKS%,
+          false);
+
+/* Rest short haul, at outstation; SKS low */
+%loss_rest_sh_outstation_SKS% = 
+  count(duty(roster)) where(%is_loss_rest_sh_outstation_SKS%);
+  
+export %is_loss_rest_sh_outstation_SKS% =
+  default(%is_valid_loss_rest%
+          and not duty.%is_bought%
+          and not duty.%arrives_at_homebase%
+          and %duty_is_short_haul_rest%
+          and duty.%rest_time% < %min_rest_sh_outstation_SKS% 
+          and (%is_late_informed_short_stop%
+               or %next_duty_longer_than_rest%),
+          false);
+
+/* Rest long haul, at homebase; SKS low */
+%loss_rest_lh_homebase_SKS% = 
+  count(duty(roster)) 
+  where(%is_loss_rest_lh_homebase_SKS% and not %is_loss_rest_lh_24hrs_SKS%);
+  
+export %is_loss_rest_lh_homebase_SKS% = 
+  default(%is_valid_loss_rest%
+          and not %duty_is_short_haul_rest%
+          and not duty.%is_bought%
+          and duty.%arrives_at_homebase%
+          and duty.%rest_time% < %min_rest_lh_homebase_SKS%,
+          false);
+
+/* Rest long haul, at outstation; SKS low */
+%loss_rest_lh_outstation_SKS% = 
+  count(duty(roster)) 
+  where(%is_loss_rest_lh_outstation_SKS% and not %is_loss_rest_lh_24hrs_SKS%);
+  
+export %is_loss_rest_lh_outstation_SKS% = 
+  default(%is_valid_loss_rest%
+          and not %duty_is_short_haul_rest%
+          and not duty.%is_bought%
+          and not duty.%arrives_at_homebase%
+          and duty.%rest_time% < %min_rest_lh_outstation_SKS%,
+          false);
+
+/* Rest long haul, in 24 hours; SKS low */
+%loss_rest_lh_24hrs_SKS% = 
+  count(duty(roster)) where(%is_loss_rest_lh_24hrs_SKS%);
+  
+export %is_loss_rest_lh_24hrs_SKS% = 
+  default(%is_valid_loss_rest%
+          and not duty.%is_bought%
+          and not %duty_is_short_haul_rest%
+          and last(leg(duty), rest.%in_24hrs% < %min_rest_lh_24hrs_SKS%),
+          false);
+
+/********************/
+/* Loss of rest SKN */
+/********************/
+
+/* Rest short haul, homebase, SKN low */
+%loss_rest_sh_homebase_NKF_SKN% =
+  count(duty(roster)) where(%is_loss_rest_sh_homebase_NKF_SKN%);
+  
+export %is_loss_rest_sh_homebase_NKF_SKN% =
+  default(%is_valid_loss_rest%
+          and duty.%arrives_at_homebase%
+          and %duty_is_short_haul_rest%
+          and duty.%rest_time% < %min_rest_sh_homebase_NKF_SKN%,
+          false);
+
+/* Rest long haul, SKN high */
+%loss_rest_lh_SKN% = 0;
+export %is_loss_rest_lh_SKN% = false;
+
+/********************************************/
+/* string representations for List12 report */
+/********************************************/
+
+export %rest_time_high_str% = 
+  concat(%reltime2str%(%rest_time_high%),
+         %rest_type_high_str%,
+         %reltime2str%(%min_rest_time_high%),
+         ")");
+		 
+%rest_type_high_str% =
+  if (%is_SKD% and %is_loss_rest_sh_24hrs_SKD%)
+  then " rest in 24hrs ("
+  else if (%is_SKD% and %is_loss_rest_lh_SKD%)
+       or (%is_SKN% and %is_loss_rest_lh_SKN%)
+  then " duty period ("
+  else if (%is_SKD% and %is_loss_rest_sh_outstation_high_SKD%)
+       or (%is_SKS% and %is_loss_rest_sh_outstation_SKS% 
+           and not %is_late_informed_short_stop%) 
+  then " next duty > than rest ("
+  else " rest (";
+
+%rest_time_high% = 
+  if (%is_SKD% and %is_loss_rest_sh_24hrs_SKD%) then 
+    last(leg(duty), rest.%in_24hrs%)
+  else if (%is_SKD% and %is_loss_rest_lh_SKD%) 
+       or (%is_SKN% and %is_loss_rest_lh_SKN%) then
+    duty.%duty_time%(duty.overtime, False)
+  else if (%is_SKD% and %is_loss_rest_sh_outstation_high_SKD%) then  
+    next(duty(trip), duty.%duty_time%(duty.overtime, True))
+  else 0:00;
+
+%min_rest_time_high% = 
+  if %is_SKD% then
+    if %is_loss_rest_sh_24hrs_SKD% then
+      %min_rest_sh_24hrs_SKD%
+    else if %is_loss_rest_sh_outstation_high_SKD% then
+      duty.%rest_time%
+    else if %is_loss_rest_lh_SKD% then
+      %min_rest_lh_SKD%
+    else 0:00
+  else if %is_SKN% then 
+    if %is_loss_rest_lh_SKN% then
+      %min_rest_lh_SKN%
+    else 0:00
+  else 0:00;
+
+export %rest_time_low_str% =
+  concat(%reltime2str%(%rest_time_low%),
+         %rest_type_low_str%,
+         %reltime2str%(%min_rest_time_low%),
+         ")");
+
+%rest_type_low_str% =
+  if (%is_SKS% and %is_loss_rest_lh_24hrs_SKS%)
+     or (%is_SKD% and %is_loss_rest_sh_24hrs_SKD%)
+  then " rest in 24hrs ("
+  else if (%is_SKS% and %is_loss_rest_sh_outstation_SKS%
+                    and not %is_late_informed_short_stop%)
+  then " next duty > rest ("
+  else " rest (";
+
+%rest_time_low% = 
+  if (%is_SKD% and %is_loss_rest_sh_homebase_SKD%) 
+     or (%is_SKS% and %is_loss_rest_sh_homebase_SKS%)
+     or (%is_SKS% and %is_loss_rest_lh_homebase_SKS%)
+     or (%is_SKS% and %is_loss_rest_lh_outstation_SKS%)
+     or (%is_SKN% and %is_loss_rest_sh_homebase_NKF_SKN%)
+     or (%is_SKS% and %is_loss_rest_sh_outstation_SKS% 
+                  and %is_late_informed_short_stop%) then
+   duty.%rest_time%
+  else if (%is_SKS% and %is_loss_rest_sh_outstation_SKS% 
+                    and not %is_late_informed_short_stop%) then
+    next(duty(trip), duty.%duty_time%(duty.overtime, True))
+  else if (%is_SKS% and %is_loss_rest_lh_24hrs_SKS%) then
+    last(leg(duty), rest.%in_24hrs%)
+  else 0:00;
+
+%min_rest_time_low% =
+  if %is_SKN% then 
+    if %is_loss_rest_sh_homebase_NKF_SKN% then
+      %min_rest_sh_homebase_NKF_SKN%
+    else 0:00
+  else if %is_SKD% then
+    if %is_loss_rest_sh_homebase_SKD% then 
+      %min_rest_sh_homebase_SKD%
+    else if %is_loss_rest_sh_outstation_low_SKD% then 
+      %min_rest_sh_outstation_SKD%
+    else 0:00
+  else if %is_SKS% then
+    if %is_loss_rest_lh_24hrs_SKS% then
+      %min_rest_lh_24hrs_SKS%
+    else if %is_loss_rest_lh_outstation_SKS% then
+      %min_rest_lh_outstation_SKS%
+    else if %is_loss_rest_lh_homebase_SKS% then
+      %min_rest_lh_homebase_SKS%
+    else if %is_loss_rest_sh_homebase_SKS% then
+      %min_rest_sh_homebase_SKS%
+    else if %is_loss_rest_sh_outstation_SKS% then
+      if %is_late_informed_short_stop% then
+        %min_rest_sh_outstation_SKD%
+      else
+        duty.%rest_time%
+    else 0:00
+  else 0:00;
+
+/*******************************************************
+
+             Help variables
+             
+*******************************************************/
+/*  Salary month start and month end */
+%month_start% = salary.%salary_month_start%;
+%month_end% = salary.%salary_month_end%;
+
+/* "Add hours" method. Add hours if condition is true*/
+export %add_hours%(Bool cond, Reltime hours) = 
+  if cond then hours else 0:00;
+  
+/* Crew salary region */
+export %is_SKD% = salary.%is_SKD%;
+export %is_SKN% = salary.%is_SKN%;
+export %is_SKS% = salary.%is_SKS%;
+
+/* Crew is leased at scheduled start of the activity */
+export %crew_is_leased_duty% = 
+  crew.%is_leased_without_overtime%(duty.%start_hb%);
+
+/* salary periods */
+%in_loss_rest_period% =
+  let rest_end_utc = default(next(duty(wop), duty.%start_utc%) where (duty.%is_on_duty%), 
+                             duty.%end_utc%);
+  %month_start% <= rest_end_utc and rest_end_utc < %month_end%;
+
+export %leg_in_period% = salary.%leg_in_period%;
+export %wop_in_period% = salary.%wop_in_period%;
+
+/* crew is temporary definition (duplicated in salary_overtime) */
+export %crew_is_temporary% =
+  not (%temp_crew_start% = %month_end%)
+  and not (%is_SKN% and %crew_is_full_time%);
+
+export %temp_crew_start% = 
+  default(nmax(first(leg(roster),leg.%duty_start_UTC%)
+               where (salary.%leg_in_period_hb% and (crew.%is_temporary_at_date%(nmax(leg.%end_hb% - 0:01, %month_start%)))),
+               %month_start%),
+          %month_end%);
+
+export %temp_crew_end% = 
+  default(nmin(last(leg(roster),leg.%duty_end_UTC%)
+               where (%leg_in_period% and (crew.%is_temporary_at_date%(leg.%end_lt%))),
+               %month_end%),
+          %month_start%);
+
+export %crew_is_full_time% =
+  not any(wop(roster), crew.%part_time_factor_wop_start% < 100)
+  where (%wop_in_period%);
+
+/* end of file */   

@@ -1,0 +1,1263 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains common training rules for flight and cabin crew 
+ *   used in Carmen Crew Rostering and Carmen Crew Tracking.
+ *   All rules are studio only rules, i.e. there is no respect to these
+ *   rules during optimization.
+ *
+ * Sections:
+ *   1. Recency/Absence rules
+ *   2. Initial/Conversion/Transition training rules
+ *   3. Composition check
+ *
+ * Created by:
+ *   Henrik Albertson, 03may2007
+ *
+ * Major changes:
+ *
+ */
+
+root module rules_training_ccr
+
+import fundamental;
+import base_utils;
+import levels;
+import task;
+import crew_pos;
+import leg;
+import duty;
+import trip;
+import wop;
+import roster;
+import crew;
+import model_crew;
+import rule_exceptions;
+import training;
+import qualification;
+import system_db_parameters;
+import recency;
+import absence;
+import accumulators;
+import base_product;
+import rules;
+import attributes;
+import pp;
+
+/****************************************************************
+ * Section 1: Recency/Absence rules
+****************************************************************/
+
+
+ /*
+** Rule:
+**    Recency
+**
+** Description:
+**    Check that crew is recent for flight duty. This equals to:
+**    CC - must fly each ac family every 90 days, A leg is assumed to 
+**         be recent if it is a familiarization flight (which implies
+**         that appropriate training has been performed.
+**    FC - at least 3 landings every 90 days per ac family. If this
+**         is not fulfilled, a T-flt can be assigned if within 91-120 days
+**         since last recent. If more than 120 days since last recent only
+**         a simulator (by default 3 landings) regains recency.
+**
+**    NB! The rule is checked on leg level due to mixed trips sometimes used
+**    for cabin crew, i.e. first leg with B737 and second leg with MD80. If 
+**    checked on trip level, it would be hard to construct a descent failtext.
+**
+** Agreement:
+**    OM-A 5.2.10 (incl note 1 and note 3)
+**    OM-A 5.3.5.2 (implicitly)
+*/ 
+
+export rule qln_recency_ok_ALL =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        trip.%has_flight_duty% and
+        leg.%start_hb% >= %pp_start% and
+        leg.%is_active_flight% and
+        /* Training legs should not give recency warnigns */
+        not (leg.%is_any_lifus% or
+             leg.%is_release% or
+              leg.%is_fam_flt% or
+             (leg.%is_school_flight% and not crew.%is_instructor_leg_start%) or
+             crew_pos.%is_supernum% or
+             crew.%has_restr_training_foc%(trip.%start_UTC%)) and
+        /* Check only if crew has qln at all */
+        qualification.%crew_has_qln_leg_start% and
+        not crew.%is_leased_duty_start% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+  recency.%leg_is_recent%;
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %qln_recency_OK_ALL_failtext%;
+  remark "OMA: Crew must be recent for flight duty",
+  planner "Check that crew is recent for flight duty. CC must fly each ac"
+          " family every 180 days (a leg is assumed to be recent if it is a"
+          " flight with training attribute flight)."
+          " FC must perform at least 3 landings every 90 days per ac family."
+          " A T-flt can be assigned if within 91-120 days since last recent."
+          " If more than 120 days since last recent, only a simulator"
+          " (by default 3 landings) regains recency.";
+end
+
+/* Defined in child modules, due to different definitions btw FC and CC */
+%qln_recency_OK_ALL_failtext% = String;
+
+
+/*
+** SKCMS-2078
+** Rule:
+**    A350 JCRT:Min 10 sectors within 90 days after FAM flight
+**    
+** Description:
+**    The rule checks that crew has completed 10 active A5 
+**    sectors within 90 days of their last FAM flight.
+**    Or that crew has completed 8 active A5 sectors within 90 days, 
+**    followed by one (1) FMST web training occasion (flight mgmt system training),
+**    Followed by 2 active A5 sectors within 30 days of day 90, i.e. day 120
+**    after the last FAM flight.
+**    The FMST session and leg 9 can be separated by a maximum number of 3 days,
+**    e,g. FMST on day 90 and sector 9 on day 93.
+*/
+
+export rule trng_min_active_sectors_after_ctr_flight =
+  valid %valid_trng_min_active_sectors_after_ctr_flight%;
+
+  %nr_consolidation_sectors_in_90d_or_120d_or_150d% >= training.%nr_consolidation_sectors_required% - 
+    rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%);
+
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext(Int value, Int limit) = %trng_min_active_sectors_after_ctr_flight_failtext%(value, limit);
+  remark "Min number of active sectors on new AC type within 90 or 120 days after FAM flight",
+  planner "The rule checks that a minimum number of active sectors on the ac type acquired during CTR course are completed within 90 days of the last flight, or min 8 active A5 sectors within 90 days, followed by one (1) FMST session and the remaining two sectors within 30 days of day 90, i.e. 120 day after the last FAM flight.";
+end
+
+%valid_trng_min_active_sectors_after_ctr_flight% =
+    %leg_qual% = %consolidation_ac_qual% and
+    leg.%is_active_flight% and
+    leg.%start_hb% > %consolidation_period_end_90d_or_120d_or_150d_hb% and
+    roster.%check_rules% and
+    trip.%in_pp_extended% and
+    /* Check only if crew has qln at date */
+    qualification.%crew_has_qln_leg_start%;
+
+%trng_min_active_sectors_after_ctr_flight_failtext%(Int value, Int limit) =
+  if %consider_asf_ast_pc_opc% then
+    rules.%failtext_int%(concat("ASF, AST or PC/OPC and remaining ",
+                                %consolidation_ac_qual%,
+                                " sectors within 150 days after FAM flight ",
+                                format_time(%consolidation_period_end_150d_hb% - 24:00, "%02d%b%Y"),
+                                ":"), value, limit)
+  else
+    if %consider_fmst% then
+        rules.%failtext_int%(concat("FMST and remaining ",
+                                    %consolidation_ac_qual%,
+                                    " sectors within 120 days after FAM flight ",
+                                    format_time(%consolidation_period_end_120d_hb% - 24:00, "%02d%b%Y"),
+                                    ":"), value, limit)
+    else
+      if %nr_consolidation_sectors_in_90d% >= training.%nr_consolidation_sectors_required_before_fmst% then
+        rules.%failtext_int%(concat("OMA: Min ",
+                                    %consolidation_ac_qual%,
+                                    " sectors within 90 days after FAM flight needs FMST ",
+                                    format_time(%consolidation_period_end_90d_hb% - 24:00, "%02d%b%Y"),
+                                  ":"), value, limit)
+      else
+        rules.%failtext_int%(concat("OMA: Min ",
+                                    %consolidation_ac_qual%,
+                                    " sectors within 90 days after FAM flight needs ASF, PC or OPC ",
+                                    format_time(%consolidation_period_end_90d_hb% - 24:00, "%02d%b%Y"),
+                                    ":"), value, limit);
+
+
+/*
+** SKCMS-2078
+** Rule:
+**    A350 JCRT: Warn if there is more than three days between FMST and next consolidation
+**    flight during consolidation period.
+**    
+** Description:
+**    If the crew has completed 8-9 sectors within the first 90 days after FAM FLT,
+**    has FMST amd does not have ASF/PC/OPC, the rule check that the distance is at most
+**    three days between FMST and the next consolidation flight. Fail object is the
+**    consolidation flight.
+*/
+export rule trng_max_days_between_fmst_and_cons_flt =
+  valid %leg_qual% = %consolidation_ac_qual% and
+        leg.%is_active_flight% and
+        (not %consider_asf_ast_pc_opc%) and
+        %consider_fmst% and
+        %is_first_leg_after_fmst% and
+        (%nr_consolidation_sectors_after_fmst_before_pp% = 0) and
+        roster.%check_rules% and
+        trip.%in_pp_extended% and
+        /* Check only if crew has qln at date */
+        qualification.%crew_has_qln_leg_start%;
+
+  leg.%start_hb% <= round_up(%last_fmst_date_hb% + 0:01, 24:00) + 24:00 * 3 + 
+    rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%);
+
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext(Abstime value, Abstime limit) = %trng_max_days_between_fmst_and_cons_flt_failtext%(value, limit);
+  remark "Max allowed days between FMST and next consolidation flight is 3 days",
+  planner "The rule checks that the number of days between FMST and next consolidation flight is 3 days or less";
+end
+
+%trng_max_days_between_fmst_and_cons_flt_failtext%(Abstime value, Abstime limit) =
+      rules.%failtext_abs%("OMA: Max days between FMST and next consolidation flight ", value, limit);
+
+%is_first_leg_after_fmst% =
+  is_first(leg(roster)) where(leg.%start_hb% > %last_fmst_date_hb% and
+                              leg.%is_active_flight% and
+                              %leg_qual% = %consolidation_ac_qual%);
+
+%consolidation_ac_qual% = training.%consolidation_ac_qual%;
+
+%nr_consolidation_sectors_in_90d% = training.%nr_consolidation_sectors_in_90d%;
+%nr_consolidation_sectors_in_120d% = training.%nr_consolidation_sectors_in_120d%;
+%nr_consolidation_sectors_in_150d% = training.%nr_consolidation_sectors_in_150d%;
+%nr_consolidation_sectors_after_fmst_before_pp% = training.%nr_consolidation_sectors_after_fmst_before_pp%;
+
+%consider_fmst% = training.%consider_fmst%;
+%last_fmst_date_hb% = training.%last_fmst_date_hb%;
+
+%consider_asf_ast_pc_opc% = training.%consider_asf_ast_pc_opc%;
+
+%nr_consolidation_sectors_in_90d_or_120d_or_150d% =
+  if %consider_asf_ast_pc_opc% then
+    %nr_consolidation_sectors_in_150d%
+  else
+    if %consider_fmst% then
+      %nr_consolidation_sectors_in_120d%
+    else
+      %nr_consolidation_sectors_in_90d%;
+
+%consolidation_period_end_90d_or_120d_or_150d_hb% = training.%consolidation_period_end_hb%;
+%consolidation_period_end_90d_hb% = training.%consolidation_period_end_90d_hb%;
+%consolidation_period_end_120d_hb% = training.%consolidation_period_end_120d_hb%;
+%consolidation_period_end_150d_hb% = training.%consolidation_period_end_150d_hb%;
+
+
+/*
+** SKCMS-2383
+** Rule:
+**    A2LR JCRT: Min 10 sectors within 180 days after A2LR ETOPS course
+**    
+** Description:
+**    The rule checks that crew has completed 10 active A2 LH
+**    sectors within 180 days of their A2LR ETOPS course (LRP2),
+**    or 8 active A2 LH sectors within 180 days, 
+**    followed by one (1) LRSB (long range self briefing) day,
+**    followed by 2 active A2 LH sectors immediately after,
+**    or 6 active A2 LH sectors within 180 days, followed by
+**    2 LR REFRESH sectors and then 2 A2LH sectors within
+**    another 30 days.
+*/
+
+export rule trng_min_active_sectors_after_etops_training =
+  valid %valid_trng_min_active_sectors_after_etops_training%;
+
+  %nr_etops_training_sectors% >= %nr_etops_training_sectors_required% -
+    rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%);
+
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext(Int value, Int limit) = %trng_min_active_sectors_after_etops_training_failtext%(value, limit);
+  remark "Min number of active A2LR sectors after ETOPS training",
+  planner "The rule checks that a minimum number of active A2LR sectors are performed in the LH area after A2LR ETOPS course LRP2. To be completed within 180 days after LRP2 training";
+end
+
+%valid_trng_min_active_sectors_after_etops_training% =
+    %leg_needs_etops_training% and
+    leg.%is_active_flight% and
+    leg.%start_hb% > %etops_training_period_end_hb% and
+    roster.%check_rules% and
+    trip.%in_pp_extended% and
+    /* Check only if crew has qln at date */
+    qualification.%crew_has_qln_leg_start%;
+
+%trng_min_active_sectors_after_etops_training_failtext%(Int value, Int limit) =
+  if %nr_etops_training_sectors_in_180d% >= training.%nr_etops_training_sectors_required_before_lrsb% then
+    rules.%failtext_int%(concat("OMA: Min ",
+                                %etops_training_ac_qual%,
+                                " LH sectors within 180 days after LRP2 needs LRSB followed by last sectors:"), value, limit)
+  else
+    rules.%failtext_int%(concat("OMA: Min ",
+                                %etops_training_ac_qual%,
+                                " LH sectors within 180 days after LRP2 training needs LR REFRESH flight followed by last sectors within 30 days:"), value, limit);
+
+
+/*
+** SKCMS-2383
+** Rule:
+**    A2LR JCRT: Warn if LRSB is not immediately followed by A2 LH sectors.
+**    
+** Description:
+**    If the crew has not yet completed 10 sectors within the first 180 days after ETOPS training
+**    and has LRSB, the rule checks that two sectors immediately follows the activity.
+*/
+export rule trng_lrsb_followed_by_active_sectors =
+  valid %leg_is_lrsb% and
+        roster.%check_rules% and
+        trip.%in_pp_extended%;
+
+  %consecutive_etops_training_sectors_forward% >= nmin(%nr_etops_training_sectors_needed%, 2) -
+    rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%);
+
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext(Int value, Int limit) = %trng_lrsb_followed_by_active_sectors_failtext%(value, limit);
+  remark "LRSB must be immediately followed by active sectors",
+  planner "The rule checks that LRSB is immediately followed by active A2 LH sectors";
+end
+/*counts consecutive sectors. Skips leg if passive transfer. A2LH sectors might be in wop after LRSB*/
+%consecutive_etops_training_sectors_forward% =
+  count(leg(chain))
+  from (next) forwards
+    while ((%leg_needs_etops_training% and %leg_is_active_flight%) or leg.%is_deadhead% or not leg.%is_on_duty%)
+    where((%leg_needs_etops_training% and %leg_is_active_flight%));
+
+%nr_etops_training_sectors_needed% = %nr_etops_training_sectors_required% - %nr_etops_training_sectors_before_leg%;
+
+%trng_lrsb_followed_by_active_sectors_failtext%(Int value, Int limit) =
+      rules.%failtext_int%("OMA: LRSB followed by active sectors:", value, limit);
+
+
+%is_first_leg_after_lrsb% =
+  is_first(leg(roster)) where(leg.%start_hb% > %last_lrsb_date_hb% and
+                              leg.%is_active_flight% and
+                              %leg_needs_etops_training%);
+
+%nr_etops_training_sectors_required% = training.%nr_etops_training_sectors_required%;
+%nr_etops_training_sectors_in_180d% = training.%nr_etops_training_sectors_in_180d%;
+%nr_etops_training_sectors_considering_lrsb% = training.%nr_etops_training_sectors_considering_lrsb%;
+%nr_etops_training_sectors_considering_lr_refresh% = training.%nr_etops_training_sectors_considering_lr_refresh%;
+%nr_etops_training_sectors_before_leg% = training.%nr_etops_training_sectors_before_leg%;
+%nr_etops_training_sectors_after_lrsb_before_pp% = training.%nr_etops_training_sectors_after_lrsb_before_pp%;
+
+%consider_lrsb% = training.%consider_lrsb%;
+%last_lrsb_date_hb% = training.%last_lrsb_date_hb%;
+
+%consider_lr_refresh% = training.%consider_lr_refresh%;
+
+%nr_etops_training_sectors% =
+  if %consider_lr_refresh% then
+    %nr_etops_training_sectors_considering_lr_refresh%
+  else
+    if %consider_lrsb% then
+      %nr_etops_training_sectors_considering_lrsb%
+    else
+      %nr_etops_training_sectors_in_180d%;
+
+%etops_training_period_end_hb% = training.%etops_training_period_end_hb%;
+
+
+export rule qln_no_sby_or_bl_to_unrecent_crew_ALL =
+  valid roster.%check_rules% and
+        trip.%starts_in_pp% and
+        (trip.%is_standby% or trip.%is_blank_day%) and
+        not training.%crew_has_training_bl_during_restr% and
+        crew.%crewrank_at_date%(trip.%start_hb%) <> "AA" and
+        not crew.%is_leased_trip_start% and
+        rule_exceptions.%rule_on%(trip.%start_utc%);
+        
+  recency.%blank_or_standby_trip_is_recent%;
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %qln_no_sby_or_bl_to_unrecent_crew_ALL_failobject%;
+  failtext %qln_no_sby_or_bl_to_unrecent_crew_ALL_failtext%;
+  remark "(CCR) OMA: Crew must be recent for blank or standby duty",
+  planner "It is not appropriate to assign standby duty or blank days to"
+          " unrecent crew as these will never be possible to convert to"
+          " active production until crew has regained recency.";
+end
+
+%qln_no_sby_or_bl_to_unrecent_crew_ALL_failobject% =
+  first(leg(trip),leg.%failobject_departure%)
+  where (not recency.%blank_or_standby_leg_is_recent%);
+
+%qln_no_sby_or_bl_to_unrecent_crew_ALL_failtext% =
+  concat("OMA: Unrecent",
+         default(format_time(recency.%first_expiry_date_trip_start%, " [%02d%b%Y]"), ""));
+
+/*
+** Rule:
+**    Absence ground training performed 
+**
+** Description:
+**    Check that absent crew has performed the appropriate ground training,
+**    based on aoc, ac_qual, absence type (i.e. all flight duty or ac) and days.
+**
+** Agreement:
+**    OM-A 5.2.10 (incl note 1)
+**    OM-A 5.3.5.2, 5.3.5.3
+*/
+
+%qln_absence_training_performed_valid% =
+  roster.%check_rules% and
+  not (crew.%is_temporary% and crew.%in_first_year_of_flying%) and
+  trip.%in_pp_extended% and
+  leg.%start_hb% >= %pp_start% and
+  not leg.%is_training_blank_day% and
+  (qualification.%crew_has_qln_leg_start% or leg.%qual% = "" or leg.%qual% = "---") and
+  not training.%crew_has_program_on_leg% and
+  %qln_absence_valid_leg%;
+  
+%qln_absence_valid_leg% =
+  let qual = leg.%qual%;
+  %_qln_absence_valid_leg% and
+  is_first(leg(duty))
+  where (%_qln_absence_valid_leg% and leg.%qual% = qual);
+
+%_qln_absence_valid_leg% =
+  leg.%is_active_flight% or 
+  %leg_is_sby_or_bl_to_be_checked% or
+  leg.%is_simulator% and not absence.%absence_sim% or
+  leg.%is_cc_rec%;
+  
+/* Redefined for FC */
+%leg_is_sby_or_bl_to_be_checked% =
+  leg.%is_standby% or leg.%is_blank_day%;
+
+/* Absence definition includes simulators for FD. If crew is absent, the rule
+   will always trigger */
+export rule qln_absence_ground_training_performed_ALL =
+  valid %qln_absence_training_performed_valid% and
+        (%crew_is_absent% or %crew_is_absent_a3_a5%) and
+        (%absence_requires_ground_training% or %absence_requires_ground_training_a3a5%) and
+        not crew_pos.%is_supernum%;
+  %days_since_absence_ground_training% <=
+    absence.%max_days_from_ground_training% + 
+    rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%);
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %qln_absence_ground_training_performed_ALL_failtext%;
+  remark "OMA: Crew must perform absence ground training";
+end
+
+%qln_absence_ground_training_performed_ALL_failtext% = 
+  if %crew_is_absent_a3_a5% and %absence_requires_ground_training_a3a5% then
+    concat("OMA: Absence ", leg.%qual% , 
+            ", More than 90 days since ", 
+            format_time(recency.%last_flown_ac_qual%(leg.%qual%, leg.%start_utc%), " %02d%02b%Y"),
+            ", needs Refresher")
+  else
+    concat("OMA: ", absence.%reqd_gnd_training_str%);
+
+/* Redefined in child modules */
+%crew_is_absent% = Bool;
+%crew_is_absent_a3_a5% = Bool;
+%absence_requires_ground_training% = Bool;
+%absence_requires_ground_training_a3a5% = Bool;
+
+%days_since_absence_ground_training% =
+  %days_since%(leg.%start_hb%, absence.%ground_training_date_leg_start%);
+
+/*
+** Rule:
+**    Absence flight training performed 
+**
+** Description:
+**    Check that absent crew has performed the appropriate flight training,
+**    based on aoc, ac_qual, absence type (i.e. all flight duty or ac) and days.
+**    The rule will not be checked if crew is defined in table as undergoing
+**    training. For longer absence than 365 days for cabin crew and 180 days
+**    for flight crew, the required flight training type and nr legs must be
+**    defined in table crew_training_need and will be checked by that rule.
+**
+** Agreement:
+**    OM-A 5.2.10 (incl note 1)
+**    OM-A 5.3.5.2, 5.3.5.3
+*/
+export rule qln_absence_flight_training_performed_ALL =
+  valid %qln_absence_training_performed_valid% and
+        not (leg.%is_pc_or_opc% or leg.%is_cc_rec%) and
+        %crew_is_absent% and
+        (not %absence_requires_ground_training% or
+         %days_since_absence_ground_training% <= absence.%max_days_from_ground_training%);
+  absence.%nr_flight_training_legs% >=
+    absence.%reqd_flight_training_legs% -
+    rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%);
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext concat("OMA: ", absence.%reqd_flt_training_str%);
+  remark "(CCR) OMA: Crew must perform absence flight training";
+end
+
+/****************************************************************
+ * Section 2: Initial/Conversion/Transition training rules
+ ***************************************************************/
+
+/*
+** Rule:
+**    Max days from training start to perform training flights
+**
+** Description:
+**    Check that a training flight is not assigned too late after
+**    training start. The rule will be active if a limit is defined in
+**    field max_days in table crew_training_need.
+**    Max days will be counted from start of training for all activities 
+**    except NEW legs where max days are counted from end of previous non
+**    NEW flight training.
+**    Only applicable to cabin crew.
+**
+** Agreement:
+**    OMA 5.3.3.2, 5.3.4.1
+*/
+
+export rule trng_flight_max_days_from_training_start_ALL =
+  valid roster.%check_rules% and
+        crew.%is_cabin% and
+        trip.%in_pp_extended% and
+        training.%unperformed_training_leg_start% and
+        %first_training_leg_in_duty% and
+        training.%maxdays_for_leg% > 0;
+    %training_days_since_start% <=
+    training.%maxdays_for_leg% +
+    rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%);
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext(Int value, Int limit) =
+    %failtext_max_days_training_start%(value,limit);
+  remark "(CCR) OMA: Training flight must be performed within max days",
+  planner "";
+end
+
+%first_training_leg_in_duty% =
+    is_first(leg(duty))
+    where (leg.%is_active_flight% and
+           (leg.%has_training_code% or leg.%is_new%));
+    
+%failtext_max_days_training_start%(Int value, Int limit) =
+    if void(%_training_days_since_start%) then
+        "OMA: Max days for trn flight, no previous activity found"
+    else rules.%failtext_int%("OMA: Max days for trn flight",value,limit);
+    
+%training_days_since_start% =
+    default(%_training_days_since_start%, 1000);
+    
+%_training_days_since_start% = 
+  if leg.%is_new% then
+    %days_since%(leg.%end_date% + 24:00, %end_of_last_non_new_activity%)
+  else if %cabin_crew% then
+    if crew.%crewrank_at_date%(trip.%start_hb%) = "AA" then
+      %days_since%(leg.%end_date% + 24:00, %end_of_last_course_activity%)
+    else
+      %days_since%(leg.%end_date% + 24:00, %end_of_last_workshop%)
+  else 
+    %days_since%(leg.%end_hb%, training.%course_start_leg_start%);
+
+/* NEW flights are always preceded by RELEASE fligths so we look for the
+** last performed RELEASE */
+%end_of_last_non_new_activity% =
+  training.%last_perf_day_for_release%(leg.%qual%, leg.%start_utc%);
+  
+
+%end_of_last_workshop% =
+  training.%last_perf_day_for_workshop%(leg.%qual%, leg.%start_utc%);
+
+%end_of_last_workshop2% =
+  training.%last_perf_day_for_workshop2%(leg.%qual%, leg.%start_utc%);
+
+%end_of_last_course_activity% =
+  training.%last_perf_day_for_cc_course%(leg.%start_utc%);
+  
+/*
+** Rule:
+**    Crew must perform all required initial flights during restriction "NEW"
+**
+** Description:
+**    The rule checks that, at the last leg with restriction "NEW", the
+**    minimum number of flights have been flown during the period with
+**    restriction "NEW".
+**
+** Agreement:
+**    OM-A 4.1-4.6, 5.3.3.2
+**
+** Johan Astrom 25Jun2009:  
+** This rule is turned OFF completely since it is covered by rule
+** 'trng_all_training_flights_performed_ALL'.
+*/
+
+export rule (off) trng_min_initial_flights_performed_ALL =
+  valid roster.%check_rules% and
+        trip.%starts_in_pp% and
+        trip.%has_active_flight% and
+        crew.%has_qual_restr_new_actype_trip_start% and
+        training.%program_has_new_on_trip% and
+        %last_trip_with_restriction_new_actype%;
+  training.%nr_perf_initial_flts_trip_end% >=
+    training.%nr_reqd_initial_flts% -
+    rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %trng_min_initial_flights_performed_ALL_failobject%;
+  failtext(Int value, Int limit) =
+    %trng_min_initial_flights_performed_ALL_failtext%(value,limit);
+  remark "(CCR) OMA: Crew must perform initial flights during NEW restriction",
+  planner "";
+end
+
+%trng_min_initial_flights_performed_ALL_failobject% = 
+   first(leg(trip), leg.%failobject_departure%) 
+   where (%last_leg_with_restriction_new%);
+
+%trng_min_initial_flights_performed_ALL_failtext%(Int value,Int limit) = 
+    rules.%failtext_int%(concat("OMA: NEW on ",
+                                training.%first_unplanned_course_name_pp%,
+                                ",flts"),
+                         value,limit); 
+
+%last_trip_with_restriction_new% =
+  default(next(trip(roster), not crew.%has_restr_new_trip_start%)
+          where (trip.%is_on_duty%), false);
+%last_duty_with_restriction_new_actype_or_rank% =
+  default(next(duty(roster), not crew.%has_qual_restr_new_actype_or_rank_duty_start%)
+          where (duty.%is_on_duty%), false);
+%last_leg_with_restriction_new% =
+ default(next(leg(roster), not crew.%has_restr_new_leg_start%)
+          where (leg.%is_on_duty%), false);
+
+%last_trip_with_restriction_new_actype% = not %any_next_trip_with_qual%;
+ 
+%any_next_trip_with_qual% = 
+  let start = trip.%start_hb%, 
+      qual = trip.%qual%;
+  any(trip(roster), trip.%start_hb% > start and 
+                    trip.%is_on_duty% and 
+                    qual = trip.%qual% and 
+                    crew.%has_qual_restr_new_actype%(trip.%start_hb%, qual));
+ 
+/*
+** Rule:
+**    Crew should not be considered as NEW restricted
+**
+** Description:
+**    
+** Agreement:
+**    OM-A 5.2.12
+**    OM-A 5.3.3.2 table 4, 5.3.4.1 table 7, 5.3.5.2 table 10
+**
+*/
+export rule trng_crew_should_not_be_considered_as_new_restr_ALL =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        not trip.%is_ilc% and
+        (crew.%has_qual_restr_new_actype_or_rank_duty_start% or
+        (not %cabin_crew% and crew.%has_restr_new_new_duty_start%)) and
+        (not (prev(duty(roster),%sufficient_flight_experience_duty_start%) where
+            (duty.%is_active_flight%)) or
+         not (prev(duty(roster),%sufficient_time_as_new%) where
+            (duty.%is_active_flight%))) and
+        rule_exceptions.%rule_on%(duty.%start_day%);
+  
+  if %is_new_actype_for_double_qualification% then
+    not %sufficient_flight_experience_duty_start_double_qualification%
+  else
+    not %sufficient_flight_experience_duty_start% or not %sufficient_time_as_new%;
+  
+  startdate = duty.%start_day%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = first(leg(duty), leg.%failobject_departure%) 
+               where(leg.%start_hb% > duty.%start_day%);
+  failtext %trng_crew_should_not_be_considered_as_new_restr_ALL_failtext%;
+  remark "(CCR) OMA: Crew should not be considered as NEW restriction",
+  planner "This rule checks that the restriction period is not longer than"
+          " necessary. NEW+ACTYPE & NEW+RANK should be maintained until general"
+          " requirements have been met. For crew with NEW+NEW restriction, the"
+          " general requirement must have been met and the restriction period is"
+          " is at minimum 6 months. See OM-A 4.1 for more information"
+          " General requirements: After completion of the ILC either"
+          "  * 100 flying (block) hours and flown 10 sectors within a"
+          "    period of 120 days, or"
+          "  * 150 flying (block) hours and flown 20 sectors with no time limit"
+          " The above general requirement must be achieved in the position"
+          " for which the training has qualified the individual.";
+end
+
+/* Redefined in child modules */
+%sufficient_flight_experience% = void_bool;
+%sufficient_flight_experience_duty% = Bool; /*Appears to be unused, remove*/
+%sufficient_flight_experience_duty_start% = Bool;
+%sufficient_flight_experience_duty_start_double_qualification% = false;
+%trng_crew_should_not_be_considered_as_new_restr_ALL_failtext% = String;
+%sufficient_time_as_new% = true;
+
+
+%is_new_actype_for_double_qualification% = false;
+
+
+rule trng_release_flights_too_far_apart_FC =
+  valid %release_flights_too_far_apart_fc_valid%;
+
+  %release_flights_too_far_apart_fc_time% < qualification.%max_time_between_release_flights%;
+
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext "OMA: Initial release flights may not be more than 4 weeks apart";
+  remark "(CCR) OMA: Initial release flights may not be more than 4 weeks apart",
+  planner "The rule checks that the initial release flights are not more than 4 weeks apart.";
+end
+
+
+%release_flights_too_far_apart_fc_valid% =
+     roster.%check_rules% and
+     leg.%is_release% and
+     leg.%end_station% in qualification.stations_with_extra_release_requirements and
+     not crew.%has_or_had_airport_qual%(leg.%end_station%, leg.%end_hb%) and
+     not void(qualification.%time_of_release_flight_before%(leg.%start_utc%, leg.%end_station%));
+
+%release_flights_too_far_apart_fc_time% =
+     leg.%start_utc% - qualification.%time_of_release_flight_before%(leg.%start_utc%, leg.%end_station%);
+
+
+/****************************************************************
+ * Section 3: Composition check
+ ***************************************************************/
+/*
+
+/*
+** Rule:
+**    Crew performing some kind of training flight has an acceptable companion
+**
+** Description:
+**    The rule checks that crew performing some kind of training (e.g. t-flight)
+**    has an appropriate companion (e.g. TRI/TRE) assigned to the same leg.
+**
+** Agreement:
+**    OM-A 5.2 ???
+*/
+export rule comp_crew_with_training_flight_has_good_companion_ALL =
+  valid %valid_comp_crew_with_training_flight_has_good_companion_ALL% and
+        not (leg.%is_simulator% and
+             crew_pos.%sim_has_external_instructor%(leg.%code%)) and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+  %trigger_comp_crew_with_training_flight_has_good_companion_ALL%;
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %training_flight_has_good_companion_ALL_failtext%;
+  remark "(CCR) OMA: Training flight/simulator must have appropriate companion",
+  planner "The rule checks that crew performing some kind of training"
+          " (e.g. t-flight) has an appropriate companion (e.g. TRI/TRE)"
+          " assigned to the same leg and in the right position. "
+          " This a studio only rule and applicable to all crew in all regions.";
+end
+
+%training_flight_has_good_companion_ALL_failtext% =
+  if leg.%is_new% then
+    "OMA: NEW flights must have companion"
+  else if leg.%is_cc_fam_flt% then
+    "OMA: FAM flights must have companion"
+  else
+    concat("OMA: ", training.%training_type%, " needs a ", 
+           if training.%instr_tag_required% then "tagged "
+           else "",
+           if %acceptable_companion_str% = "ETOPS LIFUS/LC"
+           then "LC or LIFUS instructor"
+           else %acceptable_companion_str%);
+
+/* Composition should be checked on own simulators, own training flights and
+   training flights that might require a valid instructor in the current position.
+   Instructors on simulators can be checked without composition, and is done in
+   rules_qual_ccr_fc. /EKG 090218 */
+export %valid_comp_crew_with_training_flight_has_good_companion_ALL% =
+  roster.%check_rules% and
+  leg.%in_pp_extended% and
+  (%valid_sim_good_comp% or %valid_flight_good_comp%) and
+  %check_instructor_composition_for_ccr_and_cct% and
+  %r_valid_acceptable_companion% and
+  training.%instr_tag_required%
+  and (leg.%is_cc_fam_flt% or not crew_pos.%is_supernum%) 
+  and not %pilot_on_lc_receiving_lc_from_lc_capt%
+  and not leg.%is_FLT_INSTR_OL%;
+
+%pilot_on_lc_receiving_lc_from_lc_capt% =
+  crew.%main_func% = "F" and
+  training.%has_duty_code% and
+  training.%duty_code% = "S" and
+  crew_pos.%assigned_pos% = 2 and
+  default(any(equal_legs, training.%leg_instructor_duty_code% = "B")
+  where (leg.%is_active_flight% and
+         leg.%in_pp_extended% and
+         crew.%main_func% = "F" and
+         crew_pos.%assigned_pos% = 1), false);
+
+%check_instructor_for_sim% =
+    parameter false
+    remark "Include simulators in acceptable companion rule";
+    
+%valid_sim_good_comp% = 
+  (%check_instructor_for_sim% or %product% = "CCT") and
+  training.%leg_is_own_sim% and leg.%is_simulator% and
+  %_sim_has_instructor%;
+  
+%_sim_has_instructor% =
+  crew_pos.%sim_need_in_pos%(training.%instructor_position%) > 0 or
+  crew_pos.%sim_has_external_instructor%(leg.%code%);
+
+%valid_flight_good_comp% =
+  leg.%is_active_flight% and
+  (leg.%has_training_code% or leg.%is_new% or 
+   leg.%is_school_flight% and training.%instructor_position% <> crew_pos.%assigned_pos%);
+
+/* Check instructor composition rule for all legs (in open time or assigned)
+ * if in Tracking, otherwise check rule first when all legs are assigned if
+ * in Rostering. */
+%check_instructor_composition_for_ccr_and_cct% =
+    let instr_pos = training.%instructor_position%;
+  %product% = "CCT" or
+  crew_pos.%leg_is_fully_assigned% or
+  (instr_pos > 0 and
+  crew_pos.%leg_rostered_pos%(instr_pos) = 
+  crew_pos.%leg_booked_pos%(instr_pos));
+
+/* Redefined in child modules due to different validity */
+%r_valid_acceptable_companion% = Bool;
+
+export %trigger_comp_crew_with_training_flight_has_good_companion_ALL% =
+  training.%has_acceptable_companion%;
+
+%acceptable_companion_str% =
+  training.%acceptable_companion_str%(training.%training_type%);
+  
+export %remark_comp_crew_with_training_flight_has_good_companion_ALL% =
+  "Training flight must have appropriate companion";
+  
+export rule special_schedule_zftt =
+  valid (leg.%leg_has_zftt_x% or
+        leg.%leg_has_zftt_lifus%) and
+        %valid_comp_crew_with_training_flight_is_good_companion_ALL% and
+        leg.%has_instructor_code%;
+  %spec_sched_zftt%;
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext "SpecSched: Instructor duty ZFTT LIFUS / ZFTT X not allowed";
+  remark "(CCR) OMA: Crew must not have forbidden act zftt",
+  planner "The rule checks that crew doesn't have valid forbidden act zftt";        
+end
+
+%spec_sched_zftt% =
+    void(crew.%spec_sched_limit_str%("ForbiddenAct", "ZFTT", leg.%start_utc%));
+ 
+    
+/* Companion rule to rule above. Should check that crew isn't assigned in a 
+   position that requires different qualification. 
+   */
+export rule comp_crew_with_training_flight_is_good_companion_ALL =
+  valid %valid_comp_crew_with_training_flight_is_good_companion_ALL% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+  %trigger_comp_crew_with_training_flight_is_good_companion_ALL%;
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %training_flight_is_good_companion_ALL_failtext%;
+  remark "(CCR) OMA: Crew must be appropriate instructor for training flight",
+  planner "The rule checks that crew isn't assigned in a position that requires "
+          " some kind of instructor qualification";
+end
+
+export %valid_comp_crew_with_training_flight_is_good_companion_ALL% =
+  let mypos = crew_pos.%assigned_pos%;
+  roster.%check_rules% and
+  leg.%in_pp_extended% and
+  leg.%is_active_flight% and
+  (leg.%has_any_training_code_any_crew% or leg.%is_school_flight%) and
+  crew_pos.%leg_rostered_pos%(mypos) = crew_pos.%leg_booked_pos%(mypos) and
+  not %training_capt_on_ilc_receiving_lc_from_lc_capt% and
+  not leg.%leg_has_line_flight%;
+  
+%trigger_comp_crew_with_training_flight_is_good_companion_ALL% =
+  let type = %failed_training_type%;
+  if type = "NONE" then
+    true
+  else
+    if leg.%has_any_training_code_any_crew% and not %is_supernum%(type) and training.%instr_tag_required% then 
+        leg.%instructor_code_safe% = type
+    else
+        training.%acceptable_companion%(type);
+     
+%is_supernum%(String type) = type = "SUPERNUM";
+
+%training_capt_on_ilc_receiving_lc_from_lc_capt% =
+  crew.%main_func% = "F" and
+  training.%has_duty_code% and
+  training.%duty_code% = "BU" and
+  crew.%has_restr_training_capt_in_pp% and
+  crew_pos.%assigned_pos% = 4 and
+  default(any(equal_legs, training.%leg_instructor_duty_code% = "B")
+  where (leg.%is_active_flight% and
+         leg.%in_pp_extended% and
+         crew.%main_func% = "F" and
+         crew_pos.%assigned_pos% = 1), false);
+
+%failed_training_type% =
+  let main_cat = fundamental.%main_cat%,
+      instr_pos = crew_pos.%assigned_pos%,
+      instr_id = crew.%id%;
+  default(max(equal_legs, %_failed_training_type%)
+          where (leg.%is_active_flight% and
+                 crew.%main_func% = main_cat and
+                 crew.%id% <> instr_id and
+                 (leg.%has_training_code% or leg.%is_school_flight%) and
+                 instr_pos = %leg_instructor_pos% and
+                 not training.%has_acceptable_companion%
+                 and not leg.%is_FLT_INSTR_OL%),
+          "NONE");
+    
+%_failed_training_type% =
+  if leg.%has_any_training_code_any_crew% then
+    leg.%training_code_safe%
+  else
+    "School flt";
+    
+%leg_instructor_pos% =
+  if leg.%has_any_training_code_any_crew% then
+    training.%leg_instructor_pos%
+  else
+    /* School flt */
+    1;
+
+%training_flight_is_good_companion_ALL_failtext% =
+    concat("OMA: ", %failed_training_type%, " flight needs a ",
+       if training.%instr_tag_required% then "tagged "
+          else "",
+           if leg.%is_fc% 
+           then "LC or LIFUS instructor"
+           else %acceptable_companion_str%);
+           
+            
+
+          
+/* Rule:
+**    Instructor for release flights to SMI must have
+**    TRI, TRE, SFI, SFE or LIFUS qualification.
+*/
+export rule comp_release_instructor_is_qualified =
+  valid roster.%check_rules% and
+        crew.%is_pilot%      and
+        leg.%in_pp_extended% and
+	    leg.%end_station% in qualification.stations_with_extra_release_requirements and
+	    default(leg.%instructor_code% = "RELEASE", false);
+
+  crew.%is_lifus_matching_instr%(false, leg.%start_utc%);
+
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext "OMA: SMI release flight needs a tagged FCI or FCQ";
+  remark "(CCR) OMA: SMI release flight needs a tagged FCI or FCQ",
+  planner "The rule checks that crew that is assigned as release instructor to SMI"
+          " has TRI, TRE, SFI, SFE or LIFUS qualification.";
+end
+
+
+/*
+** Rule:
+**    Max nr of crew performing training type on flight
+**
+** Description:
+**    The rule checks that the number of crew performing
+**    training on a flight is not greater than maximum allowed.
+**
+** Agreement:
+**    OM-A ???
+*/
+export rule comp_max_nr_crew_performing_training_type_on_flight_ALL =
+  valid %valid_comp_max_nr_crew_performing_training_type_on_flight_ALL%;
+  %value_comp_max_nr_crew_performing_training_type_on_flight_ALL% <=
+    %limit_comp_max_nr_crew_performing_training_type_on_flight_ALL% +
+    rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%);
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("OMA: Max crew in training", value,limit);
+  remark "(CCR) OMA: Max crew performing training on flight",
+  planner "The rule checks that the number of crew performing the current"
+          " training type (e.g. FAM) does not exceed maximum allowed."
+          " This a studio only rule and applicable to all crew in all regions.";
+end
+
+/* Redefined in child modules due to different limits */
+%max_crew_on_training_type% = 1;
+%nr_crew_on_training_type% = void_int;
+
+export %valid_comp_max_nr_crew_performing_training_type_on_flight_ALL% =
+  roster.%check_rules% and
+  leg.%in_pp_extended% and
+  leg.%is_active_flight% and
+  not leg.%is_school_flight% and
+  leg.%has_training_code% and
+  not leg.%is_new%;
+  
+export %trigger_comp_max_nr_crew_performing_training_type_on_flight_ALL% =
+  %value_comp_max_nr_crew_performing_training_type_on_flight_ALL% <=
+  %limit_comp_max_nr_crew_performing_training_type_on_flight_ALL%;
+  
+export %value_comp_max_nr_crew_performing_training_type_on_flight_ALL% =
+  %nr_crew_on_training_type%;
+ 
+  
+export %limit_comp_max_nr_crew_performing_training_type_on_flight_ALL% =
+  %max_crew_on_training_type% + 
+  default(rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%), 0);
+
+  
+export %remark_comp_max_nr_crew_performing_training_type_on_flight_ALL% =
+  "Max crew performing training type on flight";
+
+/*
+** Rule:
+**    Max number of restricted NEW
+**
+** Description:
+**    The rule checks that there is not more restricted NEW+NEW. NEW+ACQUAL,
+**    NEW+RANK or NEW+REFR crew than allowed.
+**
+** Agreement:
+**    OM-A 4.1
+*/
+export rule comp_max_restricted_new_ALL =
+  valid %valid_comp_max_restricted_new_ALL% and not
+        crew_pos.%is_supernum_cabin% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_utc%);
+  
+  %value_comp_max_restricted_new_ALL% <= %limit_comp_max_restricted_new_ALL%;
+  
+  startdate = leg.%activity_scheduled_start_time_utc%;
+  severity = %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("OMA: Max restricted NEW ", value,limit);
+  remark "OMA: Max number of restricted NEW",
+  planner "";
+end
+
+export %valid_comp_max_restricted_new_ALL% =
+  roster.%check_rules% and
+  trip.%in_pp_extended% and
+  trip.%has_active_flight% and
+  %_crew_is_restricted%;
+
+%_crew_is_restricted% =
+  crew.%has_restr_new_new_leg_start% or
+  crew.%has_qual_restr_new_actype_on_leg% or
+  crew.%has_restr_new_rank_leg_start% or
+  crew.%has_restr_new_refr_leg_start%;
+
+export %value_comp_max_restricted_new_ALL% =
+  let main_func = fundamental.%main_cat%;
+  count(equal_legs)
+    where (main_func = crew.%main_func% and
+           %_crew_is_restricted% and not
+           crew_pos.%is_supernum_cabin% and
+           leg.%is_active_flight%);
+
+
+export %limit_comp_max_restricted_new_ALL% = Int;
+
+export %trigger_comp_max_restricted_new_ALL% =
+  %value_comp_max_restricted_new_ALL% <= %limit_comp_max_restricted_new_ALL%;
+
+export %remark_comp_max_restricted_new_ALL% =
+  "OMA: Max number of restricted NEW";
+
+/*
+** Rule:
+**    Crew performing training shall be assigned in correct position
+**
+** Description:
+**    The rule checks that a crew with a training flight attribute shall
+**    be assigned in the correct position
+**
+** Agreement:
+**    OMA
+*/
+export rule comp_trainee_assigned_in_correct_position_ALL =
+  valid %valid_comp_trainee_assigned_in_correct_position_ALL% and
+  rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+  
+  %trigger_comp_trainee_assigned_in_correct_position_ALL%;
+  
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext concat("OMA: Trainee in pos ",
+                  crew_pos.%assigned_function%);
+  remark "(CCR) OMA: Trainee must be assigned in correct position",
+  planner "";
+end
+
+export %valid_comp_trainee_assigned_in_correct_position_ALL% =
+  roster.%check_rules% and 
+  leg.%in_pp_extended% and 
+  leg.%is_active_flight% and 
+  leg.%has_training_code%;
+  
+export %trigger_comp_trainee_assigned_in_correct_position_ALL% =
+  not void(training.%leg_trainee_pos%);
+  
+export %remark_comp_trainee_assigned_in_correct_position_ALL% =
+  "Trainee must be assigned in correct position";
+  
+/*
+Rule: Crew tagged as instructor needs a matching student on flight!
+Desc: Checks all legs tagged with INSTRUCTOR attribute has a student
+      with matching training attribute
+Author: Per Groenberg 28Aug2008
+*/
+export rule comp_instructor_has_matching_student_ALL =
+  valid   roster.%check_rules% and 
+          leg.%in_pp_extended% and 
+          leg.%is_active_flight% and 
+          leg.%has_instructor_code% and
+          rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+  
+  (leg.%has_any_training_code_any_crew%) and /* No training-code at all -> no student */
+  %matching_student_exists% ;
+  
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext concat("Func: No matching student on training: ",
+                  leg.%instructor_code_safe%);
+  remark "(CCR) Func: Leg tagged as instructor without matching student.",
+  planner "";
+end
+
+%matching_student_exists% =
+    let instr_code = leg.%instructor_code_safe%,
+        my_func = crew.%main_func_at_date%(leg.%start_hb%);
+    any(equal_legs,  %training_code_match%(instr_code) and
+                    my_func = crew.%main_func_at_date%(leg.%start_hb%)) or
+    not void(training.%leg_non_loaded_special_student_id%);
+   
+%training_code_match%(string instr_code) =
+    if instr_code = "ILC" then 
+    leg.%training_code_safe% = "LC" or
+    leg.%training_code_safe% = "ILC"
+    else leg.%training_code_safe% = instr_code ;
+
+
+/*
+Rule: PD1 requirement by end of year check
+Desc: In December, checks if crew has has a PD1 assigned during the current year
+*/
+%PD1_assigned% =
+    training.%nr_acts_of_code_in_ival%("PD1", round_down_year(%pp_start%), round_up_year(%pp_start%)) > 0;
+
+rule required_activities_in_time_period_ALL =
+    valid roster.%check_rules%
+          and pp.%start_month_number% = 12
+          and rule_exceptions.%rule_on%(%pp_start%);
+
+    %PD1_assigned%;
+
+    startdate = %pp_start%;
+    severity = %severity_filter_int_chain%(%pp_start%);
+    failobject = first(duty(chain), duty.%failobject_start%)
+                     where(duty.%starts_in_pp%);
+    failtext concat("OMA: Crew needs PD1 before ",
+                    format_time(round_up_year(%pp_start%), "%02d%02b%02y"));
+    remark "OMA: Crew needs document duty time during current year",
+    planner "The rule checks that crew has document duty time assigned during"
+            " the current year. The PD1 activity represents duty time for"
+            " renewal of passport and visa with is a regulatory requirement.";
+end
+
+
+/*
+SKCMS-2875
+Rule: Rule that controls that crew needing PC is not assigned to 
+      same sim slot as crew needing OPC (OTS)
+Desc: Create new rule that controls
+      - Trainees having PC (Y*) and trainees having OPC (OTS) S* are 
+        not assigned to same simulator
+      - Crew with attribute SIM ASSIST can still have S* while the other 
+        trainee has Y*
+      - Please note that instructors can still have S* while the trainees has Y*
+      - The rule shall fail on both trainees in case of a mismatch of 
+        training attributes on a Y* or S* session
+*/
+export rule comp_mixed_pc_ots_not_allowed_in_sim =
+  valid roster.%check_rules% and 
+        leg.%in_pp_extended% and 
+        leg.%is_pc_or_opc% and 
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+  
+  (leg.%is_pc_or_opc%) and
+  not %has_pc_opc_mismatch% ;
+  
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext "PC and OTS must not be mixed in same simulator";
+  remark "PC and OTS must not be mixed in same simulator",
+  planner "PC and OTS must not be mixed in same simulator";
+end
+
+%has_pc_opc_mismatch% =
+    if training.%leg_is_pc% and not (leg.%is_any_sim_instr% or leg.%is_forced_sim_assist% or leg.%is_sim_assist_landings%) then
+      default(any(equal_legs, training.%leg_is_opc%) 
+      where (not (leg.%is_any_sim_instr% or leg.%is_forced_sim_assist% or leg.%is_sim_assist_landings%)),false)
+    else if training.%leg_is_opc% and not (leg.%is_any_sim_instr% or leg.%is_forced_sim_assist% or leg.%is_sim_assist_landings%) then
+      default(any(equal_legs, training.%leg_is_pc%) 
+      where (not (leg.%is_any_sim_instr% or leg.%is_forced_sim_assist% or leg.%is_sim_assist_landings%)),false)
+    else
+      false;
+
+/****************************************************************
+ * Section 4: Common variables
+****************************************************************/
+
+
+/****************************************************************
+ * Section 5: Definitions to be redefined
+****************************************************************/
+export %valid_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL% = false;
+export %trigger_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL% = false;
+export %value_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL% = 0;
+export %limit_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL% = 0;
+export %remark_comp_max_nr_crew_with_purser_as_instr_on_flight_ALL% = "";
+
+export %valid_comp_assigned_in_ap_must_be_SCC_CC% = false;
+export %remark_comp_assigned_in_ap_must_be_SCC_CC% = "";
+export %trigger_comp_assigned_in_ap_must_be_SCC_CC% = false;
+
+%leg_is_considered_as_scc% = false;
+
+export %valid_comp_no_higher_ah_when_lower_ap_CC% = false;
+export %remark_comp_no_higher_ah_when_lower_ap_CC% = "";
+export %trigger_comp_no_higher_ah_when_lower_ap_CC% = false;
+
+export %valid_trng_min_release_flight_length_CC% = false;
+export %remark_trng_min_release_flight_length_CC% = "";
+export %trigger_trng_min_release_flight_length_CC% = false;
+
+
+/* Cached expressions */
+%leg_is_active_flight% = leg.%is_active_flight%;
+%leg_is_lrsb% = leg.%is_lrsb%;
+%leg_qual% = leg.%qual%;
+%leg_needs_etops_training% = training.%leg_needs_etops_training%;
+%etops_training_ac_qual% = training.%etops_training_ac_qual%;
+
+/* end of file */

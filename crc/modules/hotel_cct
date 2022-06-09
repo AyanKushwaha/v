@@ -1,0 +1,125 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   Special local transport times, defined for tracking
+ *
+ * Created by:
+ *   Yaser Mohamed 14 Feb 2007
+ *
+ * Major changes:
+ *
+ */
+
+module hotel_cct inherits hotel
+import crew;
+import leg;
+import duty;
+import fundamental;
+import keywords;
+import attributes;
+
+export %spec_local_trans% = 
+  parameter"spec_local_trans"
+  remark "External table with the special local transports";
+  
+  
+table special_local_transport_table (String leg, String rest_station, String crew) =
+  leg, rest_station, crew -> export RelTime %slt_to_rest%, export RelTime %slt_from_rest%;
+  External %spec_local_trans%;
+  "leg", "rest_stat", "crew" -> "to_rest", "from_rest";
+  -, -, - -> void_reltime, void_reltime;
+end
+
+/* Find special local transport time */
+
+redefine export %slt_after_leg% =
+  %slt_to_rest%(%slt_leg%, %slt_station%, crew.%id%);
+
+redefine export %slt_before_leg% = 
+  prev(leg(wop), %slt_from_rest%(%slt_leg%, %slt_station%, crew.%id%));
+
+redefine export %slt_mean_time% = 
+  (%slt_after_leg% + next(leg(wop), %slt_before_leg%))/2;
+  
+export %slt_leg% = 
+  if keywords.%flight_duty% or not keywords.%flight_duty%
+  then last(leg(duty), %slt_leg_string%)
+  else "DUMMY";
+
+%slt_leg_string% =
+  if leg.%is_pact% 
+      then  %slt_leg_pact%
+      else
+          %slt_leg_nonpact%;
+          
+%slt_leg_pact% = 
+    concat("P+",
+           format_time(leg.%activity_scheduled_start_time_UTC%, "%02d%b%Y"),
+           "+",
+           leg.%flight_name%,
+           "+",
+           keywords.%arrival_airport_name%);
+  
+%slt_leg_nonpact% = leg.%activity_id%;
+
+export %slt_station% =
+  if (keywords.%flight_duty% or not keywords.%flight_duty%) and 
+     (not is_last(duty(trip)) or leg.%is_sby_manual_duty_break%) 
+  then last(leg(duty), leg.%end_station%)
+  else void_string;
+
+export %slt_default_time_apt_to_hotel% = 
+  last(leg(duty), hotel.%leg_local_transport_apt_to_hotel%);
+  
+export %slt_default_time_hotel_to_apt% = 
+  if default(last(leg(duty), leg.%is_ground_duty% and attributes.%leg_has_duty_break_attribute%), false) then
+    last(leg(duty), hotel.%leg_local_transport_apt_to_hotel%)
+  else if  next(duty(trip),first(leg(duty),leg.%start_station%)) =
+           last(leg(duty),leg.%end_station%) then
+    last(leg(duty), hotel.%leg_local_transport_apt_to_hotel%)
+  else
+    next(duty(trip),first(leg(duty),hotel.%leg_local_transport_hotel_to_apt%));
+  
+export %slt_layover_span_str% =
+  fundamental.%time_span_str%(leg.%duty_end_utc%,
+                              leg.%duty_end_utc% + leg.%rest_time%);
+
+redefine export %can_set_local_transport% = 
+  /*not leg.%is_pact% and*/
+  not void(crew.%id%) and
+  not void(%slt_leg%) and 
+  not void(%slt_station%) and
+  not void(%slt_default_time_apt_to_hotel%) and
+  not void(%slt_default_time_hotel_to_apt%);
+
+/* Region is used to determine hotel and hotel transport customer, not to 
+   select which hotel to book. Since this is accounting, who will pay for the
+   hotel, it is determined by flight owner.
+   
+   If, for some reason, flight owner is missing, then legality region is used
+   instead.
+*/
+
+redefine export %region% = 
+  if void(%_flight_owner_region%) 
+     or %_flight_owner_region% = ""
+  then 
+    leg.%region% 
+  else %_flight_owner_region%;
+
+%_flight_owner_region% = leg.%flight_owner_region%;
+
+%leg_hotel_attribute% = 
+  default(attributes.%assignment_attr_str%("HOTEL_BOOKING"),"");
+
+/* cancelled booking (assignment attribute H-) means the crew does not need/want a hotel for the layover in question */
+%_cancelled_booking_attribute% = "H-";
+redefine export %is_cancelled_booking% = %leg_hotel_attribute% = %_cancelled_booking_attribute%;
+
+redefine export %leg_hotel_id_override% =
+  if %is_cancelled_booking% then
+    void_string
+  else if %leg_hotel_attribute% = "" then
+    %leg_hotel_id%
+  else
+    substr(%leg_hotel_attribute%, 3,4);

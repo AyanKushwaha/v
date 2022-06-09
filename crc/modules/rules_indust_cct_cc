@@ -1,0 +1,219 @@
+/* -*- crc -*- 
+ *
+ * 
+ *
+ * Purpose:
+ *   This module contains cabin crew specific industrial rules to be used in
+ *   tracking
+ *
+ * Sections:
+ *    1. Freeday Rules
+ *    2. Composition rules
+ *
+ * Created by:
+ *   Peter Jonsson 20-Mar-2006
+ *
+ * Major changes:
+ *
+ */
+
+module rules_indust_cct_cc inherits rules_indust_cct
+import rules;
+import crew_pos;
+import crew;
+
+/****************************************************************
+ * Section 1: Freeday Rules
+ ***************************************************************/
+
+/*
+** Rule:
+**    Maximum number of sold VA days in calendar year.
+**
+** Description:
+**    Check that the maximum number of sold VA days doesnt exceed yearly limits.
+**    The rule is valid for SKN.
+**
+** Agreement:
+**    NKF/BSK K06 12.2
+**
+**    4ExNG - no longer applies
+*/
+export rule ind_max_num_sold_va_days_year_SKN_SKL_SKS =
+  valid roster.%check_rules% and
+        not crew.%k4exng_cc_sp5_1_valid%(wop.%start_day%) and
+        crew.%is_SKN% and
+        wop.%in_pp% and
+        wop.%is_last_on_duty_in_pp_start_month% and
+        not crew.%is_leased_wop_start%;
+
+  %bought_va_days_in_calendar_year% <= %max_sold_va_days_in_calendar_year% + 
+                                           default(rule_exceptions.%overshoot_int%(wop.%start_UTC%),0);
+
+  startdate  = wop.%start_UTC%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_num_sold_VA_days_year_SKN_failobject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("Coll: Sold VA days in yr", value, limit);
+  remark "(CCR) Coll: Max sold VA days in calendar year exceeded.",
+  planner "Check that the number of sold VA days in calendar year "
+          "doesnt exceed limit"
+          " The rule is valid for SKN.";
+end
+
+%ind_max_num_sold_VA_days_year_SKN_failobject% =
+  if(first(duty(roster), compdays.%bought_va_days_in_period%(duty.%end_day%) > %max_sold_va_days_in_calendar_year% + 
+           default(rule_exceptions.%overshoot_int%(wop.%start_UTC%),0))) then
+              default(first(duty(roster), duty.%failobject_start%) where
+                        (duty.%is_bought%), 
+                      first(duty(roster), duty.%failobject_start%))
+  else if last(duty(roster), compdays.%bought_va_days_in_period%(duty.%end_day%) <= %max_sold_va_days_in_calendar_year% + 
+           default(rule_exceptions.%overshoot_int%(wop.%start_UTC%),0)) then
+              last(duty(roster), duty.%failobject_end%)
+  else
+      first(duty(roster), duty.%failobject_start%)
+      where(duty.%start_hb% >= fundamental.%pp_start% and
+            duty.%is_bought% and
+            compdays.%bought_va_days_in_period%(duty.%end_day%) >= %max_sold_va_days_in_calendar_year% +  
+            default(rule_exceptions.%overshoot_int%(wop.%start_UTC%),0));
+      
+export %bought_va_days_in_calendar_year% =
+  compdays.%bought_va_days_in_calendar_year%(wop.%start_UTC%);
+
+%max_sold_va_days_in_calendar_year% = 2;
+
+/* SNK,NKF,SKD Standby limits for rest
+** For SB call to SH production first check out to rest or break at split
+** duty must not be later that 17 hrs after SB start
+** Valid for agmt groups AGMT_GROUP_NKF_CC, AGMT_GROUP_SNK_CC & AGMT_GROUP_SKD_CC
+** SKCMS-542 & SKCMS-2462
+**/
+export rule ind_max_duty_time_when_sb_callout =
+  valid roster.%check_rules%
+    and duty.%in_pp_extended%
+    and duty.%is_standby_callout%
+    and duty.%is_short_haul%
+    and (crew.%has_agmt_group_snk_cc% or
+         crew.%has_agmt_group_nkf_cc% or
+         crew.%has_agmt_group_skd_cc%);
+
+  %time_between_sb_start_and_co_time% <= %max_standby_sh_limit_for_rest% +
+                                            rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%, %duty_lh_region%));
+  failobject = %ind_max_duty_time_when_sb_callout_failobject%;
+  failtext(Reltime value, Reltime limit) =
+    rules.%failtext_rel%("Coll: Max duty time between standby start and checkout", value, limit);
+  remark "(CCT) Coll: Max duty between standby start and checkout or end of split duty",
+  planner "The rule checks the time between standby start and checkout or split duty end."
+          " Valid for SNK and NKF CC and SKD CC";
+end
+
+%time_between_sb_start_and_co_time% = duty.%end_UTC% - duty.%start_UTC%;
+%max_standby_sh_limit_for_rest% = 17:00;
+%ind_max_duty_time_when_sb_callout_failobject% =
+  let duty_start_utc = duty.%start_utc%;
+  first(leg(duty), leg.%failobject_departure%)
+  where (default(leg.%co_end_utc%, leg.%end_utc%) - duty_start_utc > %max_standby_sh_limit_for_rest%);
+
+
+/****************************************************************
+ * Section 2: Composition Rules
+ ***************************************************************/
+ 
+/*
+** Rule:
+**    The CC to be assigned in AP position when there is no AP avaialable,
+**    must be the most senior SCC-qualified of the assigned CC.
+**
+**
+** Description:
+**    The rule checks that an AS/AH assigned in AP position is the most
+**    senior SCC-qualified CC assigned on the flight.
+**
+** Agreement:
+**   ?? (Probably just resulting from union complaints!)
+*/
+
+rule comp_assigned_in_ap_must_be_most_senior_SCC_CC =
+  valid %valid_comp_assigned_in_ap_must_be_most_senior_SCC_CC% and
+        not %SKN_ahp_in_leg% and
+        not crew.%is_leased_duty_start% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+        
+  %most_senior_SCC_seniority% = crew.%seniority%;
+  
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext concat("Coll: Most senior SCC-qualified AH/AS ", %most_senior_SCC%,
+                  " must be in AP position");
+  remark "Coll: Most senior SCC-qualified AH/AS must be in AP position";
+end
+
+%valid_comp_assigned_in_ap_must_be_most_senior_SCC_CC% =
+    roster.%check_rules% and
+    leg.%in_pp_extended% and
+    leg.%is_active_flight% and
+    crew_pos.%assigned_pos% = 5 and
+    crew.%rank_at_date%(leg.%start_hb%) <> "AP" and
+    crew_pos.%leg_rostered_cc% >= crew_pos.%total_cabin_crew_need%;
+
+%most_senior_SCC% =
+  default(min(equal_legs, crew.%id%)
+            where (%cabin_crew% and
+                   crew.%seniority% = %most_senior_SCC_seniority%),
+          "?????");
+
+%most_senior_SCC_seniority% =
+  min(equal_legs, crew.%seniority%)
+    where (crew.%is_scc%(leg.%start_hb%) and
+           leg.%is_active_flight%);
+
+%SKN_ahp_in_leg% =
+  any(equal_legs, crew.%is_ahp%(leg.%start_hb%))
+    where (leg.%is_active_flight% and leg.%is_SKN%);
+
+/*
+** Rule:
+**    The CC to be assigned in AP position when there is no AP available,
+**    must be the most senior AHP-qualified of the assigned CC if any, only for SKN flights.
+**
+**
+** Description:
+**    The rule checks that an AS/AH assigned in AP position is the most
+**    senior AHP-qualified CC assigned on the flight.
+**
+*/
+
+rule comp_assigned_in_ap_must_be_most_senior_AHP =
+  valid %valid_comp_assigned_in_ap_must_be_most_senior_SCC_CC% and
+        %SKN_ahp_in_leg% and
+        not crew.%is_leased_duty_start% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+
+  %most_senior_AHP_seniority% = crew.%seniority%;
+
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext concat("Coll: Most senior AHP-qualified AH/AS ", %most_senior_AHP%,
+                  " must be in AP position");
+  remark "Coll: Most senior AHP-qualified AH/AS must be in AP position";
+end
+
+%most_senior_AHP% =
+  default(min(equal_legs, crew.%id%)
+            where (%cabin_crew% and
+                   crew.%seniority% = %most_senior_AHP_seniority%),
+          "?????");
+
+%most_senior_AHP_seniority% =
+  min(equal_legs, crew.%seniority%)
+    where (crew.%is_ahp%(leg.%start_hb%) and
+           leg.%is_active_flight%);
+
+/* End of file */
+
+

@@ -1,0 +1,466 @@
+/* -*- crc -*- 
+ *
+ * Purpose:
+ *   This module contains studio only rules used for Cabin Crew Rostering and
+ *   Cabin Crew Tracking. Some rules are turned OFF by parameter files.
+ *
+ * Sections:
+ *   1. Quality rules
+ *   2. Standby rules  
+ *   3. Composition rules.
+ *   4. Duty-time rules
+ *   5. Constraint rules (corresponding to roster_constraints_cc)
+ *
+ * Created by:
+ *   Henrik Mouritsen, 10-May-2007
+ *
+ * Major changes:
+ *
+ */
+
+module rules_studio_ccr_cc inherits rules_studio_ccr
+
+import wop;
+import duty_period;
+import accumulators;
+import standby;
+import parameters;
+import duty_time;
+import crew;
+import calendar;
+import system_db_parameters;
+
+/***************************************************************
+ * Section 1: Quality rules
+ ***************************************************************/
+
+/*
+** Rule: 
+**    Check that crew is valid for OK/UP course office duty.
+**
+** Description:
+**    The rule check that it is ok to assign course office duty OK / UP
+**    for crew. The following must be fulfilled:
+**    1: Course must be within range defined by parameters and
+**       must be the only one within the defined range
+**    2: Course code must correspond to base
+**
+** Agreement:
+**    Functional
+*/
+
+rule func_office_duty_valid_for_crew_CC_all =
+  valid roster.%check_rules% and
+        wop.%in_pp% and
+        not (crew.%is_SKI%) and
+        trip.%is_course_office_duty% and
+        not crew.%is_leased_wop_start% and
+        rule_exceptions.%rule_on%(wop.%start_UTC%);
+
+  %course_office_duty_is_scheduled_correct%;
+
+  startdate = wop.%start_UTC%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = wop.%failobject_start%;
+  failtext "Func: OK/UP course office duty invalid for crew ";
+  remark "(GUI) Func: OK/UP course office duty invalid for crew",
+  planner "The rule checks that OK/UP course office duty is assigned correctly";
+end
+
+%course_office_duty_is_scheduled_correct% =
+ %wop_is_unique_within_ok_up_range% and
+ %wop_is_base_correct_office_duty%;
+
+%wop_is_unique_within_ok_up_range% =
+  default(%prev_course_office_date% < %ok_up_course_office_duty_start_p% and
+          %next_course_office_date% > %ok_up_course_office_duty_end_p%,
+          true);
+
+%prev_course_office_date% =
+  accumulators.%last_course_office_duty%(wop.%start_hb%);
+
+%next_course_office_date% =
+  accumulators.%next_course_office_duty%(wop.%end_hb%);
+
+table ok_up_office_duty =
+  crew.%region% ->
+    %wop_is_base_correct_office_duty%;
+  
+  "SKD" -> %wop_is_base_correct_office_duty_SKD%;
+  "SKS" -> %wop_is_base_correct_office_duty_SKS%;
+  "SKN" -> %wop_is_base_correct_office_duty_SKN%;
+
+  -     -> true;
+end
+
+%wop_is_base_correct_office_duty_SKD% =
+  leg.%code% in ok_up_course_office_duty_SKD_p; 
+
+%wop_is_base_correct_office_duty_SKS% =
+  leg.%code% in ok_up_course_office_duty_SKS_p; 
+  
+%wop_is_base_correct_office_duty_SKN% =
+  leg.%code% in ok_up_course_office_duty_SKN_p; 
+  
+%ok_up_course_office_duty_start_p% =
+  parameter 01jan1986
+  remark "Start of OK/UP period";
+%ok_up_course_office_duty_end_p% =
+  parameter 01jan1986
+  remark "End of OK/UP period";
+
+set ok_up_course_office_duty_SKD_p =
+  parameter ""
+  remark "OK/UP activity codes SKD";
+set ok_up_course_office_duty_SKS_p =
+  parameter ""
+  remark "OK/UP activity codes SKS";
+set ok_up_course_office_duty_SKN_p =
+  parameter ""
+  remark "OK/UP activity codes SKN";
+/*
+** Rule: 
+**    AP assigned lower with AH assigned above
+**
+** Description:
+**    Rule prevents AH CA1 qualified crew to fly as AP together 
+**    with AP assigned as lower.
+**
+** Agreement:
+**    Functional rule
+*/
+
+export rule func_seniority_order_CC_ALL =
+  valid roster.%check_rules% and
+        wop.%in_pp% and
+        wop.%is_long_haul% and
+        %r_valid_lower_rank% and
+        not crew.%is_leased_wop_start% and
+        rule_exceptions.%rule_on%(wop.%start_UTC%);
+
+  %AP_AH_is_scheduled_correct%;
+
+  startdate = trip.%start_UTC%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = trip.%failobject_start%;
+  failtext "Soft: AP scheduled lower, on leg with AH scheduled above.";
+  remark "(CCR) Soft: AP scheduled lower, on leg with AH scheduled above.",
+  planner "The rule prevents AP scheduled as lower rank together with"
+	  " AH scheduled above."; 
+end
+
+%r_valid_lower_rank% =
+ any(leg(trip), %AP_lower_rank_leg% or %AH_above_rank_leg%); 
+
+/* AP flying AH lower */
+%AP_lower_rank_leg% =
+  not (leg.%is_deadhead% or leg.%is_supernum%) and
+  crew_pos.%lower_rank% and 
+  crew_pos.%current_function% = "AP" and
+  crew_pos.%assigned_function% = "AH";
+
+/* AH flying above */
+%AH_above_rank_leg% =
+  not (leg.%is_deadhead% or leg.%is_supernum%) and
+  crew_pos.%current_function% = "AH" and
+  (crew_pos.%assigned_function% = "AS" or
+   crew_pos.%assigned_function% = "AP");
+
+%AP_AH_is_scheduled_correct% =
+  all(leg(trip), %leg_lower_rank_is_scheduled_correct%)
+  where (%AP_lower_rank_leg% or
+         %AH_above_rank_leg%);
+
+%leg_lower_rank_is_scheduled_correct% =
+  if %AP_lower_rank_leg% then
+    not any(equal_legs, %AH_above_rank_leg%)
+  else
+    not any(equal_legs, %AP_lower_rank_leg%);
+
+/***************************************************************
+ * Section 2: CC Resource Pool rules
+ ***************************************************************/
+
+/*
+** Rule:
+**    A flight with an assigned SKD/SKN temp CC must also have an AP assigned
+**
+** Description:
+**    The rule checks that if any SKD/SKN temp CC is assigned to a flight, 
+**    then an AP must also be assigned
+**
+**    K12: AP is required only on training flights, i.e. x-supernum, release
+**         and flights in Initial Flight Duty period.
+**
+** Agreement:
+**    SKD CC, SKN CC
+*/
+
+
+/* SKCMS-451 - This rule is no longer valid.
+               I can probably be removed completely but I only commented it out if SAS change their mind.
+               2014-12-12 - Mikael Larsson
+
+
+ rule comp_temp_crew_accompanied_by_purser_CC_SKD_SKN =
+  valid %valid_comp_temp_crew_accompanied_by_purser_CC_SKD_SKN%;
+  %nr_ap_assigned_on_flight% >= 1 +
+    default(rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%), 0);
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%("Coll: Temp crew must be accompanied by AP",value,limit);
+  remark "Coll: Temp crew must be accompanied by AP",
+  planner "The rule checks that a flight with an SKS temp CC assigned"
+          " also has an AP assigned. After K12, an AP is required only"
+          " on x-supernum, release and Initial Flight Duty period flights";
+end
+
+%valid_comp_temp_crew_accompanied_by_purser_CC_SKD_SKN% =
+  roster.%check_rules% and
+  (crew.%is_skd% or crew.%is_skn%) and
+  crew.%is_temporary_pp_end% and
+  leg.%in_pp_extended% and
+  leg.%is_active_flight% and
+  not leg.%is_RC_aircraft% and
+  crew.%is_temporary_leg_start% and
+  (not parameters.%k12_sks_cc_sp4_4_valid%(leg.%start_hb%) or
+   leg.%is_x_supernum% or leg.%is_release% or
+   crew.%has_qual_restr_new_actype_on_leg%) and
+  not crew.%is_leased_duty_start%;
+
+%nr_ap_assigned_on_flight% =
+  count(equal_legs)
+  where (%is_roster% and 
+         crew.%rank_at_date%(leg.%start_hb%) = "AP" and
+         crew_pos.%assigned_function% = "AP" and
+         leg.%is_active_flight%);  
+*/
+
+
+
+
+/****************************************************************
+ * Section 3: Composition rules
+ ***************************************************************/  
+/*
+** Rule:
+**    No over/under crewed cockpits are allowed
+**
+** Description:
+**    Any roster containing over/under crewed cabins in flights is considered
+**    illegal.
+**    An (almost) identical rule exists in rules_studio_ccr_fc
+**
+** Functional rule:
+*/
+export rule (off) sft_comp_ok_CC =
+  valid base_product.%is_rostering% and 
+        %is_roster% and trip.%in_pp_extended% and
+        leg.%is_active_flight% and
+        not crew.%is_leased_duty_start% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+
+  crew_pos.%leg_booked_cc% = crew_pos.%total_cabin_crew_need% and
+  %_all_positions_ok%;
+
+  startdate = leg.%activity_scheduled_start_time_UTC%;
+  failtext %sft_comp_ok_CC_failtext%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  remark "Soft: No over/under crewed cabins are allowed",
+  planner "The rule checks that no cabins are over/under crewed. "
+          "The rule checks that the booked number of crew is "
+          "equal to the need for the first three "
+          "crew positions.";
+end
+
+%_all_positions_ok% =
+  all(times(3), 
+      crew_pos.%leg_booked_pos%(%times_index_0% + 4) = 
+      crew_pos.%need_in_pos%(%times_index_0% + 4));
+
+%sft_comp_ok_CC_failtext% =
+  cat(times(3),
+      (if crew_pos.%leg_booked_pos%(%times_index_0% + 4) <> crew_pos.%need_in_pos%(%times_index_0% + 4) then
+        concat(crew_pos.%pos2func%(%times_index_0% + 4),":",
+               format_int(crew_pos.%leg_booked_pos%(%times_index_0% + 4) - 
+                          crew_pos.%need_in_pos%(%times_index_0% + 4), "%+i")," ")
+        else
+          ""));
+  
+/****************************************************************
+ * Section 4: Duty-time rules
+ ***************************************************************/  
+  
+/*
+** Rule:
+**  Max duty time 2 months (Jan-feb, Mar-Apr etc...)
+** Description:
+**  Duty time in 2 months may not exceed the number of working(P) days x 8:48. 
+**
+** Agreement: 
+** SKD CC K12 C.1.2.g)
+**
+** 4ExNG - no longer applies
+*/
+rule ind_max_duty_time_2_months_SKD =
+  valid roster.%check_rules% and
+        wop.%starts_in_pp% and
+        not crew.%is_leased_wop_start% and
+        not crew.%k4exng_cc_sp5_1_valid%(%pp_start%) and
+        parameters.%k12_skd_cc_sp4_3_valid%(%pp_start%) and
+        crew.%is_skd% and
+        wop.%is_last_on_duty_in_month% and
+        wop.%start_month_start% = %pp_start% and
+        fundamental.%even_month_by_month_start%(%pp_start%);
+
+  %duty_time_2_months_cc% <= 
+  duty_time.%max_duty_time_2_months_cc% + 
+    rule_exceptions.%overshoot_rel%(wop.%start_utc%);
+
+  startdate = wop.%start_utc%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_duty_time_2_months_cc_failobject%;
+  failtext(Reltime value, Reltime limit) =
+    rules.%failtext_rel%("Coll: Max duty time in 2 months",value,limit);
+  remark "Coll: Max duty time in 2 months",
+  planner "This rule checks that SKD CC are not scheduled more than P x 8:48"
+          " hours of duty time in two fixed calendar months,"
+          " Jan+Feb, Mar+Apr etc.";
+end
+
+
+%acc_for_previous_month% =
+  accumulators.%nr_planned_p_days_2_months_cc%
+    (duty_time.%duty_time_2_months_start_check_cc%, %duty_time_month_plus_1%);
+
+
+%duty_time_2_months_start_check_cc% =
+  if %acc_for_previous_month% > 0 then
+    duty_time.%duty_time_2_months_start_check_cc%
+  else
+    %duty_time_month_plus_1%;
+
+
+/* Go back from current object until we are below limits -
+**  next object is illegal */
+%ind_max_duty_time_2_months_cc_failobject% =
+  let month_start_check = %duty_time_2_months_start_check_cc%,
+      limit = duty_time.%max_duty_time_2_months_cc%;
+  default(
+    last(duty(wop),
+         prev(duty(chain),
+              next(duty(chain),
+                   default(first(leg(duty), leg.%failobject_departure%)
+                           where(duty_time.%duty_time_cc_in_period%(
+                                   month_start_check,
+                                   leg.%end_hb% +
+                                   leg.%check_out%) > limit),
+                           duty.%failobject_start%))
+              where(duty_period.%is_on_duty%))
+         where(duty_time.%duty_time_cc_in_period%(month_start_check,
+                                                  duty.%end_hb%) <= limit)),
+    wop.%failobject_start%);
+
+
+%duty_time_month_plus_1% = add_months(duty_time.%duty_time_2_months_start_check_cc%, 1);
+
+
+%acc_for_previous_month_skn% =
+  accumulators.%nr_planned_p_days_skn_cc%
+    (duty_time.%duty_time_2_months_start_check_cc%, %duty_time_month_plus_1%);
+
+
+/* The variable %duty_time_2_months_start_check_snk_cc% will check if the accumulated
+   value for the previous month is greater than zero.  If it is, then calculate
+   the duty time for the two months.  If it is zero, then assume that the duty
+   time should only be calculated for the current month */
+%duty_time_2_months_start_check_snk_cc% =
+  if %acc_for_previous_month_skn% > 0 then
+    duty_time.%duty_time_2_months_start_check_cc%
+  else
+    %duty_time_month_plus_1%;
+
+
+%duty_time_2_months_cc% =
+    let duty_start = duty.%start_HB%;
+    duty_time.%duty_time_cc_in_period%(
+        calendar.%month_pair_start%(duty_start),
+        calendar.%month_pair_end%(duty_start));
+
+/***************************************************************
+ * Section 5: Constraint rules
+ ***************************************************************/
+
+/*
+** Rule:
+**   Max number of unrestricted AHV and AHN
+**
+** Description:
+**   For a flight with composition 1/0/2 or 0/0/3 (1 AH is Senior) -> max 1 restricted with either AHV or AHN
+**   For a flight with composition 1/0/3 or 0/0/4 (1 AH is Senior) -> max 2 restricted with either AHV or AHN
+**   For a flight with composition 1/0/4 or 0/0/5 (1 AH is Senior) -> max 3 restricted with either AHV or AHN
+**
+** Agreement:
+**   FOMT-R decision
+**
+** Differences from constraint
+**   The constraint only checks booked value, not who might actually be assigned in those positions
+**   It also only evaluates over leg.%in_pp_utc% and not leg.%in_pp_extended%
+*/
+
+rule comp_max_ahv_ahn_on_sh_flight =
+    valid roster.%check_rules% and
+          leg.%in_pp_extended% and
+          leg.%is_active_flight% and
+          leg.%is_short_haul% and
+          system_db_parameters.%comp_max_ahv_ahn_on_sh_flight%(leg.%activity_scheduled_start_time_UTC%) and
+          %crew_is_ahv_or_ahn%;
+
+    %nr_of_ahv_or_ahn_on_flight% <= %ahv_ahn_limit% +
+                                    rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%);
+
+    startdate = leg.%activity_scheduled_start_time_UTC%;
+    severity = %severity_filter_int%(leg.%start_utc%, %duty_lh_region%);
+    failobject = leg.%failobject_departure%;
+    failtext(int value, int limit) =
+        rules.%failtext_int%("OMA: Max AHV and AHN on flight", value, limit);
+    remark "OMA: Max AHV and AHN on flight",
+    planner "Number of AHV and AHN on flight is restricted based on complement."
+            "1/0/2 or 0/0/3 -> max 1 AHV or AHN"
+            "1/0/3 or 0/0/4 -> max 2 AHV or AHN"
+            "1/0/4 or 0/0/5 -> max 3 AHV or AHN";
+end
+
+%crew_is_ahv_or_ahn% =
+    crew.%has_restr_new_new_leg_start% or
+    crew.%has_restr_new_6m_leg_start%;
+
+%nr_of_ahv_or_ahn_on_flight% =
+    count(equal_legs) where (leg.%is_active_flight% and
+                             crew.%is_cabin% and
+                             not crew_pos.%is_supernum% and
+                             %crew_is_ahv_or_ahn%);
+
+%ahv_ahn_limit% =
+    if %max_of_assigned_or_booked% = 3 then 1 else
+    if %max_of_assigned_or_booked% = 4 then 2 else
+    if %max_of_assigned_or_booked% > 4 then 3 else 0;
+
+%max_of_assigned_or_booked% =
+    nmax(%_cc_booked_pos_5_6_7%, %_cc_assigned_pos_5_6_7%);
+
+%_cc_booked_pos_5_6_7% =
+    booked_crew_position_5 +
+    booked_crew_position_6 +
+    booked_crew_position_7;
+
+%_cc_assigned_pos_5_6_7% =
+    count(equal_legs) where (not leg.%is_deadhead% and
+                             (crew.%rank_leg_start% = "AP" or
+                              crew.%rank_leg_start% = "AS" or
+                              crew.%rank_leg_start% = "AH"));
+
+/* end of file */
