@@ -36,7 +36,6 @@ import rules_caa_ccr;
 import qualification;
 
 
-
 /****************************************************************
  * Section 1: Recency/Absence rules
  ***************************************************************/
@@ -74,7 +73,7 @@ To ensure continuity, MFF pilots shall fly:
 */
 
 export rule qln_min_legs_in_month_recency_fc_mff_sh =
-  valid roster.%check_rules% and not
+valid roster.%check_rules% and not
     (base_product.%is_tracking% and not system_db_parameters.%mff_continuity_in_tracking%(%month_start%)) and
     system_db_parameters.%min_legs_in_month_mff_valid%(%month_start%) and
     leg.%start_hb% >= round_down_month(%pp_start%) and
@@ -82,6 +81,8 @@ export rule qln_min_legs_in_month_recency_fc_mff_sh =
     %leg_overlaps_last_production_day_in_month% and
     (crew.%is_a2a3_qualified_at_date%(%month_start%) or crew.%is_a2a5_qualified_at_date%(%month_start%)) and
     not (crew.%rank_leg_start% = "FS") and 
+    not (%wop_is_va_or_loa_and_5_days_or_longer%) and
+    not (default(any(leg(roster) where (%is_crew_on_WCA_web_training_sh%), True), false)) and
     leg.%start_hb% = %leg_last_in_month%;
   %active_sh_flights% >= %active_sh_flight_limit% - rule_exceptions.%overshoot_int%(%leg_last_in_month%);
   startdate  = %leg_last_in_month%;
@@ -90,11 +91,10 @@ export rule qln_min_legs_in_month_recency_fc_mff_sh =
   remark "Min SH legs in calendar month for MFF pilots",
   planner "To ensure continuity, MFF pilots are required to fly"
           " - Not less than 4 dual aisle and 8 single aisle legs per calendar month"
-          " - Not less than 2 dual aisle and 4 single aisle legs per calendar month" 
+          " - Not less than 2 dual aisle and 4 single aisle legs per calendar month"
           " 	if working as Flight Instructor. The flights shall be carried out in the"
-          "   instructor�s ordinary seat position and may include LIFUS but not ZFTT LIFUS" 
-          " - In connection with vacation, fulfilling the above average over "
-          "	  rolling 3 calendar months is acceptable. Valid when vacation period is 7 days or more."
+          "   instructors ordinary seat position and may include LIFUS but not ZFTT LIFUS" 
+          " - In months with more than 5 days of vacation and/or LOA, the rule is not applicable."
           " - The rule shall enforce that MFF pilots fly minimum 4 active sectors on A3 or A5 "
           "   and minimum 8 active sectors on A2 in a calendar month.";
 end
@@ -108,6 +108,8 @@ export rule qln_min_legs_in_month_recency_fc_mff_lh =
     %leg_overlaps_last_production_day_in_month% and
     (crew.%is_a2a3_qualified_at_date%(%month_start%) or crew.%is_a2a5_qualified_at_date%(%month_start%)) and
     not (crew.%rank_leg_start% = "FS") and 
+    not (%wop_is_va_or_loa_and_5_days_or_longer%) and
+    not (default(any(leg(roster) where (%is_crew_on_WCA_web_training_lh%), True), false)) and
     leg.%start_hb% = %leg_last_in_month%;
   %active_lh_flights% >= %active_lh_flight_limit% - rule_exceptions.%overshoot_int%(%leg_last_in_month%);
   startdate  = %leg_last_in_month%;
@@ -116,14 +118,17 @@ export rule qln_min_legs_in_month_recency_fc_mff_lh =
   remark "Min LH legs in calendar month for MFF pilots",
   planner "To ensure continuity, MFF pilots are required to fly"
           " - Not less than 4 dual aisle and 8 single aisle legs per calendar month"
-          " - Not less than 2 dual aisle and 4 single aisle legs per calendar month" 
+          " - Not less than 2 dual aisle and 4 single aisle legs per calendar month"
           " 	if working as Flight Instructor. The flights shall be carried out in the"
-          "   instructor�s ordinary seat position and may include LIFUS but not ZFTT LIFUS" 
-          " - In connection with vacation, fulfilling the above average over "
-          "	  rolling 3 calendar months is acceptable. Valid when vacation period is 7 days or more."
+          "   instructors ordinary seat position and may include LIFUS but not ZFTT LIFUS" 
+          " - In months with more than 5 days of vacation and/or LOA, the rule is not applicable."
           " - The rule shall enforce that MFF pilots fly minimum 4 active sectors on A3 or A5 "
           "   and minimum 8 active sectors on A2 in a calendar month.";
 end
+
+%wop_is_va_or_loa_and_5_days_or_longer% =
+  default(any(wop(roster), (wop.%is_vacation% or wop.%is_loa%)) where
+        (wop.%in_pp% and wop.%no_of_days% >= 5), false);
 
 %is_valid_mff_instr%(Abstime date) = 
   crew.%is_tri_tre_sfi_sfe_any_qual%(date) or
@@ -201,19 +206,8 @@ end
   %active_lh_flights_instructor_same_rank%(%prev_month_start%) >= %min_lh_legs_month_limit_instr_mff_p%;
 
 %active_sh_flights% = 
-  if %active_a2_flights_current_month% >= %min_sh_legs_month_limit_mff_p% then
-    %active_a2_flights_current_month%
-  else if %is_mff_instr_limit_sh_relaxation% then
+  if %is_mff_instr_limit_sh_relaxation% then
     %active_sh_flights_instructor_same_rank%(%month_start%)
-  else if accumulators.%vacation_day_in_period%(%month_start%,%month_end%) >= 7 then
-    if %active_a2_flights_in_three_months%/3 >=  %min_sh_legs_month_limit_mff_p% then
-      %active_a2_flights_in_three_months%/3
-    else if %is_mff_instr_limit_sh_relaxation_3months% then
-      (%active_sh_flights_instructor_same_rank%(leg.%start_hb%) + 
-      %active_sh_flights_instructor_same_rank%(round_down_month(add_months(leg.%start_hb%, -1))) +
-      %active_sh_flights_instructor_same_rank%(round_down_month(add_months(leg.%start_hb%, -2))))/3
-    else
-      %active_a2_flights_current_month%
   else
     %active_a2_flights_current_month%;
 
@@ -235,21 +229,10 @@ end
     %active_a2_flights_prev_month%;
 
 %active_lh_flights% = 
-  if (%active_a3_flights_current_month% + %active_a5_flights_current_month%) >= %min_lh_legs_month_limit_mff_p% then
-    %active_a3_flights_current_month% + %active_a5_flights_current_month%
-  else if %is_mff_instr_limit_lh_relaxation% then
+  if %is_mff_instr_limit_relaxation% then
     %active_lh_flights_instructor_same_rank%(%month_start%)
-  else if accumulators.%vacation_day_in_period%(%month_start%,%month_end%) >= 7 then
-    if (%active_a3_flights_in_three_months% + %active_a5_flights_in_three_months%)/3 >=  %min_lh_legs_month_limit_mff_p% then
-      (%active_a3_flights_in_three_months% + %active_a5_flights_in_three_months%)/3
-    else if %is_mff_instr_limit_lh_relaxation_3months% then
-      (%active_lh_flights_instructor_same_rank%(leg.%start_hb%) + 
-      %active_lh_flights_instructor_same_rank%(round_down_month(add_months(leg.%start_hb%, -1))) +
-      %active_lh_flights_instructor_same_rank%(round_down_month(add_months(leg.%start_hb%, -2))))/3
-    else
-      %active_a3_flights_current_month% + %active_a5_flights_current_month%
-  else
-    %active_a3_flights_current_month% + %active_a5_flights_current_month%;
+  else  
+      %active_a3_flights_current_month% + %active_a5_flights_current_month%;
 
 %active_lh_flights_prev_month% = 
   if (%active_a3_flights_prev_month% + %active_a5_flights_prev_month%) >= %min_lh_legs_month_limit_mff_p% then
@@ -267,6 +250,19 @@ end
       %active_a3_flights_prev_month% + %active_a5_flights_prev_month%
   else
     %active_a3_flights_prev_month% + %active_a5_flights_prev_month%;
+
+%is_crew_on_WCA_web_training_lh% = 
+ if leg.%code%="WCA3" or leg.%code%="WCA5" then
+     True
+ else
+     False;
+
+%is_crew_on_WCA_web_training_sh% = 
+ if leg.%code%="WCA2" then
+     True
+ else
+     False;
+  
 
 export %min_lh_legs_month_limit_mff_p% =
   parameter 4
@@ -286,20 +282,24 @@ export %min_sh_legs_month_limit_instr_mff_p% =
 
 
 %active_lh_flight_limit% =
-  if %active_lh_flights% >= %min_lh_legs_month_limit_mff_p% then
-    %min_lh_legs_month_limit_mff_p%
-  else if %is_mff_instr_limit_lh_relaxation% or %is_mff_instr_limit_lh_relaxation_3months% then
+  if %sum_va_or_loa_in_pp% > 5 then 0
+  else if %is_mff_instr_limit_relaxation% then
     %min_lh_legs_month_limit_instr_mff_p%
   else
     %min_lh_legs_month_limit_mff_p%;
 
 %active_sh_flight_limit% =
-  if %active_sh_flights% >= %min_sh_legs_month_limit_mff_p% then
-    %min_sh_legs_month_limit_mff_p%
-  else if %is_mff_instr_limit_sh_relaxation% or %is_mff_instr_limit_sh_relaxation_3months% then
+  if %sum_va_or_loa_in_pp% > 5 then 0
+  else if %is_mff_instr_limit_relaxation% then
     %min_sh_legs_month_limit_instr_mff_p%
   else
     %min_sh_legs_month_limit_mff_p%;
+
+%is_mff_instr_limit_relaxation% = 
+  %is_valid_mff_instr%(leg.%start_hb%);
+
+%sum_va_or_loa_in_pp% =
+  sum(trip(roster), trip.%pp_days%) where (trip.%in_pp% and (trip.%is_vacation% or trip.%is_loa%));
 
 %active_lh_flight_limit_prev_month% =
   if %active_lh_flights_prev_month% >= %min_lh_legs_month_limit_mff_p% then
@@ -394,14 +394,10 @@ end
 ** Absence ground training performed
 */
 redefine %crew_is_absent% = absence.%at_leg_start%;
-redefine %crew_is_absent_a3_a5% = absence.%at_leg_start_a3_a5%;
 
 redefine %absence_requires_ground_training% = 
   absence.%days% >= absence.%hard_limit%;
-
-redefine %absence_requires_ground_training_a3a5% = 
-  absence.%days_with_a3a5_specific_absence% >= absence.%limit%;
-
+  
 /* Do not check rule on standby or blank days during 46-90 days absence */
 redefine %leg_is_sby_or_bl_to_be_checked% =
   (leg.%is_standby% or leg.%is_blank_day%) and
