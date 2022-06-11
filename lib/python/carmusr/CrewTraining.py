@@ -1266,7 +1266,7 @@ class Document(TempTable):
         self.unsavedChanges = status
 
     def validateDocForModifiedRows(self, mod_rows):
-        DOCUMENT_BLACKLIST = ['LC', 'PC', 'PCA3', 'PCA3A5', 'PCA4','PCA5','OPC', 'OPCA3', 'OPCA3A5', 'OPCA4','OPCA5','CRM', 'CRMC']
+        DOCUMENT_BLACKLIST = ['LC', 'PC', 'PCA3', 'PCA3A5', 'PCA4', 'PCA5', 'OPC', 'OPCA3', 'OPCA3A5', 'OPCA4', 'OPCA5', 'CRM', 'CRMC', 'REC', 'PGT']
         errorText = None
         if self is None or mod_rows is None:
             return errorText
@@ -1276,7 +1276,7 @@ class Document(TempTable):
         return errorText
 
     def save(self):
-        DOCUMENT_BLACKLIST = ['LC', 'PC', 'PCA3', 'PCA3A5', 'PCA4','PCA5', 'OPC', 'OPCA3', 'OPCA3A5','OPCA4','OPCA5', 'CRM', 'CRMC'] # TODO move somewhere relevant
+        DOCUMENT_BLACKLIST = ['LC', 'PC', 'PCA3', 'PCA3A5', 'PCA4', 'PCA5', 'OPC', 'OPCA3', 'OPCA3A5', 'OPCA4', 'OPCA5', 'CRM', 'CRMC', 'REC', 'PGT'] # TODO move somewhere relevant
         global crewId
 
         (changes, mod_rows) = self.checkForChanges()
