@@ -442,8 +442,8 @@ class PerDiemTripManager:
                             / trip[TRIP_COMPENSATION_UNIT])
                         perDiemLeg.mealReductionExchangeRate = (float(leg[LEG_MEAL_REDUCTION_EXCHANGE_RATE])
                             / leg[LEG_MEAL_REDUCTION_EXCHANGE_UNIT])
-                        print("perDiemLeg.mealReductionAmount = ", perDiemLeg.mealReductionAmount)
-                        print("perDiemLeg.mealReductionExchangeRate = ", perDiemLeg.mealReductionExchangeRate)
+                        #print("perDiemLeg.mealReductionAmount = ", perDiemLeg.mealReductionAmount)
+                        #print("perDiemLeg.mealReductionExchangeRate = ", perDiemLeg.mealReductionExchangeRate)
                 else:
                     perDiemLeg.mealReduction = leg[LEG_MEAL_REDUCTION]
                     perDiemLeg.mealReductionAmount = 0
@@ -546,7 +546,7 @@ class PerDiemRoster(DataClass):
         for trip in self.trips:
             total += trip.getMealReductionSumHomeCurrency()
         
-        print("PerdiemRoster.getMealReduction: ", total)
+        #print("PerdiemRoster.getMealReduction: ", total)
         return round(total / 100, 2)
 
     def getPerDiemForTaxDomesticNO(self):
@@ -707,7 +707,7 @@ class PerDiemTrip(DataClass):
         for leg in self.legs:
             sum += leg.getMealReductionHomeCurrency()
 
-        print("PerdiemTrip.getMealReductionSumHomeCurrency: ", sum)
+        #print("PerdiemTrip.getMealReductionSumHomeCurrency: ", sum)
         return round(sum, 2)
         
     def sumAllocatedPerDiem(self):
@@ -874,8 +874,8 @@ class PerDiemTrip(DataClass):
                     result += handleMultipleLegs(self.legs, lasti, i)
                     lasti = i
             result += handleMultipleLegs(self.legs, lasti, len(self.legs))
-            print result
-            print "END Per diem tax NO"
+            #print result
+            #print "END Per diem tax NO"
                 
         elif self.layoverTaxDeductNo: # 2A, 3: if at least 5:00 between 22-06 and stop, or covering all of 22-06
             #print "Is layover: "
@@ -978,8 +978,8 @@ class PerDiemTrip(DataClass):
             #print "Trip days=", self.getTripDaysTaxNorway()
             #print '  ' + '  \n'.join(map(lambda x: repr(x.__dict__), self.legs))
             result = handleMultipleLegs(self.legs, 0, len(self.legs))
-            print result
-            print "END Per diem tax NO"
+            #print result
+            #print "END Per diem tax NO"
                 
         elif self.layoverTaxDeductNo: # 2A, 3: if at least 5:00 between 22-06 and stop, or covering all of 22-06
             #print "Is layover: "
@@ -1186,8 +1186,8 @@ class PerDiemLeg(DataClass):
 
     # Converts meal reduction to 'home' currency
     def getMealReductionHomeCurrency(self):
-        print("PerdiemLeg.mealReductionAmount: ", self.mealReductionAmount)
-        print("PerdiemLeg.mealReductionExchangeRate: ", self.mealReductionExchangeRate)
+        #print("PerdiemLeg.mealReductionAmount: ", self.mealReductionAmount)
+        #print("PerdiemLeg.mealReductionExchangeRate: ", self.mealReductionExchangeRate)
         return round(
             self.mealReductionAmount * self.mealReductionExchangeRate, 2)
         
