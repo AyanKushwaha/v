@@ -38,10 +38,10 @@ def main():
             return False
 
     def _get_crew_from_extperkey(record_id):
-        for i in TM.crew_employment.search("(crew={})".format(record_id)):
+        for i in TM.crew_employment.search("(extperkey={})".format(record_id)):
             crew_id = i.crew
             return crew_id
-        print "Cannot find crew with crewid '%s' in crew_employement table." % record_id
+        print "Cannot find crew with empid '%s' in crew table." % record_id
     
     def getMonth(time):
         date_string = time.yyyymmdd()
@@ -52,10 +52,6 @@ def main():
         date_string = time.yyyymmdd()
         year = date_string[:4]
         return int(year) 
-
-  
-    
-   
 
     def record_process():
         for f in meal_opt_out_files:
@@ -74,11 +70,8 @@ def main():
                 
                 unique_crew_annotation = []
  
-                
-            
                 for row in data:
                     record_id =row['ID']
-            
                     crew_id = _get_crew_from_extperkey(record_id)
         
                     current_time = AbsTime(now_time.year,now_time.month,now_time.day,now_time.hour,now_time.minute)
@@ -106,15 +99,14 @@ def main():
                             ref_adep = TM.airport.getOrCreateRef(flt.adep)
                             ref_fd = TM.flight_leg[(flt.udor,flt.fd.flight_descriptor,ref_adep)]
                             new_rec_flight = TM.meal_flight_opt_out.create((crew_id,ref_fd,record_time_new))
-                            print "Saved meal_flight_opt_out record " + str(new_rec_flight)
-                            
+                            print "Saved meal_flight_opt_out record for crew ={}".format(record_id) + str(new_rec_flight)     
                         else:
                             record_month =int(row['MONTH'])
                             record_year =int(row['YEAR'])
                             validfrom_date = AbsTime(AbsDate(record_year,record_month,1))
                             validto_date = AbsTime(AbsDate(record_year,record_month+1,1))
                             new_rec_month = TM.meal_opt_out.create((crew_id,record_month,record_year))
-                            print "Saved meal_opt_out record " + str(new_rec_month)
+                            print "Saved meal_opt_out record for crew ={}".format(record_id) + str(new_rec_month) 
 
                             crew_ref = TM.crew.getOrCreateRef((crew_id.id,))
                             user_name = Names.username()
@@ -127,40 +119,36 @@ def main():
                             new_crew_annotation_rec.code = TM.annotation_set.getOrCreateRef(('CM',))
                             new_crew_annotation_rec.property =-1
                             new_crew_annotation_rec.username = user_name
-                            print "Saved Crew annotation record" +str(new_crew_annotation_rec)
-                    except EntityError:
-                        print "Record already exists in table"  + str(new_rec)
-
-                
-
+                            print "Saved Crew annotation record for crew ={}".format(record_id) +str(new_crew_annotation_rec)
                     except:
                         print "Could not create entry for crew {}".format(record_id)
                         traceback.print_exc()
                 
-                for rec in unique_crew_annotation:
-                        month = getMonth(record_time_new)
-                        year  = getYear(record_time_new)
-                        validfrom_date = AbsTime(AbsDate(year,month,1))
-                        validto_date = AbsTime(AbsDate(year,month+1,1))
-                        unique_crew_id =_get_crew_from_extperkey(rec['ID'])
-                        crew_ref = TM.crew.getOrCreateRef((unique_crew_id.id,))
-                        user_name = Names.username()
-                        seqnr = createSeqNr(crew_ref)
-                        new_crew_annotation_rec =TM.crew_annotations.create((unique_crew_id,seqnr))
-                        new_crew_annotation_rec.isvisible =True
-                        new_crew_annotation_rec.validfrom = validfrom_date
-                        new_crew_annotation_rec.validto = validto_date
-                        new_crew_annotation_rec.entrytime =current_time
-                        new_crew_annotation_rec.code = TM.annotation_set.getOrCreateRef(('CM',))
-                        new_crew_annotation_rec.property =-1
-                        new_crew_annotation_rec.username = user_name
-                        new_crew_annotation_rec.text = rec['text'] 
-                        print "Saved Crew annotation record" +str(new_crew_annotation_rec)
-
+                try:
+                    for rec in unique_crew_annotation:
+                            month = getMonth(record_time_new)
+                            year  = getYear(record_time_new)
+                            validfrom_date = AbsTime(AbsDate(year,month,1))
+                            validto_date = AbsTime(AbsDate(year,month+1,1))
+                            unique_crew_id =_get_crew_from_extperkey(rec['ID'])
+                            crew_ref = TM.crew.getOrCreateRef((unique_crew_id.id,))
+                            user_name = Names.username()
+                            seqnr = createSeqNr(crew_ref)
+                            new_crew_annotation_rec =TM.crew_annotations.create((unique_crew_id,seqnr))
+                            new_crew_annotation_rec.isvisible =True
+                            new_crew_annotation_rec.validfrom = validfrom_date
+                            new_crew_annotation_rec.validto = validto_date
+                            new_crew_annotation_rec.entrytime =current_time
+                            new_crew_annotation_rec.code = TM.annotation_set.getOrCreateRef(('CM',))
+                            new_crew_annotation_rec.property =-1
+                            new_crew_annotation_rec.username = user_name
+                            new_crew_annotation_rec.text = rec['text'] 
+                            print "Saved Crew annotation record for crew ={}".format(record_id) +str(new_crew_annotation_rec)
+                except:
+                        print "Could not create entry for crew {}".format(unique_crew_id)       
+                
                 TM.save()
-                
-            
-                
+                                
                 csv_file.close()
                 now = datetime.now()
                 backup_file_name = f.split('.')[0]+str(now.strftime("%Y%m%d%H%M%S"))+".csv"
@@ -170,12 +158,8 @@ def main():
         for f in os.listdir(path):
                 meal_opt_out_files.append(f)
                 record_process()
-
-    
       
     meal_opt_out_files = []    
-
-
 
     backup_folder = os.path.join(os.environ['CARMTMP'], 'ftp', 'crew_meal_optout_imported')
     path = os.path.join(os.environ['CARMTMP'], 'ftp', 'in')
@@ -183,9 +167,7 @@ def main():
     if not os.path.exists(backup_folder):
         os.makedirs(backup_folder)
     run_meal_opt_out()
-                
-
-        
+                       
 def run():
     try:
         main()

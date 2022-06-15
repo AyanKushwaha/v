@@ -10,7 +10,7 @@ def main():
     command = sh.studio_launch_command(args.daemon)
     now = tshell.abstime_now()
     pp_start_month_start = now.adddays(0).month_floor()
-    pp_start_month_end = now.adddays(0).month_ceil()
+    pp_start_month_end = now.adddays(30).month_ceil()
 
     environment = sh.get_environmnent()
     sh.set_save_and_daemon(environment, args)
