@@ -1,5 +1,5 @@
 js.crewweb.warp.widgets.PeriodViewExt = Ext.override(js.crewweb.warp.jmp.period.PeriodView.prototype, {
-    getPeriodViewText : function(periodData) {
+    getPeriodViewText: function (periodData) {
         var thePeriodData = periodData;
         if (!thePeriodData) {
             thePeriodData = this.periodModel.getPeriodData();
@@ -14,12 +14,11 @@ js.crewweb.warp.widgets.PeriodViewExt = Ext.override(js.crewweb.warp.jmp.period.
             var bidWindow = thePeriodData.bidWindow;
             var bidPeriod = thePeriodData.bidPeriod;
 
-            var bidWindowTo = new Date(bidWindow.to);
-            var isMidnight = bidWindowTo.getHours() === 0 && bidWindowTo.getMinutes() === 0 && bidWindowTo.getMilliseconds() === 0;
+            var maybeBidWindowTo = new Date(bidWindow.to);
+            var isMidnight = maybeBidWindowTo.getUTCHours() === 0 && maybeBidWindowTo.getUTCMinutes() === 0 && maybeBidWindowTo.getUTCMilliseconds() === 0;
 
-            if (isMidnight) {
-                bidWindowTo.setDate(bidWindowTo.getDate() - 1);
-            }
+            var bidWindowTo = isMidnight ? new Date(maybeBidWindowTo.setDate(maybeBidWindowTo.getDate() - 1))
+                : new Date(maybeBidWindowTo.setDate(maybeBidWindowTo.getUTCDate()));
 
             var start = Ext.util.Format.date(E.parseDate(bidPeriod.from), dateFormat);
             var end = Ext.util.Format.date(E.parseDate(bidPeriod.to), dateFormat);
@@ -29,10 +28,10 @@ js.crewweb.warp.widgets.PeriodViewExt = Ext.override(js.crewweb.warp.jmp.period.
             var crewTimeZone = thePeriodData.crewTimeZone;
 
             if (thePeriodData.openForBidding) {
-                return this.localization.translate('bid_period_label', [ open, close, start, end, crewTimeZone ]);
+                return this.localization.translate('bid_period_label', [open, close, start, end, crewTimeZone]);
             } else {
-                return this.localization.translate('bid_period_label_closed_period', [ open, close, start, end,
-                    crewTimeZone ]);
+                return this.localization.translate('bid_period_label_closed_period', [open, close, start, end,
+                    crewTimeZone]);
             }
         } else {
             return this.localization.translate('no_period_info');
