@@ -357,6 +357,8 @@ class TimeEntry(WFSReport):
         uniq_dates = set()
         wfs_corrected_data = []
         final_wfs_corrected_data = []
+        uniq_paycodes = set()
+
 
         prev_mnth_start_dt = self.report_start_date()
 
@@ -366,15 +368,17 @@ class TimeEntry(WFSReport):
 
             wfs_corrected_data.append(rec)
             uniq_dates.add(i.work_day)
+            uniq_paycodes.add(i.wfs_paycode)
 
         for dt in uniq_dates:
-            mx_id = -1
-            for rec in wfs_corrected_data:
-                if rec[4] == dt:
-                    if rec[0] > mx_id:
-                        mx_id = rec[0]
-                        mx_rec = rec
-            final_wfs_corrected_data.append(mx_rec) 
+            for pc in uniq_paycodes:
+                mx_id = -1
+                for rec in wfs_corrected_data:
+                    if rec[4] == dt and rec[3] == pc:
+                        if rec[0] > mx_id:
+                            mx_id = rec[0]
+                            mx_rec = rec
+                final_wfs_corrected_data.append(mx_rec) 
 
         for rec in final_wfs_corrected_data:
             corrected_rec = self._insert_or_update_record(rec[1], rec[2], rec[3], abs_to_datetime(rec[4]), rec[5], rec[6])
