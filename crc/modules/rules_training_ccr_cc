@@ -126,15 +126,61 @@ redefine %absence_requires_ground_training_a3a5% = not leg.%is_supernum%;
 redefine %sufficient_flight_experience_duty% =
   training.%nr_perf_initial_flts_duty_start% >= 
     training.%nr_reqd_initial_flts%;
-    
+
+redefine %is_new_actype% = 
+  if duty.%is_ac_employer_svs% and crew.%has_qual_restr_new_actype%(leg.%start_hb%, "EJ") then
+    true
+  else 
+    false;
+
+redefine %is_new_actype_valid% = 
+  crew.%has_qual_restr_new_actype_any_qual%(%pp_start%-01:00);
+
+export %qrestr_new_end_after_FAM% = training.%qrestr_new_end_FAM_date%(1JAN1986,31DEC2035)-24:00 + 90 * 24:00;
+
+%new_rank_actype_or_new_end_date_cc% =
+  if crew.%has_restr_new_rank_in_pp% /*and
+     /*not crew.%has_restr_new_rank%(%pp_end%)*/ then
+    crew.%_restr_subtype_enddate_in_ival%("NEW","RANK",
+                                          %pp_start%, 
+                                          %pp_end%) - 24:00
+  else if crew.%has_restr_new_new_in_pp% then
+    crew.%_restr_subtype_enddate_in_ival%("NEW","NEW",
+                                          %pp_start%, 
+                                          %pp_end%) - 24:00
+  else if(not crew.%has_restr_new_rank_in_pp% and crew.%has_restr_new_rank%(%pp_start%-01:00) or
+          not crew.%has_qual_restr_any_qual_in_pp% and crew.%has_qual_restr_new_actype_any_qual%(%pp_start%-01:00) or 
+          not crew.%has_restr_new_new_in_pp% and crew.%has_restr_new_new%(%pp_start%-01:00)) then
+          %pp_start% - 24:00
+  else
+      crew.%qrestr_new_end%(%pp_start%, %pp_end%) - 24:00 ;
+
+
+redefine %_new_restr_long_enough_cc_link% = 
+if duty.%is_ac_employer_svs% then
+    %qrestr_new_end_after_FAM% = %new_rank_actype_or_new_end_date_cc% 
+else
+    false;
+
 redefine %sufficient_flight_experience_duty_start% =
   training.%nr_perf_initial_flts_duty_start% >=
   training.%nr_reqd_initial_flts_duty_start%;
 
 redefine %trng_crew_should_not_be_considered_as_new_restr_ALL_failtext% =
    let value = training.%nr_perf_initial_flts_duty_start%,
-       limit = training.%nr_reqd_initial_flts_duty_start%;
-   rules.%failtext_int%("OMA: Remove NEW restr, flts", value, limit);
+       limit = training.%nr_reqd_initial_flts_duty_start%,
+       val = %qrestr_new_end_after_FAM%,
+       lim = %new_rank_actype_or_new_end_date_cc%;
+  if duty.%is_ac_employer_svs% and crew.%has_qual_restr_new_actype%(duty.%start_hb%, "EJ") then
+    rules.%failtext_abs%("OMA: Remove NEW restr", val, lim)
+  else
+    rules.%failtext_int%("OMA: Remove NEW restr, flts", value, limit);
+
+Redefine %trng_crew_should_not_be_considered_as_new_restr_ALL_failobject% = 
+  let new_rank_end_time = %new_rank_actype_or_new_end_date_cc%;
+  first(duty(roster) where (%qrestr_new_end_after_FAM% <> new_rank_end_time), 
+        duty.%failobject_start%); 
+
 
 /*
 ** Rule: Dispensation date for NEW restriction
@@ -188,7 +234,51 @@ end
     
 %prev_training_type% = 
     training.%course_attribute%(leg.%start_hb%, training.%index_of_type%("NEW", leg.%qual%, leg.%start_hb%) - 1);
-    
+
+
+/*
+** Rule:
+**    Crew must have required amount of flight experience during restriction "NEW"
+**
+** Description:
+**    The rule checks that when crew changes from restriction "NEW",
+**    he/she is sufficiently experienced and has had the restriction for long enough (only NEW+NEW). 
+**    The check is performed on the last duty with restriction "NEW" valid.
+**
+** Agreement:
+**    OM-A 5.2.12
+**    OM-A 5.3
+*/
+
+export rule trng_crew_must_have_flight_exp_for_no_new_restr_CC =
+    valid %trng_crew_must_have_flight_exp_for_no_new_restr_CC_valid%;
+    %_new_restr_long_enough_cc_link%;
+  
+    startdate = %new_rank_actype_or_new_end_date_cc%;
+    severity = first(leg(roster), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+    failobject = %trng_crew_must_have_flight_exp_for_no_new_restr_ALL_failobject%;
+    failtext %trng_crew_must_have_flight_exp_for_no_new_restr_ALL_failtext%;
+    remark "(CCR) OMA: Crew must have sufficient experience to lose NEW restriction",
+    planner "";
+end
+
+%trng_crew_must_have_flight_exp_for_no_new_restr_CC_valid%=
+     roster.%check_rules% and
+        
+          (crew.%is_SVS% and crew.%is_cabin% and crew.%has_qual_restr_new_actype_any_qual%(%pp_start%-01:00));
+
+%trng_crew_must_have_flight_exp_for_no_new_restr_ALL_failobject% =
+  let new_rank_end_time = %new_rank_actype_or_new_end_date_cc%;
+  first(duty(roster) where (duty.%start_hb% > new_rank_end_time), 
+        duty.%failobject_start%);
+
+%trng_crew_must_have_flight_exp_for_no_new_restr_ALL_failtext% = 
+  let limit_days = %qrestr_new_end_after_FAM%,
+      value_days = %new_rank_actype_or_new_end_date_cc%,
+      days = 90;
+  concat(rules.%failtext%("OMA: Should bw NEW,days",days),rules.%failtext_abs%(",days",value_days,limit_days));
+
+
 /*
 ** Rule:
 **    New entrant CC must perform flight training
