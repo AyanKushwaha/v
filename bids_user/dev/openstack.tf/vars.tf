@@ -27,7 +27,7 @@ variable "image_name" {
 }
 
 variable "flavor" {
-  default = "j1.c4r8d15"
+  default = "j1.c2x2r8d40"
 }
 
 variable "user" {

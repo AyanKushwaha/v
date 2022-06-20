@@ -1,12 +1,12 @@
 Authentication uses cases
 =========================
-The SAS Bid6 portal supports the authentication use cases:
+The SAS Crew Portal 11 portal supports the authentication use cases:
 - SSO cookie authentication:
-	Used by crew that login via the SAS Portal. Requires no password in the Bid6 user directory database. 
+	Used by crew that login via the SAS Portal. Requires no password in the Crew Portal 11 user directory database.
 - Form login with passwords:  
-	Used by admin/crew that login via form in the Bid6 portal. Requires password in the Bid6 user directory database.
+	Used by admin/crew that login via form in the Bid6 portal. Requires password in the Crew Portal 11 user directory database.
 - Form login without password:
-	Used in test  by admin/crew that login via form in the Bid6 portal.
+	Used in test by admin/crew that login via form in the Crew Portal 11.
 	
 The setup is configured in the jboss standalone.xml configuration.
 ==================================================================
@@ -25,44 +25,51 @@ Security setup in the subsystem urn:jboss:domain:security:
 Security domian "other"
     <security-domain name="other" cache-type="default">
         <authentication>
-<!-- Authenticate user with the user with the Bid6 user directory database. Identifies the configured authentication use case.   -->    
+<!-- Authenticate user with the user with the Crew Portal 11 user directory database. Identifies the configured authentication use case.   -->
+            <login-module code="com.sas.authentication.SASCookieLoginModule" flag="required">
+            </login-module>
             <login-module code="com.sas.authentication.LoginModuleWithRolesInDatabase" flag="required">
                 <module-option name="dsJndiName" value="java:jboss/datasources/CrewWebDS"/>
                 <module-option name="principalsQuery" value="select password from userdirectory where userid = ?"/>
 				<module-option name="rolesQuery" value="Select Concat(Userdirroles.Roletype,Concat(':',Concat(Userdirroles.Name, Concat(':',Userdirroles.Value)))), 'Roles' From Userdirroles,Users Where Userdirroles.Userid=Users.Loginid and Userdirroles.Userid=? and Users.Inactive IS NULL"/>
                 <module-option name="password-stacking" value="useFirstPass"/>
             </login-module>
-<!-- Bid6 setup to parse the authenticated principals and from that derive the crewid and user role. -->
+<!-- Crew Portal 11 setup to parse the authenticated principals and from that derive the crewid and user role. -->
             <login-module code="com.jeppesen.jcms.wpf.jboss.loginmodule.CacsAttributeMapping" flag="required">
                 <module-option name="attributePrefix" value="ou=attributes,dc=cacs,DC=jcms,DC=jeppesen,DC=com"/>
                 <module-option name="rolePrefix" value="ou=roles,dc=cacs,dc=jcms,dc=jeppesen,dc=com"/>
                 <module-option name="crewIdAttributeName" value="crewIdentity"/>
                 <module-option name="rolesFormat" value="simple-db"/>
             </login-module>
-<!--  Bid6 setup to get the authenticated user role (admin || crew) and with that enable JEE authorizaton roles from the CACS setup for the given uesr role.  -->   
+<!--  Crew Portal 11 setup to get the authenticated user role (admin || crew) and with that enable JEE authorizaton roles from the CACS setup for the given uesr role.  -->
             <login-module code="com.jeppesen.jcms.wpf.jboss.loginmodule.CacsRoleMapping" flag="required">
                 <module-option name="replaceRole" value="false"/>
             </login-module>
         </authentication>
     </security-domain>
 
+Setup of the subsystem urn:jboss:domain:undertow:
+----------------------------------------------------------
+Setup in undertow should include 'proactive-authentication="false"' flag, e.g.:
+
+    <subsystem xmlns="urn:jboss:domain:undertow:12.0" ... default-security-domain="other" ...>
+        ...
+        <servlet-container name="default" disable-caching-for-secured-pages="false" proactive-authentication="false">
+            <jsp-config/>
+            <session-cookie http-only="true"/>
+            <websockets/>
+        </servlet-container>
+        ...
+    </subsystem>
+
 
 Technical solution.
 =================================
-There are two ways to trigger the authenticaiton of the user in the Bid6 system - SAS SSO cookie login or Bid6 supplied form login. Both ways passes the jboss login modules to 
-authenticate the user in the system.
+There are two ways to trigger the authenticaiton of the user in the Crew Portal 11 system - SAS SSO cookie login or Crew Portal 11 supplied form login. Both ways passes the jboss login modules to authenticate the user in the system.
 
-The SSO solution is implemented by intercepting the http request in the jboss valve class com.sas.authenticationAuthenticationValve. The valve class will get the userid from the sso cookie 
-and authenticate the user. A change of sso-user will trigger the login of the new user.
+The SSO solution is implemented in class com.sas.authentication.SASCookieLoginModule. This class will get the userid from the sso cookie and authenticate the user. Reverse proxy which perform pre-authentication, along with this special cookie should add Authorization header with some dummy value, e.g.:
 
-The jboss authentication is performed by the login module com.sas.authentication.LoginModuleWithRolesInDatabase. It will authenticate the userid with the Bid6 database user directory.
-For SSO logged in users there must not be any password in the userdirectory database. For form logged in users there must be a password, unless the system is 
-configured to allow empty password.
+Authorization: Basic ZGVmYXVsdDpzb21lTm90VXNlZENyZWRlbnRpYWxz
 
-
-
-
-
-
-
-
+The jboss authentication is performed by the login module com.sas.authentication.LoginModuleWithRolesInDatabase. It will authenticate the userid with the Crew Portal 11 database user directory.
+For SSO logged in users there must not be any password in the userdirectory database. For form logged in users there must be a password, unless the system is configured to allow empty password.

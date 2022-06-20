@@ -16,11 +16,11 @@ js.ib.widgets.DateAndTimeWidget = function(
 		initialDate = Environment.parseDate(
 			this.bidProperty.get(this.bidPropertyName));
 	} else {
-		initialDate = "start" == this.bidPropertyName
+		initialDate = "start" === this.bidPropertyName
 			? this.bidModel.presets.start : this.bidModel.presets.end;
 	}
 	this.dateField = new js.crewweb.warp.jsbase.ui.CWDateField({
-		id : this.id + '_date',
+		id : this.id + '_date', //NOSONAR
 		hideLabel : true,
 		label : this.label,
 		value : initialDate,
@@ -39,21 +39,21 @@ js.ib.widgets.DateAndTimeWidget = function(
 		name: 'time',
 		value: initialDate.format("H:i"),
 		digitOnly: false,
-		allowBlank: false, 
+		allowBlank: false,
 		maxLength: 5,
 		enforceMaxLength: true,
 		width: 48,
-		regex: /^([0-1]\d{1}|2[0-3]):[0-5]\d{1}$/,
-		regexText: 'time_field_blank_text', 
+		regex: /^([0-1]\d{1}|2[0-3]):[0-5]\d{1}$/, //NOSONAR
+		regexText: 'time_field_blank_text',
 		blankText: 'time_field_blank_text'
 	});
 	this.timeField.on("blur", this.timeField.isValid, this);
 	this.timeField.on("cwSelect", this.setTimeValue, this);
 	this.timeField.on("keyup", this.setTimeValue, this);
 	this.timeField.on("change", this.setTimeValue, this);
-	
+
 	js.ib.widgets.DateAndTimeWidget.superclass.constructor.call(
-			this, 2, 
+			this, 2,
 	[{
 		colspan : 1,
 		item : this.dateField
@@ -61,7 +61,7 @@ js.ib.widgets.DateAndTimeWidget = function(
 		colspan : 1,
 		item : this.timeField
 	}]);
-	
+
 	this.on('afterlayout', this.isValid, this);
 };
 Ext.extend(js.ib.widgets.DateAndTimeWidget,
@@ -111,11 +111,11 @@ Ext.extend(js.ib.widgets.DateAndTimeWidget,
 	setDateValue : function() {
 		var value = this.dateField.getValue();
 		var timeString = this.timeField.getValue();
-		if (timeString != null && timeString != "") {
+		if (timeString != null && timeString !== "") {
 			this.updateHoursAndMinutes(value, timeString);
 		}
 		this.bidProperty.set(this.bidPropertyName,
-		       	Environment.formatISODateTime(value), true);
+			Environment.formatISODateTime(value), true);
 	},
 
 	/**
@@ -127,21 +127,21 @@ Ext.extend(js.ib.widgets.DateAndTimeWidget,
 			this.bidProperty.get(this.bidPropertyName));
 		this.updateHoursAndMinutes(oldDateTime, this.timeField.getValue());
 		this.bidProperty.set(this.bidPropertyName,
-		       	Environment.formatISODateTime(oldDateTime), true);
-	},	
+			Environment.formatISODateTime(oldDateTime), true);
+	},
 
 	/**
 	 * Updates the Hours and Minutes parts of a DateTime object.
 	 */
 	updateHoursAndMinutes : function(dateToUpdate, hoursAndMinutesString) {
-		var hoursAndMinutes = hoursAndMinutesString.split(":"); 
+		var hoursAndMinutes = hoursAndMinutesString.split(":");
 		dateToUpdate.setHours(hoursAndMinutes[0]);
 		dateToUpdate.setMinutes(hoursAndMinutes[1]);
 	},
-	
+
 	/**
-	 * Set copy start value, to be able to use existing ValidityPeriodAdjuster 
-	 * functionality server side. Only 'end' fields get this as only a single 
+	 * Set copy start value, to be able to use existing ValidityPeriodAdjuster
+	 * functionality server side. Only 'end' fields get this as only a single
 	 * bid property can define a period.
 	 */
 //	setPropertyValue : function() {

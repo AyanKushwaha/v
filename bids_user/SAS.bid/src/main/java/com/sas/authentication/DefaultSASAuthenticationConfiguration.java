@@ -6,12 +6,11 @@ import javax.naming.NamingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-
 public class DefaultSASAuthenticationConfiguration implements SASAuthenticationConfiguration {
 
 	private static final Logger LOG = LoggerFactory.getLogger(DefaultSASAuthenticationConfiguration.class);
 	private String authenticationCookieName;
-	private String dummyPassword = "}3hz_18#||6Eq8r";
+	private final String dummyValue = "}3hz_18#||6Eq8r";
 	private boolean allowFormBasedLogin;
 	private boolean allowEmptyPassword;
 
@@ -27,7 +26,7 @@ public class DefaultSASAuthenticationConfiguration implements SASAuthenticationC
 		try {
 			authenticationCookieName = (String) context.lookup(SASAuthenticationConfiguration.COOKIE_NAME);
 			allowFormBasedLogin = getJNDILookupWithDefaultValue(context, ALLOW_FORM_BASED_LOGIN, false);
-			allowEmptyPassword = getJNDILookupWithDefaultValue(context, SASAuthenticationConfiguration.ALLOW_EMPTY_PASSWORD, false);
+			allowEmptyPassword = getJNDILookupWithDefaultValue(context, ALLOW_EMPTY_PASSWORD, false);
 
 		} catch (Exception e) {
 			throw new RuntimeException("Incorrect configuration ==============> Bids will not start or function properly", e);
@@ -36,9 +35,9 @@ public class DefaultSASAuthenticationConfiguration implements SASAuthenticationC
 	
 	private boolean getJNDILookupWithDefaultValue(InitialContext context, String jndiName, boolean defaultValue) {
 		try {
-			return Boolean.parseBoolean((String) context.lookup(SASAuthenticationConfiguration.ALLOW_EMPTY_PASSWORD));
+			return Boolean.parseBoolean((String) context.lookup(jndiName));
 		} catch (Exception e) {
-			LOG.info("JNDI name " + ALLOW_EMPTY_PASSWORD + " not set, using default value \"" + defaultValue + "\"");
+			LOG.info("JNDI name " + jndiName + " not set, using default value \"" + defaultValue + "\"");
 			return defaultValue;
 		}
 	}
@@ -50,7 +49,7 @@ public class DefaultSASAuthenticationConfiguration implements SASAuthenticationC
 
 	@Override
 	public String getDummyPassword() {
-		return dummyPassword;
+		return dummyValue;
 	}
 
 	@Override
