@@ -221,7 +221,7 @@ class TimeEntryReport(WFSReport):
                     	general_ot_hrs_45_50 = default_reltime(duty_bag.report_overtime.overtime_7_calendar_days_ot_45_50_svs())
                         general_ot_hrs_50 = default_reltime(duty_bag.report_overtime.overtime_7_calendar_days_ot_50_svs())
                         general_ot_paycode_45_50_ot = self.paycode_handler.paycode_from_event('CNLN_OT_45_50', crew_id, country,rank)
-                        general_ot_paycode_50_ot = self.paycode_handler.paycode_from_event('CNLN_OT_50_Plus', crew_id, country,rank)
+                        general_ot_paycode_50_ot = self.paycode_handler.paycode_from_event('CNLN_OT_50_PLUS', crew_id, country,rank)
                         if (general_ot_hrs_45_50 > RelTime('0:00') or general_ot_hrs_50 > RelTime('0:00')) and (last_overtime_date['crew'] == crew_id and last_overtime_date['date'].adddays(6) < duty_start_day):
                             last_overtime_date['crew'] = crew_id
                             last_overtime_date['date'] = duty_start_day
@@ -229,9 +229,9 @@ class TimeEntryReport(WFSReport):
                             event_data['CNLN_OT_45_50']['hrs'] = general_ot_hrs_45_50
                             event_data['CNLN_OT_45_50']['paycode'] = general_ot_paycode_45_50_ot
                             event_data['CNLN_OT_45_50']['dt'] = abs_to_datetime(duty_start_day)
-                            event_data['CNLN_OT_50_Plus']['hrs'] = general_ot_hrs_50                 
-                            event_data['CNLN_OT_50_Plus']['paycode'] = general_ot_paycode_50_ot
-                            event_data['CNLN_OT_50_Plus']['dt'] = abs_to_datetime(duty_start_day)
+                            event_data['CNLN_OT_50_PLUS']['hrs'] = general_ot_hrs_50                 
+                            event_data['CNLN_OT_50_PLUS']['paycode'] = general_ot_paycode_50_ot
+                            event_data['CNLN_OT_50_PLUS']['dt'] = abs_to_datetime(duty_start_day)
                             
                         # Filter out events with hour count > RelTime('00:00')
                         # These are the records that can be reported

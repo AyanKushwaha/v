@@ -51,9 +51,9 @@ PAYCODE_FROM_EVENT = {
             'TEMP_SE'           :   'SAS_SE_CMS_TEMPCREW',
             'OT_SE_CC'          :   'SAS_SE_CMS_OVERTIME',
             'CNLN_OT_45_50_DK'  :   'SAS_DK_CNLN_OT_45_50',
-            'CNLN_OT_50_Plus_DK':   'SAS_DK_CNLN_OT_50_Plus',
+            'CNLN_OT_50_PLUS_DK':   'SAS_DK_CNLN_OT_50_PLUS',
             'CNLN_OT_45_50_NO'  :   'SAS_NO_CNLN_OT_45_50',
-            'CNLN_OT_50_Plus_NO':   'SAS_NO_CNLN_OT_50_Plus',
+            'CNLN_OT_50_PLUS_NO':   'SAS_NO_CNLN_OT_50_PLUS',
             'F7_NO_FC'          :   'SAS_NO_CMS_F7D_3_29',
             'F7_NO_CC'          :   'SAS_NO_F7_VA_DAGER_3_29',
             'F7_SE_CC'          :   'SAS_SE_CMS_ERS_F7_F31_CABIN',
@@ -113,8 +113,10 @@ EVENT_FROM_PAYCODE = {
             'SAS_NO_CMS_F0_F3_CC'           : 'F3',
             'SAS_DK_CNLN_OT_45_50'          : 'CNLN_OT_45_50' ,
             'SAS_DK_CNLN_OT_50_Plus'        : 'CNLN_OT_50_Plus', 
-            'SAS_NO_CNLN_OT_45_50'          : 'CNLN_OT_45_50' ,
-            'SAS_NO_CNLN_OT_50_Plus'        : 'CNLN_OT_50_Plus',  
+            'SAS_DK_CNLN_OT_50_PLUS'        : 'CNLN_OT_50_PLUS',
+            'SAS_NO_CNLN_OT_45_50'          : 'CNLN_OT_45_50',
+            'SAS_NO_CNLN_OT_50_Plus'        : 'CNLN_OT_50_Plus', 
+            'SAS_NO_CNLN_OT_50_PLUS'        : 'CNLN_OT_50_PLUS',
             'SAS_NO_CMS_F7D_3_29'			: 'F7',
             'SAS_NO_F7_VA_DAGER_3_29'		: 'F7',
             'SAS_SE_CMS_ERS_F7_F31_CABIN'   : 'F7',
@@ -175,9 +177,9 @@ ROSTER_PAYCODES = (
     'SAS_SE_CMS_TEMPCREW',
     'SAS_SE_CMS_OVERTIME',
     'SAS_DK_CNLN_OT_45_50',
-    'SAS_DK_CNLN_OT_50_Plus',
+    'SAS_DK_CNLN_OT_50_PLUS',
     'SAS_NO_CNLN_OT_45_50',
-    'SAS_NO_CNLN_OT_50_Plus'
+    'SAS_NO_CNLN_OT_50_PLUS'
 )
 
 EVENT_FROM_ARTICLE_PAYCODES = {
@@ -223,7 +225,7 @@ EVENT_FROM_ARTICLE_PAYCODES = {
 	'F0_F3_CC'          :	'F3',
 	'F0_F3'             :	'F3',
     'CNLN_OT_45_50'     :   'CNLN_OT_45_50',
-    'CNLN_OT_50_Plus'   :   'CNLN_OT_50_Plus'
+    'CNLN_OT_50_PLUS'   :   'CNLN_OT_50_PLUS'
 	}
 
 
@@ -262,7 +264,7 @@ class PaycodeHandler:
         elif event_type in ('F3',):
             rank = '_{r}'.format(r=rank) if country in ('NO', 'DK') else ''
             return PAYCODE_FROM_EVENT['F0_{e}_{c}{r}'.format(e=event_type, c=country, r=rank)]
-        elif event_type in ('CNLN_OT_45_50', 'CNLN_OT_50_Plus'):
+        elif event_type in ('CNLN_OT_45_50', 'CNLN_OT_50_PLUS'):
             return PAYCODE_FROM_EVENT['{e}_{c}'.format(e=event_type, c=country)]
         elif event_type in ('F7',):
             rank = '_{r}'.format(r=rank) if country in ('NO', 'DK', 'SE') else ''
