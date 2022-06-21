@@ -1,14 +1,14 @@
 #!/bin/env/python
 
 """
-SKCMS-2771 TE: Overtime pay for Link crew
+SKCMS-3022 TE: Overtime pay for Link crew
 S
 """
 
 import adhoc.fixrunner as fixrunner
 from AbsTime import AbsTime
 
-__version__ = '2022-06_13_'
+__version__ = '2022-06_22_'
 
 
 @fixrunner.once
@@ -31,7 +31,7 @@ def fixit(dc, *a, **k):
     return ops
 
 
-fixit.program = 'skcms_2771.py (%s)' % __version__
+fixit.program = 'skcms_3022.py (%s)' % __version__
 
 if __name__ == '__main__':
     fixit()
