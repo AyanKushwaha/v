@@ -274,7 +274,7 @@ class CrewUserFilterHandler(FilterHandler):
                         print ("Updating Crew : " + str(crew.id) + " Emp End : " + str(emp_end_date) + " Ret End : " + str(ret_end_date))
                         crew.retirementdate = None
                 if update_crew_retirement :        
-                self.__update_crew_with_set(crew, retired_intervals)
+                    self.__update_crew_with_set(crew, retired_intervals)
                     
                         
 
