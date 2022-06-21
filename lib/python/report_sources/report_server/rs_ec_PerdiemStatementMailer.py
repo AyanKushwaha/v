@@ -26,14 +26,14 @@ lastdate = AbsTime(now.year, now.month, 1, 0, 0)
 
 @argfix
 def generate(*a, **k):
-    print "Starting the ECExportPerdiem.run(rundata)...."
+    print "Starting the EC Perdiem Statement Mailer Functionality...."
     for reg in regions:
         runid = start_run(runtype='ECPerDiem', extsys=reg)
-        print "Created runid %s, for the region" % (runid, reg)
-    print "Completed the ECExportPerdiem.run(rundata)...."
+        print "Created runid %s for the region %s" % (runid, reg)
+    print "Completed the EC Perdiem Statement Mailer Functionality...."
 
 def start_run(runtype, extsys='SE', exportformat='FLAT', firstdate=firstdate, lastdate=lastdate):
-    print "start_run for %s" % runtype
+    print "Started_run for %s for the region %s" % (runtype,extsys)
     
     carm_system = os.path.expandvars('$CARMSYSTEMNAME')
     if carm_system in ('SASDEV', 'PROD_TEST'):
