@@ -24,13 +24,19 @@ from carmusr.tracking.OpenPlan import CfhCheckDone
 TM = tm.TM()
 
 ACCOUNTS = ['BOUGHT', 'BOUGHT_8', 'BOUGHT_FORCED']
+ACCOUNTS_SVS = ['BOUGHT_SBY', 'BOUGHT_Prod', 'BOUGHT_DUTY']
 BOUGHT_LABELS = [
             'Bought more than 6 hrs',
             'Bought 6 hrs or less',
         
             'OT comp, C/O on Fday']
-LBL_COUNT_CC = 2
-LBL_COUNT_FD = 3
+BOUGHT_LABELS_SVS = [
+            'Bought Day Off',
+            'Standby',
+            'Production',
+            'Bought Additional Duty']
+LBL_COUNT_CC = 5
+LBL_COUNT_FD = 5
 LBL_MAX_LEN = 22
 
 
@@ -57,6 +63,11 @@ def get_overlap(start1, end1, start2, end2):
 def buy_days(crew_id, start_time, end_time, leg_type, comment="", bought_day_type="", has_agmt_skd_cc=False, is_valid=False):
 
     bought_account, bought_8_account,bought_forced_account = ACCOUNTS
+    bought_sby, bought_prod, bought_duty = ACCOUNTS_SVS
+    
+    is_type_bought_sby = bought_day_type == bought_sby
+    is_type_bought_prod = bought_day_type == bought_prod
+    is_type_bought_duty = bought_day_type == bought_duty
 
     #############################################################
     # This is a "conversion table" for SKD CC to be used once the validity agreement is fullfilled.
@@ -141,9 +152,114 @@ def buy_days(crew_id, start_time, end_time, leg_type, comment="", bought_day_typ
                 current_row.account_name = bought_f3_2_account
             elif is_type_bought_forced:
                 current_row.account_name = bought_forced_account
+            elif is_type_bought_sby:
+                current_row.account_name = bought_sby
+            elif is_type_bought_prod:
+                current_row.account_name = bought_prod
+            elif is_type_bought_duty:
+                current_row.account_name = bought_duty
             else:
                 current_row.account_name = bought_account
             current_row.end_time = start_time.adddays(1)
+            current_row.uname = uname
+            current_row.si = comment
+        finished = current_row is not None and \
+            current_row.end_time >= end_time and \
+            current_row.end_time not in periods_to_merge  # Don't forget to merge end if needed
+
+def buy_days_svs(crew_id, start_time, end_time, leg_type, comment="",time_hh_sby="", time_mm_sby="", time_hh_prod="", time_mm_prod="",time_hh="", time_mm="", bought_day_type="", has_agmt_skd_cc=False, is_valid=False):
+
+    
+    bought_sby, bought_prod, bought_duty = ACCOUNTS_SVS
+    
+    is_type_bought_sby = bought_day_type == bought_sby
+    is_type_bought_prod = bought_day_type == bought_prod
+    is_type_bought_duty = bought_day_type == bought_duty
+
+    crew = TM.crew.getOrCreateRef((crew_id,))
+    main_cat, = R.eval('crew.%%main_cat_of_crew_id%%("%s",%s)' % (crew_id, start_time))
+    is_cabincrew = main_cat == 'C'
+    uname = Names.username()
+    
+    row_day_type = get_row_day_type(leg_type)
+    # Cache current existing rows, since we might need to loop through these more than once
+    periods_to_merge = {}
+    touch_start = None
+    
+    for row in TM.bought_days_svs.search('(crew='+crew_id+')'):
+        # If row touches period,  we might need to modify it
+        if row.start_time <= start_time <= row.end_time:
+            touch_start = row  # Touch start_time
+        elif row.start_time == end_time:
+            periods_to_merge[row.start_time] = row  # Touch end_time
+        elif get_overlap(row.start_time, row.end_time, start_time, end_time) > 0:
+            periods_to_merge[row.start_time] = row
+
+    # periods_to_merge.sort(cmp=lambda x,y:cmp(x.start_time,y.start_time))
+    finished = False  # Finished when all days covered!
+    current_row = touch_start
+    while not finished:
+        if current_row:
+            if current_row.end_time in periods_to_merge:
+                next_row = periods_to_merge[current_row.end_time]
+                if next_row.day_type == current_row.day_type and next_row.account_name == current_row.account_name:
+                    # Merge found period into current
+                    current_row.end_time = next_row.end_time
+                    next_row.remove()
+                    del periods_to_merge[next_row.start_time]
+                else:
+                    current_row = next_row
+            elif current_row.end_time >= end_time:
+                if is_type_bought_sby:
+                    current_row.hours = time_hh_sby
+                    current_row.minutes = time_mm_sby
+                elif is_type_bought_prod:
+                    current_row.hours = time_hh_prod
+                    current_row.minutes = time_mm_prod
+                else:
+                    current_row.hours = time_hh
+                    current_row.minutes = time_mm
+                
+                break
+            elif current_row.day_type == row_day_type and current_row.account_name == bought_day_type:
+                # Increase period
+                current_row.end_time = current_row.end_time.adddays(1)
+                if is_type_bought_sby:
+                    current_row.hours = time_hh_sby
+
+                
+                    current_row.minutes = time_mm_sby
+            if is_type_bought_prod:
+                current_row.hours = time_hh_prod
+                current_row.minutes = time_mm_prod
+            else:
+                # Start new period
+                start_time = current_row.end_time
+                current_row = None
+        else:  # Start in empty period!
+            current_row = TM.bought_days_svs.create((crew, start_time))
+            current_row.day_type = row_day_type
+            if is_type_bought_sby:
+                current_row.account_name = bought_sby
+                
+            elif is_type_bought_prod:
+                current_row.account_name = bought_prod
+                
+                
+            else:
+                current_row.account_name = bought_duty
+            current_row.end_time = start_time.adddays(1)
+            if is_type_bought_sby:
+                current_row.hours = time_hh_sby
+                current_row.minutes = time_mm_sby
+            if is_type_bought_prod:
+                current_row.hours = time_hh_prod
+                current_row.minutes = time_mm_prod
+            if is_type_bought_duty:
+                current_row.hours = time_hh
+                current_row.minutes = time_mm
+
+            
             current_row.uname = uname
             current_row.si = comment
         finished = current_row is not None and \
@@ -157,11 +273,12 @@ def get_row_day_type(leg_type):
         return "F"
     elif activity_shall_be_recreated(leg_type):
         return leg_type
-    elif leg_type[0] == "F":
-        return "F"
+    #elif leg_type[0] == "F":
+        #return "F"
     else:
         # Unknown...well save as it is for now...
-        return leg_type
+        #return leg_type
+        return "P"
 
 
 def unbuy_days(crew_id, start_time, end_time, area):
@@ -282,18 +399,21 @@ def markDaysAsBought(buy):
         'crew.%is_temporary%',
         'crew.%is_cabin%',
         'crew.%has_agmt_group_qa%',
+        'crew.%has_agmt_group_svs%',
         "salary_overtime.%is_CJ%",
+        "salary_overtime.%is_EMJ%",
         "parameters.%%fxx_boughtday_comp_valid_at_date%%(%s)" % start_time,
         'crew.%has_agmt_group_skd_cc%',
         "system_db_parameters.%%f3_compensation_skd_cc%%(%s)" % start_time,
         )
     print "  ## eval_result:", eval_result
-    is_temp, is_cabin, is_qa, is_cj, is_valid, has_agmt_skd_cc, is_f3_valid = eval_result
+    is_temp, is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, has_agmt_skd_cc, is_f3_valid = eval_result
 
     # for easy dev/test, set to True:
     if False:
-        sel = cfhExtensions.choices("Crew type:", title="TESTING", choices=["QA_FD", "QA_CC", "SK_FD", "SK_CC"])
+        sel = cfhExtensions.choices("Crew type:", title="TESTING", choices=["QA_FD", "QA_CC", "SK_FD", "SK_CC", "SVS_FD", "SVS_CC"])
         is_qa = sel[:2] == "QA"
+        is_svs = sel[:3] == "SVS"
         is_cabin = sel[-2:] == "CC"
 
     if is_temp and is_cabin:
@@ -316,32 +436,74 @@ def markDaysAsBought(buy):
                            R.foreach(R.iter('iterators.chain_set'),
                                      "bought_days.%%days_may_be_bought%%(%s, %s)"
                                      % (current_time, current_time.adddays(1))))[0][0][1]
+
+            code_duty = R.eval('default_context',
+                           R.foreach(R.iter('iterators.chain_set'),
+                                     "bought_days.%%duty_may_be_bought%%(%s, %s)"
+                                     % (current_time, current_time.adddays(1))))[0][0][1]
             # Store activities
-            key = (activity_start_time, (code or ""))
+            key = (activity_start_time, (code or code_duty or ""))
             if key in activities_in_period:
                 activities_in_period[key] = current_time.adddays(1)  # increase period for activity
             else:
-                key = (current_time, (code or ""))  # Create new activity period
+                key = (current_time, (code or code_duty or ""))  # Create new activity period
                 activities_in_period[key] = current_time.adddays(1)
                 activity_start_time = current_time
             current_time = current_time.adddays(1)
 
         # Prepared to be able to buy a period of time, instead of single days
         comment = ""
+        time_hh_sby=""
+        time_mm_sby=""
+        time_hh_prod=""
+        time_mm_prod=""
+        time_hh=""
+        time_mm=""
         no_change = True
+        flag = True
+        if code is None:
+            flag = False
         for (start, code), end in activities_in_period.items():
-            if code:
+            if flag:
                 if comment == "":
                     try:
-                        comment, bought_type = BuyDayCommentForm(is_cabin, is_qa, is_cj, is_valid, "Buy_Day_Form")()
+                        if is_svs:
+                            comment, time_hh_sby,time_mm_sby,time_hh_prod,time_mm_prod,time_hh,time_mm,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, "Buy_Day_Form")()
+                        else:
+                            comment,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, "Buy_Day_Form")()
+
                     except CancelBuyDay:
                         return
                 # Do the actual "buy"
+                if is_svs:
+                    buy_days_svs(crew_id, start, end, code, comment, time_hh_sby, time_mm_sby, time_hh_prod, time_mm_prod, time_hh, time_mm, bought_type, has_agmt_skd_cc, is_f3_valid)
+                
                 buy_days(crew_id, start, end, code, comment, bought_type, has_agmt_skd_cc, is_f3_valid)
                 # Remove activity from roster
                 ActivityManipulation.deleteActivityInPeriod(crew_id, start, end, area=area)
                 no_change = False
+
+        if code_duty is None:
+            flag = False
+        else:
+            flag = True
+        for (start, code_duty), end in activities_in_period.items():
+            if flag:
+                if comment == "":
+                    try:
+                        if is_svs:
+                            comment,time_hh_sby,time_mm_sby,time_hh_prod,time_mm_prod,time_hh,time_mm,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, "Buy_Day_Form")()
+                   
+                    except CancelBuyDay:
+                        return
+                # Do the actual "buy"
+                if is_svs:
+                    buy_days_svs(crew_id, start, end, code, comment, time_hh_sby, time_mm_sby, time_hh_prod, time_mm_prod, time_hh, time_mm, bought_type, has_agmt_skd_cc, is_f3_valid)
                 
+                
+                no_change = False
+
+
         if no_change:
             cfhExtensions.show(
                 "Not possible to buy days.\n"
@@ -361,15 +523,82 @@ def markDaysAsBought(buy):
 
 class BuyDayCommentForm(Cfh.Box):
 
-    def __init__(self, is_cabin, is_qa, is_cj, is_valid, *args):
+    def __init__(self, crew_id, is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, *args):
         Cfh.Box.__init__(self, *args)
         self.setText('Buy Day / Overtime checkout on Fday')
+        if is_svs or is_emj:
+            self.svs_type_label = Cfh.Label(self, "SVS_TYPE_LABEL", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(0, 0)), "Please enter comment:")
+            self.comment = Cfh.String(self, "COMMENT", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(1, 0)), 20, "")
+            change = True
+            #self.Bought_day_off_label = Cfh.Label(self, "Bought_day_Off", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(2, 0)), "Bought Day Off")
+            for row in TM.bought_days_svs.search('(crew='+crew_id+')'):
+                hr_sby = " "
+                min_sby = " "
+                hr_prod = " "
+                min_prod = " "
+                hr= " "
+                min = " "
+                if row.account_name == 'BOUGHT_SBY':
+                    hr_sby=row.hours
+                    min_sby=row.minutes
+                elif row.account_name == 'BOUGHT_Prod':
+                    hr_prod = row.hours
+                    min_prod = row.minutes
+                else:
+                    hr= row.hours
+                    min = row.minutes
+            
+                self.time_hh_sby = Cfh.String(self, "HH_sby", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 9)), 2, hr_sby)
+                self.time_mm_sby = Cfh.String(self, "MM_sby",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 13)), 2, min_sby)
+                
+                    
+                self.time_hh_prod = Cfh.String(self, "HH_prod", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(4, 9)), 2, hr_prod)
+                self.time_mm_prod = Cfh.String(self, "MM_prod",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(4, 13)), 2, min_prod)
+                
+                    
 
-        self.comment_label = Cfh.Label(self, "COMMENT_LABEL", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(0, 0)), "Please enter comment:")
-        self.comment = Cfh.String(self, "COMMENT", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(1, 0)), 20, "")
-        self.button_area = Cfh.Area(Cfh.Loc(-1, -1))
-        self.ok = CfhCheckDone(self, "OK", self.button_area, "Ok", "_Ok")
+                self.time_hh = Cfh.String(self, "HH_duty", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(6, 9)), 2, hr)
+                self.time_mm = Cfh.String(self, "MM_duty",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(6, 13)), 2, min)
+                change = False 
+            if change:
+                self.time_hh_sby = Cfh.String(self, "HH_sby", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 9)), 2, " ")
+                self.time_mm_sby = Cfh.String(self, "MM_sby",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 13)), 2, " ")
+                self.time_hh_prod = Cfh.String(self, "HH_prod", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(4, 9)), 2, " ")
+                self.time_mm_prod = Cfh.String(self, "MM_prod",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(4, 13)), 2, " ")
+                self.time_hh = Cfh.String(self, "HH_duty", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(6, 9)), 2, " ")
+                self.time_mm = Cfh.String(self, "MM_duty",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(6, 13)), 2, " ")
+                
 
+        
+            #self.comment_label = Cfh.Label(self, "COMMENT_LABEL", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(0, 0)), "Please enter comment:")
+            #self.comment = Cfh.String(self, "COMMENT", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(1, 0)), 20, "")
+            #self.time_hh = Cfh.String(self, "HH", Cfh.Area(Cfh.Dim(2, 1), Cfh.Loc(4, 6)), 2, "")
+            #self.time_mm = Cfh.String(self, "MM", Cfh.Area(Cfh.Dim(2, 1), Cfh.Loc(4, 10)), 2, "")
+            self.button_area = Cfh.Area(Cfh.Loc(-1, -1))
+            self.ok = CfhCheckDone(self, "OK", self.button_area, "Ok", "_Ok")
+
+            num_entries = LBL_COUNT_CC if is_cabin else LBL_COUNT_FD
+            self.bought_type = Cfh.String(self, "Compensation", Cfh.Area(Cfh.Dim(20, num_entries), Cfh.Loc(2, 0)), LBL_MAX_LEN, "Bought")
+            bought_type_options_str = "Select;" + ";".join(BOUGHT_LABELS_SVS[:num_entries])
+            self.bought_type.setMenuString(bought_type_options_str)
+            self.bought_type.setStyle(Cfh.CfhSChoiceRadioCol)
+
+            def enforce_selection_fn():
+                # self.bought_type.compute()
+                if self.bought_type.getValue() not in BOUGHT_LABELS_SVS:
+                    cfhExtensions.show("Please select a bought type", title="Missing selection")
+                    return "Warning: No bought type selected"
+                return ""
+
+            self.ok.register_check(enforce_selection_fn)
+        
+        else:
+            self.comment_label = Cfh.Label(self, "COMMENT_LABEL", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(0, 0)), "Please enter comment:")
+            self.comment = Cfh.String(self, "COMMENT", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(1, 0)), 20, "")
+            self.button_area = Cfh.Area(Cfh.Loc(-1, -1))
+            self.ok = CfhCheckDone(self, "OK", self.button_area, "Ok", "_Ok")
+
+        
         if is_qa or (is_cj and is_valid):
             description = "Bought day %s" % ("QA CC" if is_cabin else "QA FD" if is_qa else "CJ FD (QA)")
             self.qa_type_label = Cfh.Label(self, "QA_TYPE_LABEL", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(2, 0)), description)
@@ -399,9 +628,20 @@ class BuyDayCommentForm(Cfh.Box):
         self.show(1)
         if self.loop() != Cfh.CfhOk:
             raise CancelBuyDay
+        is_svs = hasattr(self, "svs_type_label")
         is_qa = hasattr(self, "qa_type_label")
-        selected_index = 0 if is_qa else BOUGHT_LABELS.index(self.bought_type.getValue())
-        return self.comment.valof(), ACCOUNTS[selected_index]
+        if is_qa:
+            selected_index = 0
+            return self.comment.valof(), ACCOUNTS[selected_index]
+        elif is_svs:
+            selected_index = BOUGHT_LABELS_SVS.index(self.bought_type.getValue())
+            return self.comment.valof(), self.time_hh_sby.valof(), self.time_mm_sby.valof(),self.time_hh_prod.valof(), self.time_mm_prod.valof(),self.time_hh.valof(), self.time_mm.valof(), ACCOUNTS_SVS[selected_index - 1] 
+        else:
+            selected_index = BOUGHT_LABELS.index(self.bought_type.getValue())
+
+            return self.comment.valof(), ACCOUNTS[selected_index]
+        
+
 
 
 if __name__ == "__main__":

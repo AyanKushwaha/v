@@ -36,7 +36,8 @@ echo " - Processing migration tasks"
 # echo "  * SKCMS-1234: Some description"
 # python $CARMUSR/data/migration/$RELEASE/skcms-1234.py 2>&1 | tee $LOG_DIR/skcms-1234.log
 
-
+echo "  * SKCMS-2822: Bought types for Link"
+python $CARMUSR/data/migration/r27_sas2206/skcms_2822.py 2>&1 | tee $LOG_DIR/skcms_2822.log
 
 # Uncomment this in case dave filters shall be modified, remember to update JIRA number
 #echo "  * SKCMS-XXXX: Importing crc/etable/dave_filter/*.etab into database"

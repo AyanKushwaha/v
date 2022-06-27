@@ -34,6 +34,7 @@ default_entities = (
     'attr_category_set',
     'bases',
     'bought_days',
+    'bought_days_svs',
     'callout_list',
     'cga_crew_group',
     'cga_crew_group_set',
