@@ -223,7 +223,7 @@ class TimeEntry(WFSReport):
                     	general_ot_hrs_45_50 = default_reltime(duty_bag.report_overtime.overtime_7_calendar_days_ot_45_50_svs())
                         general_ot_hrs_50 = default_reltime(duty_bag.report_overtime.overtime_7_calendar_days_ot_50_svs())
                         general_ot_paycode_45_50_ot = self.paycode_handler.paycode_from_event('CNLN_OT_45_50', crew_id, country,rank)
-                        general_ot_paycode_50_ot = self.paycode_handler.paycode_from_event('CNLN_OT_50_Plus', crew_id, country,rank)
+                        general_ot_paycode_50_ot = self.paycode_handler.paycode_from_event('CNLN_OT_50_PLUS', crew_id, country,rank)
                         log.info('{ot_hrs_45_50} {ot_hrs_50} {ot_paycode_45_50} {ot_paycode_50}'.format(ot_hrs_45_50=general_ot_hrs_45_50 , ot_hrs_50 = general_ot_hrs_50,ot_paycode_45_50 = general_ot_paycode_45_50_ot,  ot_paycode_50 =general_ot_paycode_50_ot))
                         if general_ot_hrs_day_off == RelTime('0:00'):
                             if (general_ot_hrs_45_50 > RelTime('0:00') or general_ot_hrs_50 > RelTime('0:00')) and (last_overtime_date['crew'] == crew_id and last_overtime_date['date'].adddays(6) < duty_start_day):
@@ -233,9 +233,10 @@ class TimeEntry(WFSReport):
                                 event_data['CNLN_OT_45_50']['hrs'] = general_ot_hrs_45_50
                                 event_data['CNLN_OT_45_50']['paycode'] = general_ot_paycode_45_50_ot
                                 event_data['CNLN_OT_45_50']['dt'] = abs_to_datetime(duty_start_day)
-                                event_data['CNLN_OT_50_Plus']['hrs'] = general_ot_hrs_50                 
-                                event_data['CNLN_OT_50_Plus']['paycode'] = general_ot_paycode_50_ot
-                                event_data['CNLN_OT_50_Plus']['dt'] = abs_to_datetime(duty_start_day)
+                                event_data['CNLN_OT_50_PLUS']['hrs'] = general_ot_hrs_50                 
+                                event_data['CNLN_OT_50_PLUS']['paycode'] = general_ot_paycode_50_ot
+                                event_data['CNLN_OT_50_PLUS']['dt'] = abs_to_datetime(duty_start_day)
+
                             
                         
                         # Filter out events with hour count > RelTime('00:00')
@@ -781,7 +782,8 @@ class TimeEntry(WFSReport):
            }
         }
         '''
-        event_types = ('OT', 'OT_LATE_CO', 'TEMP','CNLN_OT_45_50','CNLN_OT_50_Plus','CNLN_LAND_DAY_OFF')
+        event_types = ('OT', 'OT_LATE_CO', 'TEMP','CNLN_OT_45_50','CNLN_OT_50_PLUS','CNLN_LAND_DAY_OFF')
+
         event_data_t = dict()
         
         for e in event_types:
@@ -1154,7 +1156,7 @@ class TimeEntry(WFSReport):
                         ot_late_co = [r for r in candidates[duty_start_dt] if r['event'] == 'OT_LATE_CO']
                         temp = [r for r in candidates[duty_start_dt] if r['event'] == 'TEMP']
                         saslink_7_calendar_45_50_ot = [r for r in candidates[duty_start_dt] if r['event'] == 'CNLN_OT_45_50']
-                        saslink_7_calendar_50_ot = [r for r in candidates[duty_start_dt] if r['event'] ==  'CNLN_OT_50_Plus']
+                        saslink_7_calendar_50_ot = [r for r in candidates[duty_start_dt] if r['event'] ==  'CNLN_OT_50_PLUS']
                         saslink_land_day_off_ot = [r for r in candidates[duty_start_dt] if r['event'] ==  'CNLN_LAND_DAY_OFF']
 
                         # Check if any event can be considered removed from the roster
