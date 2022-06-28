@@ -93,6 +93,9 @@ class WFSReport():
                 if crew_has_retired_at_date(crew_id, curr_date):
                     log.info('NORDLYS: Skipping retired crew {c} on {d}'.format(c=crew_id, d = curr_date))
                     continue
+                if crew_excluded(crew_id, curr_date):
+                    log.info('NORDLYS: Skipping the excluded SAS Link crew {c}'.format(c=crew_id))
+                    continue 
                     
                 crew_ids.append(crew_id)
         else:
@@ -432,3 +435,10 @@ def planninggroup_from_id(crew_id, dt):
         dt=dt)
         )[0]
     return planninggroup
+
+crew_exclusion_list = ['92742','92589','92462']
+
+def crew_excluded(crew_id, curr_date):
+    if extperkey_from_id(crew_id,curr_date) in crew_exclusion_list:
+        return True
+    return False
