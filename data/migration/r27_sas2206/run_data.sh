@@ -48,6 +48,8 @@ python $CARMUSR/data/migration/$RELEASE/skcms-3022.py 2>&1 | tee $LOG_DIR/skcms-
 #echo "  * SKCMS-XXXX: Importing crc/etable/dave_filter/*.etab into database"
 #$CARMUSR/bin/admin/setup/setup_filters.sh -c -d | tee -a $LOG_DIR/SKCMS-XXXX.log
 
+echo "  * SKCMS-2740: Alert gen Crash issue"
+python $CARMUSR/data/migration/$RELEASE/skcms-2740.py 2>&1 | tee $LOG_DIR/skcms-2740.log
 
 echo "********************************************"
 echo "Migration finished"
