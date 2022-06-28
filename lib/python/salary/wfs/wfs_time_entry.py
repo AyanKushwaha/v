@@ -213,21 +213,31 @@ class TimeEntry(WFSReport):
                     planning_group = planninggroup_from_id(crew_id, duty_start_day)
                     log.info('NORDLYS: planning group {z} '.format(z = planning_group))
                     if planning_group == "SVS":
+                         # Checkout on Day-off overtime 
+                        general_ot_paycode_day_off = self.paycode_handler.paycode_from_event('CNLN_LAND_DAY_OFF', crew_id, country,rank)
+                        general_ot_hrs_day_off = integer_to_reltime(duty_bag.report_overtime.OT_units_SVS())
+                        event_data['CNLN_LAND_DAY_OFF']['hrs'] = general_ot_hrs_day_off                 
+                        event_data['CNLN_LAND_DAY_OFF']['paycode'] = general_ot_paycode_day_off
+                        event_data['CNLN_LAND_DAY_OFF']['dt'] = abs_to_datetime(duty_start_day)
+ 
                     	general_ot_hrs_45_50 = default_reltime(duty_bag.report_overtime.overtime_7_calendar_days_ot_45_50_svs())
                         general_ot_hrs_50 = default_reltime(duty_bag.report_overtime.overtime_7_calendar_days_ot_50_svs())
                         general_ot_paycode_45_50_ot = self.paycode_handler.paycode_from_event('CNLN_OT_45_50', crew_id, country,rank)
                         general_ot_paycode_50_ot = self.paycode_handler.paycode_from_event('CNLN_OT_50_Plus', crew_id, country,rank)
                         log.info('{ot_hrs_45_50} {ot_hrs_50} {ot_paycode_45_50} {ot_paycode_50}'.format(ot_hrs_45_50=general_ot_hrs_45_50 , ot_hrs_50 = general_ot_hrs_50,ot_paycode_45_50 = general_ot_paycode_45_50_ot,  ot_paycode_50 =general_ot_paycode_50_ot))
-                        if (general_ot_hrs_45_50 > RelTime('0:00') or general_ot_hrs_50 > RelTime('0:00')) and (last_overtime_date['crew'] == crew_id and last_overtime_date['date'].adddays(6) < duty_start_day):
-                            last_overtime_date['crew'] = crew_id
-                            last_overtime_date['date'] = duty_start_day
+                        if general_ot_hrs_day_off == RelTime('0:00'):
+                            if (general_ot_hrs_45_50 > RelTime('0:00') or general_ot_hrs_50 > RelTime('0:00')) and (last_overtime_date['crew'] == crew_id and last_overtime_date['date'].adddays(6) < duty_start_day):
+                                last_overtime_date['crew'] = crew_id
+                                last_overtime_date['date'] = duty_start_day
 
-                            event_data['CNLN_OT_45_50']['hrs'] = general_ot_hrs_45_50
-                            event_data['CNLN_OT_45_50']['paycode'] = general_ot_paycode_45_50_ot
-                            event_data['CNLN_OT_45_50']['dt'] = abs_to_datetime(duty_start_day)
-                            event_data['CNLN_OT_50_Plus']['hrs'] = general_ot_hrs_50                 
-                            event_data['CNLN_OT_50_Plus']['paycode'] = general_ot_paycode_50_ot
-                            event_data['CNLN_OT_50_Plus']['dt'] = abs_to_datetime(duty_start_day)
+                                event_data['CNLN_OT_45_50']['hrs'] = general_ot_hrs_45_50
+                                event_data['CNLN_OT_45_50']['paycode'] = general_ot_paycode_45_50_ot
+                                event_data['CNLN_OT_45_50']['dt'] = abs_to_datetime(duty_start_day)
+                                event_data['CNLN_OT_50_Plus']['hrs'] = general_ot_hrs_50                 
+                                event_data['CNLN_OT_50_Plus']['paycode'] = general_ot_paycode_50_ot
+                                event_data['CNLN_OT_50_Plus']['dt'] = abs_to_datetime(duty_start_day)
+                            
+                        
                         # Filter out events with hour count > RelTime('00:00')
                         # These are the records that can be reported
                         # to WFS and stored in salary_wfs table
@@ -771,7 +781,7 @@ class TimeEntry(WFSReport):
            }
         }
         '''
-        event_types = ('OT', 'OT_LATE_CO', 'TEMP','CNLN_OT_45_50','CNLN_OT_50_Plus')
+        event_types = ('OT', 'OT_LATE_CO', 'TEMP','CNLN_OT_45_50','CNLN_OT_50_Plus','CNLN_LAND_DAY_OFF')
         event_data_t = dict()
         
         for e in event_types:
@@ -1145,6 +1155,7 @@ class TimeEntry(WFSReport):
                         temp = [r for r in candidates[duty_start_dt] if r['event'] == 'TEMP']
                         saslink_7_calendar_45_50_ot = [r for r in candidates[duty_start_dt] if r['event'] == 'CNLN_OT_45_50']
                         saslink_7_calendar_50_ot = [r for r in candidates[duty_start_dt] if r['event'] ==  'CNLN_OT_50_Plus']
+                        saslink_land_day_off_ot = [r for r in candidates[duty_start_dt] if r['event'] ==  'CNLN_LAND_DAY_OFF']
 
                         # Check if any event can be considered removed from the roster
                         if len(general_ot) > 0:
@@ -1163,6 +1174,10 @@ class TimeEntry(WFSReport):
                         elif len(saslink_7_calendar_50_ot) > 0:
                             log.info('NORDLYS: Checking for removed overtime in 7 calendar days for 50 hrs or more on roster on {dt}'.format(dt=duty_start_dt))    
                             recs_to_remove.extend(self._remove_saslink_7_calendar_50_ot(crew_id, duty_bag, duty_start_dt, saslink_7_calendar_50_ot))
+                        
+                        elif len(saslink_land_day_off_ot) > 0:
+                            log.info('NORDLYS: Checking for removed overtime on day-off on roster on {dt}'.format(dt=duty_start_dt))    
+                            recs_to_remove.extend(self._remove_saslink_land_day_off_ot(crew_id, duty_bag, duty_start_dt, saslink_land_day_off_ot))
 
                         elif len(temp) > 0:
                             if duty_bag.crew.is_temporary_at_date(duty_start_dt):
@@ -1327,6 +1342,12 @@ class TimeEntry(WFSReport):
         if (default_reltime(duty_bag.report_overtime.overtime_7_calendar_days_ot_50_svs()) == RelTime('00:00')) :
             general_ot_50_removals_svs.append(saslink_7_calendar_50_ot[0]['rec'])
         return general_ot_50_removals_svs
+    
+    def _remove_saslink_land_day_off_ot(self, crew_id, duty_bag, duty_start_dt, saslink_land_day_off_ot):
+        general_ot_day_off_removals_svs = []
+        if (default_reltime(duty_bag.report_overtime.OT_units_SVS()) == RelTime('00:00')) :
+            general_ot_day_off_removals_svs.append(saslink_land_day_off_ot[0]['rec'])
+        return general_ot_day_off_removals_svs
 
     '''
     Main data extraction END
