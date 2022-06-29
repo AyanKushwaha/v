@@ -18,6 +18,7 @@ GRANT SELECT ON sys.dba_pending_transactions TO cp_sas;
 GRANT SELECT ON sys.pending_trans$ TO cp_sas;
 GRANT SELECT ON sys.dba_2pc_pending TO cp_sas;
 GRANT EXECUTE ON sys.dbms_system TO cp_sas;
+GRANT dba TO cp_sas WITH ADMIN OPTION;
 GRANT CONNECT TO cp_sas;
 GRANT RESOURCE TO cp_sas;
 GRANT CREATE VIEW TO cp_sas;

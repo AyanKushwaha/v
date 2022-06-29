@@ -1,22 +1,53 @@
 version: '2.2'
 networks:
-  got.jeppesensystems.com:
+  ymq.jeppesensystems.com:
     driver: bridge
 services:
+  hub:
+    image: selenium/hub:4.1.1-20220121
+    ports: [ '4444:4444' ]
+    networks: [ymq.jeppesensystems.com]
+    healthcheck:
+      test: [ "CMD-SHELL", "/opt/bin/check-grid.sh --host 0.0.0.0 --port 4444" ]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+  chrome:
+    image: selenium/node-chrome:4.1.1-20220121
+    shm_size: 2g
+    environment:
+      SE_EVENT_BUS_HOST: hub
+      SE_EVENT_BUS_PUBLISH_PORT: 4442
+      SE_EVENT_BUS_SUBSCRIBE_PORT: 4443
+      SCREEN_DEPTH: 24
+      SCREEN_WIDTH: 1360
+      SCREEN_HEIGHT: 768
+    networks: [ymq.jeppesensystems.com]
+  firefox:
+    image: selenium/node-firefox:4.1.1-20220121
+    shm_size: 2g
+    environment:
+      SE_EVENT_BUS_HOST: hub
+      SE_EVENT_BUS_PUBLISH_PORT: 4442
+      SE_EVENT_BUS_SUBSCRIBE_PORT: 4443
+      SCREEN_DEPTH: 24
+      SCREEN_WIDTH: 1360
+      SCREEN_HEIGHT: 768
+    networks: [ymq.jeppesensystems.com]
   oracle:
-    image: docker.service.cloud.jeppesensystems.com/crew-buddies/ib6-sas/oracle
+    image: docker.service.cloud.jeppesensystems.com/crew-buddies/ib6-sas/oracle:19c
     hostname: crewportal-ora
     shm_size: 1g
     ports: ['1521:1521']
     networks:
-      got.jeppesensystems.com:
+      ymq.jeppesensystems.com:
         aliases:
           - crewportal-ora
-          - crewportal-ora.got.jeppesensystems.com
+          - crewportal-ora.ymq.jeppesensystems.com
     environment:
       APEX_PORT: 8080
     healthcheck:
-      test: test `lsnrctl status | grep 'status READY' | wc -l` -eq 2 || exit -1
+      test: test `lsnrctl status | grep 'status READY' | wc -l` -eq 4 || exit -1
       interval: 5s
       timeout: 5s
       retries: 55
@@ -26,25 +57,25 @@ services:
       context: ../../
       dockerfile: ./dev/docker/xmlrpc/Dockerfile
     ports: ['24054:24054']
-    networks: [got.jeppesensystems.com]
+    networks: [ymq.jeppesensystems.com]
   xmlrpc-vacation:
     build:
       context: ../../
       dockerfile: ./dev/docker/xmlrpc/vacation/Dockerfile
     ports: ['24055:24055']
-    networks: [got.jeppesensystems.com]
+    networks: [ymq.jeppesensystems.com]
   xmlrpc-career:
     build:
       context: ../../
       dockerfile: ./dev/docker/xmlrpc/career/Dockerfile
     ports: ['24056:24056']
-    networks: [got.jeppesensystems.com]
+    networks: [ymq.jeppesensystems.com]
   jboss:
     build:
       context: ../../
       dockerfile: ./dev/docker/jboss/Dockerfile
     ports:
-      - '5005:5005'
+      - '8787:8787'
       - '8080:8080'
       - '9990:9990'
     healthcheck:
@@ -52,8 +83,15 @@ services:
       interval: 6s
       timeout: 6s
       retries: 66
-    networks: [got.jeppesensystems.com]
+    networks: [ymq.jeppesensystems.com]
     # mem_limit: 1073741824 # container limit: 1024Mb (1024^3)
+  httpd:
+    image: httpd:latest
+    ports:
+      - '8090:80'
+    volumes:
+      - ./httpd/httpd.conf:/usr/local/apache2/conf/httpd.conf
+    networks: [ ymq.jeppesensystems.com ]
   healthcheck:
     image: alpine
     container_name: healthcheck
@@ -66,4 +104,4 @@ services:
       interval: 7s
       timeout: 7s
       retries: 77
-    networks: [got.jeppesensystems.com]
+    networks: [ymq.jeppesensystems.com]

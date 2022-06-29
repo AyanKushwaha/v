@@ -39,7 +39,7 @@ create sequence NOTIFICATIONSSEQUENCE
 
 create sequence PERIODSSEQUENCE
   maxvalue 2100000000
-  start with 1112
+  start with 1114
 /
 
 create sequence QUALIFICATIONSSEQUENCE

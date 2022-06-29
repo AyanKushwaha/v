@@ -9,11 +9,11 @@ export SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd ${SCRIPT_DIR}/
 
 # DBA
-SQLPLUS_CONNECTION_STRING="sys/${ORACLE_PWD}@//${ORA_HOST}/XE"
+SQLPLUS_CONNECTION_STRING="sys/${ORACLE_PWD}@//${ORA_HOST}/orcl"
 echo '@dba/01-create-tablespaces-and-application-user.sql'     | sqlplus -s ${SQLPLUS_CONNECTION_STRING} as SYSDBA >/tmp/migration.log && echo 'DBA complete.'
 
 # DDL
-SQLPLUS_CONNECTION_STRING="cp_sas/cp_sas@//${ORA_HOST}/XE"
+SQLPLUS_CONNECTION_STRING="cp_sas/cp_sas@//${ORA_HOST}/orcl"
 echo '@ddl/01-create-sequences.sql'                            | sqlplus -s ${SQLPLUS_CONNECTION_STRING} >>/tmp/migration.log && echo -ne '.'
 echo '@ddl/02-create-tables-constraints-and-indexes.sql'       | sqlplus -s ${SQLPLUS_CONNECTION_STRING} >>/tmp/migration.log && echo -ne '.'
 echo "
@@ -64,5 +64,3 @@ echo "@dml/CP_SAS_USERDIRROLES.sql"                           | sqlplus -s ${SQL
 echo "@dml/CP_SAS_USERDIRECTORY.sql"                          | sqlplus -s ${SQLPLUS_CONNECTION_STRING} >>/tmp/migration.log && echo -ne '.'
 echo "
 DML complete."
-
-

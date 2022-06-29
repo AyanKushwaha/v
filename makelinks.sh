@@ -26,7 +26,6 @@ declare -a softLinks=(
     "current_carmtmp_cct" "current_carmtmp"
     "/opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_${version}" "current_carmtmp_cct"
     "local_template_SASDEV.xml" "etc/local.xml"
-    "/opt/Carmen/CARMSYS/BIDS-10.1.24" "current_carmsys_bid"
     "/opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_${version}/carmtmp_behave" "carmtmp_behave"
     "/opt/Carmen/cms_accounts" "etc/cms_accounts"
     "/opt/SasLinkCMS/CARMDATA/carmdata/" "current_link_carmdata"
