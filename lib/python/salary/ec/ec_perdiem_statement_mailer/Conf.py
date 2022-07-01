@@ -85,7 +85,7 @@ currencies = {
 # These are the bases for each country/salary system.
 bases = {
     'DK': ['CPH'],
-    'NO': ['OSL', 'SVG', 'TRD'],
+    'NO': ['OSL', 'BGO'],
     'SE': ['STO'],
     'S3': ['STO'],
 }
