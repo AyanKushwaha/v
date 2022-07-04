@@ -841,7 +841,7 @@ class CrewDocument(CrewInfoTempTable, ExtraValidations):
     '''
 
     TM_NAME = "crew_document"
-    DOCUMENT_BLACKLIST = ['LC', 'PC', 'PCA3', 'PCA3A5', 'PCA4','PCA5', 'OPC', 'OPCA3', 'OPCA3A5', 'OPCA4','OPCA5', 'CRM', 'CRMC']
+    DOCUMENT_BLACKLIST = ['LC', 'PC', 'PCA3', 'PCA3A5', 'PCA4', 'PCA5', 'OPC', 'OPCA3', 'OPCA3A5', 'OPCA4', 'OPCA5', 'CRM', 'CRMC', 'REC', 'PGT']
     
     def __init__(self, nowTime, crewId=None, tablePrefix="tmp_"):
 
