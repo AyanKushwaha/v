@@ -10,9 +10,9 @@ Feature: Max duty 7 days
    
        Given a crew member with
            | attribute       | value     | valid from | valid to |
-           | base            | CPH        | 01OCT2018  | 01JAN2036 |
-           | title rank      | AH         | 28OCT2018  | 01JAN2036 |
-           | contract        | V300       | 01OCT2018  | 01JAN2036 |
+           | base            | CPH       | 01OCT2018  | 01JAN2036 |
+           | title rank      | AH        | 28OCT2018  | 01JAN2036 |
+           | contract        | VSVS-001  | 01OCT2018  | 01JAN2036 |
          
         Given a trip with the following activities
          | act | num  | dep stn | arr stn | date      | dep   | arr   | car | ac_typ  |
@@ -37,9 +37,9 @@ Feature: Max duty 7 days
    
        Given a crew member with
            | attribute       | value     | valid from | valid to |
-           | base            | CPH        | 01OCT2018  | 01JAN2036 |
-           | title rank      | AH         | 28OCT2018  | 01JAN2036 |
-           | contract        | V300       | 01OCT2018  | 01JAN2036 |
+           | base            | CPH       | 01OCT2018  | 01JAN2036 |
+           | title rank      | AH        | 28OCT2018  | 01JAN2036 |
+           | contract        | VSVS-001  | 01OCT2018  | 01JAN2036 |
          
         Given a trip with the following activities
          | act | num  | dep stn | arr stn | date      | dep   | arr   | car | ac_typ  |
@@ -67,9 +67,9 @@ Feature: Max duty 7 days
    
         Given a crew member with
            | attribute       | value     | valid from | valid to |
-           | base            | CPH        | 01OCT2018  | 01JAN2036 |
-           | title rank      | AH         | 28OCT2018  | 01JAN2036 |
-           | contract        | V300       | 01OCT2018  | 01JAN2036 |
+           | base            | CPH       | 01OCT2018  | 01JAN2036 |
+           | title rank      | AH        | 28OCT2018  | 01JAN2036 |
+           | contract        | VSVS-001  | 01OCT2018  | 01JAN2036 |
          
         Given a trip with the following activities
          | act | num  | dep stn | arr stn | date      | dep   | arr   | car | ac_typ  |
