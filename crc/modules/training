@@ -685,9 +685,50 @@ export %all_required_recurrent_performed_duty_end% =
 export %all_required_recurrent_performed_duty_start% =
    %all_required_recurrent_performed%(duty.%start_hb%);
 export %all_required_recurrent_performed%(Abstime date) =
-  all(times(%nr_recurrent_types%), %recurrent_type_performed_ix%(%times_index_0%, date))
-  where (%valid_aoc_ix%(%times_index_0%, date) and
-         %valid_ac_qual_ix%(%times_index_0%, date));
+  if (crew.%is_mff% 
+      and (crew.%has_qln%("ACQUAL", "A2", leg.%start_utc%) or crew.%has_qln%("ACQUAL", "A3", leg.%start_utc%) or crew.%has_qln%("ACQUAL", "A5", leg.%start_utc%)))
+       then %recurrent_type_performed_with_matching_ac_qual%(date)
+  else
+      all(times(%nr_recurrent_types%), %recurrent_type_performed_ix%(%times_index_0%, date))
+      where (%valid_aoc_ix%(%times_index_0%, date) and
+            %valid_ac_qual_ix%(%times_index_0%, date));
+
+export %recurrent_type_performed_with_matching_ac_qual%(Abstime date) =
+    if(any(times(%nr_recurrent_types%),%recurrent_type_performed_ix%(%times_index_0%, date) = false  and
+      %check_matching_leg_qual%(%times_index_0%,date) = true))then
+         false
+    else
+        true;
+
+export %check_matching_leg_qual%(int ix, Abstime date) =
+    let missed_trining = %reqd_rec_desc_mff%(%recurrent_activity_ix%(ix,date), date);
+    if missed_trining in rec_doc then
+      if leg.%qual% = "A2" then
+        concat("LC (", duty.%qual%, ")") = default(missed_trining,"") or
+        concat("PC (", duty.%qual%, ")") = default(missed_trining,"") or
+        concat("OPC (", duty.%qual%, ")") = default(missed_trining,"")
+		  else 
+			   concat("PC", duty.%qual% ) = default(missed_trining,"") or
+            concat("OPC", duty.%qual%) = default(missed_trining,"")
+	  else
+	    all(times(%nr_recurrent_types%), %recurrent_type_performed_ix%(%times_index_0%, date))
+        where (%valid_aoc_ix%(%times_index_0%, date) and
+            %valid_ac_qual_ix%(%times_index_0%, date));
+
+%reqd_rec_desc_mff%(String rec_type, Abstime date) =
+    let ac_qual =
+        if rec_type = "LC" then
+            %recurrent_type_expiry_ac_qual%(rec_type, %active_ac_qual%, date)
+            
+        else 
+           %recurrent_type_expiry_ac_qual%(rec_type, %any_ac_qual%, date);
+    concat(rec_type,
+           if length(ac_qual) >= 2 then concat(" (", ac_qual, ")")
+           else "",
+           if %recurrent_refresher_reqd%(rec_type, date) then ""
+           else "");
+           
+set rec_doc = "LC (A2)","OPC (A2)","PC (A2)","OPCA3","PCA3","OPCA5","PCA5";
 
 export %recurrent_type_performed%(Int ix, Abstime date) =
     let rec_type = %_recurrent_group%(ix, date);
