@@ -284,8 +284,8 @@ def setDaveLoadFiltersAlertGenerator():
 
     # We are not going to load any extra data for alert generator,
     # so we set these parameters to 0!
-    max_trip_length = 0
-    max_number_of_days_with_optional_variant_deadheads_before_trip = 0
+    max_trip_length = 5
+    max_number_of_days_with_optional_variant_deadheads_before_trip = 1
 
     trip_start = dbPeriodStart - RelTime.RelTime(max_trip_length*1440)
     trip_end = dbPeriodEnd + RelTime.RelTime(max_number_of_days_with_optional_variant_deadheads_before_trip*1440)
