@@ -36,8 +36,8 @@ echo " - Processing migration tasks"
 # echo "  * SKCMS-1234: Some description"
 # python $CARMUSR/data/migration/$RELEASE/skcms-1234.py 2>&1 | tee $LOG_DIR/skcms-1234.log
 
-
-
+echo "  * SKCMS-2052: Populate table cnx_time_training"
+python $CARMUSR/data/migration/$RELEASE/skcms_2052_add_training_cnx_time.py 2>&1 | tee $LOG_DIR/skcms_2052_add_training_cnx_time.log
 
 # Uncomment this in case dave filters shall be modified, remember to update JIRA number
 #echo "  * SKCMS-XXXX: Importing crc/etable/dave_filter/*.etab into database"

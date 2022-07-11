@@ -49,6 +49,7 @@ import parameters;
 import duty_period;
 import fdp;
 import oma16;
+import meal;
 
 /****************************************************************
  * Section 1: Connection rules
@@ -72,9 +73,15 @@ import oma16;
 **   ??
 */
 export rule ind_min_connection_time_ALL =
-  valid %ind_min_connection_time_valid%;
+  valid trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty.%has_flight_duty% and
+        connection.%normal_connection% and
+        not %valid_training_connection% and
+        (%is_flight_duty_connection% or
+         %is_gnd_flight_duty_connection%);
 
-    %min_connection_value% >= 
+    connection.%connection_time% >= 
     %minimum_connection_time% - 
     rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%) + 
     soft_locks.%cxn_buffer%;
@@ -83,7 +90,7 @@ export rule ind_min_connection_time_ALL =
   severity = %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
   failobject = next(leg(duty), leg.%failobject_departure%);
   failtext(Reltime value, Reltime limit) =
-    rules.%failtext_rel%(concat("Coll: Cnx ", leg.%flight_name%," - ",
+    rules.%failtext_rel%(concat("Min cnx time ", leg.%flight_name%," - ",
            next(leg(duty), leg.%flight_name%)),
            value, limit);
   remark "Coll. Min connection time between activities",
@@ -135,6 +142,7 @@ else
 
 
 /*
+** SKCMS-2052 /2074
 ** Rule: 
 **    Training connection
 ** 
@@ -149,68 +157,184 @@ else
 */
 
 rule ind_min_training_connection_ALL =
-  valid trip.%check_rules% and
-        duty.%in_pp_extended% and
-        (duty.%is_simulator% or
-         duty.%is_recurrent% or 
-         (duty.%has_any_pilot_on_lc_or_ilc% and not duty.%is_ski%)) and 
-        %valid_training_connection% and
-        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+  valid %ind_min_training_connection_ALL_valid%;
         
   connection.%connection_time% >=
-    %min_training_connection_time%;
+    %min_training_cnx_time%(duty.%start_day%);
   startdate = leg.%activity_scheduled_start_time_UTC%;
   severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
   failobject = next(leg(trip), leg.%failobject_departure%);
   failtext(Reltime value, Reltime limit) =
-    rules.%failtext_rel%(concat("Coll: Training cnx ", leg.%flight_name%," - ",
+    rules.%failtext_rel%(concat("Training cnx ", leg.%flight_name%," - ",
            next(leg(duty), leg.%flight_name%)),
            value, limit);
-  remark "Coll: Min connection time to/from training activities",
+  remark "Min connection time to/from training activities",
   planner "The rule checks that the minimum connection time to" 
           "and from training activities (LC, ILC, STO SIM, STO REC) is"
           "not exceeded";
 end
 
+export %ind_min_training_connection_ALL_valid% =
+  trip.%check_rules% and
+        duty.%in_pp_extended% and
+        (duty.%is_simulator% or
+         duty.%is_any_simulator_instr% or
+         duty.%is_recurrent% or
+         duty.%is_lifus_or_zftt_lifus% or
+         duty.%is_lifus_or_zftt_lifus_instr% or
+         duty.%is_supernum% or
+         duty.%is_fam_or_flt% or
+         duty.%is_fam_flt_instr% or
+         duty.%is_x_lifus% or
+         duty.%has_any_lifus% or
+         duty.%has_any_lifus_instr% or
+         duty.%is_zftt_x_trainee_or_instr% or
+         duty.%has_school_flight% or
+        ((duty.%has_any_pilot_or_instr_on_lc_or_ilc%)and not duty.%is_ski%)) and
+        %valid_training_connection% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+
+export %any_zftt% =
+  if ((leg.%is_deadhead%) and next(leg(duty), leg.%is_any_trainee_zftt_lifus%)) then
+     true
+  else
+    false;
+    
 %connection_type% =
   /* Act or pass to LC */
-  if not leg.%is_any_pilot_on_lc_or_ilc% and leg.%is_flight_duty% and 
-     next(leg(duty), leg.%is_any_pilot_on_lc_or_ilc%) then
+  if not leg.%is_any_pilot_or_instr_on_lc_or_ilc% and leg.%is_flight_duty% and
+           next(leg(duty), leg.%is_any_pilot_or_instr_on_lc% ) then
     "TOLC"
-  /* LC to Pass */
-  else if leg.%is_any_pilot_on_lc_or_ilc% and 
+  else if leg.%is_any_pilot_or_instr_on_lc% and
           next(leg(duty), leg.%is_active_flight% and
-                          not leg.%is_any_pilot_on_lc_or_ilc%) then
+          not  (leg.%is_any_pilot_or_instr_on_lc_or_ilc%))then
     "LCTOACT"
-  else if leg.%is_any_pilot_on_lc_or_ilc% and
+  else if leg.%is_any_pilot_or_instr_on_lc% and
           next(leg(duty), leg.%is_deadhead%) then
     "LCTOPASS"
   else if leg.%is_deadhead% and
-          next(leg(duty), leg.%is_simulator% or leg.%is_recurrent%) then
-    "PASSTOSIM"
-  else if (leg.%is_simulator% or leg.%is_recurrent%) and
+          next(leg(duty), leg.%is_simulator% or leg.%is_recurrent% or leg. %is_any_sim_instr%) then
+    "PASSTOSIM"    
+  else if (leg.%is_simulator% or leg.%is_recurrent% or leg.%is_any_sim_instr%) and
           next(leg(duty), leg.%is_deadhead%) then
-    "SIMTOPASS"
+    "SIMTOPASS"  
+  else if leg.%is_deadhead%  and
+          next(leg(duty), leg.%is_lifus_or_xlifus_instr_or_trainee% ) then
+          "PASSTOLIFUS"
+  else if leg.%is_deadhead%  and
+          next(leg(duty), leg.%is_any_trainee_zftt_x% or leg.%is_zftt_x_instructor%) then
+          "PASSTOZFTTX"
+  else if (leg.%is_any_lifus%  or leg.%is_any_lifus_instr%) and
+          next(leg(duty), leg.%is_deadhead%) then
+          "LIFUSTOPASS"
+  else if leg.%is_deadhead% and next(leg(duty), (leg.%is_any_trainee_zftt_lifus% or leg.%is_zftt_lifus_instructor%)) then
+                if next(leg(duty),leg.%Course_ccq_a3a4_or_ccq_a4a3%) then
+                   "PASSTOZFTT CCQ A3-A4"
+                else if next(leg(duty), leg.%Course_ccq_A2% or leg.%Course_typerating%) then
+                     "PASSTOZFTT TR & CCQ from A2"
+                else "PASSTOZFTT"
+  else if leg.%is_supernum% and
+          next(leg(duty), leg.%is_deadhead%) then
+          "SUPERNUMTOPASS"
+  else if leg.%is_deadhead% and
+          next(leg(duty), leg.%is_supernum%) then
+          "PASSTOSUPERNUM"
+  else if leg.%is_deadhead% and
+          next(leg(duty), leg.%is_school_flight%) then
+          "PASSTOSCHOOLFLIGHT"
+  else if leg.%is_school_flight% and
+          next(leg(duty), leg.%is_deadhead%) then
+          "SCHOOLFLIGHTTOPASS"
+  else if leg.%is_deadhead% and
+          next(leg(duty), leg.%is_any_trainee_fam_flt% or leg.%is_fam_flt_instr%) then
+          "PASSTOFAMFLT"
+  else if leg.%is_any_trainee_fam_flt% or leg.%is_fam_flt_instr% and
+          next(leg(duty), leg.%is_deadhead%) then
+          "FAMFLTTOPASS"
+  else if  leg.%is_any_pilot_or_instr_on_lc%  and
+          next(leg(duty), (leg.%is_any_pilot_or_instr_on_lc%) and
+           leg.%is_active_flight%) then
+          "LCTOLC"
+  else if leg.%is_any_pilot_or_instr_on_ilc% and
+          next(leg(duty), leg.%is_any_pilot_or_instr_on_ilc% and
+          leg.%is_active_flight%) then
+          "ILCTOILC"
+  else if leg.%is_any_pilot_or_instr_on_ilc% and
+          next(leg(duty), leg.%is_any_pilot_or_instr_on_lc% and
+          leg.%is_active_flight%) then
+          "ILCTOLC"
+  else if leg.%is_any_pilot_or_instr_on_lc%  and
+          next(leg(duty), leg.%is_any_pilot_or_instr_on_ilc% and
+          leg.%is_active_flight%) then
+          "LCTOILC"
+  else if not (leg.%is_any_pilot_or_instr_on_lc_or_ilc%) and leg.%is_flight_duty% and
+          next(leg(duty), leg.%is_any_pilot_or_instr_on_ilc%) then
+          "TOILC"
+  else if leg.%is_any_pilot_or_instr_on_ilc% and
+          next(leg(duty), leg.%is_deadhead%) then
+          "ILCTOPASS"
+  else if leg.%is_any_pilot_or_instr_on_ilc% and
+          next(leg(duty), leg.%is_active_flight% and
+          not (leg.%is_any_pilot_or_instr_on_lc_or_ilc%)) then
+          "ILCTOACT"
   else
     "UNKNOWN";
          
-table training_connection_table =
-  %connection_type%,
-  leg.%end_station%
-                   -> %valid_training_connection%,
-                      %min_training_connection_time%;
-                      
-  "PASSTOSIM", "TXL"   -> true, 1:30;
-  "SIMTOPASS", "TXL"   -> true, 1:30;
-&
-  "TOLC"     ,   -     -> true, 1:15;
-  "LCTOPASS" ,   -     -> true, 1:30;
-  "LCTOACT"  ,   -     -> true, 1:45;
-  "PASSTOSIM",   -     -> true, 0:30;
-  "SIMTOPASS",   -     -> true, 0:45;
+export %valid_training_connection% = default(not(%connection_type% = "UNKNOWN"), false);
 
-       -     ,   -     -> false, 99:00;
+export %cnx_time_training_table_p% =
+  parameter "cnx_time_training"
+  remark "External table with cnx types and min cnx time";
+
+/* ensures extended connection if a meal is required and it is not eaten on board the airplane */
+%meal_break_time% =
+  if %connection_type% not in connections_with_meal_break then
+    00:00
+  else if(meal.%is_assigned_meal_stop%) then
+    system_db_parameters.%meal_stop_training%(duty.%start_day%)
+  else
+    00:00;
+
+/* Set of connection types that could include meal breaks */
+set connections_with_meal_break = "TOLC", "TOILC", "LCTOPASS", "ILCTOPASS", "LCTOACT", "ILCTOACT";
+
+export %min_training_cnx_time%(Abstime valid_at) =
+  %_min_training_cnx_time%(%connection_type%,
+                               %_cnx_end_station%,
+                               %_cnx_ac_type%,
+                               valid_at) + %meal_break_time%;
+
+/* Cached variables */
+%_leg_end_station% = leg.%end_station%;
+%_leg_ac_type% = if leg.%is_deadhead% then next(leg(duty), leg.%qual%) else leg.%qual%;
+%_end_stations% = %cnx_end_stations%(%connection_type%);
+%_ac_types% = %cnx_ac_types%(%connection_type%);
+
+%_cnx_end_station% = if locate("N/A", %_end_stations%) > 0 then "N/A"
+                     else if locate(%_leg_end_station%, %_end_stations%) > 0 then %_leg_end_station%
+                     else "-";
+
+%_cnx_ac_type% = if locate("N/A", %_ac_types%) > 0 then "N/A"
+                 else if locate(%_leg_ac_type%, %_ac_types%) > 0 then %_leg_ac_type%
+                 else "-";
+
+/* Returns all possible end stations and aircraft types for a given connection type. */
+table training_connection_table_variables(String connection_type) =
+  connection_type -> String %cnx_end_stations%, String %cnx_ac_types%;
+  external %cnx_time_training_table_p%;
+  "cnx_type" -> cat(leg_end_station, ", "), cat(ac_type, ", ");
 end
+
+table training_connection_table_new(String connection_type, String leg_end_station, String ac_type, Abstime valid_at)  =
+  connection_type, leg_end_station, ac_type, valid_at ->
+    Reltime %_min_training_cnx_time%,
+    AbsTime %_valid_from%,
+    AbsTime %_valid_to%;
+  external %cnx_time_training_table_p%;
+  "cnx_type", "leg_end_station", "ac_type", ("validfrom", "validto") -> "min_training_cnx_time", "validfrom", "validto";
+  -, -, -, - -> void_reltime, void_abstime, void_abstime;
+end
+
 /*
 ** Rule: 
 **    Plausible connection
@@ -230,7 +354,7 @@ export rule ind_plausible_connection_ALL =
   startdate = leg.%activity_scheduled_start_time_UTC%;
   severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
   failobject = next(leg(chain), leg.%failobject_departure%);
-  failtext concat("Cnx ", leg.%end_station%," - ",
+  failtext concat("Plausible cnx ", leg.%end_station%," - ",
                   next(leg(chain),leg.%start_station%), " not allowed");
   remark "Func: Connect only legs with plausible connections",
   planner "The rule checks that only legs starting from the same"
