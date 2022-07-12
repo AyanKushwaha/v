@@ -24,7 +24,7 @@ from carmusr.tracking.OpenPlan import CfhCheckDone
 TM = tm.TM()
 
 ACCOUNTS = ['BOUGHT', 'BOUGHT_8', 'BOUGHT_FORCED']
-ACCOUNTS_SVS = ['BOUGHT_SBY', 'BOUGHT_Prod', 'BOUGHT_DUTY']
+ACCOUNTS_SVS = ['BOUGHT_SBY', 'BOUGHT_PROD', 'BOUGHT_DUTY']
 BOUGHT_LABELS = [
             'Bought more than 6 hrs',
             'Bought 6 hrs or less',
@@ -269,16 +269,24 @@ def buy_days_svs(crew_id, start_time, end_time, leg_type, comment="",time_hh_sby
 
 def get_row_day_type(leg_type):
         # The activity code to save:
-    if not leg_type:
-        return "F"
-    elif activity_shall_be_recreated(leg_type):
-        return leg_type
-    #elif leg_type[0] == "F":
-        #return "F"
+    is_svs = 'crew.%has_agmt_group_svs%'
+    if is_svs:
+        if not leg_type:
+            return "F"
+        elif activity_shall_be_recreated(leg_type):
+            return leg_type
+        else:
+            return "P"
     else:
-        # Unknown...well save as it is for now...
-        #return leg_type
-        return "P"
+        if not leg_type:
+            return "F"
+        elif activity_shall_be_recreated(leg_type):
+            return leg_type
+        elif leg_type[0] == "F":
+            return "F"
+        else:
+            # Unknown...well save as it is for now...
+            return leg_type
 
 
 def unbuy_days(crew_id, start_time, end_time, area):
@@ -441,6 +449,7 @@ def markDaysAsBought(buy):
                            R.foreach(R.iter('iterators.chain_set'),
                                      "bought_days.%%duty_may_be_bought%%(%s, %s)"
                                      % (current_time, current_time.adddays(1))))[0][0][1]
+            print(code_duty)
             # Store activities
             key = (activity_start_time, (code or code_duty or ""))
             if key in activities_in_period:
@@ -474,9 +483,18 @@ def markDaysAsBought(buy):
 
                     except CancelBuyDay:
                         return
+        
+                print(time_hh)
                 # Do the actual "buy"
-                if is_svs:
-                    buy_days_svs(crew_id, start, end, code, comment, time_hh_sby, time_mm_sby, time_hh_prod, time_mm_prod, time_hh, time_mm, bought_type, has_agmt_skd_cc, is_f3_valid)
+                if time_hh is " ":
+                    if is_svs:
+                        buy_days_svs(crew_id, start, end, code, comment, time_hh_sby, time_mm_sby, time_hh_prod, time_mm_prod, time_hh, time_mm, bought_type, has_agmt_skd_cc, is_f3_valid)
+                else:
+                    cfhExtensions.show(
+                        "Not possible to buy Additional duty on day-off.\n"
+                        "The current assignment(s) do not permit this\n"
+                        "type of operation.", title="No change")
+                    return 1
                 
                 buy_days(crew_id, start, end, code, comment, bought_type, has_agmt_skd_cc, is_f3_valid)
                 # Remove activity from roster
@@ -497,8 +515,16 @@ def markDaysAsBought(buy):
                     except CancelBuyDay:
                         return
                 # Do the actual "buy"
-                if is_svs:
-                    buy_days_svs(crew_id, start, end, code, comment, time_hh_sby, time_mm_sby, time_hh_prod, time_mm_prod, time_hh, time_mm, bought_type, has_agmt_skd_cc, is_f3_valid)
+                if time_hh_sby is " " or time_hh_prod is " ":
+                    if is_svs:
+                        buy_days_svs(crew_id, start, end, code, comment, time_hh_sby, time_mm_sby, time_hh_prod, time_mm_prod, time_hh, time_mm, bought_type, has_agmt_skd_cc, is_f3_valid)
+                else:
+                    cfhExtensions.show(
+                        "Not possible to buy day-off on duty.\n"
+                        "The current assignment(s) do not permit this\n"
+                        "type of operation.", title="No change")
+                    return 1
+        
                 
                 
                 no_change = False
@@ -541,7 +567,7 @@ class BuyDayCommentForm(Cfh.Box):
                 if row.account_name == 'BOUGHT_SBY':
                     hr_sby=row.hours
                     min_sby=row.minutes
-                elif row.account_name == 'BOUGHT_Prod':
+                elif row.account_name == 'BOUGHT_PROD':
                     hr_prod = row.hours
                     min_prod = row.minutes
                 else:
@@ -599,15 +625,15 @@ class BuyDayCommentForm(Cfh.Box):
             self.ok = CfhCheckDone(self, "OK", self.button_area, "Ok", "_Ok")
 
         
-        if is_qa or (is_cj and is_valid):
-            description = "Bought day %s" % ("QA CC" if is_cabin else "QA FD" if is_qa else "CJ FD (QA)")
-            self.qa_type_label = Cfh.Label(self, "QA_TYPE_LABEL", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(2, 0)), description)
-        else:
-            num_entries = LBL_COUNT_CC if is_cabin else LBL_COUNT_FD
-            self.bought_type = Cfh.String(self, "Compensation", Cfh.Area(Cfh.Dim(20, num_entries), Cfh.Loc(2, 0)), LBL_MAX_LEN, "Bought")
-            bought_type_options_str = "Select;" + ";".join(BOUGHT_LABELS[:num_entries])
-            self.bought_type.setMenuString(bought_type_options_str)
-            self.bought_type.setStyle(Cfh.CfhSChoiceRadioCol)
+            if is_qa or (is_cj and is_valid):
+                description = "Bought day %s" % ("QA CC" if is_cabin else "QA FD" if is_qa else "CJ FD (QA)")
+                self.qa_type_label = Cfh.Label(self, "QA_TYPE_LABEL", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(2, 0)), description)
+            else:
+                num_entries = LBL_COUNT_CC if is_cabin else LBL_COUNT_FD
+                self.bought_type = Cfh.String(self, "Compensation", Cfh.Area(Cfh.Dim(20, num_entries), Cfh.Loc(2, 0)), LBL_MAX_LEN, "Bought")
+                bought_type_options_str = "Select;" + ";".join(BOUGHT_LABELS[:num_entries])
+                self.bought_type.setMenuString(bought_type_options_str)
+                self.bought_type.setStyle(Cfh.CfhSChoiceRadioCol)
 
             def enforce_selection_fn():
                 # self.bought_type.compute()
