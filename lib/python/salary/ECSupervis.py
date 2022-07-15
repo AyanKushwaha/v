@@ -30,6 +30,8 @@ class SupervisRosterManager:
         self.fields = {
             'crewid': 'crew.%id%',
             'empNo': 'crew.%employee_number%',
+            'etops_lifus_act': 'salary.%inst_etops_lifus_act%',
+            'etops_lc_act': 'salary.%inst_etops_lc_act%',
             'lifus_act': 'salary.%inst_lifus_act%',
             'pc_opc': 'salary.%inst_pc_opc%',
             'pc_opc_bd': 'salary.%inst_pc_opc_bd%',

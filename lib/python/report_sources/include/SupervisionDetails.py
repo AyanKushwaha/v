@@ -65,6 +65,8 @@ class SupervisionDetails(SASReport):
                 'new_hire_follow_up_act': 'salary.%inst_new_hire_follow_up_act%',
                 'supernum_release': 'salary.%inst_supernum_release%',
                 'instr_extra_compensation': 'salary.%sim_instr_fixed%',
+                'etops_lifus_act': 'salary.%inst_etops_lifus_act%',
+                'etops_lc_act': 'salary.%inst_etops_lc_act%',
 
             })
 
@@ -160,7 +162,7 @@ class SupervisionDetails(SASReport):
 
     def get_type(self, t):
         try:
-            type = ('', 'A/C, LIFUS', 'PC/OPC', 'T/R', 'CLASSROOM', 'LCI SH', 'CRM', 'CC', 'SKILL-Test', 'SIM', 'LCI LH', 'New Hire Follow Up','Supernum, Release')[int(str(t)[-2:])]
+            type = ('', 'A/C, LIFUS', 'PC/OPC', 'T/R', 'CLASSROOM', 'LCI SH', 'CRM', 'CC', 'SKILL-Test', 'SIM', 'LCI LH', 'New Hire Follow Up','Supernum, Release','ETOPS LC','ETOPS LIFUS')[int(str(t)[-2:])]
             return type
         except:
             return '?'
