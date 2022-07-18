@@ -4904,4 +4904,42 @@ export %ci_time_at_co_day_plus_offset% = 31dec2099;
 export %sum_of_additional_weekend_days_in_period%(abstime d) = 99;
 export %ind_max_duty_time_in_calendar_month_pt_cc_parttime_SKS_monthly_parttime_SKD_valid% = false;
 
+/*
+** Rule:
+**    Long haul trip must be followed by freedays
+**
+** Description:
+**    Check that a long haul trip is followed by freedays,
+**    i.e. check that the wop is terminated when arriving
+**    to homebase after a long haul trip. In rostering this
+**    is also valid for standby-lines.
+**
+** Agreement:
+**    CAU
+*/
+export rule ind_long_haul_trip_last_in_wop_fg_cc =
+  valid roster.%check_rules% and
+        base_product.%is_rostering% and
+        not crew.%is_leased_trip_start% and
+        ((crew.%is_SKD% and crew.%is_cabin%) or
+        crew.%is_pilot%) and
+        crew.%in_fixed_group%(trip.%start_UTC%) and
+        wop.%in_pp% and
+        wop.%is_on_duty% and
+        trip.%is_long_haul% and
+        not(last(duty(trip),duty.%is_bought%)) and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+
+  round_down(next(trip(roster), trip.%start_hb%),24:00) = round_up(trip.%end_hb%,24:00) and
+  is_last(trip(wop)) where(not trip.%is_off_duty_cmp%);
+
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = next(trip(wop), trip.%failobject_start%);
+  failtext "Soft: Long haul trip must be last in wop on fixed group crew";
+  remark "Soft: Long haul trip must be last in wop on fixed group crew",
+  planner "Long haul trips should be assigned last in wop on"
+           " fixed group crew to enable productive rosters";
+end
+
 /* end of file */
