@@ -20,39 +20,55 @@ def fixit(dc, *a, **k):
     ops = []
 
     ops.append(fixrunner.createOp('salary_article', 'N', {
-        'extsys':      'NO',
-        'extartid':    '2324',
+        'extsys':      'SE',
+        'extartid':    '5113',
         'validfrom':   validfrom,
         'validto':     validto,
-        'intartid':    'LIFUS FD',
+        'intartid':    'ETOPS LIFUS',
+        'note':        ''
+    }))
+    ops.append(fixrunner.createOp('salary_article', 'N', {
+        'extsys':      'SE',
+        'extartid':    '5112',
+        'validfrom':   validfrom,
+        'validto':     validto,
+        'intartid':    'ETOPS LC',
+        'note':        ''
+    }))
+
+    ops.append(fixrunner.createOp('salary_article', 'N', {
+        'extsys':      'DK',
+        'extartid':    '0735',
+        'validfrom':   validfrom,
+        'validto':     validto,
+        'intartid':    'ETOPS LIFUS',
         'note':        ''
     }))
     ops.append(fixrunner.createOp('salary_article', 'N', {
         'extsys':      'DK',
-        'extartid':    '071A',
+        'extartid':    '0526',
         'validfrom':   validfrom,
         'validto':     validto,
-        'intartid':    'LIFUS FD',
+        'intartid':    'ETOPS LC',
         'note':        ''
     }))
 
+    ops.append(fixrunner.createOp('salary_article', 'N', {
+        'extsys':      'NO',
+        'extartid':    '2324',
+        'validfrom':   validfrom,
+        'validto':     validto,
+        'intartid':    'ETOPS LIFUS',
+        'note':        ''
+    }))
     ops.append(fixrunner.createOp('salary_article', 'N', {
         'extsys':      'NO',
         'extartid':    '2325',
         'validfrom':   validfrom,
         'validto':     validto,
-        'intartid':    'LINE CHECK FD',
+        'intartid':    'ETOPS LC',
         'note':        ''
     }))
-    ops.append(fixrunner.createOp('salary_article', 'N', {
-        'extsys':      'DK',
-        'extartid':    '051A',
-        'validfrom':   validfrom,
-        'validto':     validto,
-        'intartid':    'LINE CHECK FD',
-        'note':        ''
-    }))
-
 
 
     return ops   
