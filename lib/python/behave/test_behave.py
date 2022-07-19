@@ -589,6 +589,7 @@ def download_etabs():
              'bases',
              'cabin_training',
              'ci_exception',
+             'cnx_time_training',
              'country_req_docs',
              'course_ac_qual_set',
              'crew_base_set',
