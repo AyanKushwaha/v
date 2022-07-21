@@ -24,7 +24,7 @@ def fixit(dc, *a, **k):
         'extartid':    '5113',
         'validfrom':   validfrom,
         'validto':     validto,
-        'intartid':    'ETOPS LIFUS',
+        'intartid':    'INST_ETOPS_LIFUS_ACT',
         'note':        ''
     }))
     ops.append(fixrunner.createOp('salary_article', 'N', {
@@ -32,7 +32,7 @@ def fixit(dc, *a, **k):
         'extartid':    '5112',
         'validfrom':   validfrom,
         'validto':     validto,
-        'intartid':    'ETOPS LC',
+        'intartid':    'INST_ETOPS_LC_ACT',
         'note':        ''
     }))
 
@@ -41,7 +41,7 @@ def fixit(dc, *a, **k):
         'extartid':    '0735',
         'validfrom':   validfrom,
         'validto':     validto,
-        'intartid':    'ETOPS LIFUS',
+        'intartid':    'INST_ETOPS_LIFUS_ACT',
         'note':        ''
     }))
     ops.append(fixrunner.createOp('salary_article', 'N', {
@@ -49,31 +49,12 @@ def fixit(dc, *a, **k):
         'extartid':    '0526',
         'validfrom':   validfrom,
         'validto':     validto,
-        'intartid':    'ETOPS LC',
+        'intartid':    'INST_ETOPS_LC_ACT',
         'note':        ''
     }))
-
-    ops.append(fixrunner.createOp('salary_article', 'N', {
-        'extsys':      'NO',
-        'extartid':    '2324',
-        'validfrom':   validfrom,
-        'validto':     validto,
-        'intartid':    'ETOPS LIFUS',
-        'note':        ''
-    }))
-    ops.append(fixrunner.createOp('salary_article', 'N', {
-        'extsys':      'NO',
-        'extartid':    '2325',
-        'validfrom':   validfrom,
-        'validto':     validto,
-        'intartid':    'ETOPS LC',
-        'note':        ''
-    }))
-
-
     return ops   
 
-fixit.program = 'skcms-2996.py (%s)' % __version__
+fixit.program = 'skcms-2996_101.py (%s)' % __version__
 
 if __name__ == '__main__':
     fixit()
