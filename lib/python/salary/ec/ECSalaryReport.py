@@ -299,7 +299,7 @@ class PerDiemRun(ECGenericRun):
 
     def MEAL(self, rec):
         # SE: 841, negative in normal cases
-        return -times100(rec.getMealReduction())
+        return times100(rec.getMealReduction())
 
     def PERDIEM_SALDO(self, rec):
         # DK: 1550
