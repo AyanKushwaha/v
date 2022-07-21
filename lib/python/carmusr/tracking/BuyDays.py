@@ -449,7 +449,7 @@ def markDaysAsBought(buy):
                            R.foreach(R.iter('iterators.chain_set'),
                                      "bought_days.%%duty_may_be_bought%%(%s, %s)"
                                      % (current_time, current_time.adddays(1))))[0][0][1]
-            print(code_duty)
+            
             # Store activities
             key = (activity_start_time, (code or code_duty or ""))
             if key in activities_in_period:
@@ -483,18 +483,31 @@ def markDaysAsBought(buy):
 
                     except CancelBuyDay:
                         return
-        
-                print(time_hh)
+
                 # Do the actual "buy"
-                if time_hh is " ":
-                    if is_svs:
-                        buy_days_svs(crew_id, start, end, code, comment, time_hh_sby, time_mm_sby, time_hh_prod, time_mm_prod, time_hh, time_mm, bought_type, has_agmt_skd_cc, is_f3_valid)
-                else:
+                if bought_type is "BOUGHT_DUTY":
                     cfhExtensions.show(
                         "Not possible to buy Additional duty on day-off.\n"
                         "The current assignment(s) do not permit this\n"
                         "type of operation.", title="No change")
                     return 1
+                else:
+                    if is_svs:
+                        if bought_type is "BOUGHT_SBY" and time_hh_sby is "" and  time_mm_sby is "":
+                            cfhExtensions.show(
+                                "Please enter HH and MM.\n"
+                                "The current assignment(s) do not permit this\n"
+                                "type of operation.", title="No change")
+                            return 1
+                        elif bought_type is "BOUGHT_PROD" and time_hh_prod is "" and  time_mm_prod is "":
+                            cfhExtensions.show(
+                                "Please enter HH and MM.\n"
+                                "The current assignment(s) do not permit this\n"
+                                "type of operation.", title="No change")
+                            return 1
+                        else:
+                            buy_days_svs(crew_id, start, end, code, comment, time_hh_sby, time_mm_sby, time_hh_prod, time_mm_prod, time_hh, time_mm, bought_type, has_agmt_skd_cc, is_f3_valid)
+                
                 
                 buy_days(crew_id, start, end, code, comment, bought_type, has_agmt_skd_cc, is_f3_valid)
                 # Remove activity from roster
@@ -510,22 +523,30 @@ def markDaysAsBought(buy):
                 if comment == "":
                     try:
                         if is_svs:
+
                             comment,time_hh_sby,time_mm_sby,time_hh_prod,time_mm_prod,time_hh,time_mm,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, "Buy_Day_Form")()
                    
                     except CancelBuyDay:
                         return
                 # Do the actual "buy"
-                if time_hh_sby is " " or time_hh_prod is " ":
-                    if is_svs:
-                        buy_days_svs(crew_id, start, end, code, comment, time_hh_sby, time_mm_sby, time_hh_prod, time_mm_prod, time_hh, time_mm, bought_type, has_agmt_skd_cc, is_f3_valid)
-                else:
+                
+                if bought_type is "BOUGHT_SBY" or bought_type is "BOUGHT_PROD":
                     cfhExtensions.show(
                         "Not possible to buy day-off on duty.\n"
                         "The current assignment(s) do not permit this\n"
                         "type of operation.", title="No change")
                     return 1
-        
-                
+                else:
+                    if is_svs:
+                        if bought_type is "BOUGHT_DUTY" and time_hh is "" and  time_mm is "":
+                            cfhExtensions.show(
+                                "Please enter HH and MM.\n"
+                                "The current assignment(s) do not permit this\n"
+                                "type of operation.", title="No change")
+                            return 1
+                        else:
+                            buy_days_svs(crew_id, start, end, code, comment, time_hh_sby, time_mm_sby, time_hh_prod, time_mm_prod, time_hh, time_mm, bought_type, has_agmt_skd_cc, is_f3_valid)
+
                 
                 no_change = False
 

@@ -12,7 +12,7 @@ def fixit(dc, *a, **k):
     ops = []
 
     ops.append(fixrunner.createOp('account_set', 'N', {'id': 'BOUGHT_SBY','si': 'Bought standby on day off'}))
-    ops.append(fixrunner.createOp('account_set', 'N', {'id': 'BOUGHT_Prod','si': 'Bought Production on day off'}))
+    ops.append(fixrunner.createOp('account_set', 'N', {'id': 'BOUGHT_PROD','si': 'Bought Production on day off'}))
     ops.append(fixrunner.createOp('account_set', 'N', {'id': 'BOUGHT_DUTY','si': 'Bought additional duty'}))
 
     print "done"
