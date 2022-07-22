@@ -42,6 +42,9 @@ python $CARMUSR/data/migration/$RELEASE/skcms-2975.py 2>&1 | tee $LOG_DIR/skcms-
 echo "  * SKCMS-2052: Populate table cnx_time_training"
 python $CARMUSR/data/migration/$RELEASE/skcms_2052_add_training_cnx_time.py 2>&1 | tee $LOG_DIR/skcms_2052_add_training_cnx_time.log
 
+echo "  * SKCMS-2996: Changed instructor pay at A2NX ETOPS flights "
+python $CARMUSR/data/migration/$RELEASE/skcms-2996.py 2>&1 | tee $LOG_DIR/skcms-2996.log
+
 # Uncomment this in case dave filters shall be modified, remember to update JIRA number
 #echo "  * SKCMS-XXXX: Importing crc/etable/dave_filter/*.etab into database"
 #$CARMUSR/bin/admin/setup/setup_filters.sh -c -d | tee -a $LOG_DIR/SKCMS-XXXX.log
