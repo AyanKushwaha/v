@@ -16,8 +16,9 @@ def fixit(dc, *a, **k):
     
     ops.append(fixrunner.createOp('training_log_set', 'N', {'typ': 'LINE FLIGHT SCC', 'grp': 'FLT TRAINING', 'si': 'Added in SKCMS-2998'}))
 
-    return ops
+    ops.append(fixrunner.createOp('crew_training_t_set', 'N', {'id': 'LINE FLIGHT SCC', 'si': 'Added in SKCMS-2998'}))
 
+    return ops
 
 fixit.program = 'skcms-2998.py (%s)' % __version__
 if __name__ == '__main__':

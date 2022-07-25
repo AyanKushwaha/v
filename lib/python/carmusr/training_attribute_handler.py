@@ -552,7 +552,7 @@ def set_training_attribute(leg_objects=[],attribute="", area=None):
             return 1
         leg_objects, attribute = form_values
 
-    excepted_attr = attribute in Set(["CC INSTR AUSC", "CC INSTR EXAM", "CC INSTR SEN", "FAM FLIGHT", "LINE FLIGHT"])
+    excepted_attr = attribute in Set(["CC INSTR AUSC", "CC INSTR EXAM", "CC INSTR SEN", "FAM FLIGHT", "LINE FLIGHT", "LINE FLIGHT SCC"])
     if application.isPlanning and not excepted_attr: # Only check need in Planning, ok for tracking to overbook
         leg_objects, messages = _check_legs_for_need(area,leg_objects, attribute)
         if messages:
