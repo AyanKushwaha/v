@@ -41,6 +41,10 @@ submitter = 'manifest_manual_jobs'
 # Will be filled in by end user the first time 'leg_apis_text()' is called.
 mail_address = None
 
+# Will be filled in by 'get_valid_countries()'. Since this module is imported
+# before a rule set is loaded, we cannot fill in the info here.
+valid_countries = None
+
 def append_fo_to_RU(c):
     "to know if 'RU' is flyover og dest/dep country"
     return "RU_fo" if c == "RU" else c
