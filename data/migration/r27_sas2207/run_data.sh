@@ -37,6 +37,8 @@ echo " - Processing migration tasks"
 # python $CARMUSR/data/migration/$RELEASE/skcms-1234.py 2>&1 | tee $LOG_DIR/skcms-1234.log
 
 
+echo "  * SKCMS-2996: Changed instructor pay at A2NX ETOPS flights "
+python $CARMUSR/data/migration/$RELEASE/skcms-2996.py 2>&1 | tee $LOG_DIR/skcms-2996.log
 
 
 # Uncomment this in case dave filters shall be modified, remember to update JIRA number

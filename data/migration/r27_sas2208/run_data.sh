@@ -39,6 +39,9 @@ echo " - Processing migration tasks"
 echo "  * SKCMS-2922: Splitting ETOPS LIFUS/LC"
 python $CARMUSR/data/migration/$RELEASE/skcms-2922.py 2>&1 | tee $LOG_DIR/skcms-2922.log
 
+echo "  * SKCMS-2996: Salary implementation for ETOPS LIFUS and ETOPS LC"
+python $CARMUSR/data/migration/$RELEASE/skcms-2996.py 2>&1 | tee $LOG_DIR/skcms-2996.log
+
 
 # Uncomment this in case dave filters shall be modified, remember to update JIRA number
 #echo "  * SKCMS-XXXX: Importing crc/etable/dave_filter/*.etab into database"
