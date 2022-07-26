@@ -114,7 +114,7 @@ def ctf_hhmm(time):
     return str(time)[-5:-3] + str(time)[-2:]
 
 
-def create_new_activity(last_activity=None, activity='leg', car='', code='', num='', date='', dep='', arr='', dep_stn='', arr_stn='', ac_typ='', cockpit_employer='', cabin_employer='', ac_owner='', trip_num=0, num_activities=0):
+def create_new_activity(last_activity=None, activity='leg', car='', code='', num='', date='', dep='', arr='', dep_stn='', arr_stn='', ac_typ='', trip_num=0, num_activities=0):
     if last_activity:
         last_flno, last_arr, last_arr_stn = last_activity.get_activity_info()
         flno = num and int(num) or last_flno+1
@@ -124,10 +124,10 @@ def create_new_activity(last_activity=None, activity='leg', car='', code='', num
             assert dep_stn == last_arr_stn, 'Implausible cxn %s-%s' % (last_arr_stn, dep_stn)
         else:
             dep_stn = last_arr_stn
-        the_activity = Activity(activity=activity, car=car, code=code, flno=flno, date=date, dep=dep, arr=arr, dep_stn=dep_stn, arr_stn=arr_stn, ac_typ=ac_typ, cockpit_employer=cockpit_employer, cabin_employer=cabin_employer, ac_owner=ac_owner, num_activities=num_activities)
+        the_activity = Activity(activity=activity, car=car, code=code, flno=flno, date=date, dep=dep, arr=arr, dep_stn=dep_stn, arr_stn=arr_stn, ac_typ=ac_typ, num_activities=num_activities)
     else:
         flno = num and int(num) or ''
-        the_activity = Activity(activity=activity, car=car, code=code, flno=flno, date=date, dep=dep, arr=arr, dep_stn=dep_stn, arr_stn=arr_stn, ac_typ=ac_typ, cockpit_employer=cockpit_employer, cabin_employer=cabin_employer, ac_owner=ac_owner, trip_num=trip_num, num_activities=num_activities)
+        the_activity = Activity(activity=activity, car=car, code=code, flno=flno, date=date, dep=dep, arr=arr, dep_stn=dep_stn, arr_stn=arr_stn, ac_typ=ac_typ, trip_num=trip_num, num_activities=num_activities)
     return the_activity
 
 
@@ -183,7 +183,7 @@ class CTF(object):
     def get_last_activity(self):
         return self.activities and self.activities[-1] or None
 
-    def create_activity(self, activity='leg', car='', code='', num='', date='', dep='', arr='', dep_stn='', arr_stn='', ac_typ='', cockpit_employer='', cabin_employer='', ac_owner=''):
+    def create_activity(self, activity='leg', car='', code='', num='', date='', dep='', arr='', dep_stn='', arr_stn='', ac_typ=''):
         if dep:
             # Create full dep/arr including date
             dep = make_abstime(date, dep)
@@ -195,7 +195,7 @@ class CTF(object):
             dep = offset_time(arr, -1)
             date = ''
 
-        the_activity = create_new_activity(activity=activity, car=car, code=code, num=num, date=date, dep=dep, arr=arr, dep_stn=dep_stn, arr_stn=arr_stn, ac_typ=ac_typ, cockpit_employer=cockpit_employer, cabin_employer=cabin_employer, ac_owner=ac_owner, num_activities=self.num_activities())
+        the_activity = create_new_activity(activity=activity, car=car, code=code, num=num, date=date, dep=dep, arr=arr, dep_stn=dep_stn, arr_stn=arr_stn, ac_typ=ac_typ, num_activities=self.num_activities())
         self.add_activity(the_activity)
         return
 
@@ -231,14 +231,11 @@ class CTF(object):
     def make_trip_name(self, num):
         return '%s%03d' % (custom.trip_name, num)
 
-    def create_activity_on_trip(self, activity='leg', car='', code='', num='', date='', dep='', arr='', dep_stn='', arr_stn='', ac_typ='', cockpit_employer='', cabin_employer='', ac_owner=''):
+    def create_activity_on_trip(self, activity='leg', car='', code='', num='', date='', dep='', arr='', dep_stn='', arr_stn='', ac_typ=''):
         the_activity = self.get_last_trip().add_activity(activity=activity,
                                                          car=car, code=code, num=num,
                                                          date=date, dep=dep, arr=arr,
-                                                         dep_stn=dep_stn, arr_stn=arr_stn, ac_typ=ac_typ,
-                                                         cockpit_employer=cockpit_employer,
-                                                         cabin_employer=cabin_employer,
-                                                         ac_owner=ac_owner)
+                                                         dep_stn=dep_stn, arr_stn=arr_stn, ac_typ=ac_typ)
         self.add_activity(the_activity)
 
     # Crew methods
@@ -450,7 +447,7 @@ class CTF(object):
 
 class Activity(object):
 
-    def __init__(self, activity='leg', car='', code='', flno=0, date='', dep='', arr='', dep_stn='', arr_stn='', ac_typ='', cockpit_employer='', cabin_employer='', ac_owner='', trip_num=0, num_activities=0):
+    def __init__(self, activity='leg', car='', code='', flno=0, date='', dep='', arr='', dep_stn='', arr_stn='', ac_typ='', trip_num=0, num_activities=0):
         # Values may be decoded if the come diectly from Gherkin step
         self.activity=activity
         self.set_car(car)
@@ -460,7 +457,6 @@ class Activity(object):
         self.set_dep_arr_stn(activity, dep_stn, arr_stn, num_activities)
         self.set_ac_typ(ac_typ)
         self.set_date(date)
-        self.set_employer(cockpit_employer, cabin_employer, ac_owner)
 
         self.activity_num = 1
         self.freq = '1234567'
@@ -527,11 +523,6 @@ class Activity(object):
         else:
             self.date = str(self.arrival)[:-5]
 
-    def set_employer(self, cockpit_employer, cabin_employer, ac_owner):
-        self.cockpit_employer = cockpit_employer or self.car
-        self.cabin_employer = cabin_employer or self.car
-        self.ac_owner = ac_owner or self.car
-
     def get_activity_info(self):
         return(self.flight_num, self.arrival, self.arr_stn)
 
@@ -591,7 +582,7 @@ class Activity(object):
     def get_ctf_line(self, custom_keys=[]):
         """
         Leg:
-        JA 4711 * 1 GOT CDG 0800 1000 0 12345 20030706 20030805 737 [JA 4712 * 1] /SKN/SKN/SK
+        JA 4711 * 1 GOT CDG 0800 1000 0 12345 20030706 20030805 737 [JA 4712 * 1]
         Ground duty:
         AB12 * MAD 0800 0100 12345 20030706 20030805 * *
         """
@@ -616,13 +607,14 @@ class Activity(object):
             arr = ctf_hhmm(self.arrival)
             day_diff = int((self.arrival.day_floor() - self.departure.day_floor()) / RelTime(24, 0))
 
-            ret = '%s %s * 1 %s %s %s %s %s %s %s %s %s %s /%s/%s/%s\n' % \
+            # FIXME: Make it possible to set employer!
+            # ret = '%s %s * 1 %s %s %s %s 0 %s %s %s %s %s /SKN/SKN/SK\n' % \
+            ret = '%s %s * 1 %s %s %s %s %s %s %s %s %s %s\n' % \
                   (self.car, self.flight_num,
                    self.dep_stn, self.arr_stn, dep, arr, day_diff,
                    self.freq, dep_date, arr_date,
                    self.ac_typ,
-                   self.get_ctf_onward_flight(),
-                   self.cockpit_employer, self.cabin_employer, self.ac_owner,
+                   self.get_ctf_onward_flight()
                   )
             if len(custom_keys) > 0:
                 custom_attributes = ['"%s"' % self.custom_attributes.get(key, '') for key in custom_keys]
@@ -711,7 +703,7 @@ class Trip(object):
     def get_num_activities(self):
         return len(self.activities)
 
-    def add_activity(self, the_activity=None, activity='', car='', code='', num='', date='', dep='', arr='', dep_stn='', arr_stn='', ac_typ='', cockpit_employer='', cabin_employer='', ac_owner=''):
+    def add_activity(self, the_activity=None, activity='', car='', code='', num='', date='', dep='', arr='', dep_stn='', arr_stn='', ac_typ=''):
         if not the_activity:
             last_activity = self.activities and self.activities[-1] or None
             the_activity = create_new_activity(last_activity=last_activity,
@@ -719,9 +711,6 @@ class Trip(object):
                                                date=date, dep=dep, arr=arr,
                                                dep_stn=dep_stn, arr_stn=arr_stn,
                                                ac_typ=ac_typ,
-                                               cockpit_employer=cockpit_employer,
-                                               cabin_employer=cabin_employer,
-                                               ac_owner=ac_owner,
                                                trip_num=self.num,
                                                num_activities=self.get_num_activities())
 

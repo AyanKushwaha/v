@@ -247,6 +247,22 @@ export %last_perf_date_for_act_of_type_for_ac_qual_as_student%(String type, Stri
                   01jan1986)
           );
 
+/*
+SKCMS-2473:
+Due to Corona, some spring web trainings are postponed to autumn.
+This means that spring PC and autumn PC/OPC can be scheduled in the same season.
+This variable is used to exclude the delayed PC activities when considering assist position
+and when verifying that crew holds all required documents (PC/OPC).
+
+This variable shall be removed after autumn 2020 delayed PC activities are completed.
+*/
+%delayed_pc_exception_corona% =
+  leg.%is_forced_pc% and /* The delayed PC activity must be marked as PC FORCED */
+  leg.%qual% = "38" and /* Only applicable for 38 crew */
+  leg.%start_utc% > 01Jul2020 and /* Only valid if the delayed activity is scheduled during autumn 2020 */
+  leg.%end_utc% < 01Jan2021;
+
+
 %match_roster_date_and_type%(abstime date, string ac_qual, string type, string checktype) =
   leg.%start_hb% < date and
   leg.%start_hb% >= %pp_start% and
@@ -262,8 +278,8 @@ export %last_perf_date_for_act_of_type_for_ac_qual_as_student%(String type, Stri
        leg.%is_skill_test%
      else
        if checktype in sims_logged_different then
-         
-         leg.%group_code% = checktype and %leg_is_own_sim%
+         /* SKCMS-2473: %delayed_pc_exception_corona% shall be removed after autumn 2020 delayed PC activites are completed. */
+         leg.%group_code% = checktype and %leg_is_own_sim% and not %delayed_pc_exception_corona%
        else
          leg.%group_code% = type);
 
@@ -640,6 +656,7 @@ export %first_recurrent_doc_expiry_date% =
   %first_recurrent_doc_expiry_date_at_date%(%pp_start%);
 
 set rec_doc_per_qual = "LC", "PC", "OPC";
+
 
 %first_recurrent_doc_expiry_date_at_date%(Abstime end_date) =
   default(
@@ -1267,7 +1284,7 @@ table correct_recurrent_sim(String type) =
     -, "OPCA5", "OPCA4" -> true;
     /* A PC includes an OPC */
     true, -, "PC" -> %check_qual%(type);
-    true, -, "OPC" -> true;
+    true, -, "OPC" -> not any(leg(duty), %delayed_pc_exception_corona%); /* SKCMS-2473: %delayed_pc_exception_corona% shall be removed after autumn 2020 delayed PC activites are completed. */
     /* An OPC is nothing more */
     false, -, "OPC" -> %check_qual%(type);
     -, -, - -> false;
@@ -1638,7 +1655,7 @@ export %recurrent_type_expiry_date%(String type, String ac_qual, Abstime date) =
                     then %any_ac_qual%
                     else expiry_ac_qual,
       doc_expiry = 
-      if type = "OPCA5" or type = "OPCA3" then
+      if type = "OPCA5"or type = "OPCA3" then
          if not void(crew.%document_expiry_date_subtype%("REC", "OPCA3A5", doc_ac_qual, date)) and not void(crew.%document_expiry_date_subtype%("REC", type, doc_ac_qual, date)) then
              nmax(crew.%document_expiry_date_subtype%("REC", type, doc_ac_qual, date),crew.%document_expiry_date_subtype%("REC", "OPCA3A5", doc_ac_qual, date))
          else
@@ -3987,18 +4004,7 @@ export %opc_expiry_date% =
        default(%recurrent_type_expiry_date%("OPCA5", %any_ac_qual%, %rec_period_end%), 31Dec2099),
        default(%recurrent_type_expiry_date%("OPCA4", %any_ac_qual%, %rec_period_end%), 31Dec2099)) - 00:01;
 
-export %pc_qual_expiry_date% =
-  if leg.%qual% = "A3" then default(%recurrent_type_expiry_date%("PCA3", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01
-  else if leg.%qual% = "A4" then default(%recurrent_type_expiry_date%("PCA4", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01
-  else if leg.%qual% = "A5" then default(%recurrent_type_expiry_date%("PCA5", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01
-  else default(%recurrent_type_expiry_date%("PC", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01;
     
-export %opc_qual_expiry_date% =
-  if leg.%qual% = "A3" then default(%recurrent_type_expiry_date%("OPCA3", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01
-  else if leg.%qual% = "A4" then default(%recurrent_type_expiry_date%("OPCA4", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01
-  else if leg.%qual% = "A5" then default(%recurrent_type_expiry_date%("OPCA5", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01
-  else default(%recurrent_type_expiry_date%("OPC", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01;
-
 
 /* PC/OPC is a valid lookup for all but A3/A4 qualified crew */
 %pc_def_date% =
@@ -5209,10 +5215,6 @@ export %web_trg_assigned% =
 export %wt_latest_date% =
     nmin(%wt_pc_latest_date%, %wt_opc_latest_date%);
 
-export %wt_latest_date_for_qual% =
-    nmin(%wt_pc_latest_date_for_qual%, %wt_opc_latest_date_for_qual%);
-
-
 %wt_pc_latest_date% =
   default(
     round_up_month(leg.%pc_change_date%(%pp_start%, round_up_month(%pp_start% + 0:01))),
@@ -5222,20 +5224,8 @@ export %wt_latest_date_for_qual% =
 %wt_opc_latest_date% =
     round_up_month(%opc_expiry_date%);
 
-%wt_pc_latest_date_for_qual% =
-  default(
-    round_up_month(leg.%pc_change_date%(%pp_start%, round_up_month(%pp_start% + 0:01))),
-    round_up_month(%pc_qual_expiry_date%)
-  );
-
-%wt_opc_latest_date_for_qual% =
-    round_up_month(%opc_qual_expiry_date%);
-
 export %wt_earliest_date% =
   nmax(add_months(%wt_latest_date%, -3), %wt_course_publish_date%(%wt_latest_date%));
-
-export %wt_earliest_date_for_qual% =
-  nmax(add_months(%wt_latest_date_for_qual%, -3), %wt_course_publish_date%(%wt_latest_date_for_qual%));
 
 export %wt_start_date% =
   nmax(add_months(%wt_latest_date%, -2), %wt_course_publish_date%(%wt_latest_date%));
@@ -5280,6 +5270,25 @@ export %wt_code% =
   else
     model_training.%wt_cod_by_type_and_season%(%wt_airbus_qual%, base_utils.%year_nr%(%pc_expiry_date%), false);
 
+/*
+ * Special case during Corona crisis.
+ * Some crew completed web training during spring 2020 (WTA2 and WTB2) but could not perform PC.
+ * These crew got their PC document prolonged and the PC activity delayed to summer 2020.
+ *
+ * The following code searches the extended period (spring 2020) for completed web trainings and verifies that crew
+ * didn't perform any PC or OPC during this period. If so, rules qln_min_days_btw_pc_opc_and_web_trg_FC and
+ * trng_web_training_needed should not alert for missing web trainings within the original grace period.
+ *
+ * This should be removed after delayed PC and OPC activities are completed.
+*/
+%wt_code_spring_2020% = if %wt_airbus_qual% then "WTA2" else "WTB2";
+export %extended_wt_window_start% = 01Jan2020 00:00;
+export %extended_wt_window_end% = 01Jul2020 00:00;
+
+export %wt_completed_in_extended_window% =
+  let wt_last_performed_spring_2020 = default(%wt_last_performed%(%extended_wt_window_start%, %extended_wt_window_end%, %wt_code_spring_2020%), %abstimemin%);
+  wt_last_performed_spring_2020 > %abstimemin%
+  and void(%PC_last_performed%(wt_last_performed_spring_2020, %pp_start%));
 
 export %is_simulator_instructor% =  
             (%simulator_duty_code%= "IZ" or

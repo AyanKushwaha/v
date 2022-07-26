@@ -255,11 +255,8 @@ def subq_violation_report(st=None, en=None, rerun=False):
                         row = TM.rule_violation_log[key]
                         si = (row.si or "")
                         if si: si += ","
-                        if len(str(si)) > 192:
-                            continue
-                        else:
-                            row.si = si + "dup=True"
-                            continue
+                        row.si = si + "dup=True"
+                        continue
                     except:
                         pass
                     row = TM.rule_violation_log.create(key)

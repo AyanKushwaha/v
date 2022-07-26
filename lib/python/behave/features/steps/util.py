@@ -128,16 +128,6 @@ def verify_ac_type(ac_type):
         assert re.match(regexp, ac_type), 'Cannot handle ac type %s, use MD80' % ac_type
     return ac_type
 
-def verify_employer(employer):
-    """
-    SKS or none
-    """
-    employer = employer.encode().upper()
-    regexp = '^[A-Z]*$'
-    if employer:
-        assert re.match(regexp, employer), 'Cannot handle employer %s' % employer
-    return employer
-
 def verify_activity(activity):
     """
     leg, dh, ground

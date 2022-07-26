@@ -25,7 +25,7 @@ test_crew_emp_no = ['999991']
 class LMSQualReport:
     def __init__(self, test=False):
         self.test = test
-        self.default_delta_date = today_in_abstime()
+        self.default_delta_date = today_in_abstime().adddays(-1)
         self.assignment_writer = AssignmentReportWriter()
         self.deassignment_writer = DeassignmentReportWriter()
         self._stats = {
@@ -46,9 +46,9 @@ class LMSQualReport:
     def generate(self, crew_ids=[], delta_date=None):
         exec_start = time.time()
         if delta_date is None:
-            delta_date = today_in_abstime()
+            delta_date = today_in_abstime().adddays(-1)
         else:
-            delta_date = AbsTime(delta_date)
+            delta_date = AbsTime(delta_date).adddays(-1)
         
         log.info('Generating qualifications for LMS at {dt}...'.format(dt=delta_date))
 
@@ -66,10 +66,10 @@ class LMSQualReport:
     def _qualification_deltas(self,delta_date):
         
         crew_qual_table = tm.table('crew_qualification')
-        curr_day = delta_date 
+        prev_day = delta_date 
 
-        assignment_filter = crew_qual_table.search("(validfrom={0})".format(curr_day))
-        deassignment_filter = crew_qual_table.search("(validto={0})".format(curr_day))
+        assignment_filter = crew_qual_table.search("(validfrom={0})".format(prev_day))
+        deassignment_filter = crew_qual_table.search("(validto={0})".format(prev_day))
 
         # checking for assignment qualification data 
         for rec in assignment_filter:
@@ -136,10 +136,10 @@ class LMSQualReport:
     def _crew_employment_deltas(self, delta_date):
         
         crew_emp_table = tm.table('crew_employment')
-        curr_day = delta_date
+        prev_day = delta_date
 
-        assignment_filter = crew_emp_table.search("(validfrom={0})".format(curr_day))
-        deassignment_filter = crew_emp_table.search("(validto={0})".format(curr_day))
+        assignment_filter = crew_emp_table.search("(validfrom={0})".format(prev_day))
+        deassignment_filter = crew_emp_table.search("(validto={0})".format(prev_day))
 
         total_assignment_data = []
         total_deassignment_data = []
@@ -441,7 +441,7 @@ def abs_to_datetime(abstime):
 
 
 def extperkey_from_id(crew_id, date):
-    date = date.adddays(-1)
+    date = date.adddays(-2)
     extperkey = rave.eval('model_crew.%extperkey_at_date_by_id%("{crew_id}", {dt})'.format(
         crew_id=crew_id,
         dt=date)

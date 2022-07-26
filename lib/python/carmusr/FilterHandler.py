@@ -241,7 +241,6 @@ class CrewUserFilterHandler(FilterHandler):
         for crew_id, cache in self.crew_cache.items():
             crew = self.crew[crew_id]
             retired_intervals = cache.get(_RETIRED,[])
-            emp_period = cache.get(_EMPL_TMP,[])
             if not retired_intervals:
                 if  crew.retirementdate is None:
                     continue #No update needed
@@ -250,31 +249,8 @@ class CrewUserFilterHandler(FilterHandler):
                     crew.retirementdate = None
                     Errlog.log('CrewUserFilterHandler:: '+\
                                'Setting retirementdate for crewid %s to %s'% (crew.id, 'NONE'))
-            else: 
-                            
-                update_crew_retirement = True
-                ret_end_date = None
-                emp_end_date = None
-                # Only consider the latest retirement interval
-                for (start,end) in retired_intervals:
-                    ret_end_date = end
-                    break
-                # Only consider the latest emp period
-                for (start,end) in emp_period:
-                    emp_end_date = end
-                    break
-                # Check if a valid emp contract exists after retirement (rehire)
-                if emp_end_date > ret_end_date and emp_end_date > self.today:
-                    update_crew_retirement = False
-                    if crew.retirementdate is None:
-                        # Do nothing
-                        continue
-                    else:
-                        # Valid emp contract after retirement - Make retirement date empty
-                        print ("Updating Crew : " + str(crew.id) + " Emp End : " + str(emp_end_date) + " Ret End : " + str(ret_end_date))
-                        crew.retirementdate = None
-                if update_crew_retirement :        
-                    self.__update_crew_with_set(crew, retired_intervals)
+            else:         
+                self.__update_crew_with_set(crew, retired_intervals)
                     
                         
 
