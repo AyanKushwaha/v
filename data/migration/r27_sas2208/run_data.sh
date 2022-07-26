@@ -36,7 +36,8 @@ echo " - Processing migration tasks"
 # echo "  * SKCMS-1234: Some description"
 # python $CARMUSR/data/migration/$RELEASE/skcms-1234.py 2>&1 | tee $LOG_DIR/skcms-1234.log
 
-
+echo "  * SKCMS-2996: Salary implementation for ETOPS LIFUS and ETOPS LC"
+python $CARMUSR/data/migration/$RELEASE/skcms-2996.py 2>&1 | tee $LOG_DIR/skcms-2996.log
 
 
 # Uncomment this in case dave filters shall be modified, remember to update JIRA number
