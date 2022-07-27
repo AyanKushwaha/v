@@ -13,18 +13,21 @@ def fixit(dc, *a, **k):
     crewids = []
     now = get_now()
     ops = []
-    for rec in fixrunner.dbsearch(dc, 'crew_employment', ' AND '.join((
-                'validfrom <= %s' % now,
-                'validto > %s' % now,
+    for crew in fixrunner.dbsearch(dc, 'crew_employment', ' AND '.join((
+            "deleted = 'N'",
+            "next_revid = 0",
+            "validfrom <= '%s'" % now,
+            "validto > '%s'" % now,
         ))):
-        crewids.append(rec['crew'])
-    for entry in fixrunner.dbsearch(dc, 'crew', ' AND '.join((
-            "mcl = '%s'" % country,
-            "id IN (%s)" % ', '.join(["'%s'" % x for x in crewids]),
+        for entry in fixrunner.dbsearch(dc, 'crew', ' AND '.join((
+            "id = '%s'" % crew['crew'],
+            "empno <> '%s'" % crew['extperkey'],
+            "(retirementdate > '%s' OR retirementdate IS NULL)" % now,
             "deleted = 'N'",
             "next_revid = 0",
         ))):
-        ops.append(createOp('ground_task', 'W', gtrec))
+        entry['empno'] = crew['extperkey'] 
+        ops.append(createOp('crew', 'U', entry))
     return ops
 
     
