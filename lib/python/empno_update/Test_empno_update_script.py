@@ -35,11 +35,8 @@ def fixit(dc, *a, **k):
             "deleted = 'N'",
             "next_revid = 0",
         ))):
-           print "The value of id is ", entry['id'] , "crew is ", crew['crew'], " and the value of extperkey is " , crew['extperkey'] , "and empno is ", entry['empno'] , " and retirementdate is " , entry['retirementdate']
-           entry['empno'] = crew['extperkey'] 
-           ops.append(createOp('crew', 'U', entry))
-    return ops
-
+           print "The value of id is ", entry['id'] , "crew is ", crew['crew'], " and the value of extperkey is " , crew['extperkey'] , "and empno is ", entry['empno'] , " and retirementdate is " , entry['retirementdate']  
+        
     
 fixit.program = 'empno_update_script.py (2022-07-27)'
 
