@@ -8,13 +8,13 @@ import adhoc.fixrunner as fixrunner
 from AbsTime import AbsTime
 import datetime
 EPOCH = datetime.datetime(1986, 1, 1)
+ct = datetime.datetime.now()
 
 def get_now():
     """Return now as DAVE time."""
     timestamp = datetime.datetime.now() - EPOCH
     return timestamp.days * 1440 + timestamp.seconds / 60
 
-@fixrunner.once
 @fixrunner.run
 def fixit(dc, *a, **k):
     now = get_now()
@@ -37,12 +37,10 @@ def fixit(dc, *a, **k):
         ))):
            print "The value of id is ", entry['id'] , "crew is ", crew['crew'], " and the value of extperkey is " , crew['extperkey'] , "and empno is ", entry['empno'] , " and retirementdate is " , entry['retirementdate']
            entry['empno'] = crew['extperkey'] 
-           ops.append(createOp('crew', 'U', entry))
+           ops.append(fixrunner.createOp('crew', 'U', entry))
     return ops
 
-    
-fixit.program = 'empno_update_script.py (2022-07-27)'
-
+fixit.program = 'empno_update_script.py_(%s)' % ct
 
 if __name__ == '__main__':
     fixit()
