@@ -32,8 +32,8 @@ salary_perdim_article = {
     'JP': ['PERDIEM_SALDO']
 }
 salary_supervis_article = {
-    'DK': ['INST_LCI_LH', 'INST_LCI', 'INST_CLASS', 'INST_SKILL_TEST', 'INST_SIM', 'INST_SIM_SKILL_BR', 'INST_LIFUS_ACT', 'INST_NEW_HIRE', 'INST_CC'],
-    'NO': ['SIM_INSTR_FIXED', 'INST_NEW_HIRE', 'INST_SIM_SKILL_BR', 'INST_LIFUS_ACT', 'INST_CLASS', 'INST_SIM', 'INST_SKILL_TEST', 'INST_CC', 'INST_LCI', 'INST_LCI_LH'],
+    'DK': ['INST_LCI_LH', 'INST_LCI', 'INST_CLASS', 'INST_SKILL_TEST', 'INST_SIM', 'INST_SIM_SKILL_BR', 'INST_LIFUS_ACT', 'INST_NEW_HIRE', 'INST_CC', 'INST_LC_SVS', 'INST_SIM_SKILL_BR_SVS','INST_LIFUS_ACT_SVS','INST_GD_SVS'],
+    'NO': ['SIM_INSTR_FIXED', 'INST_NEW_HIRE', 'INST_SIM_SKILL_BR', 'INST_LIFUS_ACT', 'INST_CLASS', 'INST_SIM', 'INST_SKILL_TEST', 'INST_CC', 'INST_LCI', 'INST_LCI_LH', 'INST_LC_SVS', 'INST_SIM_SKILL_BR_SVS', 'INST_LIFUS_ACT_SVS','INST_GD_SVS'],
     'SE': ['INST_CLASS', 'INST_LCI', 'INST_CC', 'INST_LCI_LH', 'INST_LIFUS_ACT', 'INST_NEW_HIRE', 'INST_SIM', 'INST_SIM_SKILL_BR', 'INST_SKILL_TEST', 'SIM_INSTR_FIXED'],
     'CN': [],
     'HK': [],
@@ -430,8 +430,22 @@ class SupervisRun(ECGenericRun):
 
     def SIM_INSTR_FIXED(self, rec):
         return times100(rec.sim_instr_fixed)
+ 
+    def INST_GD_SVS(self, rec):
+         return times100(rec.ground_instr_svs)
 
+    def INST_LIFUS_ACT_SVS(self, rec):
+        return times100(rec.lifus_act_svs)
+        #return hours100(rec.lifus_act_svs)
 
+    def INST_SIM_SKILL_BR_SVS(self, rec):
+        return times100(rec.sim_skill_bd_svs)
+        #return hours100(rec.sim_skill_bd_svs)
+
+    def INST_LC_SVS(self, rec):
+        return times100(rec.inst_lci_svs)
+        #return hours100(rec.inst_lc_svs)
+    
 class OvertimeRun(ECGenericRun):
     def __init__(self, salary_system=None, crew_ids=[], salary_article_tm=None, report_start_date=None, report_first_absdate=None, report_end_date=None, report_last_absdate=None, release=True, test=False):
         ECGenericRun.__init__(self, salary_system, salary_article_tm, report_start_date, report_first_absdate, report_end_date, report_last_absdate, release, test)
