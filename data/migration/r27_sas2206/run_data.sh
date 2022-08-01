@@ -38,6 +38,9 @@ echo " - Processing migration tasks"
 echo "  * SKCMS-2922: Splitting ETOPS LIFUS/LC"
 python $CARMUSR/data/migration/$RELEASE/skcms-2922.py 2>&1 | tee $LOG_DIR/skcms-2922.log
 
+echo "  * SKCMS-2975: Add LC AP-POS to table training_log_set"
+python $CARMUSR/data/migration/$RELEASE/skcms-2975.py 2>&1 | tee $LOG_DIR/skcms-2975.log
+
 
 echo "  * SKCMS-2774: TE: Overtime Pay for checkout on day off for Link crew"
 python $CARMUSR/data/migration/$RELEASE/skcms-2774.py 2>&1 | tee $LOG_DIR/skcms-2774.log
