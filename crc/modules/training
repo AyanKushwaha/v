@@ -686,10 +686,57 @@ export %all_required_recurrent_performed_duty_end% =
    %all_required_recurrent_performed%(duty.%end_hb%);
 export %all_required_recurrent_performed_duty_start% =
    %all_required_recurrent_performed%(duty.%start_hb%);
+
+export %all_required_recurrent_performed_leg_end% = 
+   %all_required_recurrent_performed%(leg.%end_hb%);
+export %all_required_recurrent_performed_leg_start% =
+   %all_required_recurrent_performed%(leg.%start_hb%);
+
 export %all_required_recurrent_performed%(Abstime date) =
-  all(times(%nr_recurrent_types%), %recurrent_type_performed_ix%(%times_index_0%, date))
-  where (%valid_aoc_ix%(%times_index_0%, date) and
-         %valid_ac_qual_ix%(%times_index_0%, date));
+  if (crew.%is_mff% 
+      and (crew.%has_qln%("ACQUAL", "A2", leg.%start_hb%) or crew.%has_qln%("ACQUAL", "A3", leg.%start_hb%) or crew.%has_qln%("ACQUAL", "A5", leg.%start_hb%)))
+       then %recurrent_type_performed_with_matching_ac_qual%(date)
+  else
+      all(times(%nr_recurrent_types%), %recurrent_type_performed_ix%(%times_index_0%, date))
+      where (%valid_aoc_ix%(%times_index_0%, date) and
+            %valid_ac_qual_ix%(%times_index_0%, date));
+
+export %recurrent_type_performed_with_matching_ac_qual%(Abstime date) =
+    if(any(times(%nr_recurrent_types%),%recurrent_type_performed_ix%(%times_index_0%, date) = false  and
+      %check_matching_leg_qual%(%times_index_0%,date) = true))then
+         false
+    else
+        true;
+
+export %check_matching_leg_qual%(int ix, Abstime date) =
+    let missed_trining = %reqd_rec_desc_mff%(%recurrent_activity_ix%(ix,date), date);
+    if missed_trining in rec_doc then
+      if leg.%qual% = "A2" then
+        concat("LC (", duty.%qual%, ")") = default(missed_trining,"") or
+        concat("PC (", duty.%qual%, ")") = default(missed_trining,"") or
+        concat("OPC (", duty.%qual%, ")") = default(missed_trining,"")
+		  else 
+			   concat("PC", duty.%qual% ) = default(missed_trining,"") or
+            concat("OPC", duty.%qual%) = default(missed_trining,"")
+	  else
+	    all(times(%nr_recurrent_types%), %recurrent_type_performed_ix%(%times_index_0%, date))
+        where (%valid_aoc_ix%(%times_index_0%, date) and
+            %valid_ac_qual_ix%(%times_index_0%, date));
+
+%reqd_rec_desc_mff%(String rec_type, Abstime date) =
+    let ac_qual =
+        if rec_type = "LC" then
+            %recurrent_type_expiry_ac_qual%(rec_type, %active_ac_qual%, date)
+            
+        else 
+           %recurrent_type_expiry_ac_qual%(rec_type, %any_ac_qual%, date);
+    concat(rec_type,
+           if length(ac_qual) >= 2 then concat(" (", ac_qual, ")")
+           else "",
+           if %recurrent_refresher_reqd%(rec_type, date) then ""
+           else "");
+           
+set rec_doc = "LC (A2)","OPC (A2)","PC (A2)","OPCA3","PCA3","OPCA5","PCA5","PCA4","OPCA4","PCA3A5","OPCA3A5";
 
 export %recurrent_type_performed%(Int ix, Abstime date) =
     let rec_type = %_recurrent_group%(ix, date);
@@ -718,7 +765,7 @@ export %unperformed_recurrent_types%(Abstime date) =
          not %index_is_OPC_and_PC_required%(date));
 
 export %unperformed_recurrent_types_with_matching_ac_qual_str%(Abstime date) =
-  cat(times(%nr_recurrent_types%),  %reqd_rec_desc%(%recurrent_activity_ix%(%times_index_0%,date), date), ",")
+  cat(times(%nr_recurrent_types%),  %reqd_rec_desc%(%recurrent_activity_ix%(%times_index_0%,date), date),",")
   where (%is_unperformed_ix%(date) and %check_matching_duty_qual%(%times_index_0%,date) and 
          not %index_is_OPC_and_PC_required%(date));
 
@@ -737,8 +784,17 @@ export %unperformed_recurrent_types_with_matching_qual%(Abstime date) =
           true;
           
 %check_matching_duty_qual%(int ix, Abstime date) =
-    let missed_trining = %reqd_rec_desc%(%recurrent_activity_ix%(ix,date), date);
-    any(leg(trip),locate(leg.%qual%, missed_trining) > 0);
+     let missed_trining = %reqd_rec_desc%(%recurrent_activity_ix%(ix,date), date);
+     if leg.%is_blank_day% or leg.%is_standby%then 
+      true
+     else 
+      if (missed_trining in training_acqual) then
+        true
+      else
+        any(leg(trip),locate(leg.%qual%, missed_trining) > 0);
+
+set training_acqual ="PGT","LC","CRM";
+
     
     /*
     concat("LC (", cat(leg(trip) where (locate(leg.%qual%, missed_trining) > 0), leg.%qual%), ")") = missed_trining or
