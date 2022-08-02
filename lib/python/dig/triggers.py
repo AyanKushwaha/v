@@ -953,10 +953,9 @@ class CrewManifestRequestBuilderForArr:
                "deleted = 'N'",
                "next_revid = 0",
            ))):
-           list_country = entry['country']
+           list_country.append(entry['country'])
         
-        if self.__destCountry not in list_country:
-            print "The country is" , list_country , " and matching to ", self.__destCountry
+        if self.__destCountry not in list_country:       
             reportArgs = {
                 'fd': flight['fd'],
                 'origsuffix': origsuffix,
@@ -965,11 +964,19 @@ class CrewManifestRequestBuilderForArr:
                 'country': self.__destCountry,
                 'fileName': self.__fileName,
             }
-            request = reports.ReportRequest(self.__report, reportArgs, delta=True)
-            return (request, reports.ReportRequestContentType(), None)
         else:
-            return None
-
+            self.__report = 'report_sources.report_server.rs_crew_manifest_nonarr'
+            reportArgs = {
+                'fd': flight['fd'],
+                'origsuffix': origsuffix,
+                'udor': carmentime.fromCarmenTime(flight['udor']*1440).strftime("%Y%m%d"),
+                'adep': flight['adep'],
+                'country': self.__destCountry,
+                'fileName': "_API_for_flight_"  + flight['fd'].replace(" ", "_") + "_" + flight['adep'] + flight['ades'] + "_",
+        }
+        request = reports.ReportRequest(self.__report, reportArgs, delta=True)
+        return (request, reports.ReportRequestContentType(), None)         
+      
 
 # functions =============================================================={{{1
 
