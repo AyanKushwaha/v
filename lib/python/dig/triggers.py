@@ -13,14 +13,13 @@ __docformat__ = 'restructuredtext en'
 __metaclass__ = type
 
 # imports ================================================================{{{1
-import datetime, time, json
+import datetime, time, json, os
 from carmensystems.dig.framework import carmentime, utils
 from carmensystems.dig.framework.handler import MessageHandlerBase, ExitResult, SpawnChildrenAndCallNextHandlerResult, TextContentType
-from carmensystems.dig.framework.dave import DaveSearch
+from carmensystems.dig.framework.dave import DaveSearch, DaveConnector
 from carmensystems.dig.framework import errors
 from carmensystems.dig.framework import utils
 from carmensystems.dig.messagehandlers import reports
-
 
 # Trigger Handler classes ================================================{{{1
 
@@ -936,16 +935,28 @@ class CrewManifestRequestBuilderForArr:
         self.__logger = logger
         self.__report = report
         self.__fileName = fileName
+      
 
     def makeReportRequest(self, flight):
         # Prepare request for the new report handler
-
+        schema =os.environ['DB_SCHEMA']
+        url =os.environ['DB_URL']
+        dc = DaveConnector(url, schema)
+        list_country = []
         origsuffix = flight['origsuffix']
         if origsuffix is None:
             origsuffix = ''
         
-        if FlightTimeTrigger.__lookupAirportCountry(flight['adep']) != self.__destCountry:
-            print "The country is" , FlightTimeTrigger.__lookupAirportCountry(flight['adep']) , " and matching to ", self.__destCountry
+        flt = str(flight['adep'])
+        for entry in dbsearch(dc, 'airport', ' AND '.join((
+               "id = '%s'" % flt,
+               "deleted = 'N'",
+               "next_revid = 0",
+           ))):
+           list_country = entry['country']
+        
+        if self.__destCountry not in list_country:
+            print "The country is" , list_country , " and matching to ", self.__destCountry
             reportArgs = {
                 'fd': flight['fd'],
                 'origsuffix': origsuffix,
@@ -953,10 +964,11 @@ class CrewManifestRequestBuilderForArr:
                 'adep': flight['adep'],
                 'country': self.__destCountry,
                 'fileName': self.__fileName,
-             }
-             request = reports.ReportRequest(self.__report, reportArgs, delta=True)
-
-        return (request, reports.ReportRequestContentType(), None)
+            }
+            request = reports.ReportRequest(self.__report, reportArgs, delta=True)
+            return (request, reports.ReportRequestContentType(), None)
+        else:
+            return None
 
 
 # functions =============================================================={{{1
@@ -976,6 +988,12 @@ def level_1_query(dc, query, columns):
         yield d
         R = l1conn.readRow()
     l1conn.endQuery()
+
+def dbsearch(dc, entity, expr=[], withDeleted=False):
+        """Search entity and return list of DCRecord objects."""
+        if isinstance(expr, str):
+            expr = [expr]
+        return list(dc.runSearch(DaveSearch(entity, expr, withDeleted)))
 
 
 # modeline ==============================================================={{{1
