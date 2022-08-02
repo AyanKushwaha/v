@@ -923,6 +923,41 @@ class CrewManifestRequestBuilderMail:
 
         return (request, reports.ReportRequestContentType(), None)
 
+# CrewManifestRequestBuilderForArr  ============================================{{{2
+class CrewManifestRequestBuilderForArr:
+    """
+    Generates report request string for arrival flights for a country 
+    Crew Manifest IE
+    """
+
+    def __init__(self, destCountry=None, logger=None,
+            report='report_sources.report_server.rs_crew_manifest', fileName=None):
+        self.__destCountry = destCountry
+        self.__logger = logger
+        self.__report = report
+        self.__fileName = fileName
+
+    def makeReportRequest(self, flight):
+        # Prepare request for the new report handler
+
+        origsuffix = flight['origsuffix']
+        if origsuffix is None:
+            origsuffix = ''
+        
+        if FlightTimeTrigger.__lookupAirportCountry(flight['adep']) != self.__destCountry:
+            print "The country is" , FlightTimeTrigger.__lookupAirportCountry(flight['adep']) , " and matching to ", self.__destCountry
+            reportArgs = {
+                'fd': flight['fd'],
+                'origsuffix': origsuffix,
+                'udor': carmentime.fromCarmenTime(flight['udor']*1440).strftime("%Y%m%d"),
+                'adep': flight['adep'],
+                'country': self.__destCountry,
+                'fileName': self.__fileName,
+             }
+             request = reports.ReportRequest(self.__report, reportArgs, delta=True)
+
+        return (request, reports.ReportRequestContentType(), None)
+
 
 # functions =============================================================={{{1
 
