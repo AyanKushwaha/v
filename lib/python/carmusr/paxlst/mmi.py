@@ -40,6 +40,7 @@ submitter = 'manifest_manual_jobs'
 
 # Will be filled in by end user the first time 'leg_apis_text()' is called.
 mail_address = None
+valid_countries = None
 
 def append_fo_to_RU(c):
     "to know if 'RU' is flyover og dest/dep country"
