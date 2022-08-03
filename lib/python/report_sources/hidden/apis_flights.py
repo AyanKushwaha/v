@@ -164,7 +164,9 @@ class Report(SASReport):
             for country in (f.start_country, f.end_country):
                 # To make it possible for the same flight to be listed for
                 # both the departure and arrival countries.
-                if f.dk_nsch:
+                if f.ie_neu:
+                    apis_countries = rave.set('leg.apis_countries_ie').members()
+                elif f.dk_nsch:
                     apis_countries = rave.set('leg.apis_countries_dk').members()
                 elif f.no_nsch:
                     apis_countries = rave.set('leg.apis_countries_no').members()
@@ -260,7 +262,8 @@ def get_flights(startdate=None, enddate=None):
             'start_country': 'report_crewlists.%leg_start_country%',
             'end_country': 'report_crewlists.%leg_end_country%',
             'no_nsch': 'report_crewlists.%leg_is_no_nsch%',
-            'dk_nsch': 'report_crewlists.%leg_is_dk_nsch%'
+            'dk_nsch': 'report_crewlists.%leg_is_dk_nsch%',
+            'ie_neu': 'report_crewlists.%leg_is_ie_neu%'
         })
     return ri.eval('sp_crew')
 
