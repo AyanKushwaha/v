@@ -30,13 +30,12 @@ def generate(*a, **k):
 
 def _generate(fd=None, origsuffix='', udor=None, adep=None, country=None, fileName=None):
     return_list = []
-    dir = os.path.join(os.environ['CARMUSR'], 'current_carmdata/REPORTS/EXPORT/ARR_NOT_REQ/')
     for message in cm.crewlist(fd=fd, udor=udor, adep=adep, country=country):
         # Will result in a list of text messages.
         return_list.append({
             'content':  message,
             'content-type': default_content_type,
-            'destination': [('ARR_NOT_REQ',{})],
+            'destination': [('DUMMY_DESTINATION',{})],
             'filename': fileName,
         })
     return return_list, True
