@@ -477,9 +477,9 @@ def markDaysAsBought(buy):
                 if comment == "":
                     try:
                         if is_svs:
-                            comment, time_hh_sby,time_mm_sby,time_hh_prod,time_mm_prod,time_hh,time_mm,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, "Buy_Day_Form")()
+                            comment, time_hh_sby,time_mm_sby,time_hh_prod,time_mm_prod,time_hh,time_mm,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, start_time, end_time, "Buy_Day_Form")()
                         else:
-                            comment,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, "Buy_Day_Form")()
+                            comment,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, start_time, end_time, "Buy_Day_Form")()
 
                     except CancelBuyDay:
                         return
@@ -524,7 +524,7 @@ def markDaysAsBought(buy):
                     try:
                         if is_svs:
 
-                            comment,time_hh_sby,time_mm_sby,time_hh_prod,time_mm_prod,time_hh,time_mm,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, "Buy_Day_Form")()
+                            comment,time_hh_sby,time_mm_sby,time_hh_prod,time_mm_prod,time_hh,time_mm,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, start_time, end_time, "Buy_Day_Form")()
                    
                     except CancelBuyDay:
                         return
@@ -570,7 +570,7 @@ def markDaysAsBought(buy):
 
 class BuyDayCommentForm(Cfh.Box):
 
-    def __init__(self, crew_id, is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, *args):
+    def __init__(self, crew_id, is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, start_time, end_time, *args):
         Cfh.Box.__init__(self, *args)
         self.setText('Buy Day / Overtime checkout on Fday')
         if is_svs or is_emj:
@@ -579,34 +579,35 @@ class BuyDayCommentForm(Cfh.Box):
             change = True
             #self.Bought_day_off_label = Cfh.Label(self, "Bought_day_Off", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(2, 0)), "Bought Day Off")
             for row in TM.bought_days_svs.search('(crew='+crew_id+')'):
-                hr_sby = " "
-                min_sby = " "
-                hr_prod = " "
-                min_prod = " "
-                hr= " "
-                min = " "
-                if row.account_name == 'BOUGHT_SBY':
-                    hr_sby=row.hours
-                    min_sby=row.minutes
-                elif row.account_name == 'BOUGHT_PROD':
-                    hr_prod = row.hours
-                    min_prod = row.minutes
-                else:
-                    hr= row.hours
-                    min = row.minutes
-            
-                self.time_hh_sby = Cfh.String(self, "HH_sby", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 9)), 2, hr_sby)
-                self.time_mm_sby = Cfh.String(self, "MM_sby",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 13)), 2, min_sby)
+                if row.start_time <= start_time <= row.end_time:
+                    hr_sby = " "
+                    min_sby = " "
+                    hr_prod = " "
+                    min_prod = " "
+                    hr= " "
+                    min = " "
+                    if row.account_name == 'BOUGHT_SBY':
+                        hr_sby=row.hours
+                        min_sby=row.minutes
+                    elif row.account_name == 'BOUGHT_PROD':
+                        hr_prod = row.hours
+                        min_prod = row.minutes
+                    else:
+                        hr= row.hours
+                        min = row.minutes
+
+                    self.time_hh_sby = Cfh.String(self, "HH_sby", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 9)), 2, hr_sby)
+                    self.time_mm_sby = Cfh.String(self, "MM_sby",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 13)), 2, min_sby)
                 
                     
-                self.time_hh_prod = Cfh.String(self, "HH_prod", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(4, 9)), 2, hr_prod)
-                self.time_mm_prod = Cfh.String(self, "MM_prod",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(4, 13)), 2, min_prod)
+                    self.time_hh_prod = Cfh.String(self, "HH_prod", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(4, 9)), 2, hr_prod)
+                    self.time_mm_prod = Cfh.String(self, "MM_prod",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(4, 13)), 2, min_prod)
                 
                     
 
-                self.time_hh = Cfh.String(self, "HH_duty", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(6, 9)), 2, hr)
-                self.time_mm = Cfh.String(self, "MM_duty",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(6, 13)), 2, min)
-                change = False 
+                    self.time_hh = Cfh.String(self, "HH_duty", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(6, 9)), 2, hr)
+                    self.time_mm = Cfh.String(self, "MM_duty",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(6, 13)), 2, min)
+                    change = False 
             if change:
                 self.time_hh_sby = Cfh.String(self, "HH_sby", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 9)), 2, " ")
                 self.time_mm_sby = Cfh.String(self, "MM_sby",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 13)), 2, " ")
