@@ -1,6 +1,9 @@
-'''
+"""
 Calibration Trip Rule KPIs report
-'''
+"""
+
+
+from __future__ import absolute_import
 
 import carmusr.calibration.report_rule_kpis as rule_kpi_report
 

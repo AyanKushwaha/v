@@ -1,6 +1,11 @@
 """
 Calibration Rave code generation for SI components.
 """
+
+
+from __future__ import absolute_import
+import six
+import io
 import os
 from collections import defaultdict
 
@@ -121,7 +126,7 @@ class SIRegistrationHandler(object):
     def get_all_required_si_import_rows(self):
         rows = [""]
         rave_modules = set()
-        for si_comp_rules in self.si_component_rules.itervalues():
+        for si_comp_rules in six.itervalues(self.si_component_rules):
             for si_comp_rule in si_comp_rules:
                 rave_modules |= si_comp_rule.rave_modules
         for module in sorted(rave_modules):
@@ -186,7 +191,7 @@ class SIRegistrationHandler(object):
         if not self.rave_module_exist():
             return False
 
-        with open(self.get_rave_module_full_path(), "r") as f:
+        with io.open(self.get_rave_module_full_path(), "br" if six.PY2 else "tr") as f:
             prev_cont = f.read()
 
         return prev_cont == self.get_rave_code_as_string()
@@ -298,7 +303,7 @@ def create_rave_module(pure_fallback=False):
         msg = "Generate SI Rave Module, Fallback Version\n\n"
     else:
         if basics.no_or_empty_local_plan():
-            Errlog.set_user_message("The command requires a loaded local plan which not is empty.")
+            Errlog.set_user_message("The command requires a loaded local plan which is not empty.")
             return
         si_handler = SIRegistrationHandler()
         msg = "Generate SI Rave Module\n\n"
@@ -323,7 +328,7 @@ def create_rave_module(pure_fallback=False):
     if not Gui.GuiYesNo(__name__, msg):
         return
 
-    with open(si_handler.get_rave_module_full_path(), "w") as f:
+    with io.open(si_handler.get_rave_module_full_path(), "bw" if six.PY2 else "tw") as f:
         f.write(si_handler.get_rave_code_as_string())
 
     msg = "'%s' has been %s.\n" % (si_handler.get_rave_module_full_path_nice_format(), action_string)

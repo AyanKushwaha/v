@@ -1,4 +1,4 @@
-'''
+"""
 Created on 21 Apr 2020
 
 @author: Stefan Hammar
@@ -7,17 +7,23 @@ Some code to extract information about rules in the loaded rule set. The followi
 * An XML-file per rule set (produced on demand using the Rave compiler).
 * Rave source files.
 * The loaded rule-set.
-'''
+"""
 
+
+from __future__ import absolute_import
+import six
+import io
+from six.moves import range
 import os
 import re
 from lxml import etree
 import time
 
-import carmensystems.basics.l10n.utilities as l10n_util
 import carmensystems.rave.api as rave
 import Errlog
 import Names
+
+from carmusr.calibration.util import basics
 
 
 class _BasicRuleInfo(object):
@@ -53,8 +59,8 @@ class Rule(_BasicRuleInfo):
     re_variable = re.compile(r"[\da-z_]*\.?%[\da-z_]+%")
 
     def __init__(self, name, file_path, rave_compile_time):
-        self.name = l10n_util.encode(name)
-        self._file_path = l10n_util.encode(file_path)
+        self.name = basics.encode_if_py2(name)
+        self._file_path = basics.encode_if_py2(file_path)
         self.skip_silently = False  # Only used for virtual rules (to imitate a not existing real rule).
         self._rave_compile_time = rave_compile_time
         self._child_module = {}  # Used to add module name to variables in Rave expressions
@@ -62,12 +68,12 @@ class Rule(_BasicRuleInfo):
     @staticmethod
     def lower_except_string_literals(text):
         st = text.split('"')
-        for n in xrange(0, len(st), 2):
+        for n in range(0, len(st), 2):
             st[n] = st[n].lower()
         return '"'.join(st)
 
     def add_child(self, child_full_name):
-        child_full_name = l10n_util.encode(child_full_name)
+        child_full_name = basics.encode_if_py2(child_full_name)
         if child_full_name.find(".") == -1:  # Skip if keyword
             return
         child_module, child_name = tuple(child_full_name.split("."))
@@ -106,7 +112,7 @@ class Rule(_BasicRuleInfo):
             fms = "{}. Warning in '{}'. The Rave file '{}' has been changed since the rule set was created. Please compile and reload the rule set."
             Errlog.log(fms.format("CALIBRATION", __name__, os.path.basename(self._file_path)))
 
-        with open(self._file_path) as rave_file:
+        with io.open(self._file_path, "rb" if six.PY2 else "rt") as rave_file:
             file_text = rave_file.read()
         file_text = self.re_comment.sub("", file_text)
         file_text = self.lower_except_string_literals(file_text)
@@ -205,21 +211,17 @@ class RuleInfoHandler(object):
         self._xref_file_path_lock = self._xref_file_path + ".lck"
         self.refresh_xref_file()
         self._creation_time_for_used_xref_file = os.path.getmtime(self._xref_file_path)
-        self.rules = etree.parse(self._xref_file_path, etree.XMLParser(target=MyTarget(self.get_compilation_time_for_rule_set())))
+        self.rules = etree.parse(self._xref_file_path, etree.XMLParser(target=MyTarget(get_compilation_time_for_rule_set(self._rule_set_name))))
         Errlog.log("CALIBRATION. Log. A new instance of the RuleInfoHandler class has been created.")
 
     def instance_can_be_kept(self):
         return self.xml_file_is_up_to_date() and self.xml_file_is_still_the_same()
 
     def xml_file_is_up_to_date(self):
-        return os.path.exists(self._xref_file_path) and os.path.getmtime(self._xref_file_path) > self.get_compilation_time_for_rule_set()
+        return os.path.exists(self._xref_file_path) and os.path.getmtime(self._xref_file_path) > get_compilation_time_for_rule_set(self._rule_set_name)
 
     def xml_file_is_still_the_same(self):
         return self._creation_time_for_used_xref_file == os.path.getmtime(self._xref_file_path)
-
-    def get_compilation_time_for_rule_set(self):
-        doc_file_path = os.path.expandvars('$CARMTMP/crc/rule_set/GPC/{}.xml'.format(self._rule_set_name))
-        return os.path.getmtime(doc_file_path)
 
     def refresh_xref_file(self):
         if self.xml_file_is_up_to_date():
@@ -274,6 +276,14 @@ class RuleInfoHandler(object):
             Errlog.log("             Please correct the Rave code and recompile the rule set to avoid problems.")
         if os.path.exists(xref_file_path_tmp):
             os.rename(xref_file_path_tmp, self._xref_file_path)
+
+
+def get_compilation_time_for_rule_set(rule_set_name):
+    doc_file_path = os.path.expandvars('$CARMTMP/crc/rule_set/GPC/{}.xml'.format(rule_set_name))
+    if not os.path.exists(doc_file_path):  # Magic
+        Errlog.log("CALIBRATION. Warning. The file '{}' does not exist. We assume the loaded rule set file is very old.".format(doc_file_path))
+        return 0
+    return os.path.getmtime(doc_file_path)
 
 
 if __name__ == "__main__":

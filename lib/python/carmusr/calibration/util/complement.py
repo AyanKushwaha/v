@@ -1,3 +1,5 @@
+from __future__ import absolute_import
+from six.moves import range
 from itertools import compress
 import re
 
@@ -55,7 +57,7 @@ class CrewCategories(object):
         unknown_codes = []
         pos_used = []
         # Accept both ',' and space as separators
-        for pos_code in filter(None, re.split('[, ]+', pos_comma_sep)):
+        for pos_code in (pc for pc in re.split('[, ]+', pos_comma_sep) if pc):
             try:
                 # positions start on 0
                 pos_used.append(cls.ccode2pos(pos_code))
