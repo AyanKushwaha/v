@@ -8,9 +8,9 @@ SKCMS-2817 EC: Link FD instructor pay
 import adhoc.fixrunner as fixrunner
 from AbsTime import AbsTime
 
-__version__ = '2022-07_24_'
+__version__ = '2022-07_31_'
 
-validfrom = int(AbsTime('01AUG2022 00:00'))
+validfrom = int(AbsTime('01MAY2022 00:00'))
 validto = int(AbsTime('31DEC2035 00:00'))
 
 
@@ -39,7 +39,7 @@ def fixit(dc, *a, **k):
         'extartid':'070A',
         'validfrom': validfrom,
         'validto':  validto,
-        'intartid': 'INST_SIM_SKILL_BR_SVS',
+        'intartid': 'INST_SIM_BR_SVS',
         'note': 'Simulator Instructor for DK'
     }))
     ops.append(fixrunner.createOp('salary_article', 'N', {
@@ -71,7 +71,7 @@ def fixit(dc, *a, **k):
         'extartid':'2326',
         'validfrom': validfrom,
         'validto':  validto,
-        'intartid': 'INST_SIM_SKILL_BR_SVS',
+        'intartid': 'INST_SIM_BR_SVS',
         'note': 'Simulator Instructor for NO'
     }))
     ops.append(fixrunner.createOp('salary_article', 'N', {
