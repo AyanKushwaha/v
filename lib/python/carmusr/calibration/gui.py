@@ -1,8 +1,12 @@
-'''
+"""
 Created on 14 Aug 2017
 
 @author: danielr
-'''
+"""
+
+
+from __future__ import absolute_import
+from six.moves import range
 
 import carmensystems.rave.api as rave
 from Localization import MSGR

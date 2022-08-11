@@ -1,27 +1,44 @@
+from __future__ import absolute_import
+from __future__ import division
+from six.moves import range
+from six.moves import zip
+from collections import defaultdict, OrderedDict
+import sys
 
 from Localization import MSGR
 import carmensystems.publisher.api as prt
 import carmensystems.rave.api as rave
-import Cui
 
 from carmusr.calibration.mappings import date_extensions as de
 from carmusr.calibration.mappings import report_generation as rg
 from carmusr.calibration.mappings import studio_palette
-from carmusr.calibration.util import compare_plan
 from carmusr.calibration.util import basics
 from carmusr.calibration.util import report_rules
 from carmusr.calibration.util import report_util as ru
-from carmusr.calibration.util import calibration_rules as cr
+
+BAR_COLORS_MULTI_RULES = [studio_palette.Blue,
+                          studio_palette.JeppesenLightBlue,
+                          studio_palette.JeppesenBlue,
+                          studio_palette.Slate]
 
 
-class RuleViolationsOverTime(report_rules._RuleViolationsOverStationOrTime):
+class ValuesForOneRule(object):
+
+    def __init__(self, cri, cat_handler, consider_sub_cats=False):
+        self.rsh_total = report_rules.RuleSummaryHandler(consider_sub_cats)
+        self.rshs = defaultdict(report_rules.RuleSummaryHandler)
+        self.cri = cri
+        self.cat_handler = cat_handler
+
+
+class RuleViolationsOverTime(report_rules._RuleAnalysisReport):
 
     @staticmethod
     def get_basic_header_text():
         return ru.CalibReports.VOT.title
 
     def get_header_text(self):
-        return self.get_basic_header_text() + (MSGR(" - Table View") if self.arg('show') == "TABLE" else "")
+        return self.get_basic_header_text() + (MSGR(" - Table View") if self.is_table_view() else "")
 
     @staticmethod
     def get_form_handler(_variant):
@@ -34,17 +51,8 @@ class RuleViolationsOverTime(report_rules._RuleViolationsOverStationOrTime):
         ix_rule, = rave.eval(param_variable)
         return "%s" % ix_rule
 
-    def __init__(self, *args, **kw):
-        report_rules._RuleViolationsOverStationOrTime.__init__(self, *args, **kw)
-        self.violation_data_list = []
-        self.min_day = None
-        self.max_day = None
-
-    def show_categories_in_summary(self):
-        return len(self.violation_data_list) == 1 and self.violation_data_list[0].cat_handler.has_categories()
-
     def create(self):
-        self.setpaper(orientation=prt.LANDSCAPE)
+        self.setpaper(orientation=prt.LANDSCAPE, size=prt.A3 if self.is_table_view() else prt.A4)
 
         super(RuleViolationsOverTime, self).create()
 
@@ -69,6 +77,10 @@ class RuleViolationsOverTime(report_rules._RuleViolationsOverStationOrTime):
                 self.add_warnings_and_links()
                 return
 
+        self.values_per_rule_list = []
+        self.min_day = sys.maxsize
+        self.max_day = -sys.maxsize
+
         if len(rules) == 1:
             self.add_link_to_rule_details_report_for_rule = rules[0]
 
@@ -78,280 +90,242 @@ class RuleViolationsOverTime(report_rules._RuleViolationsOverStationOrTime):
         for rule_str in rules:
 
             cri = self.cr.get_rule_item(rule_str)
-            my_bags = self.get_bags_for_cri_and_write_warning_once(cri)
             level = cri.rule_level
-            my_rule_body_expr = cri.rule_body_expr
+            poc = report_rules.PlanningObjectCreator(self, cri)
+            values_for_this_rule = ValuesForOneRule(cri, poc.cat_handler, consider_sub_cats=self.is_table_view())
 
-            comp_key_var, cat_handler = self.get_comp_key_and_cat_handler(cri)
-            violation_data = report_rules.ViolationData(cat_handler)
+            for po, bag in poc.get_objects_and_bags():
 
-            is_valid_var = getattr(cri, cr.IS_VALID).rave_obj
-            limit_var = getattr(cri, cr.LIMIT).rave_obj
-            value_var = getattr(cri, cr.VALUE).rave_obj
-            bin_value = getattr(cri, cr.BIN).value()
+                values_for_this_rule.rsh_total.add_from_po(po)
 
-            for bag in my_bags:
-                is_valid, = rave.eval(bag, is_valid_var)
-                if not is_valid:
-                    # False or void
-                    continue
-                is_legal, = rave.eval(bag, my_rule_body_expr)
-                if is_legal is None:
-                    # Void rules body count as void valid, i.e. not at all
+                if not po.is_valid:
                     continue
 
-                if self.current_area_mode in (Cui.AcRotMode, Cui.LegMode):
-                    tripslice_or_crew_comp = 1
-                    num_crew = 1
-                else:
-                    tripslice_or_crew_comp = compare_plan.filtered_slice_from_bag(comp_key_var, bag)
-                    num_crew = tripslice_or_crew_comp.complement_sum()
+                day_in_pp = int(tzh.get_rule_failure_time(bag, level) - self.start_day_ref) // 1440
+                self.min_day = min(day_in_pp, self.min_day)
+                self.max_day = max(day_in_pp, self.max_day)
 
-                if num_crew == 0:
-                    continue
+                values_for_this_rule.rshs[day_in_pp].add_from_po(po, skip_selected=True)
 
-                day_in_pp = int(tzh.get_rule_failure_time(bag, level) - self.start_day_ref) / 1440
-                self.min_day = min(day_in_pp, self.min_day) if self.min_day is not None else day_in_pp
-                self.max_day = max(day_in_pp, self.max_day) if self.max_day is not None else day_in_pp
-                gui_date_str = self.get_gui_date_str_from_pp_day(day_in_pp)
-                identifiers = [leg_bag.leg_identifier() for leg_bag in bag.atom_set()]
-                violation_data.add_valid(day_in_pp, num_crew, gui_date_str, identifiers)
+            self.values_per_rule_list.append(values_for_this_rule)
 
-                if not is_legal:
-                    subcat, cats_and_crew = cat_handler.get_and_register_cat(bag, tripslice_or_crew_comp)
-                    for cat, ncrew in cats_and_crew:
-                        violation_data.add_illegal(cat, subcat, ncrew, day_in_pp, gui_date_str, identifiers)
-                else:
-                    limit, value = rave.eval(bag, limit_var, value_var)
-                    diff = abs(limit - value)
-                    if diff <= cri.max_diff_for_bin_one:
-                        violation_data.add_in_bin(day_in_pp, num_crew, gui_date_str, identifiers)
-            # end of bag loop
-
-            violation_data.rule_title = cri.rule_label
-            violation_data.rule_str = rule_str
-            violation_data.level = level
-            violation_data.bin = bin_value
-            self.violation_data_list.append(violation_data)
-        # end of rule iteration
+        self.day_list, self.days_num_in_pp = self.get_day_lists(self.min_day, self.max_day)
 
         self.add_warnings_and_links()
         self.generate_settings_table()
-        self.generate_summary()
+        self.generate_summary_table()
         self.page()
 
-        if self.min_day is not None and self.max_day is not None:
-            self.day_list, self.days_num_in_pp = self.get_day_lists(self.min_day, self.max_day)
-            # we have at least one valid object selected
-            if self.arg('show') == "TABLE":
-                self.add_details_tables()
-            else:
-                self.generate_diagrams()
+        if self.is_table_view():
+            self.generate_table_view_content()
+        else:
+            self.generate_overview_content()
 
     def get_settings_table(self):
         table = super(RuleViolationsOverTime, self).get_settings_table()
         report_rules.add_time_stuff_to_settings_table(table)
         return table
 
-    def add_details_tables(self):
-
-        for vdata in self.violation_data_list:
-            full_details_table = self.get_details_table_with_header(MSGR("Rule Violations per Day"), MSGR("Date"), vdata)
-
-            illeg_list = report_rules.get_counter_values_as_list(self.days_num_in_pp, vdata.illegal_dim_cnt)
-            valid_list = report_rules.get_counter_values_as_list(self.days_num_in_pp, vdata.valid_dim_cnt)
-            in_bin_list = report_rules.get_counter_values_as_list(self.days_num_in_pp, vdata.in_bin_dim_cnt)
-
-            for day_ix, day_str in enumerate(self.day_list):
-                self.add_data_row(full_details_table, day_str,
-                                  illeg_list[day_ix], in_bin_list[day_ix], valid_list[day_ix],
-                                  vdata.illegal_identifier_dim_dict[day_str], vdata.in_bin_identifier_dim_dict[day_str],
-                                  vdata.valid_identifier_dim_dict[day_str], vdata.cat_handler,
-                                  {lb_cat: vdata.illegal_cat_dim_cnt[lb_cat][self.days_num_in_pp[day_ix]] for lb_cat in vdata.cat_handler.categories},
-                                  {lb_cat: vdata.illegal_identifier_cat_dim_dict[lb_cat][self.days_num_in_pp[day_ix]]
-                                   for lb_cat in vdata.cat_handler.categories})
-
-            self.add_data_row(full_details_table, MSGR("Total"),
-                              vdata.num_illegal, vdata.num_in_bin, vdata.num_valid,
-                              vdata.illegal_identifier_list, vdata.in_bin_identifier_list,
-                              vdata.valid_identifier_list, vdata.cat_handler,
-                              vdata.illegal_cat_cnt, vdata.illegal_identifier_cat_dict,
-                              font=ru.BOLD)
-
-            self.add("")
-            if len(self.violation_data_list) == 1:
-                self.add(prt.Isolate(full_details_table))
-            else:
-                action = prt.action(lambda m, a, rule_str: rg.display_prt_report(source=m,
-                                                                                 area=a,
-                                                                                 scope="window",
-                                                                                 rpt_args={"show": "OVERVIEW",
-                                                                                           "rule": rule_str}),
-                                    (self.__module__, self.current_area, vdata.rule_str))
-                self.add(prt.Expandable(prt.Text(vdata.rule_title, font=ru.LINK_FONT),
-                                        prt.Isolate(prt.Column(prt.Text(""),
-                                                               prt.Row(prt.Text(MSGR("Overview"), font=ru.LINK_FONT, action=action),
-                                                                       " ",
-                                                                       self.get_report_rule_details_link(vdata.rule_str)),
-                                                               prt.Text(""),
-                                                               full_details_table))))
-
-    def get_chart(self, content):
-        num_x_values = len(self.day_list)
-        tic_values = set(self.day_list[0::report_rules.get_x_tics_divider(num_x_values)])
-        xaxis_format = lambda v: v if v in tic_values else ""
-        return prt.Chart(report_rules.get_chart_width(num_x_values),
-                         report_rules.CHART_HEIGHT,
-                         content,
-                         xaxis_rotate_tags=len(self.day_list) > 10,
-                         xaxis_name=MSGR("Date"),
-                         background=studio_palette.White,
-                         xaxis_format=xaxis_format)
-
-    def get_diagrams_and_summary_per_rule(self):
-
-        prt_objects = []
-        current_area = self.current_area
-
-        for ix, vdata in enumerate(self.violation_data_list):
-            sorted_categories = vdata.cat_handler.get_sorted_categories() or [""]
-            s_illeg_nr = []
-            s_percentage_nr = []
-            if vdata.cat_handler.has_categories():
-                totals = {day: vdata.illegal_dim_cnt[day_num]
-                          for day, day_num in zip(self.day_list, self.days_num_in_pp)}
-            else:
-                totals = None
-            valid_list = report_rules.get_counter_values_as_list(self.days_num_in_pp, vdata.valid_dim_cnt)
-
-            for lb_cat in sorted_categories:
-                illeg_list = report_rules.get_counter_values_as_list(self.days_num_in_pp, vdata.illegal_cat_dim_cnt[lb_cat])
-                action = prt.chartaction(lambda x, _, identifier_dict=vdata.illegal_identifier_cat_dim_dict[lb_cat]:
-                                         ru.calib_show_and_mark_legs(current_area, identifier_dict[x]))
-                bar_j = prt.Bar(width=report_rules.SINGLE_BAR_WIDTH, fill=vdata.cat_handler.bar_color(ix, lb_cat))
-                label = lb_cat if lb_cat else vdata.rule_title
-                serie_j = prt.Series(zip(self.day_list, illeg_list),
-                                     graph=bar_j,
-                                     label=label,
-                                     action=action,
-                                     tooltip=prt.charttooltip(report_rules.Tooltip(vdata.rule_title, totals=totals,
-                                                                                   y_label=lb_cat)))
-                s_illeg_nr.append(serie_j)
-
-                ratio_per_day = [basics.percentage_value(num_illegal, num_valid)
-                                 for num_illegal, num_valid
-                                 in zip(illeg_list, valid_list)]
-                if vdata.cat_handler.has_categories():
-                    ratio_totals = {day: basics.percentage_value(vdata.illegal_dim_cnt[day_num], num_valid)
-                                    for day, day_num, num_valid
-                                    in zip(self.day_list, self.days_num_in_pp, valid_list)}
-                else:
-                    ratio_totals = None
-                serie_j = prt.Series(zip(self.day_list, ratio_per_day),
-                                     graph=bar_j,
-                                     label=label,
-                                     action=action,
-                                     tooltip=prt.charttooltip(report_rules.Tooltip(vdata.rule_title, totals=ratio_totals,
-                                                                                   y_fmt=basics.PERC_FMT, y_label=lb_cat)))
-                s_percentage_nr.append(serie_j)
-
-            viol_chart_1 = ru.SimpleDiagram(prt.Text(MSGR("Rule Violations Over Time"), valign=prt.CENTER))
-            viol_chart_1.add(prt.Isolate(self.get_chart(prt.Combine(on_top=True, yaxis_name=MSGR("Number of violations"), *s_illeg_nr))))
-
-            viol_chart_2 = ru.SimpleDiagram(prt.Text(MSGR("Rule Violations in Percentage of Valid Over Time"),
-                                                     valign=prt.CENTER))
-            viol_chart_2.add(prt.Isolate(self.get_chart(prt.Combine(on_top=True, yaxis_name=MSGR("Violations in %"), *s_percentage_nr))))
-
-            summary = self.generate_summary_header(vdata.cat_handler.has_categories())
-            self.generate_summary_for_one_rule(summary, vdata, vdata.cat_handler.has_categories())
-
-            prt_objects.append((summary, viol_chart_1, viol_chart_2))
-
-        return prt_objects
-
-    def get_multi_rule_diagrams(self):
-        current_area = self.current_area
-        s_illeg_nr = []
-        s_percentage_nr = []
-
-        for ix, vdata in enumerate(self.violation_data_list):
-            tot_illegal_list = report_rules.get_counter_values_as_list(self.days_num_in_pp, vdata.illegal_dim_cnt)
-            tot_action = prt.chartaction(lambda x, _, identifier_dict=vdata.illegal_identifier_dim_dict:
-                                         ru.calib_show_and_mark_legs(current_area, identifier_dict[x]))
-            tot_width = min(0.8 / len(self.violation_data_list), report_rules.SINGLE_BAR_WIDTH)
-            tot_bar = prt.Bar(width=tot_width,
-                              offset=0.1 + ix * tot_width if tot_width < report_rules.SINGLE_BAR_WIDTH else None,
-                              fill=compare_plan.COLORS[ix])
-            tot_serie_j = prt.Series(zip(self.day_list, tot_illegal_list),
-                                     graph=tot_bar,
-                                     label=vdata.rule_title,
-                                     action=tot_action,
-                                     tooltip=prt.charttooltip(report_rules.Tooltip(vdata.rule_title)))
-            s_illeg_nr.append(tot_serie_j)
-            valid_list = report_rules.get_counter_values_as_list(self.days_num_in_pp, vdata.valid_dim_cnt)
-            ratio_per_day = [basics.percentage_value(num_illegal, num_valid)
-                             for num_illegal, num_valid
-                             in zip(tot_illegal_list, valid_list)]
-            tot_serie_j = prt.Series(zip(self.day_list, ratio_per_day),
-                                     graph=tot_bar,
-                                     label=vdata.rule_title,
-                                     action=tot_action,
-                                     tooltip=prt.charttooltip(report_rules.Tooltip(vdata.rule_title,
-                                                                                   y_fmt=basics.PERC_FMT)))
-            s_percentage_nr.append(tot_serie_j)
-
-        viol_chart_1 = ru.SimpleDiagram(prt.Text(MSGR("Rule Violations Over Time"), valign=prt.CENTER))
-        viol_chart_1.add(prt.Isolate(self.get_chart(prt.Combine(on_top=False, yaxis_name=MSGR("Number of violations"), *s_illeg_nr))))
-
-        viol_chart_2 = ru.SimpleDiagram(prt.Text(MSGR("Rule Violations in Percentage of Valid Over Time"),
-                                                 valign=prt.CENTER))
-        viol_chart_2.add(prt.Isolate(self.get_chart(prt.Combine(on_top=False, yaxis_name=MSGR("Violations in %"), *s_percentage_nr))))
-
-        return viol_chart_1, viol_chart_2
-
-    def generate_diagrams(self):
-        if len(self.violation_data_list) == 1:
-            main_diagrams = self.get_diagrams_and_summary_per_rule()[0][-2:]
-            per_rule_diagrams = []
+    def generate_summary_table(self):
+        if len(self.values_per_rule_list) == 1:
+            table = self.get_summary_table_for_one_rule(self.values_per_rule_list[0])
         else:
-            main_diagrams = self.get_multi_rule_diagrams()
-            per_rule_diagrams = self.get_diagrams_and_summary_per_rule()
+            table = self.get_summary_table_for_many_rules()
+        self.add(prt.Isolate(table))
 
-        self.add("")
-        for diagram in main_diagrams:
-            self.page()
-            self.add(prt.Isolate(diagram))
+    def get_summary_table_for_one_rule(self, rv):
+        return report_rules.get_summary_table(rv.rsh_total,
+                                              rv.cri,
+                                              self.current_area,
+                                              rv.cat_handler)
+
+    def get_summary_table_for_many_rules(self):
+        table = ru.SimpleTable(MSGR("Summary"), use_page=True)
+        table.add_sub_title(prt.Text(MSGR("Rule")))
+        table.add_sub_title(prt.Text(MSGR("Valid"), border=prt.border(left=1)))
+        table.add_sub_title(prt.Text(MSGR("Legal"), colspan=2, border=prt.border(left=1)))
+        table.add_sub_title(prt.Text(MSGR("Illegal"), colspan=2, border=prt.border(left=1)))
+
+        def get_cell(rsh, rso, show_percent, tooltip=None):
+            action = ru.get_select_action(self.current_area, rso.leg_ids)
+            row = ru.SimpleTableRow(border=prt.border(left=1))
+            row.add(prt.Text(rso.values[0], align=prt.RIGHT, action=action, tooltip=tooltip))
+            if show_percent:
+                row.add(prt.Text(basics.percentage_string(rso.values[0], rsh.valid.values[0]),
+                                 tooltip=MSGR("Percentage of Valid"),
+                                 align=prt.RIGHT, action=action))
+            return row
+
+        for ix, rv in enumerate(self.values_per_rule_list):
+            rsh = rv.rsh_total
+            row = table.add(ru.SimpleTableRow())
+            row.add(prt.Isolate(prt.Row(report_rules.LegendColourIndicator(BAR_COLORS_MULTI_RULES[ix], valign=prt.CENTER),
+                                        rv.cri.rule_label)))
+            row.add(get_cell(rsh, rsh.valid, False))
+            row.add(get_cell(rsh, rsh.legal, True, tooltip=self.get_categories_tooltip(rv, True)))
+            row.add(get_cell(rsh, rsh.illegal, True, tooltip=self.get_categories_tooltip(rv, False)))
+
+        return table
+
+    @staticmethod
+    def get_categories_tooltip(rv, legal_cats=True):
+        # Legal OR illegal categories are considered.
+
+        def get_row(title, val):
+            return "  {}: {} ({})".format(title, val, basics.percentage_string(val, rsh.valid.values[0]))
+
+        rsh = rv.rsh_total
+        res = [MSGR("{} categories:").format(MSGR("Legal") if legal_cats else MSGR("Illegal"))]
+        if legal_cats:
+            if rsh.outside_first_bin.leg_ids:
+                res.append(get_row(basics.OUTSIDE_FIRST_BIN_LABEL, rsh.outside_first_bin.values[0]))
+            if rsh.in_first_bin.leg_ids:
+                res.append(get_row(basics.IN_FIRST_BIN_LABEL, rsh.in_first_bin.values[0]))
+            res.append("")
+            res.append(MSGR("Bin size: {}").format(rv.cri.bin_value))
+        else:
+            for cat in rv.cat_handler.get_sorted_categories():
+                if rsh.categories[cat].leg_ids:
+                    res.append(get_row(cat, rsh.categories[cat].values[0]))
+        return "\n".join(res)
+
+    def generate_table_view_content(self):
+        for rv in self.values_per_rule_list:
             self.add("")
+            self.page()
 
-        for rule_ix, (sums, dia1, dia2) in enumerate(per_rule_diagrams):
-            rule_key = self.violation_data_list[rule_ix].rule_str
+            if rv.rsh_total.valid.leg_ids:
+                table = report_rules.get_per_bin_table(MSGR("Rule Violations over Time"),
+                                                       self.days_num_in_pp,
+                                                       rv.rshs,
+                                                       MSGR("Date"),
+                                                       rv.rsh_total,
+                                                       self.current_area,
+                                                       rv.cat_handler,
+                                                       show_percentage_of_valid=True,
+                                                       binkey2label=lambda d: prt.Text(self.get_gui_date_str_from_pp_day(d), colspan=3))
+            else:
+                table = prt.Row()
+
+            if len(self.values_per_rule_list) == 1:
+                self.add(prt.Isolate(table))
+            else:
+                action = prt.action(lambda m, a, rk: rg.display_prt_report(source=m,
+                                                                           area=a,
+                                                                           scope="window",
+                                                                           rpt_args={"show": "OVERVIEW",
+                                                                                     "rule": rk}),
+                                    (self.__module__, self.current_area, rv.cri.rule_key))
+                self.add(prt.Expandable(prt.Text(rv.cri.rule_label, font=ru.LINK_FONT),
+                                        prt.Column("",
+                                                   prt.Isolate(prt.Row(prt.Text(MSGR("Overview"), font=ru.LINK_FONT, action=action),
+                                                                       prt.Text("", width=20),
+                                                                       self.get_report_rule_details_link(rv.cri.rule_key))),
+                                                   "",
+                                                   prt.Isolate(self.get_summary_table_for_one_rule(rv)),
+                                                   "",
+                                                   prt.Isolate(table))))
+
+    def generate_overview_content(self):
+        self.add("")
+
+        if len(self.values_per_rule_list) == 1:
+            self.add(self.get_diagrams_for_one_rule(self.values_per_rule_list[0]))
+            return
+
+        self.add(self.get_multi_rule_diagrams())
+        self.page()
+
+        for rv in self.values_per_rule_list:
             action = prt.action(lambda m, a, rk: rg.display_prt_report(source=m,
                                                                        area=a,
                                                                        scope="window",
                                                                        rpt_args={"show": "TABLE",
                                                                                  "rule": rk}),
-                                (self.__module__, self.current_area, rule_key))
-            self.add(prt.Expandable(prt.Text(self.violation_data_list[rule_ix].rule_title, font=ru.LINK_FONT),
-                                    prt.Column(prt.Text(""),
+                                (self.__module__, self.current_area, rv.cri.rule_key))
+            self.add(prt.Expandable(prt.Text(rv.cri.rule_label, font=ru.LINK_FONT),
+                                    prt.Column("",
                                                prt.Isolate(prt.Row(prt.Text(MSGR("Table"), font=ru.LINK_FONT, action=action),
-                                                                   " ",
-                                                                   self.get_report_rule_details_link(rule_key))),
-                                               prt.Text(""), sums, prt.Text(""), dia1, prt.Text(""), dia2)))
+                                                                   prt.Text("", width=20),
+                                                                   self.get_report_rule_details_link(rv.cri.rule_key))),
+                                               "",
+                                               prt.Isolate(self.get_summary_table_for_one_rule(rv)),
+                                               "",
+                                               self.get_diagrams_for_one_rule(rv))))
             self.page()
             self.add("")
 
-    def generate_summary(self):
-        summary_table = self.generate_summary_header(self.show_categories_in_summary())
-        self.add(prt.Isolate(prt.Column(summary_table, width=report_rules.CHART_WIDTH_DEFAULT)))
-        for vd in self.violation_data_list:
-            self.generate_summary_for_one_rule(summary_table, vd, self.show_categories_in_summary())
+    def get_diagrams_for_one_rule(self, rv):
+        res = prt.Column()
+        if rv.rsh_total.valid.leg_ids:
+            if rv.rsh_total.illegal.leg_ids:
+                res.add(self.get_single_rule_diagram(rv, MSGR("Rule Violations over Time"), include_legal=False))
+                res.page()
+                res.add("")
+            res.add(self.get_single_rule_diagram(rv, MSGR("Categories in Percentage of Valid over Time"), show_percentage_of_valid=True))
+            res.page()
+            res.add("")
+            res.add(self.get_single_rule_diagram(rv, MSGR("Valid over Time")))
+        return res
+
+    def get_single_rule_diagram(self, rv, title, include_legal=True, show_percentage_of_valid=False):
+        return prt.Isolate(report_rules.get_single_rule_diagram(title,
+                                                                self.days_num_in_pp,
+                                                                rv.rshs,
+                                                                MSGR("Date"),
+                                                                self.current_area,
+                                                                rv.cat_handler,
+                                                                include_legal=include_legal,
+                                                                show_percentage_of_valid=show_percentage_of_valid,
+                                                                xkey2label=self.get_gui_date_str_from_pp_day,
+                                                                bar_width=report_rules.SINGLE_BAR_WIDTH))
+
+    def get_multi_rule_diagrams(self):
+        if sum(rv.rsh_total.illegal.values[0] for rv in self.values_per_rule_list) == 0:
+            return prt.Row()
+
+        ret = prt.Column()
+        ret.add(self.get_multi_rule_diagram(MSGR("Rule Violations Over Time")))
+        ret.page()
+        ret.add("")
+        ret.add(self.get_multi_rule_diagram(MSGR("Rule Violations in Percentage of Valid Over Time"), True))
+        ret.page()
+        ret.add("")
+        return ret
+
+    def get_multi_rule_diagram(self, title, show_percentage_of_valid=False):
+
+        x_label2key = OrderedDict(zip(self.day_list, self.days_num_in_pp))
+
+        series_list = []
+        bar_width = 0.8 / len(self.values_per_rule_list)
+
+        for ix, rv in enumerate(self.values_per_rule_list):
+            if not rv.rsh_total.illegal.leg_ids:
+                continue
+            data = []
+            for pp_day in self.days_num_in_pp:
+                val = rv.rshs[pp_day].illegal.values[0]
+                if show_percentage_of_valid:
+                    val = basics.percentage_value(val, rv.rshs[pp_day].valid.values[0])
+                data.append((self.get_gui_date_str_from_pp_day(pp_day), val))
+            series_list.append(prt.Series(data,
+                                          graph=prt.Bar(offset=0.1 + ix * bar_width,
+                                                        width=bar_width,
+                                                        fill=BAR_COLORS_MULTI_RULES[ix]),
+                                          action=prt.chartaction(report_rules.MyDiagramAction(self.current_area, "illegal", x_label2key, rv.rshs)),
+                                          tooltip=prt.charttooltip(report_rules.MyDiagramTooltip(MSGR("Illegal. Rule: ") + rv.cri.rule_label,
+                                                                                                 x_label2key, rv.rshs, rv.cat_handler))))
+
+        dia = report_rules.get_chart(title, MSGR("Date"), x_label2key, series_list, show_percentage_of_valid, False)
+        return prt.Isolate(dia)
 
     def get_day_lists(self, min_day, max_day):
         """
         min_day :: int, max_day :: int
           -> days_in_pp :: [AbsTime], days_num_in_pp :: [int]
         """
-        days_num_in_pp = range(min_day, max_day + 1)
+        days_num_in_pp = list(range(min_day, max_day + 1))
         days_in_pp = [self.get_gui_date_str_from_pp_day(day) for day in days_num_in_pp]
         return days_in_pp, days_num_in_pp
 

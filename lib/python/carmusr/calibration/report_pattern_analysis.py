@@ -2,10 +2,12 @@
 Implementation of the calibration report Pattern Analysis
 """
 
+
+from __future__ import division
+from __future__ import absolute_import
 import six
 from six.moves import range
 from functools import reduce
-import copy
 from collections import defaultdict
 import itertools as it
 
@@ -18,6 +20,7 @@ import Cui
 from carmusr.calibration import mappings
 from carmusr.calibration.mappings import studio_palette as sp
 from carmusr.calibration.mappings import bag_handler
+from carmusr.calibration.util import basics
 from carmusr.calibration.util import report_util
 from carmusr.calibration.util import compare_plan
 
@@ -72,14 +75,14 @@ class ReportPatternAnalysis(report_util.CalibrationReport):
             return
 
         if self.arg("show") == "TABLE":
-            self.prepare_for_details()
-            self.add_details_table()
+            self.prepare_for_table()
+            self.add_table()
         else:
             self.add_heatmaps()
 
     def prepare(self):
 
-        self.gamma = float(rave.param("report_calibration.pat_centi_gamma").value()) / 100
+        self.gamma = rave.param("report_calibration.pat_centi_gamma").value() / 100
 
         if self.current_area_mode in (Cui.AcRotMode, Cui.LegMode):
             self.comp_full_name_if_relevant = ""
@@ -96,12 +99,12 @@ class ReportPatternAnalysis(report_util.CalibrationReport):
 
         return mess
 
-    def prepare_for_details(self):
+    def prepare_for_table(self):
 
         if not self.bin_patterns:
             return
 
-        # The corresponding labels are defined in DetailsViewSettingAlternatives
+        # The corresponding labels are defined in TableViewSettingAlternatives
         common_methods = (BinPatternData.not_flown_block_time,
                           BinPatternData.total_block_time,
                           BinPatternData.fraction_of_crew_with_pattern_on_same_day_in_comp_plan,
@@ -109,25 +112,25 @@ class ReportPatternAnalysis(report_util.CalibrationReport):
                           BinPatternData.get_num_crew_with_pattern,
                           lambda pd: len(pd.instances))
 
-        detail_colour_sel = rave.param("report_calibration.pat_details_colour_based_on").value()
-        details_colour_reversed = rave.param("report_calibration.pat_details_reversed_colouring").value()
-        if detail_colour_sel == 7:
+        table_colour_sel = rave.param("report_calibration.pat_table_colour_based_on").value()
+        table_colour_reversed = rave.param("report_calibration.pat_table_reversed_colouring").value()
+        if table_colour_sel == 7:
             gi = it.cycle((sp.White, sp.ReportLightBlue))
             BinPatternData.cc = lambda *_: next(gi)
             BinPatternData.colour_method = lambda *_: None
         else:
-            detail_col_m = common_methods[detail_colour_sel - 1]
-            cc = report_util.ColourCalculator(max(detail_col_m(pat) for pat in six.itervalues(self.bin_patterns)),
+            table_col_m = common_methods[table_colour_sel - 1]
+            cc = report_util.ColourCalculator(max(table_col_m(pat) for pat in six.itervalues(self.bin_patterns)),
                                               0,
-                                              zero_colour=report_util.HEATMAP_RED if details_colour_reversed else sp.White,
-                                              max_colour=sp.White if details_colour_reversed else report_util.HEATMAP_RED,
+                                              zero_colour=basics.HEATMAP_RED if table_colour_reversed else sp.White,
+                                              max_colour=sp.White if table_colour_reversed else basics.HEATMAP_RED,
                                               gamma=self.gamma)
             BinPatternData.cc = cc
-            BinPatternData.colour_method = detail_col_m
+            BinPatternData.colour_method = table_col_m
 
-        details_sort_sel = rave.param("report_calibration.pat_details_sort_order").value()
-        self.details_sort_reversed = rave.param("report_calibration.pat_details_reversed_sort_order").value()
-        self.details_sort_m = (common_methods + (lambda pd: pd.pattern,))[details_sort_sel - 1]
+        table_sort_sel = rave.param("report_calibration.pat_table_sort_order").value()
+        self.table_sort_reversed = rave.param("report_calibration.pat_table_reversed_sort_order").value()
+        self.table_sort_m = (common_methods + (lambda pd: pd.pattern,))[table_sort_sel - 1]
 
     def add_settings_tables(self):
         table = report_util.SimpleTable(MSGR("Settings"), use_page=False)
@@ -222,7 +225,7 @@ class ReportPatternAnalysis(report_util.CalibrationReport):
 
             rows[8].add(prt.Text(RelTime(tot_block), align=prt.RIGHT, action=all_action))
 
-            rows[9].add(prt.Text("%0.1f%%" % (float(100 * (tot_flown_block)) / tot_block if tot_block else 0.0),
+            rows[9].add(prt.Text("%0.1f%%" % ((100 * tot_flown_block) / tot_block if tot_block else 0.0),
                                  align=prt.RIGHT))
 
         add_to_rows(rows, self.bin_patterns)
@@ -230,7 +233,7 @@ class ReportPatternAnalysis(report_util.CalibrationReport):
         if self.use_filter:
             add_to_rows(rows, self.bin_patterns_before_filtering)
 
-    def add_details_table(self):
+    def add_table(self):
         table = report_util.SimpleTable(MSGR("Patterns"), use_page=True)
         self.add(prt.Isolate(table))
 
@@ -249,7 +252,7 @@ class ReportPatternAnalysis(report_util.CalibrationReport):
                                                             ))
         table.add_sub_title(info_lables)
 
-        for ix, pd in enumerate(sorted(six.itervalues(self.bin_patterns), key=self.details_sort_m, reverse=self.details_sort_reversed)):
+        for ix, pd in enumerate(sorted(six.itervalues(self.bin_patterns), key=self.table_sort_m, reverse=self.table_sort_reversed)):
             v = (ix + 1,
                  prt.Text(pd.pattern,
                           width=350 if len(pd.pattern) > 60 else None,  # The best we can do without support for minwidth.
@@ -293,7 +296,7 @@ class ReportPatternAnalysis(report_util.CalibrationReport):
 
         aggregated_data = defaultdict(list)
 
-        for pat in sorted(six.itervalues(self.bin_patterns)):
+        for pat in six.itervalues(self.bin_patterns):
             foc = pat.fraction_of_crew_with_pattern_on_same_day_in_comp_plan()
             if foc == 0:
                 x_value = -1  # We use the x-value -1 for exact 0.
@@ -368,7 +371,7 @@ class ReportPatternAnalysis(report_util.CalibrationReport):
         self.add(prt.Isolate(hm2))
 
 
-class DetailsViewSettingAlternatives:
+class TableViewSettingAlternatives(object):
 
     _common_menu = [MSGR("Alternatives"),
                     "1. " + MSGR("Not completed block time"),
@@ -426,13 +429,12 @@ class DataCreator(object):
                                                 "report_calibration.pat_filter_keep_five_legs_patterns",
                                                 "report_calibration.pat_filter_keep_six_or_more_legs_patterns")
             num_legs_filter_setting = tuple(rave.param(pn).value() for pn in self.num_legs_filter_param_names)
-            max_completion_to_show = float(rave.param("report_calibration.pat_filter_max_completion").value()) / 100
+            max_completion_to_show = rave.param("report_calibration.pat_filter_max_completion").value() / 100
 
-            self.bin_patterns_before_filtering = copy.copy(self.bin_patterns)
-            for pat, data in self.bin_patterns.items():
-                if data.fraction_of_crew_with_pattern_on_same_day_in_comp_plan() > max_completion_to_show or \
-                   not num_legs_filter_setting[min(data.num_legs, 6) - 1]:
-                    del self.bin_patterns[pat]
+            self.bin_patterns_before_filtering = self.bin_patterns
+            self.bin_patterns = {pat: data for pat, data in self.bin_patterns_before_filtering.items()
+                                 if data.fraction_of_crew_with_pattern_on_same_day_in_comp_plan() <= max_completion_to_show
+                                 and num_legs_filter_setting[min(data.num_legs, 6) - 1]}
 
         return mess
 
@@ -507,8 +509,8 @@ class BinPatternInstance(object):
 
         if comp_full_name_if_relevant:
             comp_match_def_var = CompMatchingPatternHandler.get_matching_rave_variable()
-            cls.keys_in_comp_plan = compare_plan.ComparisonPlanHandler.get_keys(comp_match_def_var,
-                                                                                mappings.LEVEL_DUTY)
+            cls.keys_in_comp_plan = set(compare_plan.ComparisonPlanHandler.get_keys(comp_match_def_var,
+                                                                                    mappings.LEVEL_DUTY))
         else:
             cls.keys_in_comp_plan = set()
         cls.comp_matching_key_ix = CompMatchingPatternHandler.get_selected_ix()
@@ -636,7 +638,7 @@ class BinPatternData(object):
 
     def fraction_of_crew_with_pattern_on_same_day_in_comp_plan(self):
         if self._fraction_of_crew_with_pattern_on_same_day_in_comp_plan is None:
-            self._fraction_of_crew_with_pattern_on_same_day_in_comp_plan = (float(self.get_num_crew_with_pattern_in_comp_plan_on_same_date()) /
+            self._fraction_of_crew_with_pattern_on_same_day_in_comp_plan = (self.get_num_crew_with_pattern_in_comp_plan_on_same_date() /
                                                                             self.get_num_crew_with_pattern())
         return self._fraction_of_crew_with_pattern_on_same_day_in_comp_plan
 

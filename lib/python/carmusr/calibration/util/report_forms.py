@@ -2,6 +2,9 @@
 Rave parameter forms provided by the reports
 """
 
+
+from __future__ import absolute_import
+
 if __name__ == "__main__":
     raise NotImplementedError("Do not run this module as a script")
 
@@ -18,6 +21,8 @@ if is_being_reloaded:
 
 ####################################################################
 
+from six.moves import range
+import six
 import weakref
 from tempfile import NamedTemporaryFile
 
@@ -200,28 +205,47 @@ class CrewPosFilter(RaveParam):
             return ret
         try:
             complement.CrewCategories.mask_from_pos_comma_sep(text)
-        except ValueError, e:
+        except ValueError as e:
             return str(e)
 
     def compute(self):
-        self.setValue(", ".join(filter(None, (item.strip() for item in self.getValue().split(",")))))
+        self.setValue(", ".join(s for s in (item.strip() for item in self.getValue().split(",")) if s))
         super(CrewPosFilter, self).compute()
 
 
-class Method(RaveParam):
+class EnumToggle(RaveParam):
+    @property
+    def choice_title(self):
+        ## Keep an empty title for a Bool toggle behavior.
+        return ""
+
+    @property
+    def options(self):
+        raise NotImplementedError()
 
     def __init__(self, *args, **kw):
-        super(Method, self).__init__(*args, **kw)
-        self.setMenu(["", MSGR("REPLACE"), MSGR("ADD")])
+        self.menu_to_rave = {o: r for o, r in self.options}
+        self.rave_to_menu = {r: o for o, r in self.options}
+
+        super(EnumToggle, self).__init__(*args, **kw)
+        menu_options = [o for o, _ in self.options]
+
+        self.setMenu([self.choice_title] + menu_options)
         self.setMenuOnly(1)
         self.setMandatory(1)
 
     def rave_value2string(self, rave_value):
-        return bl_msgr(str(rave_value).split(".")[-1].upper())
+        return self.rave_to_menu[str(rave_value)]
 
     def string2rave_value(self, text):
-        rave_module_name = str(self.get_rave_param_value()).split(".")[0]
-        return rave.enumval("%s.%s" % (rave_module_name, "replace" if (text == self.getMenu()[1]) else "add"))
+        return rave.enumval(self.menu_to_rave[text])
+
+
+class Method(EnumToggle):
+    param = ru.SELECT_METHOD_PARAMETER_NAME
+    options = [(MSGR("REPLACE"), 'report_calibration.replace'),
+               (MSGR("ADD"), 'report_calibration.add')]
+    choice_title = "Filter Method"
 
 
 class BoolToggle(RaveParam):
@@ -327,10 +351,10 @@ class VosRuleNameParam(RuleNameParam):
 class TimeZone(RaveParam):
 
     items = [("reference", MSGR("Reference Airport"))]
-    for ix in xrange(12, 0, -1):
+    for ix in range(12, 0, -1):
         items.append(("utc_minus_%d" % ix, MSGR("UTC-%d") % ix))
     items.append(("utc_plus_0", MSGR("UTC")))
-    for ix in xrange(1, 13):
+    for ix in range(1, 13):
         items.append(("utc_plus_%d" % ix, MSGR("UTC+%d") % ix))
     value2string = dict(items)
     string2value = dict([(item[1], item[0]) for item in items])
@@ -366,11 +390,11 @@ class NumberedMenu(RaveParam):
 
 
 class PatColourOnAttr(NumberedMenu):
-    menu = rp.DetailsViewSettingAlternatives.colouring_menu
+    menu = rp.TableViewSettingAlternatives.colouring_menu
 
 
 class PatSortOnAttr(PatColourOnAttr):
-    menu = rp.DetailsViewSettingAlternatives.sorting_menu
+    menu = rp.TableViewSettingAlternatives.sorting_menu
 
 
 class PatMatchBin(NumberedMenu):
@@ -429,7 +453,7 @@ class ParameterFormForCalibrationReport(Cfh.Box):
 
     initial_items = (("LAYOUT", "EMPTY"),)
     rave_parameters = ()  # Redefine in sub-class. ((class, rule_param_name),)
-    final_parameters = ((Method, ru.SELECT_METHOD_PARAMETER_NAME),)
+    final_parameters = ((Method, Method.param),)
 
     form_name = None  # Redefine in sub-class
     report_title = None  # Redefine in sub-class
@@ -454,6 +478,16 @@ class ParameterFormForCalibrationReport(Cfh.Box):
         self.cr = calib_rules.CalibrationRuleContainer(self.variant)  # A fresh one is required by field classes.
 
         self.entries = []
+        layout = self.get_layout(title)
+
+        with NamedTemporaryFile(mode="wb" if six.PY2 else "wt") as f:
+            f.write("\n".join(layout))
+            f.flush()
+            self.load(f.name)
+
+        self.refresh_when_rave_param_changed()
+
+    def get_layout(self, title):
         layout = ["FORM;%s;%s" % (self.form_name, title)]
 
         for num, (cls, rave_param) in enumerate(self.initial_items + self.rave_parameters + self.final_parameters):
@@ -475,25 +509,16 @@ class ParameterFormForCalibrationReport(Cfh.Box):
         layout.append("BUTTON;CLOSE;%s;%s" % (MSGR("Close"), MSGR("_Close")))
         self.set_default = SetDefault(self, "DEFAULT")
         layout.append("BUTTON;DEFAULT;%s;%s" % (MSGR("Default"), MSGR("_Default")))
-
-        with NamedTemporaryFile() as f:
-            f.write("\n".join(layout))
-            f.flush()
-            self.load(f.name)
-
-        self.refresh_when_rave_param_changed()
+        return layout
 
 
 class ParameterFormRVD(ParameterFormForCalibrationReport):
-
     form_name = "RVD_PARAM_FORM"
     report_title = ru.CalibReports.RVD.title
 
-    def __getattribute__(self, attr):
-        if attr != "rave_parameters":
-            return super(ParameterFormRVD, self).__getattribute__(attr)
-
-        items = ()
+    @property
+    def rave_parameters(self):
+        items = ((RaveParam, "studio_calibration.delay_codes_of_interest"),)
         if config_per_product.get_config_for_active_product().allow_pos_filtering:
             items += ((CrewPosFilter, "report_calibration.crew_pos_filter_p"),
                       ("LAYOUT", "EMPTY"))
@@ -506,11 +531,9 @@ class ParameterFormRD(ParameterFormForCalibrationReport):
     form_name = "RD_PARAM_FORM"
     report_title = ru.CalibReports.RD.title
 
-    def __getattribute__(self, attr):
-        if attr != "rave_parameters":
-            return super(ParameterFormRD, self).__getattribute__(attr)
-
-        items = ()
+    @property
+    def rave_parameters(self):
+        items = ((RaveParam, "studio_calibration.delay_codes_of_interest"),)
         if config_per_product.get_config_for_active_product().allow_pos_filtering:
             items += ((CrewPosFilter, "report_calibration.crew_pos_filter_p"),
                       ("LAYOUT", "EMPTY"))
@@ -523,10 +546,8 @@ class ParameterFormVOT(ParameterFormForCalibrationReport):
     form_name = "VOT_PARAM_FORM"
     report_title = ru.CalibReports.VOT.title
 
-    def __getattribute__(self, attr):
-        if attr != "rave_parameters":
-            return super(ParameterFormVOT, self).__getattribute__(attr)
-
+    @property
+    def rave_parameters(self):
         items = ((RaveParam, "studio_calibration.delay_codes_of_interest"),)
         if config_per_product.get_config_for_active_product().allow_pos_filtering:
             items += ((CrewPosFilter, "report_calibration.crew_pos_filter_p"),)
@@ -547,10 +568,8 @@ class ParameterFormVOS(ParameterFormForCalibrationReport):
     form_name = "VOS_PARAM_FORM"
     report_title = ru.CalibReports.VOS.title
 
-    def __getattribute__(self, attr):
-        if attr != "rave_parameters":
-            return super(ParameterFormVOS, self).__getattribute__(attr)
-
+    @property
+    def rave_parameters(self):
         items = ((RaveParam, "studio_calibration.delay_codes_of_interest"),)
         if config_per_product.get_config_for_active_product().allow_pos_filtering:
             items += ((CrewPosFilter, "report_calibration.crew_pos_filter_p"),)
@@ -564,10 +583,8 @@ class ParameterFormVOW(ParameterFormForCalibrationReport):
     form_name = "VOW_PARAM_FORM"
     report_title = ru.CalibReports.VOW.title
 
-    def __getattribute__(self, attr):
-        if attr != "rave_parameters":
-            return super(ParameterFormVOW, self).__getattribute__(attr)
-
+    @property
+    def rave_parameters(self):
         items = ()
         if config_per_product.get_config_for_active_product().allow_pos_filtering:
             items += ((CrewPosFilter, "report_calibration.crew_pos_filter_p"),
@@ -595,14 +612,56 @@ class ParameterFormSI(ParameterFormForCalibrationReport):
     report_title = ru.CalibReports.SI.title
 
 
-class ParameterFormDABO(ParameterFormForCalibrationReport):
+class ParameterFormDABOCommon(ParameterFormForCalibrationReport):
 
+    form_name = None  # Redefine in sub-class
+    report_title = None  # Redefine in sub-class
+    final_parameters = (("LAYOUT", "LABEL;%s" % MSGR("Interaction")),
+                        (Method, Method.param))
+
+    @property
+    def rave_parameters(self):
+        filter_items = (("LAYOUT", "EMPTY"),
+                        ("LAYOUT", "LABEL;%s" % MSGR("Rule View Filters")),
+                        (BoolToggle, ru.SHOW_OFF_RULES_PARAMETER_NAME),
+                        (BoolToggle, ru.SHOW_INVALID_RULES_PARAMETER_NAME))
+
+        bin_param_names = set(getattr(cri, calib_rules.BIN).name() for cri in six.itervalues(self.cr.all_rules_dict))
+        if not bin_param_names:
+            bin_items = ()
+        else:
+            bin_items = (("LAYOUT", "LABEL;%s" % MSGR("Bin Sizes")), )
+            bin_items += tuple((RaveParam, bin_param_name) for bin_param_name in sorted(bin_param_names, reverse=True))
+
+        pattern_items = (("LAYOUT", "LABEL;%s" % MSGR("Pattern Analysis")),
+                         (PatMatchBin, rp.BinMatchingPatternHandler.parameter_name),
+                         (PatMatchComp, rp.CompMatchingPatternHandler.parameter_name),
+                         ("LAYOUT", "EMPTY"),
+                         ("LAYOUT", "LABEL;%s" % MSGR("Pattern Filters")),
+                         (BoolToggle, "report_calibration.pat_use_filter"),
+                         (PatFilterParam, "report_calibration.pat_filter_max_completion"),
+                         (PatFilterBoolToggle, "report_calibration.pat_filter_keep_one_leg_patterns"),
+                         (PatFilterBoolToggle, "report_calibration.pat_filter_keep_two_legs_patterns"),
+                         (PatFilterBoolToggle, "report_calibration.pat_filter_keep_three_legs_patterns"),
+                         (PatFilterBoolToggle, "report_calibration.pat_filter_keep_four_legs_patterns"),
+                         (PatFilterBoolToggle, "report_calibration.pat_filter_keep_five_legs_patterns"),
+                         (PatFilterBoolToggle, "report_calibration.pat_filter_keep_six_or_more_legs_patterns"))
+        items = filter_items
+        items += (("LAYOUT", "SEPARATOR"),)
+        items += bin_items
+        items += (("LAYOUT", "SEPARATOR"),)
+        items += pattern_items
+        items += (("LAYOUT", "SEPARATOR"),)
+
+        return items
+
+
+class ParameterFormDABO(ParameterFormDABOCommon):
     form_name = "DABO_PARAM_FORM"
     report_title = ru.CalibReports.DABO.title
 
 
-class ParameterFormDABOforTTA(ParameterFormForCalibrationReport):
-
+class ParameterFormDABOforTTA(ParameterFormDABOCommon):
     form_name = "DABO_TTA_PARAM_FORM"
     report_title = ru.CalibReports.DABO.timetable_title
 
@@ -612,21 +671,22 @@ class ParameterFormKPI(ParameterFormForCalibrationReport):
     initial_items = (("LAYOUT", "COLUMN;6"),)
     final_parameters = (("LAYOUT", "EMPTY"),
                         ("LAYOUT", "LABEL;%s" % MSGR("Interaction")),
-                        (Method, ru.SELECT_METHOD_PARAMETER_NAME))
+                        (Method, Method.param))
 
     form_name = "KPI_PARAM_FORM"
     report_title = ru.CalibReports.RKPI.title
 
-    def __getattribute__(self, attr):
-        if attr != "rave_parameters":
-            return super(ParameterFormKPI, self).__getattribute__(attr)
-        bin_param_names = set(getattr(cri, calib_rules.BIN).name() for cri in self.cr.all_rules_dict.itervalues())
+    @property
+    def rave_parameters(self):
+        bin_param_names = set(getattr(cri, calib_rules.BIN).name()
+                              for cri in six.itervalues(self.cr.all_rules_dict))
         if not bin_param_names:
             return ()
         else:
             items = (("LAYOUT", "EMPTY"),
                      ("LAYOUT", "LABEL;%s" % MSGR("Bin Sizes")))
-            return items + tuple((RaveParam, bin_param_name) for bin_param_name in sorted(bin_param_names, reverse=True))
+            return items + tuple((RaveParam, bin_param_name)
+                                 for bin_param_name in sorted(bin_param_names, reverse=True))
 
 
 class ParameterFormKPIforTTA(ParameterFormKPI):
@@ -643,7 +703,7 @@ class ParameterFormPat(ParameterFormForCalibrationReport):
                        ("LAYOUT", "EMPTY"),
                        (Gamma, "report_calibration.pat_centi_gamma"),
                        ("LAYOUT", "EMPTY"),
-                       ("LAYOUT", "LABEL;%s" % MSGR("Filter")),
+                       ("LAYOUT", "LABEL;%s" % MSGR("Filters")),
                        (BoolToggle, "report_calibration.pat_use_filter"),
                        (PatFilterParam, "report_calibration.pat_filter_max_completion"),
                        (PatFilterBoolToggle, "report_calibration.pat_filter_keep_one_leg_patterns"),
@@ -658,11 +718,11 @@ class ParameterFormPat(ParameterFormForCalibrationReport):
                        (RaveParam, "report_calibration.pat_slices_num_bins_with_size_1"),
                        (RaveParam, "report_calibration.pat_slices_bin_size_2"),
                        ("LAYOUT", "EMPTY"),
-                       ("LAYOUT", "LABEL;%s" % MSGR("Details view")),
-                       (PatColourOnAttr, "report_calibration.pat_details_colour_based_on"),
-                       (BoolToggle, "report_calibration.pat_details_reversed_colouring"),
-                       (PatSortOnAttr, "report_calibration.pat_details_sort_order"),
-                       (BoolToggle, "report_calibration.pat_details_reversed_sort_order"),
+                       ("LAYOUT", "LABEL;%s" % MSGR("Table view")),
+                       (PatColourOnAttr, "report_calibration.pat_table_colour_based_on"),
+                       (BoolToggle, "report_calibration.pat_table_reversed_colouring"),
+                       (PatSortOnAttr, "report_calibration.pat_table_sort_order"),
+                       (BoolToggle, "report_calibration.pat_table_reversed_sort_order"),
                        ("LAYOUT", "EMPTY"),
                        ("LAYOUT", "LABEL;%s" % MSGR("Interaction")))
 
@@ -702,7 +762,7 @@ class ParameterFormHandler(object):
             self.prev_form = None
             self.form = self.form_class(variant)
             self.form.close.register_callback(self.free_form)
-            self.test_param = rave.parameters().next()
+            self.test_param = next(rave.parameters())
 
             for method, kind, tag, name in self.listener_values:
                 Gui.GuiCreateListener('''PythonEvalExpr("%s.%s.%s()")''' % (__name__, self.variable_name_in_module, method),
@@ -739,7 +799,7 @@ class ParameterFormHandler(object):
             self.test_param.value()
         except rave.UsageError:  # Changed rule set
             self.form.refresh_when_rule_set_changed()
-            self.test_param = rave.parameters().next()
+            self.test_param = next(rave.parameters())
 
 
 def close_and_free_all_forms():

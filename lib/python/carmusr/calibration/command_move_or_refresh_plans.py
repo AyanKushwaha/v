@@ -1,11 +1,13 @@
-'''
+"""
 Created on 10 Jun 2020
 
 @author: steham
+"""
 
-'''
 
-from tempfile import NamedTemporaryFile
+from __future__ import absolute_import
+from six.moves import map
+from six.moves import zip
 import os
 import traceback
 import re
@@ -13,22 +15,22 @@ import re
 import Cfh
 import Cui
 import Gui
-import MenuCommandsExt
 import Cps
 import Errlog
 from Localization import MSGR
 import Crs
 from jcms.calibration import move_subplan
 from jcms.calibration import plan
-from __main__ import exception as StudioError  # @UnresolvedImport
 
-import carmusr.calibration.util.process_commands_util as pcu
-
+from jcms.calibration.utils import process_commands_util as pcu
+from carmusr.calibration.util import plan_process_steps
+from jcms.calibration import form_util
+from jcms.calibration.form_util import CachedProperty, FormCheckFailure
 
 crc_param_dir = Crs.CrsGetModuleResource("default", Crs.CrsSearchModuleDef, "CRC_PARAMETERS_DIR")
 
 
-class LABELS:
+class LABELS(object):
     from_lp = MSGR("From local plan")
     to_lp = MSGR("To local plan")
     sub_plans = MSGR("Sub-plans to process")
@@ -39,10 +41,16 @@ class LABELS:
     suffix_for_moved_plans = MSGR("Suffix to add to moved sub-plans")
 
 
-class LABELS_WHEN_NO_TO_PLAN(LABELS):
+class LABELSNoToPlan(LABELS):
     from_lp = MSGR("Local plan")
     param_file_for_orig_plans = MSGR("Optional parameter file to load")
     suffix_for_orig_plans = MSGR("Suffix to add to sub-plans")
+
+
+def get_form_class(variant):
+    return {TT: TTMoveRefresh,
+            LB: LBMoveRefresh,
+            PA: PAMoveRefresh}[variant]
 
 
 class Variant(object):
@@ -65,7 +73,7 @@ class Variant(object):
 
     @classmethod
     def labels(cls):
-        return LABELS if cls.allow_to_plan else LABELS_WHEN_NO_TO_PLAN
+        return LABELS if cls.allow_to_plan else LABELSNoToPlan
 
     @classmethod
     def form_name(cls):
@@ -105,31 +113,32 @@ def do_it_with_gui(variant_key):
     if variant.use_param_sets:
         Cui.CFM("CFM_ParameterSets")
 
-    # Ask for plan names
-    form = MyForm(variant)
-    form.show(1)
-    if form.loop() != Cfh.CfhOk:
-        return 1
+    retcode = form_util.run_form(get_form_class(variant), do_it_ok)
+    return retcode
 
-    only_refesh_plans = variant.allow_only_refresh_plans and form.action.valof() == MyAction.only_refresh_plans_value
+
+def do_it_ok(form):
+    variant = form.variant
+    vals = form.return_values()
+    only_refesh_plans = form.variant.allow_only_refresh_plans and vals.ACTION == MyAction.only_refresh_plans_value
     args = ("%L",
-            variant_key,
+            variant.key,
             only_refesh_plans,
-            form.from_local_plan.valof(),
-            form.to_local_plan.valof() if hasattr(form, "to_local_plan") else None,
-            form.rule_set_name.valof() if hasattr(form, "rule_set_name") else None,
-            form.param_set_for_orig_plans.valof() if hasattr(form, "param_set_for_orig_plans") else None,
-            form.param_set_for_moved_plans.valof() if hasattr(form, "param_set_for_moved_plans") else None)
+            vals.FROM_LOCAL_PLAN,
+            vals.get('TO_LOCAL_PLAN', None),
+            vals.get('RULE_SET_NAME', None),
+            vals.get('PARAM_SET_ORIG', None),
+            vals.get('PARAM_SET_MOVED', None))
 
     if only_refesh_plans:
         args += (form.sub_plans_to_refresh_orig_lp_as_string,
                  form.sub_plans_to_refresh_moved_lp_as_string)
     else:
         args += (form.sub_plans_to_move_as_string,
-                 form.orig_suffix.valof(),
-                 form.moved_suffix.valof() if hasattr(form, "moved_suffix") else "")
+                 vals.ORIG_SUFFIX,
+                 vals.get('MOVED_SUFFIX', ''))
 
-    if form.run_in_background.valof() if hasattr(form, "run_in_background") else True:
+    if vals.RUN_IN_BACKGROUND:
         cmd = "".join(['$CARMSYS/bin/studio -l %E -d -p',
                        '"PythonEvalExpr(\\"__import__(\\\\\\"%s\\\\\\",' % __name__,
                        'fromlist=[None])._do_it_in_batch(',
@@ -154,6 +163,7 @@ class DoIt(object):
 
     def __call__(self, user_messages_file_path, *args):
         self.umh = pcu.UserMessagesHandler(user_messages_file_path)
+        self.pps = plan_process_steps.PlanProcessSteps(self.umh)
         try:
             self.all_timer = pcu.MySimpleTimer()
             self.plan_timer = pcu.MySimpleTimer()
@@ -193,10 +203,8 @@ class DoIt(object):
             if os.path.exists(best_solution_file_path):
                 source_plan_full_name = os.path.join(source_plan_full_name, "best_solution")
             sp_new_from_full_name = os.path.join(self.from_local_plan, sp + orig_suffix)
-            self.umh.add_message(MSGR("Load the sub-plan '%s'." % source_plan_full_name))
-            plan.open_plan(source_plan_full_name, confirm=False, silent=True, force=True)
-            self.umh.add_message(MSGR("Save the sub-plan as '%s'." % sp_new_from_full_name))
-            plan.save_subplan(sp_new_from_full_name)
+            self.pps.force_open_plan(source_plan_full_name)
+            self.pps.save_subplan_as(sp_new_from_full_name)
             sp_comment = pcu.get_text_for_sub_plan_comment(MSGR("Copied"), source_plan_full_name, self.variant.title)
             self.finalize_sp(sp + orig_suffix, False, sp_comment)
 
@@ -210,8 +218,8 @@ class DoIt(object):
                 self.finalize_sp(sp + moved_suffix, True, sp_comment)
 
     def _refesh_plans(self, sub_plans_to_refresh_orig_lp_as_string, sub_plans_to_refresh_moved_lp_as_string):
-        sp_names_orig = filter(None, sub_plans_to_refresh_orig_lp_as_string.split(","))
-        sp_names_moved = filter(None, sub_plans_to_refresh_moved_lp_as_string.split(","))
+        sp_names_orig = [s for s in sub_plans_to_refresh_orig_lp_as_string.split(",") if s]
+        sp_names_moved = [s for s in sub_plans_to_refresh_moved_lp_as_string.split(",") if s]
         self._log_common_params()
         self.umh.add_message(get_refresh_plans_message(sp_names_orig, sp_names_moved, self.variant))
         self.umh.add_message("", 0)
@@ -241,46 +249,38 @@ class DoIt(object):
         self.umh.add_message("", 0)
 
     def finalize_sp(self, sub_plan_name, has_been_moved, sp_comment=None):
+        pps = self.pps
+
         full_sub_plan_name = os.path.join(self.to_local_plan if has_been_moved else self.from_local_plan, sub_plan_name)
-        self.umh.add_message(MSGR("Load the sub-plan '%s'.") % full_sub_plan_name)
-        plan.open_plan(full_sub_plan_name, silent=True, confirm=False, force=True)
+        pps.force_open_plan(full_sub_plan_name)
 
         if has_been_moved:
-            self.umh.add_message(MSGR("Load the rule set '%s' (keep parameter settings).") % self.rule_set_name)
-            pcu.load_rule_set_keep_parameters(self.rule_set_name)
+            pps.load_rule_set_keep_parameters(self.rule_set_name)
 
         parameter_file = self.param_set_for_moved_plans if has_been_moved else self.param_set_for_orig_plans
         if parameter_file:
-            self.umh.add_message(MSGR("Load the parameter file '%s'.") % parameter_file)
-            Cui.CuiCrcLoadParameterSet(Cui.gpc_info, parameter_file)
+            pps.load_parameters_file(parameter_file)
 
         if self.variant.set_tt_params:
             if has_been_moved:
-                pcu.set_rave_parameters(self.umh, pcu.parameters_to_set_in_moved_tt_plan)
+                pps.set_rave_parameters(pcu.parameters_to_set_in_moved_tt_plan)
             else:
-                pcu.set_rave_parameters(self.umh, pcu.parameters_to_set_in_orig_tt_plan)
+                pps.set_rave_parameters(pcu.parameters_to_set_in_orig_tt_plan)
 
         try:
-            plan.save_subplan(silent=True, confirm=False, force=True)
+            pps.force_save_subplan(verbose=False)
         except Exception:
             Errlog.log(traceback.format_exc())
             self.umh.add_message(MSGR("Warning. The loaded sub-plan can't be saved. No Custom KPIs are generated."))
             self.umh.add_message("")
             return
 
-        MenuCommandsExt.selectTripUsingPlanningAreaBaseFilter(area=Cui.CuiArea0)
-
-        self.umh.add_message(MSGR("Generate Custom KPIs for visible trips in the loaded sub-plan."))
-        try:
-            Cui.CuiGenerateKpis(Cui.gpc_info, Cui.CUI_SILENT, "window")
-        except StudioError:
-            self.umh.add_message(MSGR("Warning. Generation of Custom KPIs failed."))
+        pps.generate_plan_kpis_exclude_hidden()
 
         if sp_comment:
-            Cui.CuiSetSubPlanComment(Cui.gpc_info, sp_comment)
+            pps.set_subplan_comment(sp_comment)
 
-        self.umh.add_message(MSGR("Save the sub-plan."))
-        plan.save_subplan(silent=True, confirm=False, force=True)
+        pps.force_save_subplan()
 
         msg = MSGR("'{}' is now ready to be analysed. Duration {}.").format(full_sub_plan_name,
                                                                             self.plan_timer.get_time_as_formatted_string())
@@ -288,217 +288,234 @@ class DoIt(object):
         self.umh.add_message("")
 
 
-class MyForm(Cfh.Box):
+class _MoveRefreshForm(form_util.RememberedForm):
+    width = 70
 
-    the_instances = {}
+    @property
+    def name(self):
+        return self.variant.form_name()
 
-    def __new__(cls, variant):
-        if variant.key not in cls.the_instances:
-            cls.the_instances[variant.key] = Cfh.Box.__new__(cls)
-            cls._my_init(cls.the_instances[variant.key], variant)
-        else:
-            cls.the_instances[variant.key].refresh_form()
-        return cls.the_instances[variant.key]
+    @property
+    def title(self):
+        return self.variant.title
 
-    def __init__(self, *args, **kw):
-        pass
-
-    def refresh_form(self):
-        if hasattr(self, "rule_set_name"):
-            self.rule_set_name.refresh_menu()
-
-    def _my_init(self, variant):
-        self.variant = variant
-        form_name = variant.form_name()
-        super(MyForm, self).__init__(form_name)
-
-        layout = ["FORM;%s;%s" % (form_name, variant.title),
-                  "COLUMN;70"]
-
-        self.from_local_plan = pcu.LocalPlanName(self, "FROM_LOCAL_PLAN", "")
-        self.from_local_plan.setMandatory(1)
-        layout.append("FIELD;FROM_LOCAL_PLAN;%s" % self.variant.labels().from_lp)
-
-        self.subplans = Cfh.String(self, "SUBPLANS", pcu.MAX_LEN_SUB_PLAN_NAME, "")
-        self.subplans.setMandatory(1)
-        layout.append("FIELD;SUBPLANS;%s" % self.variant.labels().sub_plans)
+    def add_elements(self):
+        variant = self.variant
+        labels = variant.labels()
+        self.add(form_util.LocalPlanExisting(self, 'FROM_LOCAL_PLAN'), labels.from_lp)
+        self.add_string('SUBPLANS', labels.sub_plans, pcu.MAX_LEN_SUB_PLAN_NAME)
 
         if variant.allow_regex:
-            self.matching_method = MySubPlanMatchingMethod(self, "MATCHING_METHOD", MySubPlanMatchingMethod.comma_separated_value)
-            layout.append("FIELD;MATCHING_METHOD;%s" % MSGR("   matching method"))
-
+            widget = MySubPlanMatchingMethod(self, 'MATCHING_METHOD',
+                                             MySubPlanMatchingMethod.comma_separated_value)
+            self.add(widget, MSGR("   matching method"))
         if variant.allow_to_plan:
-            self.to_local_plan = pcu.LocalPlanName(self, "TO_LOCAL_PLAN", "")
-            layout.append("FIELD;TO_LOCAL_PLAN;%s" % self.variant.labels().to_lp)
-
+            self.add(form_util.LocalPlanExisting(self, 'TO_LOCAL_PLAN'), labels.to_lp, mandatory=False)
             default_rule_set = os.path.basename(Crs.CrsGetModuleResource("config", Crs.CrsSearchModuleDef, "CrcDefaultRuleSet"))
-            self.rule_set_name = pcu.RuleSetName(self, "RULE_SET_NAME", default_rule_set)
-            layout.append("FIELD;RULE_SET_NAME;%s" % self.variant.labels().rule_set_name)
-
+            self.add_rule_set_name('RULE_SET_NAME', labels.rule_set_name, default_rule_set)
         if variant.use_param_sets:
-            self.param_set_for_orig_plans = MyParamSet(self, "PARAM_SET_ORIG", "")
-            layout.append("FIELD;PARAM_SET_ORIG;%s" % self.variant.labels().param_file_for_orig_plans)
-
+            widget = MyParamSet(self, "PARAM_SET_ORIG", "")
+            self.add(widget, labels.param_file_for_orig_plans, mandatory=False)
             if variant.allow_to_plan:
-                self.param_set_for_moved_plans = MyParamSet(self, "PARAM_SET_MOVED", "")
-                layout.append("FIELD;PARAM_SET_MOVED;%s" % self.variant.labels().param_file_for_moved_plans)
-
-        self.orig_suffix = Cfh.FileName(self, "ORIG_SUFFIX", pcu.MAX_LEN_PLAN_NAME_SUFFIX, "_p")
-        self.orig_suffix.setMandatory(1)
-        layout.append("FIELD;ORIG_SUFFIX;%s" % self.variant.labels().suffix_for_orig_plans)
-
+                widget = MyParamSet(self, "PARAM_SET_MOVED", "")
+                self.add(widget, labels.param_file_for_moved_plans, mandatory=False)
+        self.add_filename('ORIG_SUFFIX', labels.suffix_for_orig_plans,
+                          pcu.MAX_LEN_PLAN_NAME_SUFFIX, initial_value='_p')
         if variant.allow_to_plan:
-            self.moved_suffix = Cfh.FileName(self, "MOVED_SUFFIX", pcu.MAX_LEN_PLAN_NAME_SUFFIX, variant.moved_suffix_default)
-            self.moved_suffix.setMandatory(1)
-            layout.append("FIELD;MOVED_SUFFIX;%s" % self.variant.labels().suffix_for_moved_plans)
+            self.add_filename('MOVED_SUFFIX', labels.suffix_for_moved_plans,
+                              pcu.MAX_LEN_PLAN_NAME_SUFFIX, initial_value=variant.moved_suffix_default)
 
         if variant.allow_only_refresh_plans:
-            self.action = MyAction(self, "ACTION", MyAction.create_new_plans_value)
-            layout.append("EMPTY")
-            layout.append("FIELD;ACTION;%s" % MSGR("Action"))
+            widget = MyAction(self, "ACTION", MyAction.create_new_plans_value)
+            self.add_empty()
+            self.add(widget, "ACTION", MSGR("Action"))
+        self.add_empty()
+        self.add_toggle('RUN_IN_BACKGROUND', MSGR("Run in background"), pcu.default_value_for_run_in_background)
+        self.add_ok()
+        self.add_cancel()
+        self.add_reset()
+        self.add_default()
 
-        layout.append("EMPTY")
-        self.run_in_background = Cfh.Toggle(self, "RUN_IN_BACKGROUND", pcu.default_value_for_run_in_background)
-        layout.append("FIELD;RUN_IN_BACKGROUND;%s" % MSGR("Run in background"))
+    def refresh_lists(self):
+        if hasattr(self, "RULE_SET_NAME"):
+            self.RULE_SET_NAME.refresh_menu()
 
-        self.done = Cfh.Done(self, "OK")
-        layout.append("BUTTON;OK;%s;%s" % (MSGR("OK"), MSGR("_Ok")))
+    class LazyCachedValues(object):
+        def __init__(self, form):
+            self.form = form
 
-        self.cancel = Cfh.Cancel(self, "CANCEL")
-        layout.append("BUTTON;CANCEL;%s;%s" % (MSGR("Cancel"), MSGR("_Cancel")))
+        @CachedProperty
+        def from_lp_name(self):
+            return self.form.FROM_LOCAL_PLAN.getValue()
 
-        self.reset = Cfh.Reset(self, "RESET")
-        layout.append("BUTTON;RESET;%s;%s" % (MSGR("Reset"), MSGR("_Reset")))
+        @CachedProperty
+        def to_lp_name(self):
+            return self.form.TO_LOCAL_PLAN.getValue() if hasattr(self.form, "TO_LOCAL_PLAN") else ""
 
-        self.default = pcu.SetDefaultValues(self, "DEFAULT")
-        layout.append("BUTTON;DEFAULT;%s;%s" % (MSGR("Default"), MSGR("_Default")))
+        @CachedProperty
+        def orig_suffix(self):
+            return self.form.ORIG_SUFFIX.getValue()
 
-        with NamedTemporaryFile() as f:
-            f.write("\n".join(layout))
-            f.flush()
-            self.load(f.name)
+        @CachedProperty
+        def moved_suffix(self):
+            return self.form.MOVED_SUFFIX.getValue() if hasattr(self.form, "MOVED_SUFFIX") else ""
 
-    def check(self, *_args):
-        ret = pcu.studio_19241_work_around(self)
-        if ret:
-            return ret
-        from_lp_name = self.from_local_plan.getValue()
-        to_lp_name = self.to_local_plan.getValue() if hasattr(self, "to_local_plan") else ""
-        if from_lp_name == to_lp_name:
-            self.to_local_plan.setFocus()
+        @CachedProperty
+        def sp_value(self):
+            return self.form.SUBPLANS.getValue()
+
+        @CachedProperty
+        def use_regex(self):
+            form = self.form
+            return form.variant.allow_regex and form.MATCHING_METHOD.getValue() == MySubPlanMatchingMethod.regex_value
+
+        @CachedProperty
+        def only_refresh_plans(self):
+            return self.form.variant.allow_only_refresh_plans and self.form.ACTION.getValue() == MyAction.only_refresh_plans_value
+
+        @CachedProperty
+        def all_sub_plans_of_from_lp(self):
+            return set(Cui.CuiSubPlanList(self.from_lp_name))
+
+    def check(self, arg):
+        v = self.LazyCachedValues(self)
+        if v.from_lp_name == v.to_lp_name:
+            self.TO_LOCAL_PLAN.setFocus()
             return MSGR("The local plans can't be the same")
-        use_regex = self.variant.allow_regex and self.matching_method.getValue() == MySubPlanMatchingMethod.regex_value
-        orig_suffix = self.orig_suffix.getValue()
-        moved_suffix = self.moved_suffix.getValue() if hasattr(self, "moved_suffix") else ""
-        sp_value = self.subplans.getValue()
-        only_refresh_plans = self.variant.allow_only_refresh_plans and self.action.getValue() == MyAction.only_refresh_plans_value
-        all_sub_plans_of_from_lp = set(Cui.CuiSubPlanList(from_lp_name))
-        if to_lp_name:
-            all_sub_plans_of_to_lp = set(Cui.CuiSubPlanList(to_lp_name))
-        if not use_regex:
-            sp_set = set(sp for sp in (x.strip() for x in sp_value.split(',')) if sp)
-
-        if only_refresh_plans:
-            if not use_regex:
-                sp_names_orig = sorted([name + orig_suffix for name in sp_set])
-                not_existing_orig_plans = set(sp_names_orig) - all_sub_plans_of_from_lp
-                if not_existing_orig_plans:
-                    self.subplans.setFocus()
-                    if len(not_existing_orig_plans) == 1:
-                        msg = MSGR("There is no sub-plan named '%%s' under <%s>") % self.variant.labels().from_lp
-                    else:
-                        msg = MSGR("There are no sub-plans named '%%s' under <%s>") % self.variant.labels().from_lp
-                    return msg % "' or '".join(not_existing_orig_plans)
-                orig_plans_with_opt = [sp for sp in sp_names_orig if sub_plan_has_opt_solutions(from_lp_name, sp)]
-                if orig_plans_with_opt:
-                    self.subplans.setFocus()
-                    if len(orig_plans_with_opt) == 1:
-                        msg = MSGR("The sub-plan '%%s' under <%s> has solutions") % self.variant.labels().from_lp
-                    else:
-                        msg = MSGR("The sub-plans '%%s' under <%s> have solutions") % self.variant.labels().from_lp
-                    return msg % "' and '".join(orig_plans_with_opt)
-                sp_names_moved = sorted([name + moved_suffix for name in sp_set]) if to_lp_name else []
-                if to_lp_name:
-                    not_existing_moved_plans = set(sp_names_moved) - all_sub_plans_of_to_lp
-                    if not_existing_moved_plans:
-                        self.subplans.setFocus()
-                        if len(not_existing_moved_plans) == 1:
-                            msg = MSGR("There is no sub-plan named '%%s' under <%s>") % self.variant.labels().to_lp
-                        else:
-                            msg = MSGR("There are no sub-plans named '%%s' under <%s>") % self.variant.labels().to_lp
-                        return msg % MSGR("' or '").join(not_existing_moved_plans)
-                    moved_plans_with_opt = [sp for sp in sp_names_moved if sub_plan_has_opt_solutions(to_lp_name, sp)]
-                    if moved_plans_with_opt:
-                        self.subplans.setFocus()
-                        if len(moved_plans_with_opt) == 1:
-                            msg = MSGR("The sub-plan '%%s' under <%s> has solutions") % self.variant.labels().to_lp
-                        else:
-                            msg = MSGR("The sub-plans '%%s' under <%s> have solutions") % self.variant.labels().to_lp
-                        return msg % "' and '".join(moved_plans_with_opt)
-            else:  # regex used
-                sp_names_orig = sorted(x for x in all_sub_plans_of_from_lp
-                                       if x.endswith(orig_suffix) and
-                                       re.search(sp_value, x[:-len(orig_suffix)]) and
-                                       not sub_plan_has_opt_solutions(from_lp_name, x))
-                if to_lp_name:
-                    sp_names_moved = sorted(x for x in all_sub_plans_of_to_lp
-                                            if x.endswith(moved_suffix) and
-                                            re.search(sp_value, x[:-len(moved_suffix)]) and
-                                            not sub_plan_has_opt_solutions(to_lp_name, x))
-                else:
-                    sp_names_moved = []
-                if not (sp_names_orig or sp_names_moved):
-                    self.subplans.setFocus()
-                    return MSGR("No sub-plans without solutions match regular expression and suffix")
-            msg = get_refresh_plans_message(sp_names_orig, sp_names_moved, self.variant)
-            msg += MSGR("\n\nContinue?")
-            if not Gui.GuiYesNo("VERIFY_PLANS", msg):
-                self.subplans.setFocus()
-                return MSGR("You pressed No")
-            self.sub_plans_to_refresh_orig_lp_as_string = ",".join(sp_names_orig)
-            self.sub_plans_to_refresh_moved_lp_as_string = ",".join(sp_names_moved)
-            return
-
-        # plan creation
-        if use_regex:
-            sp_set = set(x for x in all_sub_plans_of_from_lp if re.search(sp_value, x))
-            if not sp_set:
-                self.subplans.setFocus()
-                return MSGR("No existing sub-plans match the regular expression")
-        else:
-            not_existing_start_plans = sp_set - all_sub_plans_of_from_lp
-            if not_existing_start_plans:
-                self.subplans.setFocus()
-                if len(not_existing_start_plans) == 1:
-                    msg = MSGR("There is no sub-plan named '%%s' under <%s>") % self.variant.labels().from_lp
-                else:
-                    msg = MSGR("There are no sub-plans named '%%s' under <%s>") % self.variant.labels().from_lp
-                return msg % MSGR("' or '").join(sorted(not_existing_start_plans))
-        existing_orig_plans = all_sub_plans_of_from_lp & set(name + orig_suffix for name in sp_set)
-        if existing_orig_plans:
-            self.orig_suffix.setFocus()
-            if len(existing_orig_plans) == 1:
-                msg = MSGR("The sub-plan '%%s' already exists under <%s>") % self.variant.labels().from_lp
+        try:
+            if v.only_refresh_plans:
+                self._check_before_refresh(v)
             else:
-                msg = MSGR("The sub-plans '%%s' already exist under <%s>") % self.variant.labels().from_lp
-            return msg % MSGR("' and '").join(sorted(existing_orig_plans))
-        if to_lp_name:
-            existing_move_plans = all_sub_plans_of_to_lp & set(name + moved_suffix for name in sp_set)
-            if existing_move_plans:
-                self.moved_suffix.setFocus()
-                if len(existing_move_plans) == 1:
-                    msg = MSGR("The sub-plan '%%s' already exists under <%s>") % self.variant.labels().to_lp
-                else:
-                    msg = MSGR("The sub-plans '%%s' already exist under <%s>") % self.variant.labels().to_lp
-                return msg % MSGR("' and '").join(sorted(existing_move_plans))
-            msg = get_move_plans_message(sp_set, orig_suffix, moved_suffix, self.variant)
+                self._check_before_move(v)
+        except FormCheckFailure as f:
+            msg = f.args[0]
+            return msg
+        return super(_MoveRefreshForm, self).check(arg)
+
+    def _check_compile_re(self, re_string, field):
+        try:
+            return re.compile(re_string)
+        except Exception as ex:
+            field.setFocus()
+            raise FormCheckFailure(MSGR("Invalid regular expression: {}").format(str(ex)))
+
+    def _check_before_refresh(self, v):
+        labels = self.variant.labels()
+        if not v.use_regex:
+            sp_set = self._sp_set_no_regexp(v.sp_value)
+            sp_names_orig = sorted([name + v.orig_suffix for name in sp_set])
+            self._check_sp_exists(self.SUBPLANS, labels.from_lp, v.from_lp_name, sp_names_orig)
+            self._check_no_opt_solutions(self.SUBPLANS, labels.from_lp, v.from_lp_name, sp_names_orig)
+            if v.to_lp_name:
+                sp_names_moved = sorted([name + v.moved_suffix for name in sp_set])
+                self._check_sp_exists(self.SUBPLANS, labels.to_lp, v.to_lp_name, sp_names_moved)
+                self._check_no_opt_solutions(self.SUBPLANS, labels.to_lp, v.to_lp_name, sp_names_moved)
+            else:
+                sp_names_moved = []
         else:
-            msg = get_create_kpi_plans_message(sp_set, orig_suffix, self.variant)
+            sp_regex = self._check_compile_re(v.sp_value, self.SUBPLANS)
+            all_sub_plans_of_to_lp = set(Cui.CuiSubPlanList(v.to_lp_name))
+            sp_names_orig = self._matching_subplans_without_solutions(v.from_lp_name,
+                                                                      v.all_sub_plans_of_from_lp,
+                                                                      v.orig_suffix,
+                                                                      sp_regex)
+            if v.to_lp_name:
+                sp_names_moved = self._matching_subplans_without_solutions(v.to_lp_name,
+                                                                           all_sub_plans_of_to_lp,
+                                                                           v.moved_suffix,
+                                                                           sp_regex)
+            else:
+                sp_names_moved = []
+            if not (sp_names_orig or sp_names_moved):
+                self.SUBPLANS.setFocus()
+                raise FormCheckFailure(MSGR("No sub-plans without solutions match regular expression and suffix"))
+        msg = get_refresh_plans_message(sp_names_orig, sp_names_moved, self.variant)
+        self._check_gui_verify_plans_continue(msg)
+        self.sub_plans_to_refresh_orig_lp_as_string = ",".join(sp_names_orig)
+        self.sub_plans_to_refresh_moved_lp_as_string = ",".join(sp_names_moved)
+
+    def _check_before_move(self, v):
+        labels = self.variant.labels()
+        if v.use_regex:
+            sp_regex = self._check_compile_re(v.sp_value, self.SUBPLANS)
+            sp_set = set(x for x in v.all_sub_plans_of_from_lp if sp_regex.search(x))
+            if not sp_set:
+                self.SUBPLANS.setFocus()
+                raise FormCheckFailure(MSGR("No existing sub-plans match the regular expression"))
+        else:
+            sp_set = self._sp_set_no_regexp(v.sp_value)
+            self._check_sp_exists(self.SUBPLANS, labels.from_lp, v.from_lp_name, sp_set)
+        self._check_sp_not_exists(self.ORIG_SUFFIX, labels.from_lp, v.from_lp_name,
+                                  subplans=set(name + v.orig_suffix for name in sp_set),
+                                  existing_subplans=v.all_sub_plans_of_from_lp)
+        if v.to_lp_name:
+            self._check_sp_not_exists(self.MOVED_SUFFIX, labels.to_lp, v.to_lp_name,
+                                      subplans=set(name + v.moved_suffix for name in sp_set),
+                                      existing_subplans=v.all_sub_plans_of_from_lp)
+            msg = get_move_plans_message(sp_set, v.orig_suffix, v.moved_suffix, self.variant)
+        else:
+            msg = get_create_kpi_plans_message(sp_set, v.orig_suffix, self.variant)
+        self._check_gui_verify_plans_continue(msg)
+        self.sub_plans_to_move_as_string = ",".join(sorted(sp_set))
+
+    def _sp_set_no_regexp(self, sp_value):
+        return set(sp for sp in (x.strip() for x in sp_value.split(',')) if sp)
+
+    def _check_gui_verify_plans_continue(self, msg):
         msg += MSGR("\n\nContinue?")
         if not Gui.GuiYesNo("VERIFY_PLANS", msg):
-            self.subplans.setFocus()
-            return MSGR("You pressed No")
-        self.sub_plans_to_move_as_string = ",".join(sorted(sp_set))
+            self.SUBPLANS.setFocus()
+            raise FormCheckFailure(MSGR("You pressed No"))
+
+    def _check_sp_exists(self, focus_widget, lp_label, lp_name, sp_names):
+        lp_sps = set(Cui.CuiSubPlanList(lp_name))
+        not_existing = set(sp_names) - lp_sps
+        if not_existing:
+            focus_widget.setFocus()
+            if len(not_existing) == 1:
+                msg = MSGR("There is no sub-plan named '{}' under <{}>")
+            else:
+                msg = MSGR("There are no sub-plans named '{}' under <{}>")
+            raise FormCheckFailure(msg.format("' or '".join(sorted(not_existing)), lp_label))
+
+    def _check_no_opt_solutions(self, focus_widget, lp_label, lp_name, sp_names):
+        plans_with_opt = [sp for sp in sp_names if sub_plan_has_opt_solutions(lp_name, sp)]
+        if plans_with_opt:
+            focus_widget.setFocus()
+            if len(plans_with_opt) == 1:
+                msg = MSGR("The sub-plan '{}' under <{}> has solutions")
+            else:
+                msg = MSGR("The sub-plans '{}' under <{}> have solutions")
+            raise FormCheckFailure(msg.format("' and '".join(sorted(plans_with_opt)), lp_label))
+
+    def _matching_subplans_without_solutions(self, lp_name, subplans, suffix, regexp):
+        return sorted(sp for sp in subplans
+                      if sp.endswith(suffix) and
+                      regexp.search(sp[:-len(suffix)]) and
+                      not sub_plan_has_opt_solutions(lp_name, sp))
+
+    def _check_sp_not_exists(self, focus_widget, lp_label, lp_name, subplans, existing_subplans):
+        already_existing = existing_subplans & subplans
+        if already_existing:
+            focus_widget.setFocus()
+            if len(already_existing) == 1:
+                msg = MSGR("The sub-plan '{}' already exists under <{}>")
+            else:
+                msg = MSGR("The sub-plans '{}' already exist under <{}>")
+            msg = msg.format(MSGR("' and '").join(sorted(already_existing)), lp_label)
+            raise FormCheckFailure(msg)
+
+
+class TTMoveRefresh(_MoveRefreshForm):
+    variant = TT
+
+
+class LBMoveRefresh(_MoveRefreshForm):
+    variant = LB
+
+
+class PAMoveRefresh(_MoveRefreshForm):
+    variant = PA
 
 
 def sub_plan_has_opt_solutions(lp_name, sp_name):
@@ -522,7 +539,7 @@ def get_move_plans_message(sp_names, orig_suffix, moved_suffix, variant):
     titles = [MSGR("Source sub-plan under <%s>") % variant.labels().from_lp,
               MSGR("Result of copy under <%s>") % variant.labels().from_lp,
               MSGR("Result of move under <%s>") % variant.labels().to_lp]
-    max_lens = map(max, zip(map(len, titles), map(lambda x: max_sp_len + len(x), ("", orig_suffix, moved_suffix))))
+    max_lens = list(map(max, zip(map(len, titles), [max_sp_len + len(x) for x in ("", orig_suffix, moved_suffix)])))
     fms = "{0[0]:{1[0]}}  {0[1]:{1[1]}}  {0[2]:{1[2]}}"
     msg += "\n %s\n" % fms.format(titles, max_lens)
     msg += "\n".join(" " + fms.format((x, x + orig_suffix, x + moved_suffix), max_lens) for x in sorted(sp_names))
@@ -534,7 +551,7 @@ def get_create_kpi_plans_message(sp_names, orig_suffix, variant):
     max_sp_len = max(map(len, sp_names))
     titles = [MSGR("Source sub-plan under <%s>") % variant.labels().from_lp,
               MSGR("Result of copy under <%s>") % variant.labels().from_lp]
-    max_lens = map(max, zip(map(len, titles), map(lambda x: max_sp_len + len(x), ("", orig_suffix))))
+    max_lens = list(map(max, zip(map(len, titles), [max_sp_len + len(x) for x in ("", orig_suffix)])))
     fms = "{0[0]:{1[0]}}  {0[1]:{1[1]}}"
     msg += "\n %s\n" % fms.format(titles, max_lens)
     msg += "\n".join(" " + fms.format((x, x + orig_suffix), max_lens) for x in sorted(sp_names))
@@ -577,9 +594,3 @@ class MySubPlanMatchingMethod(Cfh.String):
         self.setMenu(["", self.comma_separated_value, self.regex_value])
         self.setMandatory(1)
         self.setStyle(Cfh.CfhSChoiceToggle)
-
-
-if __name__ == "__main__":
-    reload(pcu)
-    import carmusr.calibration.command_move_or_refresh_plans as me  # @UnresolvedImport
-    me.do_it_with_gui("lb")
