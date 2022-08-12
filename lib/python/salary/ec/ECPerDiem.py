@@ -874,7 +874,7 @@ class PerDiemTrip(DataClass):
                     result += handleMultipleLegs(self.legs, lasti, i)
                     lasti = i
             result += handleMultipleLegs(self.legs, lasti, len(self.legs))
-            print result
+            #print result
             #print "END Per diem tax NO"
                 
         elif self.layoverTaxDeductNo: # 2A, 3: if at least 5:00 between 22-06 and stop, or covering all of 22-06
@@ -978,7 +978,7 @@ class PerDiemTrip(DataClass):
             #print "Trip days=", self.getTripDaysTaxNorway()
             #print '  ' + '  \n'.join(map(lambda x: repr(x.__dict__), self.legs))
             result = handleMultipleLegs(self.legs, 0, len(self.legs))
-            print result
+            #print result
             #print "END Per diem tax NO"
                 
         elif self.layoverTaxDeductNo: # 2A, 3: if at least 5:00 between 22-06 and stop, or covering all of 22-06
