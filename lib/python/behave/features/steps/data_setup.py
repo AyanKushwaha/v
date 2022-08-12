@@ -32,7 +32,7 @@ def _create_personal_activity(context, roster_ix, personal_activity, start_date=
     context.ctf.create_personal_activity(crew_ix=roster_ix, personal_activity=personal_activity, start_date=start_date, start_time=start_time, end_date=end_date, end_time=end_time, stn=stn)
 
 
-activity_columns = ('act', 'car', 'num', 'dep stn', 'arr stn', 'dep', 'arr', 'ac_typ', 'code', 'date')
+activity_columns = ('act', 'car', 'num', 'dep stn', 'arr stn', 'dep', 'arr', 'ac_typ', 'code', 'date', 'cockpit_employer', 'cabin_employer', 'ac_owner')
 
 #
 # Set up activity data
@@ -150,24 +150,24 @@ def create_activities_from_table(context):
 Available columns:
 Colums prepended with # are not yet implemented.
 
-#        label:            A label to assign to the activity, used to reference it (example: long flight)
+#       label:            A label to assign to the activity, used to reference it (example: long flight)
         act:              Any one of: leg, dh, oag, ground, transport (example: leg)
         car:              Flight carrier code (example: JA)
         num:              Flight number (example: 7511)
-#        suf:              Flight suffix (example: P)
+#       suf:              Flight suffix (example: P)
         dep stn:          Departure airport code (example: ORY)
         arr stn:          Arrival airport code (example: ARR)
         dep:              Departure time (example: 01NOV2016 10:25)
         arr:              Arrival time (example: 01NOV2016 12:25)
         ac_typ:           Aircraft type (example: 74H)
-#        srv_typ:          Service type (example: C)
+#       srv_typ:          Service type (example: C)
         code:             Only applicable for ground duties, ground duty code (example: SBY)
-#        duty type:        Type of duty, used mainly for augmentation (example: REL)
-#        cockpit employer: The carrier code of the cockpit employer (example: JA)
-#        cabin employer:   The carrier code of the cabin employer (example: JA)
-#        ac owner:         The carrier code of the aircraft owner (example: JA)
-#        user tags:        User tags defined in the system (example: PRE_BOOKED)
-#        ac change         Whether the current and the next leg are the same aircraft or not (example: False)
+#       duty type:        Type of duty, used mainly for augmentation (example: REL)
+        cockpit employer: The carrier code of the cockpit employer (example: JA)
+        cabin employer:   The carrier code of the cabin employer (example: JA)
+        ac owner:         The carrier code of the aircraft owner (example: JA)
+#       user tags:        User tags defined in the system (example: PRE_BOOKED)
+#       ac change         Whether the current and the next leg are the same aircraft or not (example: False)
     """
     # Add all needed columns, default value to ''
     for column in activity_columns:
@@ -190,8 +190,11 @@ Colums prepended with # are not yet implemented.
         dep = util.verify_time(row[context.table.get_column_index('dep')])
         arr = util.verify_time(row[context.table.get_column_index('arr')])
         ac_typ = util.verify_ac_type(row[context.table.get_column_index('ac_typ')])
+        cockpit_employer = util.verify_employer(row[context.table.get_column_index('cockpit_employer')])
+        cabin_employer = util.verify_employer(row[context.table.get_column_index('cabin_employer')])
+        ac_owner = util.verify_employer(row[context.table.get_column_index('ac_owner')])
 
-        context.ctf.create_activity(activity=activity, car=carrier, code=code, num=flight_num, date=date, dep=dep, arr=arr, dep_stn=dep_stn, arr_stn=arr_stn, ac_typ=ac_typ)
+        context.ctf.create_activity(activity=activity, car=carrier, code=code, num=flight_num, date=date, dep=dep, arr=arr, dep_stn=dep_stn, arr_stn=arr_stn, ac_typ=ac_typ, cockpit_employer=cockpit_employer, cabin_employer=cabin_employer, ac_owner=ac_owner)
 
 
 @given(u'leg %(leg_ix_1)s has onward flight leg %(leg_ix_2)s' % util.matching_patterns)
@@ -320,24 +323,24 @@ def create_trip_from_table(context, a_another='unused', homebase=''):
 Available columns:
 Colums prepended with # are not yet implemented.
 
-#        label:            A label to assign to the activity, used to reference it (example: long flight)
+#       label:            A label to assign to the activity, used to reference it (example: long flight)
         act:              Any one of: leg, dh, oag, ground, transport (example: leg)
         car:              Flight carrier code (example: JA)
         num:              Flight number (example: 7511)
-#        suf:              Flight suffix (example: P)
+#       suf:              Flight suffix (example: P)
         dep stn:          Departure airport code (example: ORY)
         arr stn:          Arrival airport code (example: ARR)
         dep:              Departure time (example: 01NOV2016 10:25)
         arr:              Arrival time (example: 01NOV2016 12:25)
         ac_typ:           Aircraft type (example: 74H)
-#        srv_typ:          Service type (example: C)
+#       srv_typ:          Service type (example: C)
         code:             Only applicable for ground duties, ground duty code (example: SBY)
-#        duty type:        Type of duty, used mainly for augmentation (example: REL)
-#        cockpit employer: The carrier code of the cockpit employer (example: JA)
-#        cabin employer:   The carrier code of the cabin employer (example: JA)
-#        ac owner:         The carrier code of the aircraft owner (example: JA)
-#        user tags:        User tags defined in the system (example: PRE_BOOKED)
-#        ac change         Whether the current and the next leg are the same aircraft or not (example: False)
+#       duty type:        Type of duty, used mainly for augmentation (example: REL)
+        cockpit employer: The carrier code of the cockpit employer (example: JA)
+        cabin employer:   The carrier code of the cabin employer (example: JA)
+        ac owner:         The carrier code of the aircraft owner (example: JA)
+#       user tags:        User tags defined in the system (example: PRE_BOOKED)
+#       ac change         Whether the current and the next leg are the same aircraft or not (example: False)
     """
 
     # Add all needed columns, default value to ''
@@ -363,8 +366,11 @@ Colums prepended with # are not yet implemented.
         dep = util.verify_time_or_datetime(row['dep'])
         arr = util.verify_time_or_datetime(row['arr'])
         ac_typ = util.verify_ac_type(row['ac_typ'])
+        cockpit_employer = util.verify_employer(row[context.table.get_column_index('cockpit_employer')])
+        cabin_employer = util.verify_employer(row[context.table.get_column_index('cabin_employer')])
+        ac_owner = util.verify_employer(row[context.table.get_column_index('ac_owner')])
 
-        context.ctf.create_activity_on_trip(activity=activity, car=carrier, code=code, num=flight_num, date=date, dep=dep, arr=arr, dep_stn=dep_stn, arr_stn=arr_stn, ac_typ=ac_typ)
+        context.ctf.create_activity_on_trip(activity=activity, car=carrier, code=code, num=flight_num, date=date, dep=dep, arr=arr, dep_stn=dep_stn, arr_stn=arr_stn, ac_typ=ac_typ, cockpit_employer=cockpit_employer, cabin_employer=cabin_employer, ac_owner=ac_owner)
 
 @given(u'%(a_another)s trip with homebase "%(stn)s" with the following activities' % util.matching_patterns)
 def create_trip_with_homebase_from_table(context, stn, a_another='unused'):
@@ -377,24 +383,24 @@ def create_trip_with_homebase_from_table(context, stn, a_another='unused'):
 Available columns:
 Colums prepended with # are not yet implemented.
 
-#        label:            A label to assign to the activity, used to reference it (example: long flight)
+#       label:            A label to assign to the activity, used to reference it (example: long flight)
         act:              Any one of: leg, dh, oag, ground, transport (example: leg)
         car:              Flight carrier code (example: JA)
         num:              Flight number (example: 7511)
-#        suf:              Flight suffix (example: P)
+#       suf:              Flight suffix (example: P)
         dep stn:          Departure airport code (example: ORY)
         arr stn:          Arrival airport code (example: ARR)
         dep:              Departure time (example: 01NOV2016 10:25)
         arr:              Arrival time (example: 01NOV2016 12:25)
         ac_typ:           Aircraft type (example: 74H)
-#        srv_typ:          Service type (example: C)
+#       srv_typ:          Service type (example: C)
         code:             Only applicable for ground duties, ground duty code (example: SBY)
-#        duty type:        Type of duty, used mainly for augmentation (example: REL)
-#        cockpit employer: The carrier code of the cockpit employer (example: JA)
-#        cabin employer:   The carrier code of the cabin employer (example: JA)
-#        ac owner:         The carrier code of the aircraft owner (example: JA)
-#        user tags:        User tags defined in the system (example: PRE_BOOKED)
-#        ac change         Whether the current and the next leg are the same aircraft or not (example: False)
+#       duty type:        Type of duty, used mainly for augmentation (example: REL)
+        cockpit employer: The carrier code of the cockpit employer (example: JA)
+        cabin employer:   The carrier code of the cabin employer (example: JA)
+        ac owner:         The carrier code of the aircraft owner (example: JA)
+#       user tags:        User tags defined in the system (example: PRE_BOOKED)
+#       ac change         Whether the current and the next leg are the same aircraft or not (example: False)
     """
     homebase = util.verify_stn(stn)
     create_trip_from_table(context, homebase=homebase)
