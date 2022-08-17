@@ -433,7 +433,7 @@ class SupervisRun(ECGenericRun):
         return times100(rec.sim_instr_fixed)
  
     def INST_GD_SVS(self, rec):
-         return hours100(rec.crm_svs)
+        return hours100(rec.classroom_svs)
 
     def INST_LIFUS_ACT_SVS(self, rec):
         return times100(rec.lifus_act_svs)

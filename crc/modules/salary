@@ -276,7 +276,7 @@ end
 
 /* These PACT codes gives CRM allowance for Supervisor and Instructor SASCMS-3278.*/
 set inst_crm_codes = 
-  parameter "OL4", "OL5", "OL6","OLCRM4", "OLCRM5", "OLCRM6" 
+  parameter "OL4", "OL5", "OL6","OLCRM4", "OLCRM5", "OLCRM6"
   remark "Salary: Class room codes for CRM allowance for Supervisor.";
 
 /* These PACT codes gives CLASSROOM allowance. New with SASCMS-3278. */
@@ -313,8 +313,8 @@ enum inst_allowance =
   inst_allowance12 remark "Supernum, Release";
   inst_allowance15 remark "LIFUS FD SVS";         
   inst_allowance16 remark "Line Check FD SVS";
-  inst_allowance17 remark "Sim Instructor SVS";
-  inst_allowance18 remark "CRM SVS";
+  inst_allowance17 remark "Sim SVS";
+  inst_allowance18 remark "CLASSROOM SVS";
   remark "Instructor's allowances";
 end
 
@@ -358,7 +358,10 @@ export %inst_allowance% = default(%_inst_allowance%, inst_allowance00);
         else
             inst_allowance03
     else if %inst_act_classroom% then
-      inst_allowance04
+        if %is_SVS% then
+          inst_allowance18
+        else  
+          inst_allowance04
     else if %inst_act_lci% then
         if %is_SVS% then
           inst_allowance16
@@ -370,10 +373,7 @@ export %inst_allowance% = default(%_inst_allowance%, inst_allowance00);
     else if %inst_act_etops_lifus_lc% then
         inst_allowance10
     else if %inst_act_crm% then
-      if %is_SVS% then
-        inst_allowance18
-      else 
-        inst_allowance06
+      inst_allowance06
     else if %inst_act_skill_test% then
       inst_allowance08
     else if %inst_for_new_hire_follow_up% then
@@ -469,7 +469,7 @@ export %inst_is_leg_instructor% =
     %inst_act_pc_opc% or %inst_act_type_rating%;
 
 %inst_act_crm% =
-  leg.%code% in inst_crm_codes or leg.%code% = "OF1"; 
+  leg.%code% in inst_crm_codes;
 
 %inst_act_classroom% =
   if system_db_parameters.%new_training_codes_17_CC_valid%(leg.%start_utc%)
@@ -534,7 +534,7 @@ export %inst_is_leg_instructor% =
   %inst_count_as_brief_or_debrief%
   and %inst_allowance% = inst_allowance03;
 
-%inst_hours_with_allowance%(abstime s, abstime e, inst_allowance allowance) =
+%inst_hours_with_allowance%( abstime s, abstime e, inst_allowance allowance) =
   sum(leg(chain), leg.%time% * %leg_time_factor%(allowance)) where (%inst_allowance% = allowance
     and leg.%end_utc% >= s and leg.%end_utc% < e);
 
@@ -627,7 +627,7 @@ export %inst_sim_skill_brief_debrief% =
 
 export %inst_brief_debrief_hours_with_allowance%(abstime s, abstime e, inst_allowance allowance) =
     sum(leg(chain), %inst_bd_time%(allowance))
-    where (leg.%end_utc% >= %salary_month_start% 
+     where (leg.%end_utc% >= %salary_month_start% 
         and leg.%end_utc% < %salary_month_end%);
   
 %inst_bd_time%(inst_allowance allowance) =
@@ -912,15 +912,42 @@ export %inst_lci_svs% =
 
 /* Sim Instructor for link */
 
-export %inst_sim_brief_debrief_SVS% =
-    %inst_brief_debrief_hours_with_allowance%(%salary_month_start%, %salary_month_end%, inst_allowance17);  /* SIM */
+export %inst_sim_brief_debrief_svs% =
+    %inst_bd_hours_with_allowance_svs%(%salary_month_start%, %salary_month_end%) 
+     + %inst_sim_svs%; /* SIM */
+    
+export %inst_sim_svs% =
+    %inst_sim_in_period_svs%(%salary_month_start%, %salary_month_end%);
+
+%inst_sim_in_period_svs%(abstime s, abstime e) =
+    %inst_hours_with_allowance%(s, e, inst_allowance17);
+    
+%inst_bd_hours_with_allowance_svs%(abstime s, abstime e) =
+  %inst_brief_debrief_hours_with_allowance_svs%(s , e, inst_allowance17);
+   
+export %inst_brief_debrief_hours_with_allowance_svs%(abstime s, abstime e, inst_allowance allowance) =
+    sum(leg(chain), %inst_bd_time_svs%(allowance))
+     where (leg.%end_utc% >= %salary_month_start% 
+        and leg.%end_utc% < %salary_month_end%);
+
+export %inst_bd_time_svs%(inst_allowance allowance) =
+      %inst_briefing_debriefing_time_svs%(allowance, true)
+       + %inst_briefing_debriefing_time_svs%(allowance, false);
+
+%inst_briefing_debriefing_time_svs%(inst_allowance allowance, bool briefing) =
+    if %inst_allowance% <> allowance then
+            0:00
+    else if briefing then
+        leg.%check_in%
+    else leg.%check_out%;   
   
 /*ground duty Instructor for link*/
-export %inst_crm_svs% =
-  round_up(%inst_crm_in_period_svs%(%salary_month_start%, %salary_month_end%), 0:15);
+export %inst_class_svs% =
+  round_up(%inst_class_in_period_svs%(%salary_month_start%, %salary_month_end%), 0:15);
 
-%inst_crm_in_period_svs%(abstime s, abstime e) =
-  %inst_hours_with_allowance%(s , e, inst_allowance18);
+%inst_class_in_period_svs%(abstime s, abstime e) =
+  %inst_hours_with_allowance%(s, e, inst_allowance18);
+  
 
 /* vi: set fdm=marker: */
 /* eof */

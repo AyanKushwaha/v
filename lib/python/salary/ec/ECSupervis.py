@@ -51,10 +51,10 @@ class SupervisRosterManager:
             'homeCurrency': 'report_per_diem.%per_diem_home_currency%',
             'lifus_act_svs':  'salary.%inst_lifus_act_svs%',
             'inst_lci_svs': 'salary.%inst_lci_svs%',
-            'crm_svs': 'salary.%inst_crm_svs%',
-            'sim_bd_svs' : 'salary.%inst_sim_brief_debrief_SVS%',
+            'classroom_svs': 'salary.%inst_class_svs%',
+            'sim_bd_svs' : 'salary.%inst_sim_brief_debrief_svs%',
         }
-
+ 
     def getSupervisRosters(self):
         supervisRosters = []
         # iterator = rave.iter('iterators.roster_set')
