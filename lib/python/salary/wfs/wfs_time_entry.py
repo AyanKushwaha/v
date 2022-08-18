@@ -23,6 +23,7 @@ from salary.wfs.wfs_report import (abs_to_datetime, extperkey_from_id, country_f
     integer_to_reltime, crew_info_changed_in_period, crew_has_retired_at_date,planninggroup_from_id)
 from salary.wfs.wfs_config import PaycodeHandler
 import time
+import leg
 
 
 HEADERS = ('EMPLOYEE_ID', 'PAY_CODE', 'WORK_DT', 'HOURS', 'DAYS_OFF', 'START_DTTM', 'END_DTTM', 'RECORD_ID', 'FLAG')
@@ -213,6 +214,7 @@ class TimeEntry(WFSReport):
                     planning_group = planninggroup_from_id(crew_id, duty_start_day)
                     log.info('NORDLYS: planning group {z} '.format(z = planning_group))
                     if planning_group == "SVS":
+
                          # Checkout on Day-off overtime 
                         general_ot_paycode_day_off = self.paycode_handler.paycode_from_event('CNLN_LAND_DAY_OFF', crew_id, country,rank)
                         general_ot_hrs_day_off = integer_to_reltime(duty_bag.report_overtime.OT_units_SVS())
@@ -538,6 +540,14 @@ class TimeEntry(WFSReport):
             return True
         else:
             return False
+
+    def _standby_callout_time(self,duty_bag):
+        time = leg.standby_duty_time_before_factor
+        if duty_bag.duty.has_active_flight:
+            return time
+        else:
+            return 0
+        
 
     def _temporary_split_hours(self, duty_bag, start_dt, paycode, crew_id, extperkey,split_found):
 
