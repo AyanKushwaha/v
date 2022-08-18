@@ -50,6 +50,10 @@ class SupervisRosterManager:
             'homeCurrency': 'report_per_diem.%per_diem_home_currency%',
             'etops_lifus_act': 'salary.%inst_etops_lifus_act%',
             'etops_lc_act': 'salary.%inst_etops_lc_act%',
+            'lifus_act_svs':  'salary.%inst_lifus_act_svs%',
+            'inst_lci_svs': 'salary.%inst_lci_svs%',
+            'crm_svs': 'salary.%inst_crm_svs%',
+            'sim_bd_svs' : 'salary.%inst_sim_brief_debrief_SVS%',
         }
 
     def getSupervisRosters(self):

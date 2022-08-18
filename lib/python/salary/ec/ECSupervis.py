@@ -16,7 +16,8 @@ class SupervisRosterManager:
         # self.articles = ['INST_LCI', 'INST_LCI_LH', 'INST_LIFUS_ACT', 'INST_PC_OPC',
         #                 'INST_PC_OPC_BD', 'INST_TYPE_RATING', 'INST_TYPE_RATING_BD',
         #                 'INST_CLASS', 'INST_CRM', 'INST_CC', 'INST_SKILL_TEST','INST_SIM', 
-        #                 'INST_SIM_SKILL_BR','INST_NEW_HIRE','INST_CC_QA', 'SIM_INSTR_FIXED']
+        #                 'INST_SIM_SKILL_BR','INST_NEW_HIRE','INST_CC_QA', 'SIM_INSTR_FIXED',
+        #                 'INST_LC_SVS', 'INST_SIM_SKILL_BR_SVS', 'INST_LIFUS_ACT_SVS','INST_GD_SVS']
         # self.articles_se = ['INST_CLASS', 'INST_LCI', 'INST_CC', 'INST_CRM', 'INST_LCI_LH',
         #                     'INST_LIFUS_ACT', 'INST_NEW_HIRE', 'INST_SIM', 'INST_SIM_SKILL_BR', 
         #                     'INST_SKILL_TEST', 'SIM_INSTR_FIXED']
@@ -50,8 +51,12 @@ class SupervisRosterManager:
             'sim_instr_fixed': 'salary.%sim_instr_fixed%',
             'salarySystem': 'salary.%salary_system%(salary.%salary_run_date%)',
             'homeCurrency': 'report_per_diem.%per_diem_home_currency%',
+            'lifus_act_svs':  'salary.%inst_lifus_act_svs%',
+            'inst_lci_svs': 'salary.%inst_lci_svs%',
+            'classroom_svs': 'salary.%inst_class_svs%',
+            'sim_bd_svs' : 'salary.%inst_sim_brief_debrief_svs%',
         }
-
+ 
     def getSupervisRosters(self):
         supervisRosters = []
         # iterator = rave.iter('iterators.roster_set')

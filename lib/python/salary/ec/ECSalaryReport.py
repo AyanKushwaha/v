@@ -32,9 +32,9 @@ salary_perdim_article = {
     'JP': ['PERDIEM_SALDO']
 }
 salary_supervis_article = {
-    'DK': ['INST_LCI_LH', 'INST_LCI', 'INST_CLASS', 'INST_SKILL_TEST', 'INST_SIM', 'INST_SIM_SKILL_BR', 'INST_LIFUS_ACT', 'INST_NEW_HIRE', 'INST_CC', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT'],
-    'NO': ['SIM_INSTR_FIXED', 'INST_NEW_HIRE', 'INST_SIM_SKILL_BR', 'INST_LIFUS_ACT', 'INST_CLASS', 'INST_SIM', 'INST_SKILL_TEST', 'INST_CC', 'INST_LCI', 'INST_LCI_LH', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT'],
-    'SE': ['INST_CLASS', 'INST_LCI', 'INST_CC', 'INST_LCI_LH', 'INST_LIFUS_ACT', 'INST_NEW_HIRE', 'INST_SIM', 'INST_SIM_SKILL_BR', 'INST_SKILL_TEST', 'SIM_INSTR_FIXED', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT'],
+    'DK': ['INST_LCI_LH', 'INST_LCI', 'INST_CLASS', 'INST_SKILL_TEST', 'INST_SIM', 'INST_SIM_SKILL_BR', 'INST_LIFUS_ACT', 'INST_NEW_HIRE', 'INST_CC','INST_LC_SVS','INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT', 'INST_SIM_BR_SVS', 'INST_LIFUS_ACT_SVS','INST_GD_SVS' ],
+    'NO': ['SIM_INSTR_FIXED', 'INST_NEW_HIRE', 'INST_SIM_SKILL_BR', 'INST_LIFUS_ACT', 'INST_CLASS', 'INST_SIM', 'INST_SKILL_TEST', 'INST_CC', 'INST_LCI', 'INST_LCI_LH','INST_LC_SVS','INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT', 'INST_SIM_BR_SVS','INST_LIFUS_ACT_SVS','INST_GD_SVS'],
+    'SE': ['INST_CLASS', 'INST_LCI', 'INST_CC', 'INST_LCI_LH', 'INST_LIFUS_ACT', 'INST_NEW_HIRE', 'INST_SIM', 'INST_SIM_SKILL_BR', 'INST_SKILL_TEST', 'SIM_INSTR_FIXED','INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT'],
     'CN': [],
     'HK': [],
     'JP': []
@@ -369,6 +369,7 @@ class SupervisRun(ECGenericRun):
                     func = getattr(self, a)
                     unit_number = func(crew)
                     if unit_number is not None and int(unit_number) != 0:
+                        log.debug("salary system for unit number {0},{1},{2} and{3},{4}".format(unit_number,func,a,crew.salarySystem,crew.homeCurrency))
                         try: 
                             entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, '', '', unit_number/100.0, ''))
                         except Exception as e:
@@ -435,8 +436,22 @@ class SupervisRun(ECGenericRun):
 
     def SIM_INSTR_FIXED(self, rec):
         return times100(rec.sim_instr_fixed)
+ 
+    def INST_GD_SVS(self, rec):
+        return hours100(rec.classroom_svs)
 
+    def INST_LIFUS_ACT_SVS(self, rec):
+        return times100(rec.lifus_act_svs)
+        #return hours100(rec.lifus_act_svs)
 
+    def INST_SIM_BR_SVS(self, rec):
+        return hours100(rec.sim_bd_svs)
+        #return hours100(rec.sim_bd_svs)
+
+    def INST_LC_SVS(self, rec):
+        return times100(rec.inst_lci_svs)
+        #return hours100(rec.inst_lc_svs)
+    
 class OvertimeRun(ECGenericRun):
     def __init__(self, salary_system=None, crew_ids=[], salary_article_tm=None, report_start_date=None, report_first_absdate=None, report_end_date=None, report_last_absdate=None, release=True, test=False):
         ECGenericRun.__init__(self, salary_system, salary_article_tm, report_start_date, report_first_absdate, report_end_date, report_last_absdate, release, test)
