@@ -33,9 +33,15 @@ echo " - Processing migration tasks"
 
 #### Insert migration tasks below ####
 # Example:
-# echo "  * SKCMS-1234: Some description"
+# echo "  * SKCMS-1234:  Link CC SCC course set up"
 # python $CARMUSR/data/migration/$RELEASE/skcms-1234.py 2>&1 | tee $LOG_DIR/skcms-1234.log
 
+
+echo "  * SKCMS-2998: Some description"
+python $CARMUSR/data/migration/$RELEASE/skcms-2998.py 2>&1 | tee $LOG_DIR/skcms-2998.log
+
+echo "  * SKCMS-2975: Add LC AP-POS to table training_log_set and crew_training_t_set"
+python $CARMUSR/data/migration/$RELEASE/skcms-2975.py 2>&1 | tee $LOG_DIR/skcms-2975.log
 
 echo "  * SKCMS-2822: Bought types for Link"
 python $CARMUSR/data/migration/r27_sas2207/skcms-2822.py 2>&1 | tee $LOG_DIR/skcms-2822.log
