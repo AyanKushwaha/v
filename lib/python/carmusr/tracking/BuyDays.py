@@ -169,7 +169,12 @@ def buy_days(crew_id, start_time, end_time, leg_type, comment="", bought_day_typ
 
 def buy_days_svs(crew_id, start_time, end_time, leg_type, comment="",time_hh_sby="", time_mm_sby="", time_hh_prod="", time_mm_prod="",time_hh="", time_mm="", bought_day_type="", has_agmt_skd_cc=False, is_valid=False):
 
-    
+    time_hh_Sby, = R.eval('bought_days.%%hr_udor%%("%s")' % str(time_hh_sby))
+    time_mm_Sby, = R.eval('bought_days.%%mn_udor%%("%s")' % str(time_mm_sby))
+    time_mm_Prod, = R.eval('bought_days.%%mn_udor%%("%s")' % str(time_mm_prod))
+    time_hh_Prod, = R.eval('bought_days.%%hr_udor%%("%s")' % str(time_hh_prod))
+    time_MM, = R.eval('bought_days.%%mn_udor%%("%s")' % str(time_mm))
+    time_HH, = R.eval('bought_days.%%hr_udor%%("%s")' % str(time_hh))
     bought_sby, bought_prod, bought_duty = ACCOUNTS_SVS
     
     is_type_bought_sby = bought_day_type == bought_sby
@@ -211,27 +216,27 @@ def buy_days_svs(crew_id, start_time, end_time, leg_type, comment="",time_hh_sby
                     current_row = next_row
             elif current_row.end_time >= end_time:
                 if is_type_bought_sby:
-                    current_row.hours = time_hh_sby
-                    current_row.minutes = time_mm_sby
+                    current_row.hours = time_hh_Sby
+                    current_row.minutes = time_mm_Sby
                 elif is_type_bought_prod:
-                    current_row.hours = time_hh_prod
-                    current_row.minutes = time_mm_prod
+                    current_row.hours = time_hh_Prod
+                    current_row.minutes = time_mm_Prod
                 else:
-                    current_row.hours = time_hh
-                    current_row.minutes = time_mm
+                    current_row.hours = time_HH
+                    current_row.minutes = time_MM
                 
                 break
             elif current_row.day_type == row_day_type and current_row.account_name == bought_day_type:
                 # Increase period
                 current_row.end_time = current_row.end_time.adddays(1)
                 if is_type_bought_sby:
-                    current_row.hours = time_hh_sby
+                    current_row.hours = time_hh_Sby
 
                 
-                    current_row.minutes = time_mm_sby
-            if is_type_bought_prod:
-                current_row.hours = time_hh_prod
-                current_row.minutes = time_mm_prod
+                    current_row.minutes = time_mm_Sby
+                if is_type_bought_prod:
+                    current_row.hours = time_hh_Prod
+                    current_row.minutes = time_mm_Prod
             else:
                 # Start new period
                 start_time = current_row.end_time
@@ -250,14 +255,14 @@ def buy_days_svs(crew_id, start_time, end_time, leg_type, comment="",time_hh_sby
                 current_row.account_name = bought_duty
             current_row.end_time = start_time.adddays(1)
             if is_type_bought_sby:
-                current_row.hours = time_hh_sby
-                current_row.minutes = time_mm_sby
+                current_row.hours = time_hh_Sby
+                current_row.minutes = time_mm_Sby
             if is_type_bought_prod:
-                current_row.hours = time_hh_prod
-                current_row.minutes = time_mm_prod
+                current_row.hours = time_hh_Prod
+                current_row.minutes = time_mm_Prod
             if is_type_bought_duty:
-                current_row.hours = time_hh
-                current_row.minutes = time_mm
+                current_row.hours = time_HH
+                current_row.minutes = time_MM
 
             
             current_row.uname = uname
@@ -449,7 +454,7 @@ def markDaysAsBought(buy):
                            R.foreach(R.iter('iterators.chain_set'),
                                      "bought_days.%%duty_may_be_bought%%(%s, %s)"
                                      % (current_time, current_time.adddays(1))))[0][0][1]
-            
+    
             # Store activities
             key = (activity_start_time, (code or code_duty or ""))
             if key in activities_in_period:
@@ -470,10 +475,15 @@ def markDaysAsBought(buy):
         time_mm=""
         no_change = True
         flag = True
+        day_bought = False
+
         if code is None:
             flag = False
+        if "bought_days.%%leg_is_bought%%" and code is None and code_duty is None:
+            day_bought = True
         for (start, code), end in activities_in_period.items():
-            if flag:
+            
+            if flag or day_bought:
                 if comment == "":
                     try:
                         if is_svs:
@@ -519,7 +529,7 @@ def markDaysAsBought(buy):
         else:
             flag = True
         for (start, code_duty), end in activities_in_period.items():
-            if flag:
+            if flag or day_bought:
                 if comment == "":
                     try:
                         if is_svs:
@@ -579,7 +589,7 @@ class BuyDayCommentForm(Cfh.Box):
             change = True
             #self.Bought_day_off_label = Cfh.Label(self, "Bought_day_Off", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(2, 0)), "Bought Day Off")
             for row in TM.bought_days_svs.search('(crew='+crew_id+')'):
-                if row.start_time <= start_time <= row.end_time:
+                if row.start_time == start_time:
                     hr_sby = " "
                     min_sby = " "
                     hr_prod = " "
