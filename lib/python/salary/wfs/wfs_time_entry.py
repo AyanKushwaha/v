@@ -23,7 +23,6 @@ from salary.wfs.wfs_report import (abs_to_datetime, extperkey_from_id, country_f
     integer_to_reltime, crew_info_changed_in_period, crew_has_retired_at_date,planninggroup_from_id)
 from salary.wfs.wfs_config import PaycodeHandler
 import time
-import leg
 
 
 HEADERS = ('EMPLOYEE_ID', 'PAY_CODE', 'WORK_DT', 'HOURS', 'DAYS_OFF', 'START_DTTM', 'END_DTTM', 'RECORD_ID', 'FLAG')
@@ -214,6 +213,7 @@ class TimeEntry(WFSReport):
                     planning_group = planninggroup_from_id(crew_id, duty_start_day)
                     log.info('NORDLYS: planning group {z} '.format(z = planning_group))
                     if planning_group == "SVS":
+
 
                          # Checkout on Day-off overtime 
                         general_ot_paycode_day_off = self.paycode_handler.paycode_from_event('CNLN_LAND_DAY_OFF', crew_id, country,rank)
@@ -542,12 +542,24 @@ class TimeEntry(WFSReport):
             return False
 
     def _standby_callout_time(self,duty_bag):
-        time = leg.standby_duty_time_before_factor
+        time = 'leg.%%standby_duty_time_before_factor%%'
         if duty_bag.duty.has_active_flight:
-            return time
+            if duty_bag.standby.duty_is_standby_callout:
+                return time
         else:
             return 0
         
+    def is_weekend(self,start):
+        weekday_num = start.weekday()
+        log.info('NORDLYS: Weekday Day Number {sd}'.format(sd=weekday_num))
+        if weekday_num <= 4:
+            log.debug('NORDLYS: Day is between Monday-Friday {day}'.format(day=weekday_num))
+            return False
+        else:
+            log.debug('NORDLYS: Day is between Saturday or Sunday {day}'.format(day=weekday_num))
+            return True
+        return False
+
 
     def _temporary_split_hours(self, duty_bag, start_dt, paycode, crew_id, extperkey,split_found):
 
