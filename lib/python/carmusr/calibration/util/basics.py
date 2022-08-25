@@ -2,15 +2,38 @@
 Basic stuff for Calibration.
 """
 
+
+from __future__ import absolute_import
+from __future__ import division
+from functools import reduce
+import six
 import math
 import os
 
+import carmensystems.basics.l10n.utilities as l10n_util
 import carmensystems.studio.cpmbuffer as cpmb
 from jcms.calibration import plan
 import carmensystems.rave.api as rave
 from RelTime import RelTime
 from AbsTime import AbsTime
-import Etab  # mave.etab requires too much memory for very large etables.
+from Localization import MSGR
+
+from carmusr.calibration.mappings import studio_palette as sp
+
+
+# Colours ##########################################################################
+
+HEATMAP_RED = "#CC6677"
+HEATMAP_BLUE = "#4477AA"
+
+ILLEGAL_COLOUR = HEATMAP_RED
+IN_FIRST_BIN_COLOUR = sp.LightRed
+OUTSIDE_FIRST_BIN_COLOUR = "#CFDDEF"
+
+# Labels ###########################################################################
+
+IN_FIRST_BIN_LABEL = MSGR("In 1st bin")
+OUTSIDE_FIRST_BIN_LABEL = MSGR("Outside 1st bin")
 
 # Math #############################################################################
 
@@ -26,7 +49,7 @@ def percentile(a, q):
     Just as with numpy.percentile, the interpolation does not work with RelTime.
     """
     sa = sorted(a)
-    float_ixs = [(len(a) - 1) * qv / 100.0 for qv in q]
+    float_ixs = [(len(a) - 1) * qv / 100 for qv in q]
     res = []
     for f_ix in float_ixs:
         ix1 = int(math.floor(f_ix))
@@ -38,15 +61,23 @@ def percentile(a, q):
 
 
 def mean(sequence):
-    # The start argument to sum () is needed for RelTime to work
+    # The start argument to sum () is needed for RelTime.
+    # Float in the denominator is needed to get adequate rounding for RelTime.
     return sum(sequence, type(sequence[0])(0)) / float(len(sequence))
+
+
+def round_to_int(v):
+    """
+    Used instead of 'int(round(v))' to get the same behaviour in python2 and python3.
+    """
+    return int(v + (0.5 if v > 0 else -0.5))
 
 
 def percentage_value(numerator, denominator):
     if denominator == 0:
-        ratio = 0
+        ratio = 0.0
     else:
-        ratio = 100 * float(numerator) / denominator
+        ratio = 100 * numerator / denominator
     return ratio
 
 
@@ -59,6 +90,14 @@ def ratio_str(numerator, denominator):
     return PERC_FMT % percentage_value(numerator, denominator)
 
 
+# Python2to3
+
+def encode_if_py2(unicode_str):
+    if six.PY2:
+        return l10n_util.encode(unicode_str)
+    return unicode_str
+
+
 # Python
 
 def deep_getattr(obj, attr):
@@ -66,15 +105,6 @@ def deep_getattr(obj, attr):
 
 
 # Rave ##
-
-def get_rave_variable(name):
-    if not name:
-        return None
-    try:
-        return rave.var(name)
-    except rave.UsageError:
-        return None
-
 
 def is_reltime_rave_expression(expr):
     try:
@@ -124,51 +154,6 @@ def get_type_of_rave_expression(expr):
 
 ONE_DAY = RelTime(1440)
 ONE_MINUTE = RelTime(1)
-
-
-# Functions to find out what is present in the rule-set and the plan.
-
-
-def move_table_is_considered():
-    """
-    The loaded sub-plan has a move table with data and the loaded rule
-    set considers the table.
-
-    NOTE: A bit slow. Do not use in a loop.
-    """
-    try:
-        rave.module("calibration_move_history")
-    except rave.UsageError:
-        return False
-
-    full_path = os.path.join(get_sp_local_etab_dir(), "SpLocal/move_to_new_version_2.etab")
-    if not os.path.exists(full_path):
-        return False
-
-    if Etab.EtabGetFirstRow(Etab.EtabOpen(full_path)):
-        return True
-    return False
-
-
-def operational_codes_table_is_considered():
-    """
-    The loaded local plan has an operational codes table with data
-    and the loaded rule set considers the table.
-
-    NOTE: A bit slow. Do not use in a loop.
-    """
-    try:
-        rave.module("calibration_operational_codes")
-    except rave.UsageError:
-        return False
-
-    full_path = os.path.join(get_lp_local_etab_dir(), "LpLocal/operational_codes.etab")
-    if not os.path.exists(full_path):
-        return False
-
-    if Etab.EtabGetFirstRow(Etab.EtabOpen(full_path)):
-        return True
-    return False
 
 
 ## Path string

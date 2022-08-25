@@ -2,12 +2,18 @@
 Implementation of the Calibration report Compare Trips with Other Plan.
 """
 
+
+from __future__ import absolute_import
+import six
+from six.moves import range
+from functools import reduce
 from collections import defaultdict
 
 import carmensystems.publisher.api as prt
 import carmensystems.rave.api as rave
 from Localization import MSGR
 import Cui
+from jcms.calibration import rave_util
 
 from carmusr.calibration import mappings
 from carmusr.calibration.mappings import translation_type_ext
@@ -18,7 +24,7 @@ from carmusr.calibration.util import common
 
 
 def get_planned_ac_change_rave_variable():
-    if basics.move_table_is_considered():
+    if rave_util.check_move_table():
         return rave.var("calibration_move_mappings.lb_not_planned_as_turn")
     else:
         return rave.var("calibration_mappings.aircraft_change")
@@ -26,7 +32,7 @@ def get_planned_ac_change_rave_variable():
 
 def get_connection_setting_info_strings():
     ac_info = MSGR("Current plan aircraft rotation info comes from:")
-    if basics.move_table_is_considered():
+    if rave_util.check_move_table():
         ac_from = MSGR("Rotations before move")
     else:
         ac_from = MSGR("Local plan rotations")
@@ -35,9 +41,9 @@ def get_connection_setting_info_strings():
 
 def fill_int_range(values):
     """Fills integers to range of min/max value. Keeps non-ints (i.e. None), placed last"""
-    integers = filter(lambda x: isinstance(x, int), values)
-    non_integers = filter(lambda x: not isinstance(x, int), values)
-    return range(min(integers), max(integers) + 1) + non_integers
+    integers = [x for x in values if isinstance(x, int)]
+    non_integers = [x for x in values if not isinstance(x, int)]
+    return list(range(min(integers), max(integers) + 1)) + non_integers
 
 
 class ReportComparePlans(report_util.CalibrationReport):
@@ -294,7 +300,7 @@ class ReportComparePlans(report_util.CalibrationReport):
         row = prt.Row("", "", right_border_text(), "", right_border_text(), "", right_border_text(), "", "")
         table.add(row)
 
-    def add_kpi_row(self, table, title, s1, s2, do_ref_action=True):
+    def add_kpi_row(self, table, title, s1, s2):
         # Data ##
         assert isinstance(s1, SingleData)
 
@@ -306,13 +312,9 @@ class ReportComparePlans(report_util.CalibrationReport):
                                    (self.current_area, common_current_data.all_leg_keys()))
         unique_action = prt.action(report_util.calib_show_and_mark_legs,
                                    (self.current_area, unique_current_data.all_leg_keys()))
-        if do_ref_action:
-            # Additive select does not work in an adequate way for ref. plan objects. Always use simple replace.
-            always_use_replace = True
-            ref_action = prt.action(report_util.calib_show_and_mark_legs,
-                                    (self.current_area, unique_other_data.all_leg_keys(), always_use_replace))
-        else:
-            ref_action = None
+
+        ref_action = prt.action(report_util.calib_show_and_mark_legs,
+                                (self.current_area, unique_other_data.all_leg_keys(), True))
 
         num_current = len(s1)
         num_other = len(s2)
@@ -431,7 +433,7 @@ class SingleData(object):
         prev_legs += leg_keys
         self.data_points[key] = (prev_legs, complement + prev_complement)
 
-    def keys(self):
+    def keys_as_set(self):
         return set(self.data_points.keys())
 
     def leg_keys(self, key):
@@ -441,17 +443,17 @@ class SingleData(object):
         return self.data_points[key][1]
 
     def __len__(self):
-        return sum(complement for _, complement in self.data_points.itervalues())
+        return sum(complement for _, complement in six.itervalues(self.data_points))
 
     def all_leg_keys(self):
-        return reduce(list.__iadd__, (leg_keys for leg_keys, _ in self.data_points.itervalues()), [])
+        return reduce(list.__iadd__, (leg_keys for leg_keys, _ in six.itervalues(self.data_points)), [])
 
     def common_data(self, other):
         """
         Returns data object keeping all data with keys COMMON to the other data object
         """
         data = SingleData()
-        common_keys = self.keys().intersection(set(other.keys()))
+        common_keys = self.keys_as_set().intersection(other.keys_as_set())
         for key in common_keys:
             leg_keys, complement = self.data_points[key]
             data.add(key, leg_keys, complement)
@@ -462,7 +464,7 @@ class SingleData(object):
         Returns data object keeping all data with keys NOT IN to the other data object
         """
         data = SingleData()
-        unique_keys = self.keys() - other.keys()
+        unique_keys = self.keys_as_set() - other.keys_as_set()
         for key in unique_keys:
             leg_keys, complement = self.data_points[key]
             data.add(key, leg_keys, complement)

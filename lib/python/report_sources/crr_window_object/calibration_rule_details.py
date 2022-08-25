@@ -1,6 +1,9 @@
-'''
+"""
 Rule Details Report
-'''
+"""
+
+
+from __future__ import absolute_import
 
 import carmusr.calibration.report_rule_details as rd
 

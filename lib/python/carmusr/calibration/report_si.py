@@ -2,6 +2,13 @@
 Sensitivity Index Distribution report class
 """
 
+
+from __future__ import division
+from __future__ import absolute_import
+from six.moves import range
+from six.moves import zip
+from functools import reduce
+
 import carmensystems.publisher.api as prt
 import carmensystems.rave.api as rave
 from Localization import MSGR
@@ -9,16 +16,14 @@ import Cui
 
 from carmusr.calibration.mappings import studio_palette as sp
 from carmusr.calibration.util import report_util
+from carmusr.calibration.util import basics
 from carmusr.calibration.util import common
-
-
-def mean(sequence):
-    return sum(sequence) * 1.0 / (len(sequence))
 
 
 def get_bar_colour(x, si_limits):
     limits = len(si_limits)
-    if limits > 0 and x < si_limits[0]:
+    # Called with None from PRT framework as part of setup
+    if x is None or limits > 0 and x < si_limits[0]:
         return sp.ReportLightBlue
     elif limits > 1 and x < si_limits[1]:
         return sp.ReportBlue
@@ -36,10 +41,10 @@ def calculate_range_and_step_size(value_min, value_max, approx_no_steps):
     best_step = 1
     best_proximity = abs(rng - approx_no_steps)
     best_step_found = False
-    for r in [10 ** i for i in xrange(1, rng_resolution)]:
-        for j in xrange(1, 9):
+    for r in [10 ** i for i in range(1, rng_resolution)]:
+        for j in range(1, 9):
             step = r * j
-            proximity = abs(rng / step - approx_no_steps)
+            proximity = abs(rng // step - approx_no_steps)
             if best_proximity >= proximity:
                 best_step, best_proximity = step, proximity
             else:
@@ -49,7 +54,7 @@ def calculate_range_and_step_size(value_min, value_max, approx_no_steps):
             break
 
     rng_start = value_min - abs(value_min % best_step)
-    rng_end = (abs(value_max / best_step) + 1) * best_step
+    rng_end = (abs(value_max // best_step) + 1) * best_step
     return (rng_start, rng_end, best_step)
 
 
@@ -96,7 +101,7 @@ class SensitivityIndexDistributionReport(report_util.CalibrationReport):
         self.approx_steps = 40
 
         # Used for graph colouring.
-        si_limits = [rave.param('calibration.sensitivity_index_level_{}'.format(ix)).getValue() for ix in xrange(1, 5)]
+        si_limits = [rave.param('calibration.sensitivity_index_level_{}'.format(ix)).getValue() for ix in range(1, 5)]
 
         zero_sensitivity_count = 0
         zero_ids = []
@@ -132,7 +137,7 @@ class SensitivityIndexDistributionReport(report_util.CalibrationReport):
         self.xmin, self.xmax, self.step = calculate_range_and_step_size(real_min, real_max, self.approx_steps)
 
         # Recalculate number of bins
-        self.steps = (self.xmax - self.xmin) / self.step
+        self.steps = (self.xmax - self.xmin) // self.step
 
         data, grouped_legs = self.plot_ranges(sensitivity_index_list, leg_identifiers_per_object)
         all_index_list = [0] * zero_sensitivity_count + sensitivity_index_list
@@ -169,16 +174,16 @@ class SensitivityIndexDistributionReport(report_util.CalibrationReport):
         v0 = prt.Row("",
                      min(sensitivity_index_list),
                      max(sensitivity_index_list),
-                     int(plan_total_si),
-                     int(plan_total_si / num_objects),
+                     plan_total_si,
+                     basics.round_to_int(plan_total_si / num_objects),
                      num_objects)
 
         h1 = prt.Row(*(prt.Text(it)
                        for it in (MSGR("Statistics (for worst % of {})").format(self.level_info.objects_name_in_gui),
-                                  "%g%%" % round(SensitivityIndexDistributionReport.percent_1 * 100, 1),
-                                  "%g%%" % round(SensitivityIndexDistributionReport.percent_2 * 100, 1),
-                                  "%g%%" % round(SensitivityIndexDistributionReport.percent_3 * 100, 1),
-                                  "%g%%" % round(SensitivityIndexDistributionReport.percent_4 * 100, 1))),
+                                  "%g%%" % (SensitivityIndexDistributionReport.percent_1 * 100),
+                                  "%g%%" % (SensitivityIndexDistributionReport.percent_2 * 100),
+                                  "%g%%" % (SensitivityIndexDistributionReport.percent_3 * 100),
+                                  "%g%%" % (SensitivityIndexDistributionReport.percent_4 * 100))),
                      border=prt.border_frame(1))
 
         perc2idx = lambda p: int(num_objects * (1 - p))  # @IgnorePep8
@@ -190,10 +195,10 @@ class SensitivityIndexDistributionReport(report_util.CalibrationReport):
                      all_index_list[perc2idx(SensitivityIndexDistributionReport.percent_4)])
 
         v2 = prt.Row(MSGR("Average Sensitivity:"),
-                     int(mean(all_index_list[perc2idx(SensitivityIndexDistributionReport.percent_1):])),
-                     int(mean(all_index_list[perc2idx(SensitivityIndexDistributionReport.percent_2):])),
-                     int(mean(all_index_list[perc2idx(SensitivityIndexDistributionReport.percent_3):])),
-                     int(mean(all_index_list[perc2idx(SensitivityIndexDistributionReport.percent_4):])))
+                     basics.round_to_int(basics.mean(all_index_list[perc2idx(SensitivityIndexDistributionReport.percent_1):])),
+                     basics.round_to_int(basics.mean(all_index_list[perc2idx(SensitivityIndexDistributionReport.percent_2):])),
+                     basics.round_to_int(basics.mean(all_index_list[perc2idx(SensitivityIndexDistributionReport.percent_3):])),
+                     basics.round_to_int(basics.mean(all_index_list[perc2idx(SensitivityIndexDistributionReport.percent_4):])))
 
         si_histogram.add(prt.Column(h0, v0, prt.Row(""), h1, v1, v2))
 
@@ -218,7 +223,7 @@ class SensitivityIndexDistributionReport(report_util.CalibrationReport):
         while index < num_data:
             # The data is grouped with the center of the interval as the key
             interval_key = data[index][0]
-            interval_start = data[index][0] - self.step / 2
+            interval_start = data[index][0] - self.step // 2
             interval_end = interval_start + self.step - 1
 
             # Adjustments for 0 values
@@ -271,7 +276,7 @@ class SensitivityIndexDistributionReport(report_util.CalibrationReport):
         interval_value = [0] * (self.steps + 1)
         for index in range(self.steps + 1):
             # Store the centre values for the bars on the x-axis
-            interval_value[index] = self.xmin + index * self.step + self.step / 2
+            interval_value[index] = self.xmin + index * self.step + self.step // 2
 
         # Creates a list containing the number of si values(chains) for each interval
         interval_count = [0] * (self.steps)
@@ -283,11 +288,11 @@ class SensitivityIndexDistributionReport(report_util.CalibrationReport):
             grouped_legs[x_val] = list()
 
         for (ix, index) in enumerate(index_list):
-            pos = (index - self.xmin) / self.step
+            pos = (index - self.xmin) // self.step
             interval_count[pos] += 1
             grouped_legs.setdefault(interval_value[pos], list()).append(leg_identifiers[ix])
 
         # list of lists with intervals and counters
-        data = zip(interval_value, interval_count)
+        data = list(zip(interval_value, interval_count))
 
         return (data, grouped_legs)

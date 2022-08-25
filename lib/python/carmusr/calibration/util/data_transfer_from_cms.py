@@ -70,14 +70,15 @@ class MasterRotationData(object):
 
         ac_flight_leg["flight_carrier"] = leg.fd[0:3].strip()
         ac_flight_leg["flight_number"] = int(leg.fd[3:10])
-        ac_flight_leg["flight_suffix"] = "*" if leg.fd <= 9 else leg.fd[9:10]
+
+        ac_flight_leg["flight_suffix"] = "*" if len(leg.fd.strip()) <= 9 else leg.fd[9:10]
 
         ac_flight_leg["leg_number"] = leg.seq if leg.seq else 1
 
         ac_flight_leg["service_type"] = leg.stc
         ac_flight_leg["aircraft_owner"] = leg.aco
-        ac_flight_leg["cabin_crew_employer"] = leg.cae
-        ac_flight_leg["cockpit_crew_employer"] = leg.cpe
+        ac_flight_leg["cabin_crew_employer"] = leg.cae if len(leg.cae) <> 1 else ""
+        ac_flight_leg["cockpit_crew_employer"] = leg.cpe if len(leg.cpe) <> 1 else ""
 
         # Optional data, currently not available in CMS:
         # ------------------------------------
@@ -159,11 +160,21 @@ class MasterRotationData(object):
             if not (fl.udor, fl.fd, fl.adep.id) in ac_rot_legs_set:
                 single_leg_count += 1
                 rot_id = "cr_{}".format(single_leg_count)
-                master_rot = {"ac_type": fl.actype.id, "persistent": False}
+
+                try:
+                    actype_id = fl.actype.id
+                except:
+                    Errlog.log("Warning: aircraft type not found for single leg rotation.")
+                    actype_id = "unknown"
+
+                master_rot = {"ac_type": actype_id, "persistent": False}
                 master_data_dict[rot_id] = master_rot
 
-                flight_leg = self.get_rotation_flight_leg(fl, rot_id)
-                rotation_leg_list.append(flight_leg)
+                try:
+                    flight_leg = self.get_rotation_flight_leg(fl, rot_id)
+                    rotation_leg_list.append(flight_leg)
+                except:
+                    Errlog.log("Warning: leg not found.")
 
         Errlog.log("Rotation legs with assigned_tail: {}".format(tail_assigned_leg_count))
         Errlog.log("Rotation legs without assigned_tail: {}".format(anon_rot_leg_count))

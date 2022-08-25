@@ -1,6 +1,9 @@
-'''
+"""
 Calibration Pattern Analysis Report
-'''
+"""
+
+
+from __future__ import absolute_import
 
 import carmusr.calibration.report_pattern_analysis as rp
 

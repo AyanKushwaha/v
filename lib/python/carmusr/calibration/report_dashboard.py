@@ -2,14 +2,17 @@
 Calibration dashboard - a prt report
 """
 
+
+from __future__ import absolute_import
 import six
 from functools import reduce
 
+import Cui
+import jcms.calibration.comparison_plan
 from Localization import MSGR
 import carmensystems.publisher.api as prt
 import carmensystems.rave.api as rave
 from RelTime import RelTime
-import Cui
 
 from carmusr.calibration import report_rule_kpis
 from carmusr.calibration import report_compare_plans
@@ -22,6 +25,7 @@ from carmusr.calibration.util import report_util as ru
 from carmusr.calibration.util.rule_kpis_imp import RuleData
 from carmusr.calibration.util import compare_plan
 from carmusr.calibration.util import pie_chart
+from carmusr.calibration.util import basics
 from carmusr.calibration.util import common
 from carmusr.calibration.util import complement
 
@@ -65,7 +69,7 @@ class Report(ru.CalibrationReport):
         rule_kpis_handler.collect_data()
 
         main_row = prt.Row()
-        rule_table = rule_kpis_handler.get_table(self.get_rule_kpi_defs(rule_kpis_handler.cr))
+        rule_table = rule_kpis_handler.get_table(self.get_rule_kpi_defs(rule_kpis_handler.cr), use_rule_filter=True)
         kpi_report_title = (ru.CalibReports.RKPI.timetable_title
                             if self.variant == common.CalibAnalysisVariants.TimetableAnalysis.key
                             else ru.CalibReports.RKPI.title)
@@ -85,7 +89,7 @@ class Report(ru.CalibrationReport):
             else:
                 row = prt.Text(MSGR("Load Comparison Plan..."),
                                font=ru.LINK_FONT,
-                               action=prt.action(compare_plan.load))
+                               action=prt.action(jcms.calibration.comparison_plan.load))
             second_column.add(prt.Isolate(row))
 
             if self.pconfig.level_duty_defined:
@@ -147,7 +151,7 @@ class Report(ru.CalibrationReport):
                              valign=prt.CENTER, align=prt.RIGHT))
 
             pie_members = (pie_chart.PieMember(MSGR("0% completed patterns"), num_zero_completed_patterns,
-                                               fill=ru.HEATMAP_RED,
+                                               fill=basics.HEATMAP_RED,
                                                action=action_zero_completed_patterns),
                            pie_chart.PieMember(MSGR("Partly completed patterns"), num_partly_completed_patterns,
                                                fill=sp.LightRed,
@@ -179,7 +183,7 @@ class Report(ru.CalibrationReport):
                              valign=prt.CENTER, align=prt.RIGHT))
 
             pie_members = (pie_chart.PieMember(MSGR("Block time in not completed instances"), RelTime(tot_not_completed_block_time),
-                                               fill=ru.HEATMAP_RED,
+                                               fill=basics.HEATMAP_RED,
                                                action=not_completed_action),
                            pie_chart.PieMember(MSGR("Block time in completed instances"), RelTime(tot_completed_block_time),
                                                fill=sp.ReportLightBlue,
@@ -250,7 +254,7 @@ class Report(ru.CalibrationReport):
 
             members = []
             members.append(pie_chart.PieMember(MSGR("Only in current"), num_only_in_current,
-                                               fill=ru.HEATMAP_RED,
+                                               fill=basics.HEATMAP_RED,
                                                action=ru.get_select_action(self.current_area, only_in_current_ids)))
             if num_changed_kind is not None:
                 members.append(pie_chart.PieMember(kind_change_text, num_changed_kind,
@@ -312,32 +316,33 @@ class Report(ru.CalibrationReport):
                 return prt.Text("-", height=pie_height)
             if rd.categories_have_been_calculated():
                 tooltip_header = "100% illegal, showing categories\n--------------------------------------------\n\n"
+                tooltip_footer = ""
                 num_per_cat_code = rd.get_num_crew_per_category()
                 ids_per_cat_code = rd.get_leg_identifiers_per_crew_category()
                 members = []
                 for cat_code in rd.cat_handler.get_sorted_categories():
-                    members.append(pie_chart.PieMember(cat_code or MSGR("Undefined category"),
+                    members.append(pie_chart.PieMember(cat_code,
                                                        num_per_cat_code[cat_code],
-                                                       fill=rd.cat_handler.bar_color(0, cat_code),
+                                                       fill=rd.cat_handler.bar_color(cat_code),
                                                        action=ru.get_select_action(current_area, ids_per_cat_code[cat_code])))
             else:
-                tooltip_header = "Legal & Illegal\n--------------------\n\n"
+                tooltip_header = MSGR("Legal & Illegal\n--------------------\n\n")
+                tooltip_footer = MSGR("\n\nBin size: {}").format(rd.data_type(rd.bin_size))
                 num_illegal = rd.get_num_illegal_crew_slices()
                 num_bin1 = rd.get_num_crew_slices_in_first_bin()
                 num_other = num_valid - num_bin1 - num_illegal
                 other_ids = set(rd.get_all_ids()) - set(rd.get_illegal_ids()) - set(rd.get_in_first_bin_ids())
 
                 members = (pie_chart.PieMember(MSGR("Illegal"), num_illegal,
-                                               fill=ru.HEATMAP_RED,
+                                               fill=basics.ILLEGAL_COLOUR,
                                                action=ru.get_select_action(current_area, rd.get_illegal_ids())),
-                           pie_chart.PieMember(MSGR("Legal in 1st bin"), num_bin1,
-                                               add_to_tooltip_txt=MSGR("(bin size: %s)") % rd.data_type(rd.bin_size),
-                                               fill=sp.LightRed,
+                           pie_chart.PieMember(MSGR("Legal. {}").format(basics.IN_FIRST_BIN_LABEL), num_bin1,
+                                               fill=basics.IN_FIRST_BIN_COLOUR,
                                                action=ru.get_select_action(current_area, rd.get_in_first_bin_ids())),
-                           pie_chart.PieMember(MSGR("Legal other"), num_other,
-                                               fill=sp.ReportLightBlue,
+                           pie_chart.PieMember(MSGR("Legal. {}").format(basics.OUTSIDE_FIRST_BIN_LABEL), num_other,
+                                               fill=basics.OUTSIDE_FIRST_BIN_COLOUR,
                                                action=ru.get_select_action(current_area, other_ids)))
-            return pie_chart.PieChart(pie_height + 3, pie_height, members, tooltip_header, padding=prt.padding(bottom=1))
+            return pie_chart.PieChart(pie_height + 3, pie_height, members, tooltip_header, tooltip_footer, padding=prt.padding(bottom=1))
 
         def get_description_text_for_tooltip(rd):
             title = "Description of '%s'\n" % rd.label

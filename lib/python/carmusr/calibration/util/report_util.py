@@ -2,12 +2,16 @@
 Useful calibration report support functions etc.
 """
 
+
+from __future__ import division
+from __future__ import absolute_import
 import six
 from six.moves import range
 from six.moves import zip
 from functools import reduce
 from collections import defaultdict
 from collections import Counter
+from numbers import Number
 import time
 
 import carmensystems.publisher.api as prt
@@ -39,46 +43,44 @@ BORDER_LEFT = prt.border(left=1)
 LINK_FONT = prt.Font(size=10, style=prt.ITALIC, weight=prt.BOLD)
 CODE_FONT = prt.font(face=prt.MONOSPACE)
 
-HEATMAP_RED = "#CC6677"
-HEATMAP_BLUE = "#4477AA"
 SIMPLE_TABLE_BORDER_GREY = "#B7B8B6"
 
 
-class CalibReports:
+class CalibReports(object):
 
-    class VOT:
+    class VOT(object):
         title = MSGR('Rule Violations over Time')
 
-    class VOS:
+    class VOS(object):
         title = MSGR("Rule Violations over Station")
 
-    class VOW:
+    class VOW(object):
         title = MSGR("Rule Violations over Weekdays")
 
-    class RKPI:
+    class RKPI(object):
         title = "{} {}".format(config_per_product.DEFAULT_VARIANT_KIND_STRING, MSGR("Rule KPIs"))
         timetable_title = MSGR("Timetable Rule KPIs")
 
-    class DABO:
+    class DABO(object):
         title = "{} {}".format(config_per_product.DEFAULT_VARIANT_KIND_STRING, MSGR("Dashboard"))
         timetable_title = MSGR("Timetable Dashboard")
 
-    class RVD:
+    class RVD(object):
         title = MSGR('Rule Value Distribution')
 
-    class RD:
+    class RD(object):
         title = MSGR('Rule Details')
 
-    class SI:
+    class SI(object):
         title = MSGR('Sensitivity Index Distribution')
 
-    class COMP:
+    class COMP(object):
         title = MSGR('Compare Trips with Other Plan')
 
-    class PAT:
+    class PAT(object):
         title = MSGR('Pattern Analysis')
 
-    class RCC:
+    class RCC(object):
         title = MSGR('Check Rule Consistency')
 
 ########################################################################
@@ -86,6 +88,8 @@ class CalibReports:
 ########################################################################
 
 SELECT_METHOD_PARAMETER_NAME = "report_calibration.select_method_p"
+SHOW_OFF_RULES_PARAMETER_NAME = "report_calibration.show_rules_turned_off_p"
+SHOW_INVALID_RULES_PARAMETER_NAME = "report_calibration.show_no_valid_rules_p"
 
 
 def get_select_action(area, identifiers):
@@ -95,74 +99,79 @@ def get_select_action(area, identifiers):
         return None
 
 
-def calib_show_and_mark_legs(current_area, leg_identifiers, always_replace=False):
+def hide_rule_off():
+    return not rave.param(SHOW_OFF_RULES_PARAMETER_NAME).value()
+
+
+def hide_if_no_valid():
+    return not rave.param(SHOW_INVALID_RULES_PARAMETER_NAME).value()
+
+
+def calib_show_and_mark_legs(current_area, integer_leg_identifiers, comparison_plan_objects=False):
     """
     Supports additive select.
     """
-    if get_area_mode(current_area) == Cui.NoMode:
-        Gui.GuiMessage(MSGR("Impossible, the window doesn't contain anything."))
-        return
 
-    if always_replace:
-        use_add = False
+    int_leg_ids_as_set = set(integer_leg_identifiers)
+
+    if comparison_plan_objects:
+        if not compare_plan.ComparisonPlanHandler.get_plan_name(True):
+            Gui.GuiMessage(MSGR("Impossible. There is no comparison plan loaded."))
+            return
+        if int_leg_ids_as_set - set(compare_plan.ComparisonPlanHandler.get_keys(rave.keyw("leg_identifier"), mappings.LEVEL_LEG)):
+            Gui.GuiMessage(MSGR("Impossible. A new comparison plan has been loaded since the report was generated."))
+            return
     else:
-        try:
-            val = str(rave.param(SELECT_METHOD_PARAMETER_NAME).value())
-            use_add = val.endswith("add")
-        except rave.UsageError:
-            use_add = False
+        if get_area_mode(current_area) == Cui.NoMode:
+            Gui.GuiMessage(MSGR("Impossible. The report source window doesn't contain anything."))
+            return
+        if int_leg_ids_as_set - set(Cui.CuiGetLegs(Cui.gpc_info, current_area, "window")):
+            Gui.GuiMessage(MSGR("Impossible. You have probably changed plan or window content since the report was generated."))
+            return
+
+    try:
+        val = str(rave.param(SELECT_METHOD_PARAMETER_NAME).value())
+        use_add = val.endswith("add")
+    except rave.UsageError:
+        use_add = False
+
+    opposite_area = get_opposite_area(current_area)
 
     if use_add:
-        leg_identifiers = list(set(leg_identifiers) |
-                               set(Cui.CuiGetLegs(Cui.gpc_info, current_area, "marked")))
+        if comparison_plan_objects:
+            tbh = bag_handler.WindowChains(opposite_area)
+            if tbh.bag and compare_plan.bag_is_comparison_plan_bag(tbh.bag):
+                int_leg_ids_as_set |= set(Cui.CuiGetLegs(Cui.gpc_info, opposite_area, "marked"))
+        else:
+            int_leg_ids_as_set |= set(Cui.CuiGetLegs(Cui.gpc_info, current_area, "marked"))
+
+    leg_identifiers = [str(lid) for lid in int_leg_ids_as_set]
 
     # To allow undo
     Cui.CuiExecuteFunction('PythonEvalExpr("0")',
                            MSGR("Select and filter legs"),
                            Gui.POT_REDO,
                            Gui.OPA_OPAQUE)
-    opposite_area = get_opposite_area(current_area)
 
-    try:
-        display_given_objects(leg_identifiers,
-                              opposite_area,
-                              get_area_mode(current_area),
-                              Cui.LegMode)
-
-    except Cui.CancelException:
-        Gui.GuiMessage(MSGR("Impossible, you have probably changed the plan or the window content."))
-
-    Cui.CuiUnmarkAllLegs(Cui.gpc_info, current_area, "window")
-    Cui.CuiUnmarkAllLegs(Cui.gpc_info, opposite_area, "window")
-
-    for lid in leg_identifiers:
-        Cui.CuiSetSelectionObject(Cui.gpc_info, opposite_area, Cui.LegMode, str(lid))
-        Cui.CuiMarkLegs(Cui.gpc_info, opposite_area, "object")
-
-
-def display_given_objects(ids,
-                          area,
-                          area_type,
-                          obj_type):
-    '''
-    Convenience wrapper around CuiDisplayGivenObjects
-    '''
+    mode_in_opposite_window = Cui.CrrMode if comparison_plan_objects else get_area_mode(current_area)
 
     # This is needed to always get the right sort order. Bug in Cui.CuiDisplayGivenObjects.
-    Cui.CuiDisplayObjects(Cui.gpc_info, area, area_type, Cui.CuiShowNone)
-
-    # Since crr_identifier returns an int, we do a little
-    # conversion here first for convenience.
-    ids = [str(_id) for _id in ids]
+    Cui.CuiDisplayObjects(Cui.gpc_info, opposite_area, mode_in_opposite_window, Cui.CuiShowNone)
 
     Cui.CuiDisplayGivenObjects(Cui.gpc_info,
-                               area,
-                               area_type,
-                               obj_type,
-                               ids,
+                               opposite_area,
+                               mode_in_opposite_window,
+                               Cui.LegMode,
+                               leg_identifiers,
                                0,  # Flags argument is not used but necessary
                                Cui.Replace,
                                Cui.CuiSortDefault)
+
+    Cui.CuiUnmarkAllLegs(Cui.gpc_info, opposite_area if comparison_plan_objects else current_area, "window")
+
+    for lid in leg_identifiers:
+        Cui.CuiSetSelectionObject(Cui.gpc_info, opposite_area, Cui.LegMode, lid)
+        Cui.CuiMarkLegs(Cui.gpc_info, opposite_area, "object")
 
 
 ##################################################
@@ -527,8 +536,8 @@ class Heatmap(SimpleTable):
                  show_total_row=False,
                  show_total_col=False,
                  total_label=MSGR("Total"),
-                 max_colour=HEATMAP_RED,
-                 min_colour=HEATMAP_BLUE,
+                 max_colour=basics.HEATMAP_RED,
+                 min_colour=basics.HEATMAP_BLUE,
                  zero_colour=sp.White,
                  gamma=1.0,
                  max_colour_value=None,
@@ -565,7 +574,7 @@ class Heatmap(SimpleTable):
                                     align=divider_value_align,
                                     action=get_select_action(current_area, divider_ids)))
 
-        primary_value_type = type(six.itervalues(keyvaluedict).next()[0])
+        primary_value_type = type(next(six.itervalues(keyvaluedict))[0])
         value_type = primary_value_type
 
         keyvaluedict = defaultdict(lambda: (value_type(0), list()), keyvaluedict)
@@ -573,8 +582,21 @@ class Heatmap(SimpleTable):
         # Make sure ALL items in the input dictionaries are displayed.
         existing_x_keys = set(x for x, _ in keyvaluedict) | set((x for x, _ in dividerdict) if dividerdict else ())
         existing_y_keys = set(y for _, y in keyvaluedict) | set((y for _, y in dividerdict) if dividerdict else ())
-        x_keys = list(x_keys) + sorted(existing_x_keys - set(x_keys))
-        y_keys = list(y_keys) + sorted(existing_y_keys - set(y_keys))
+
+        def sort_key(value):
+            """
+            Approximate mimicking of py2 sorting different types separately.
+            """
+            if value is None:
+                return (0, '', value)
+            if isinstance(value, RelTime):
+                return (1, '', value)
+            if isinstance(value, Number):
+                return (2, '', value)
+            return (3, str(type(value)), value)
+
+        x_keys = list(x_keys) + sorted(existing_x_keys - set(x_keys), key=sort_key)
+        y_keys = list(y_keys) + sorted(existing_y_keys - set(y_keys), key=sort_key)
 
         if dividerdict:
             if tooltip_format is None:
@@ -582,7 +604,7 @@ class Heatmap(SimpleTable):
                     return "%s \n%s \n%0.1f%%" % (args[2], args[3], args[4] * 100)
             values = defaultdict(lambda: (float(), list()))
             num_objects_in_value_cell = 4
-            divider_type = type(six.itervalues(dividerdict).next()[0])
+            divider_type = type(next(six.itervalues(dividerdict))[0])
             dividerdict = defaultdict(lambda: (divider_type(0), list()), dividerdict)
             primary_value_type = float
             for key, (v, ids) in six.iteritems(keyvaluedict):
@@ -785,7 +807,7 @@ class Heatmap(SimpleTable):
 
 class ColourCalculator(object):
 
-    def __init__(self, max_value, min_value, max_colour=HEATMAP_RED, min_colour=HEATMAP_BLUE, zero_colour=sp.White, gamma=1.0):
+    def __init__(self, max_value, min_value, max_colour=basics.HEATMAP_RED, min_colour=basics.HEATMAP_BLUE, zero_colour=sp.White, gamma=1.0):
 
         self.maxvalue = my_float(max_value) or 1.0
         self.positive_minvalue = abs(my_float(min_value)) or 1.0
@@ -838,7 +860,9 @@ class CalibrationReport(prt.Report):
 
     has_table_view = True
     require_level_duty = False
-    critical_rave_param_name = SELECT_METHOD_PARAMETER_NAME
+    critical_rave_params_name = (SELECT_METHOD_PARAMETER_NAME,
+                                 SHOW_OFF_RULES_PARAMETER_NAME,
+                                 SHOW_INVALID_RULES_PARAMETER_NAME)
     num_instances = Counter()
     default_variant_key = common.CalibAnalysisVariants.Default.key
     comment = ""
@@ -862,6 +886,9 @@ class CalibrationReport(prt.Report):
     def store_bag(self):
         self.bag = self.get_top_bag_for_level_and_write_warning_once(mappings.LEVEL_LEG)
 
+    def is_table_view(self):
+        return self.arg("show") == "TABLE"
+
     def create(self):
         if self.arg("variant") is None:  # Report instance is ancestor --> set comment.
             CalibrationReport.comment = rave.eval(rave.keyw("report_comment"))[0]
@@ -869,7 +896,12 @@ class CalibrationReport(prt.Report):
         self.variant = self.arg("variant") or self.default_variant_key
 
         self.current_context = CuiContextLocator().fetchcurrent()
-        self.current_area = Cui.CuiAreaIdConvert(Cui.gpc_info, Cui.CuiWhichArea)
+
+        if self.arg("area") is None:
+            self.current_area = Cui.CuiAreaIdConvert(Cui.gpc_info, Cui.CuiWhichArea)
+        else:
+            self.current_area = int(self.arg("area"))
+
         self.current_area_mode = Cui.CuiGetAreaMode(Cui.gpc_info, self.current_area)
         self.comparison_plan_name = compare_plan.ComparisonPlanHandler.get_plan_name(reset_cache_if_needed=True)
 
@@ -878,7 +910,7 @@ class CalibrationReport(prt.Report):
 
     def get_top_bag_for_level_and_write_warning_once(self, level_name):
         if level_name not in self._my_top_bag_handlers:
-            self._my_top_bag_handlers[level_name] = self.pconfig.levels_dict[level_name].bag_handler_cls()
+            self._my_top_bag_handlers[level_name] = self.pconfig.levels_dict[level_name].bag_handler_cls(area=self.current_area)
             if self._my_top_bag_handlers[level_name].warning:
                 self.add_warning_text(self._my_top_bag_handlers[level_name].warning)
         return self._my_top_bag_handlers[level_name].bag
@@ -891,7 +923,8 @@ class CalibrationReport(prt.Report):
     @classmethod
     def critical_rave_parameter_exist(cls):
         try:
-            rave.param(cls.critical_rave_param_name)
+            for p in cls.critical_rave_params_name:
+                rave.param(p)
             return True
         except rave.RaveError:
             return False
@@ -936,7 +969,7 @@ class CalibrationReport(prt.Report):
 
     def _add_links(self):
         variant = self.variant
-        same_view = "TABLE" if self.arg('show') == "TABLE" else "OVERVIEW"
+        same_view = "TABLE" if self.is_table_view() else "OVERVIEW"
         focus_rule_name = self.arg('rule') or ""
 
         buf = Variable()
@@ -946,7 +979,8 @@ class CalibrationReport(prt.Report):
         regenerate = prt.Text(MSGR("Refresh"),
                               font=LINK_FONT,
                               link=prt.link(self.__module__,
-                                            {'variant': variant, 'show': same_view, 'rule': focus_rule_name}))
+                                            {'variant': variant, 'show': same_view,
+                                             'rule': focus_rule_name, 'area': '{a}'.format(a=self.current_area)}))
 
         close_all = self.get_close_all_prt_object()
 
@@ -963,8 +997,8 @@ class CalibrationReport(prt.Report):
             else:
                 focus_rule_label = cri.rule_label
 
-            self.add(prt.Isolate(prt.Row(prt.Text(MSGR("Focus rule:")),
-                                         prt.Text(focus_rule_label, font=BOLD, height=20),
+            self.add(prt.Isolate(prt.Row(prt.Text(MSGR("Focus rule:"), font=BOLD),
+                                         prt.Text(focus_rule_label, height=20),
                                          prt.Text("      "),
                                          prt.Text(MSGR("Skip"), font=LINK_FONT,
                                                   link=prt.link(self.__module__, {'variant': variant, 'show': same_view})))))
@@ -980,8 +1014,8 @@ class CalibrationReport(prt.Report):
                                                    (self.__module__, self.current_area)))
 
         if self.has_table_view:
-            other_view = "TABLE" if self.arg('show') != "TABLE" else "OVERVIEW"
-            other_view_str = MSGR("Table") if self.arg('show') != "TABLE" else MSGR("Overview")
+            other_view = "OVERVIEW" if self.is_table_view() else "TABLE"
+            other_view_str = MSGR("Overview") if self.is_table_view() else MSGR("Table")
             other = prt.Text(other_view_str,
                              font=LINK_FONT,
                              tooltip=MSGR("Generate the {} View of this report.").format(other_view_str),
@@ -1008,6 +1042,9 @@ class CalibrationReport(prt.Report):
             comp_trips = prt.Text(MSGR("Comparison trips"),
                                   font=LINK_FONT,
                                   action=prt.action(show_comparison_trips, (self.current_area,)))
+
+            if self.arg("show") == "FILTER_COMPARISON_TRIPS":
+                show_comparison_trips(self.current_area)
         else:
             comp_trips = prt.Text("")
 
@@ -1081,8 +1118,8 @@ class CalibrationReport(prt.Report):
 
         try:
             pp_start, pp_end = rave.eval(ctx_bag,
-                                         mappings.rave_variable_for_planning_period_start,
-                                         mappings.rave_variable_for_planning_period_end)
+                                         mappings.rave_variable_for_planning_period_start_date,
+                                         mappings.rave_variable_for_planning_period_end_date)
         except rave.RaveError:
             pp_start = pp_end = None
 
@@ -1208,19 +1245,37 @@ def my_float(v):
 
 
 def show_comparison_trips(area):
+    if not compare_plan.ComparisonPlanHandler.get_plan_name(True):
+        Gui.GuiMessage(MSGR("There is no comparison plan loaded."))
+        return
+
     Cui.CuiSetCurrentArea(Cui.gpc_info, area)
     if not Cui.CuiAnyMarkedSegment(Cui.gpc_info, area):
+        Gui.GuiMessage(MSGR("There are no selected legs in window {}.".format(area + 1)))
         return
 
     tbh = bag_handler.MarkedLegsMain()
-    num_marked_legs = sum(1 for _ in tbh.bag.atom_set())
-    if num_marked_legs > 100:
-        if not Gui.GuiYesNo(__name__, MSGR("There are many (%s) selected legs in the window.\nDo you really want to continue?") % num_marked_legs):
+    current_flight_keys = [bag.studio_calibration_compare.flight_key() for bag in tbh.bag.atom_set()]
+    if len(current_flight_keys) > 100:
+        if not Gui.GuiYesNo(__name__,
+                            MSGR("There are many (%s) selected legs in the window.\nDo you really want to continue?") % len(current_flight_keys)):
             return
 
-    Cui.CuiShowLeg(Cui.gpc_info, area, "marked", Cui.CrrMode, Cui.CuiSortNone, 0, 0, 0, 0, 3)
-    # To allow undo
-    Cui.CuiExecuteFunction('PythonEvalExpr("0")',
-                           MSGR("Show comparison plan trips"),
-                           Gui.POT_REDO,
-                           Gui.OPA_OPAQUE)
+    # Collect keys and leg-identifiers from comparison plan
+    comp_leg_keys = compare_plan.ComparisonPlanHandler.get_keys(rave.var("studio_calibration_compare.flight_key"), mappings.LEVEL_LEG)
+    comp_leg_ids = compare_plan.ComparisonPlanHandler.get_keys(rave.keyw("leg_identifier"), mappings.LEVEL_LEG)
+
+    comp_key_dict = defaultdict(list)
+    for leg_key, leg_id in zip(comp_leg_keys, comp_leg_ids):
+        comp_key_dict[leg_key].append(leg_id)
+
+    common_flight_keys = set(current_flight_keys) & set(comp_leg_keys)
+
+    if not common_flight_keys:
+        Gui.GuiMessage(MSGR("None of the selected legs exist in the comparison plan."))
+        return
+
+    # Get a flat list (this is just a nested for loop where first for is outer loop...)
+    collected_ids = [leg_id for flight_key in common_flight_keys for leg_id in comp_key_dict[flight_key]]
+
+    calib_show_and_mark_legs(area, collected_ids, True)

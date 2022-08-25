@@ -1,14 +1,18 @@
-'''
+"""
 This module is just for development. It reloads most modules defining the Calibration reports in the right order.
 Execute it as a script to perform all the reloads.
 
 Created on 4 Dec 2020
 
 @author: steham
-'''
+"""
 
+
+from __future__ import absolute_import
 import sys
 from six.moves import reload_module
+
+import Errlog
 
 
 def doit():
@@ -24,7 +28,7 @@ def doit():
     reload_module(__import__("carmusr.calibration.util.complement", fromlist=[None]))
     ret = __import__("carmusr.calibration.util.complement", fromlist=[None]).refresh_and_get_error_message_if_something_is_wrong()
     if ret:
-        print(ret)
+        Errlog.log(ret)
     reload_module(__import__("carmusr.calibration.util.compare_plan", fromlist=[None]))
     reload_module(__import__("carmusr.calibration.util.rule_kpis_imp", fromlist=[None]))
     reload_module(__import__("carmusr.calibration.util.report_util", fromlist=[None]))
