@@ -43,6 +43,9 @@ python $CARMUSR/data/migration/$RELEASE/skcms-2998.py 2>&1 | tee $LOG_DIR/skcms-
 echo "  * SKCMS-2975: Add LC AP-POS to table training_log_set and crew_training_t_set"
 python $CARMUSR/data/migration/$RELEASE/skcms-2975.py 2>&1 | tee $LOG_DIR/skcms-2975.log
 
+echo "  * SKCMS-2922: Splitting ETOPS LIFUS/LC"
+python $CARMUSR/data/migration/$RELEASE/skcms-2922.py 2>&1 | tee $LOG_DIR/skcms-2922.log
+
 # Uncomment this in case dave filters shall be modified, remember to update JIRA number
 #echo "  * SKCMS-XXXX: Importing crc/etable/dave_filter/*.etab into database"
 #$CARMUSR/bin/admin/setup/setup_filters.sh -c -d | tee -a $LOG_DIR/SKCMS-XXXX.log
