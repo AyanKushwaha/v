@@ -832,6 +832,7 @@ class TimeEntryReport(WFSReport):
             return []
 
         for dated_tnx in transactions:
+          if dated_tnx['tnx_dt'] >= self.start:
             tnx = dated_tnx['tnx']
             tnx_dt = dated_tnx['tnx_dt']
             days_off = dated_tnx['days_off']
@@ -926,7 +927,7 @@ class TimeEntryReport(WFSReport):
         query_f3_f7 = '&(|(account=F3)(account=F7))(|(reasoncode=OUT Payment)(reasoncode=IN Payment Correction))'
 
         transactions = account_entry_t.search('(&(tim>={st})(tim<={end})(|(&{account_query}{reasoncode_query})({query_f3_f7})))'.format(
-            st=self.start,
+            st=self.start.adddays(-7),
             end=self.end,
             account_query=account_query,
             reasoncode_query=reasoncode_query,
