@@ -184,7 +184,7 @@ class TimeEntryReport(WFSReport):
                             else:
                                 is_unfit_spanning,unfitData = self._calculate_unfit_hrs(duty_bag,duty_start_day,is_unfit_spanning,country)
                                 unfit_tmp_hrs.extend(unfitData)
-                        elif duty_bag.duty.is_child_illness() or duty_bag.duty.is_on_duty_illness():
+                        elif duty_bag.duty.is_child_illness() or duty_bag.duty.is_on_duty_illness() or duty_bag.duty.is_on_duty_illness_link():
                             log.info('NORDLYS: Found ILL duty for temporary crew {crew} at {dt}'.format(crew=crew_id, dt=duty_start_day))
                             sickData = self._calculate_before_sick_hrs(duty_bag,country)
                             if sickData:
