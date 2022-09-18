@@ -35,6 +35,7 @@ import duty;
 import trip;
 import wop;
 import oma16;
+import oma16_defs;
 import month;
 import roster;
 import model_freedays;
@@ -200,6 +201,62 @@ end
   first(leg(roster), leg.%activity_scheduled_start_time_UTC%)
   where(leg.%start_utc% >= start_utc and
     duty_time.%7x24_hrs_in_period%(start_utc, leg.%co_end_utc%, night_upg, duty.union) > limit);
+
+
+export rule ind_max_fdp_with_extension_7_days =		
+  valid trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and
+        duty_period.%is_last_duty_period_on_start_day% and
+        oma16.%is_extended_fdp%; 
+        
+  %ind_num_extended_fdps_in_last_7_days% <=
+  %ind_max_extended_fdps_in_7_days%;
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_fdp_with_extension_in_7_days_ALL_failboject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%(concat("Coll: Max extended FDPs in 7 days ",
+                                format_time( duty_period.%last_7_days_start_day_start% ,"%d%b"), "-",
+                                format_time( duty_period.%last_7_days_start_day_end% - 24:00,"%d%b")),
+                         value,limit);
+  remark "Coll: FD max extended FDPs in 7 days",
+  planner "The rules checks that the number of FDPs with extension in 7 calendar days for FD is less than maximum allowed according to K22 agreement";
+end
+
+export %ind_max_extended_fdps_in_7_days% = 1;
+
+export %ind_is_extended_fdp% =
+  fdp.%scheduled_time% > oma16.%basic_max_daily_fdp% and
+  oma16.%fdp_extension_allowed%;
+
+
+%ind_num_extended_fdps_in_last_7_days% = 
+  let start = duty_period.%last_7_days_start_day_start%;
+  count(duty(chain))
+    from (current)
+    backwards
+    while (fdp.%start_utc% >= start)
+    where (duty_period.%is_on_duty% and
+           %ind_is_extended_fdp%);   
+
+        
+
+%ind_max_fdp_with_extension_in_7_days_ALL_failboject% =
+  let start_7_days = duty_period.%last_7_days_start_day_start%,
+      end_7_days = duty_period.%last_7_days_start_day_end%,
+      overshoot = rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+  last(leg(duty),
+       prev(leg(chain),next(leg(chain),leg.%failobject_departure%)) where
+        (count(duty(chain))
+           from (current)
+           backwards
+           while (fdp.%start_utc% >= start_7_days)
+           where (oma16.%is_extended_fdp%) <=
+         %ind_max_extended_fdps_in_7_days% +
+         overshoot)) where
+  (leg.%start_hb% < end_7_days);
+
 
 
 /* Defined in child modules, because of different duty limits and validity for CC and FC. */
@@ -1173,49 +1230,6 @@ end
   (not trip.%is_pact% or
    next(trip(roster), trip.%is_off_duty% or trip.%is_standby_line% and (not trip.%is_pact%)));
 
-/*
-** Rule:
-**   Maximum FDP extension duties in calendar month (Subpart Q related).
-**
-** Description:
-**   Check the number of SH FDP extension duties in a calendar month.
-**
-** Union Agreement:
-**      4ExNG 6.3.1.1.B
-** 
-*/
-
-export rule ind_max_fdp_with_extension_in_month_all =
-  valid trip.%check_rules% and
-        (crew.%k4exng_cc_sp5_1_valid%(duty.%start_day%) or
-         parameters.%k4exng_fc_sp5_1_valid%(duty.%start_day%)) and
-        trip.%is_short_haul% and      
-        duty.%in_pp_extended% and
-        duty_period.%is_on_duty% and
-        duty_period.%is_last_duty_period_on_start_day% and
-        oma16.%is_extended_fdp% and
-        oma16.%is_last_fdp_extension_duty_in_month%
-        and not ( (parameters.%K15_qa_cc_mar16_valid%(trip.%start_month_start%) and crew.%agmt_group_id%="QA_CC_AG") 
-                 or (parameters.%k15qa_feb16_valid%(trip.%start_month_start%) and trip.%is_ac_employer_qa% and not crew.%is_cabin%)); /* SKCMS-581 */
-
-  %num_extension_duties_in_month% <= duty_time.%max_fdp_extensions_month% +
-                rule_exceptions.%overshoot_int%(duty.%start_UTC%);
-
-  startdate = duty.%start_UTC%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = duty.%failobject_start%;
-  failtext(Int value, Int limit) =
-    rules.%failtext_int%(format_time(duty.%start_month_start%,
-                                     "(CCR) Coll: Max FDP extension duties in %b"),
-                         value,limit);
-  remark "Coll: Max FDP extension duties in month",
-  planner "The rule checks that the number of FDP extensions in a calendar "
-          "month is less than maximum allowed.";
-end
-
-%num_extension_duties_in_month% =
-    accumulators.%extended_shorthaul_duties_in_period%(duty.%start_month_start%,
-                                             duty.%start_month_end%);
 
 
 
