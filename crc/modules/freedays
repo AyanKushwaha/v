@@ -2582,6 +2582,7 @@ export %following_vacation_days% =
  *   CAU J.1.2c, J.2.1.5
  *   SCCA H.1.4a, H.2.5
  *   NKF 8 
+ *   FD: K22, SKCMS-3067
  */
 
 
@@ -2747,16 +2748,17 @@ export %trip_is_followed_by_free_weekend% =
                  where(not trip.%is_allowed_on_free_weekend%),
             true);
 
-/* For both QA_CC and SNK_CC (cimber and K15) blank day BL should not be part of the free weekend.
- ONly for SAS crew it is possible to have blank day BL in start and end day of free weekend */
+/* For both SKN_CC and all FD SK blank day BL should not be part of the free weekend.
+** Only for SAS crew that do not have 3 whole calendar days defined as free weekend
+** it is possible to have blank day BL in start and end day of free weekend */
 %prev_trip_end_hb_free_we% =
     default(prev(trip(chain), %end_hb_free_we%)
-                 where(not trip.%is_allowed_on_free_weekend% or (not (crew.%has_agmt_group_skn_cc% or crew.%has_agmt_group_qa_cc%) and trip.%is_blank_day%)),
+                 where(not trip.%is_allowed_on_free_weekend%),
             01Jan1986);
 
 %next_trip_start_hb_free_we% = 
     default(next(trip(chain), %start_hb_free_we%)
-                 where(not trip.%is_allowed_on_free_weekend% or (not (crew.%has_agmt_group_skn_cc% or crew.%has_agmt_group_qa_cc%) and trip.%is_blank_day%)),
+                 where(not trip.%is_allowed_on_free_weekend%),
             %pp_end% + 999:00);
 
 
@@ -2878,10 +2880,12 @@ export %next_possible_free_weekend_start% =
 ** are allowed on free weekends.
 */
 
-/* For both QA_CC and SNK_CC (cimber and K15) blank day BL should not be part of the free weekend.
- ONly for SAS crew it is possible to have blank day BL in start and end day of free weekend */
+/* For both SKN_CC and all FD SK blank day BL should not be part of the free weekend.
+** Only for SAS crew that do not have 3 whole calendar days defined as free weekend
+** it is possible to have blank day BL in start and end day of free weekend */
+
 %start_hb_free_we% =
-  if (not (crew.%has_agmt_group_skn_cc% or crew.%has_agmt_group_qa_cc%) and trip.%is_blank_day%) or trip.%is_allowed_on_free_weekend% or
+  if trip.%is_allowed_on_free_weekend% or
   default(trip.%is_F36% and fundamental.%day_of_week%(trip.%start_hb%) = 1, false) then
       trip.%start_hb% + %free_we_earliest_end%
   else if (crew.%k4exng_cc_sp5_1_valid%(pp.%start_month%) or
@@ -2891,7 +2895,7 @@ export %next_possible_free_weekend_start% =
       first(duty(trip),duty.%start_hb%) where (not duty.%is_bought%);
 
 %end_hb_free_we% =
-    if (not (crew.%has_agmt_group_skn_cc% or crew.%has_agmt_group_qa_cc%) and trip.%is_blank_day%) or trip.%is_allowed_on_free_weekend% then
+    if trip.%is_allowed_on_free_weekend% then
         trip.%end_scheduled_hb% - 24:00 + %free_we_latest_start%
     else if (crew.%k4exng_cc_sp5_1_valid%(pp.%start_month%) or
              %flight_crew%) and trip.%is_freeday% then
@@ -3091,19 +3095,16 @@ export %num_free_weekend_with_activity_monthly_sk%(abstime activity_start, strin
  */
 
 /* Weekend_type is depend on the agreement group
- * for example some union have multiple definition of weekend
+ * for example all FD SK and SKN CC have multiple definition of weekend
  * like FRI-SAT-SUN=type_1 and SAT-SUN-MON=type_2 and so on
  */
 table free_we_interval =
     %flight_crew%,
 
-    /* For CC */
-    crew.%is_homebase_scand%
-    and not (crew.%has_agmt_group_snk_cc_at_date%(%pp_start%)
-             or (crew.%has_agmt_group_nkf_cc_at_date%(%pp_start%)
-                 and system_db_parameters.%k20_skn_cc_weekend_is_3day%(%pp_start%))),
-
     crew.%agmt_group_id_at_date%(%pp_start%),
+
+    crew.%has_agmt_group_sk_cc% and
+    not crew.%has_agmt_group_skn_cc%,
 
     crew.%has_agmt_group_sk_fd%
     ->
@@ -3113,22 +3114,17 @@ table free_we_interval =
 
 
     /* FC */
-    true , -    , "SKN_FD_AG"   , true  -> %free_we_latest_start_skn_fd_ag%,
-                                           %free_we_earliest_end_skn_fd_ag%,
-                                           %free_we_minimum_duration_skn_fd_ag%;
-
-    true , -    , <>"SKN_FD_AG" , true  -> 16:00, 7:00, 63:00;
-
-    true , -    , -             , false -> %free_we_latest_start_fc%,
-                                           %free_we_earliest_end_fc%,
-                                           %free_we_length_fc%;
+    true , -    , -             , true  -> 24:00, 24:00, 72:00; /* SK FD Fri 00:00 - Sun 24:00 OR Sat 00:00 - Mon 24:00 */
+    true , -    , -             , false -> 24:00, 24:00, 72:00; /* Link/Connect FD Fri 00:00 - Sun 24:00 OR Sat 00:00 - Mon 24:00 */
 
     /* CC */
-    false, true , -             , -     -> 18:00, 6:00, 60:00;  /* Scandinavian CC Default Fri 18:00 - Mon 06:00        */
+    false, -    , true          , -     -> 18:00, 6:00, 60:00;  /* SKS+SKD CC Default Fri 18:00 - Mon 06:00        */
+    false, -    , false         , -     -> 24:00, 24:00, 72:00; /* SKN CC + Link/Connect 00:00 - Sun 24:00 OR Sat 00:00 - Mon 24:00 */
 
-    false, false, "NKF_CC_AG"   , -     -> 24:00, 24:00, 72:00; /* Fri 00:00 - Sun 24:00 OR Sat 00:00 - Mon 24:00 */
-    false, false, "SNK_CC_AG"   , -     -> 24:00, 24:00, 72:00; /* Fri 00:00 - Sun 24:00 OR Sat 00:00 - Mon 24:00 */
-
+&
+    true , -    , -             ,true   -> %free_we_latest_start_fc%,
+                                           %free_we_earliest_end_fc%,
+                                           %free_we_length_fc%; /*other SK FD crew*/
     -    , -    , -             , -     -> 24:00, 24:00, 96:00; /* Default: Fri 00:00 - Mon 24:00 */
 end
 
@@ -3138,14 +3134,11 @@ table free_we_interval_tow(int weekend_types) =
 
     %flight_crew%,
 
-    /* For CC */
-    crew.%is_homebase_scand%
-    and not (crew.%has_agmt_group_snk_cc_at_date%(%pp_start%)
-             or (crew.%has_agmt_group_nkf_cc_at_date%(%pp_start%)
-                 and system_db_parameters.%k20_skn_cc_weekend_is_3day%(%pp_start%))),
-
     crew.%agmt_group_id_at_date%(%pp_start%),
-    
+
+    crew.%has_agmt_group_sk_cc% and
+    not crew.%has_agmt_group_skn_cc%,
+
     crew.%has_agmt_group_sk_fd%
     ->
         %_free_we_interval_max_number_of_types%,
@@ -3153,23 +3146,25 @@ table free_we_interval_tow(int weekend_types) =
         export %free_we_end_tow%;
 
     /* FC */
-    1, true ,  -   , "SKN_FD_AG"   , true  -> 1, %free_we_start_tow_skn_fd_ag%, %free_we_end_tow_skn_fd_ag%;
-    1, true ,  -   , <>"SKN_FD_AG" , true  -> 1, 112:00, 7:00;
-    1, true ,  -   , -             , false -> 1, %free_we_start_tow_fc%, %free_we_end_tow_fc%;
+    1, true , -      , -     ,  true   -> 2, 96:00, 0:00;   /* SK FD Fri 00:00 - Sun 24:00 */
+    2, true , -      , -     ,  true   -> 2, 120:00, 24:00; /* SK FD Sat 00:00 - Mon 24:00 */
+    1, true , -      , -     ,  false  -> 2, 96:00, 0:00;   /* Link/Connect FD Fri 00:00 - Sun 24:00 */
+    2, true , -      , -     ,  false  -> 2, 120:00, 24:00; /* Link/Connect FD Sat 00:00 - Mon 24:00 */
 
     /* CC */
-    1, false, true , -             ,   -   -> 1, 114:00, 6:00;  /* Scandinavian CC Default  Fri 18:00 - Mon 06:00 */
-    1, false, false, "NKF_CC_AG"   ,   -   -> 2, 96:00, 0:00;   /* Fri 00:00 - Sun 24:00 */
-    2, false, false, "NKF_CC_AG"   ,   -   -> 2, 120:00, 24:00; /* Sat 00:00 - Mon 24:00 */
-    1, false, false, "SNK_CC_AG"   ,   -   -> 2, 96:00, 0:00;   /* Fri 00:00 - Sun 24:00 */
-    2, false, false, "SNK_CC_AG"   ,   -   -> 2, 120:00, 24:00; /* Sat 00:00 - Mon 24:00 */
-    -, -    , -    , -             ,   -   -> 1, 96:00, 24:00;  /* Default: Fri 00:00 - Mon 24:00 */
+    1, false, -      , true  ,   -   -> 1, 114:00, 6:00;  /* SKS+SKD CC Default  Fri 18:00 - Mon 06:00 */
+    1, false, -      , false ,   -   -> 2, 96:00, 0:00;   /* SKN CC + Link/Connect CC Fri 00:00 - Sun 24:00 */
+    2, false, -      , false ,   -   -> 2, 120:00, 24:00; /* SKN CC + Link/Connect CC Sat 00:00 - Mon 24:00 */
+
+  &
+    1, true , -      , -     , true  -> 1, %free_we_start_tow_fc%, %free_we_end_tow_fc%;
+    -, -    , -      , -     ,   -   -> 1, 96:00, 24:00;  /* Default: Fri 00:00 - Mon 24:00 */
 end
 
 export %free_we_interval_max_number_of_types% = %_free_we_interval_max_number_of_types%(1);
 
 /*
- *         Free weekend intervals - FC
+ *         Free weekend intervals - other FC groups
  *
  */
 
@@ -3183,197 +3178,9 @@ table free_we_interval_fc =
     %free_we_length_fc%;
     
   true , <> "SKI" -> 16:00, 6:30, 112:00, 6:30, 62:30;   /* Fri 16:00 - Mon 06:30 K11 RC   */
-  false, <> "SKI" -> 16:00, 8:00, 112:00, 8:00, 64:00;   /* Fri 16:00 - Mon 08:00 K11 Main */
-  false,  "SKI"   -> %free_we_latest_start_ski_k11%,
-                           %free_we_earliest_end_ski_k11%,
-                           %free_we_start_tow_ski_k11%,
-                           %free_we_end_tow_ski_k11%,
-                           %free_we_minimum_duration_ski_k11%;
-                           
     -  ,    -     -> 24:00, 24:00, 96:00, 24:00, 96:00;  /* Default: Fri 00:00 - Mon 24:00 */
 end
 
-/*
- *                            K11 SKI
- *
- * SKI must have minimum 64:00 free in the period Friday 1600 to Monday 1000
- * That means that check-out can not be later than Friday 1800, and check-in
- * not earlier than Monday 0800.
- * It also means that we have to calculate the latest start and earliest end   
- * table values according to the actual start and end of the time-off period.
- *
- * E.g. Friday 1615 to Monday 0815 is a legal free weekend
- *      Friday 1545 to Monday 0800 is a legal free weekend
- *      Friday 1615 to Monday 0800 is not a legal free weekend
- *      Friday 1545 to Monday 0745 is not a legal free weekend
- *      Friday 1815 to Monday 1015 is not a legal free weekend
- */
-
-%free_we_latest_start_alt_1_ski_k11% = 16:00;
-%free_we_earliest_end_alt_1_ski_k11% = 08:00;
-%free_we_latest_start_alt_2_ski_k11% = 18:00;
-%free_we_earliest_end_alt_2_ski_k11% = 10:00;
-%free_we_minimum_duration_ski_k11% = 64:00;
-
-%free_we_latest_start_ski_k11% =
-  default(%_free_we_latest_start_ski_k11%, %free_we_latest_start_alt_1_ski_k11%);
-
-%_free_we_latest_start_ski_k11% =
-  if wop.%is_followed_by_empty_days% or
-     default(next(wop(roster),wop.%is_preceded_by_f4% or
-                              wop.%is_preceded_by_wop_allowed_on_we%)
-               where (not wop.%is_freeday%),
-             false) then
-    if fundamental.%day_of_week%(wop.%end_day%) <= 4 or
-       (if wop.%is_followed_by_empty_days% then
-          (wop.%end_day% - wop.%start_day%) / 24:00 > 2
-        else 
-          (next(wop(roster),wop.%start_day%) - wop.%start_day%) / 24:00 > 3) then
-      %free_we_latest_start_alt_1_ski_k11%
-    else
-      if next(wop(roster),wop.%start_od%) where (not wop.%is_freeday%)
-         >= %free_we_earliest_end_alt_2_ski_k11% then
-        %free_we_latest_start_alt_2_ski_k11%
-      else
-        if next(wop(roster),wop.%start_od%) where (not wop.%is_freeday%)
-           >= %free_we_earliest_end_alt_1_ski_k11% then
-          time_of_day(next(wop(roster),wop.%start_hb%) where (not wop.%is_freeday%)
-                      - %free_we_minimum_duration_ski_k11%)
-        else
-          %free_we_latest_start_alt_1_ski_k11%
-  else
-    %free_we_latest_start_alt_2_ski_k11%;
-
-%free_we_earliest_end_ski_k11% =
-  if default(prev(wop(roster),wop.%is_followed_by_f4% or
-                              wop.%is_followed_by_wop_allowed_on_we% or
-                              wop.%is_followed_by_empty_days%)
-               where (not wop.%is_freeday%),
-             false) then
-    if fundamental.%day_of_week%(wop.%end_day%) <= 4 then
-      %free_we_earliest_end_alt_1_ski_k11%
-    else
-      if prev(wop(roster),wop.%end_od%) where (not wop.%is_freeday%)
-         < %free_we_latest_start_alt_1_ski_k11% then
-        %free_we_earliest_end_alt_1_ski_k11%
-      else
-        if prev(wop(roster),wop.%end_od%) where (not wop.%is_freeday%)
-           < %free_we_latest_start_alt_2_ski_k11% then
-          time_of_day(prev(wop(roster),wop.%end_hb%) where (not wop.%is_freeday%)
-                      + %free_we_minimum_duration_ski_k11%)
-        else
-          %free_we_earliest_end_alt_2_ski_k11%
-  else
-    %free_we_earliest_end_alt_1_ski_k11%;
-
-%free_we_start_tow_ski_k11% =
-  if %free_we_latest_start_ski_k11% <= %free_we_latest_start_alt_2_ski_k11% then
-    96:00 + %free_we_latest_start_ski_k11%
-  else
-    96:00 + %free_we_latest_start_alt_2_ski_k11%;
-
-%free_we_end_tow_ski_k11% =
-  if %free_we_earliest_end_ski_k11% >= %free_we_earliest_end_alt_1_ski_k11% then
-    %free_we_earliest_end_ski_k11%
-  else
-    %free_we_earliest_end_alt_1_ski_k11%;
-
-/*
- *                        K17 - SKN_FD_AG Free weekend
- *
- * SKN_FD_AG must have minimum 64:00 free in the period Friday 1400 to Monday
- * 0900. That means that check-out can not be later than Friday 1700, and check-in
- * not earlier than Monday 0600. It also means that we have to calculate the
- * latest start and earliest end table values according to the actual start and
- * end of the time-off period.
- *
- * E.g. Friday 1415 to Monday 0615 is a legal free weekend
- *      Friday 1645 to Monday 0845 is a legal free weekend
- *      Friday 1615 to Monday 0800 is not a legal free weekend
- *      Friday 1345 to Monday 0600 is not a legal free weekend
- *      Friday 1715 to Monday 0915 is not a legal free weekend
- */
-
-%free_we_latest_start_alt_1_skn_fd_ag% = 14:00;
-%free_we_earliest_end_alt_1_skn_fd_ag% = 06:00;
-%free_we_latest_start_alt_2_skn_fd_ag% = 17:00;
-%free_we_earliest_end_alt_2_skn_fd_ag% = 09:00;
-%free_we_minimum_duration_skn_fd_ag% =
-  if system_db_parameters.%k17_skn_fc_valid%(wop.%start_hb%) then
-    64:00
-  else
-    63:00;
-
-%free_we_latest_start_skn_fd_ag% =
-  if system_db_parameters.%k17_skn_fc_valid%(wop.%start_hb%) then
-    default(%_free_we_latest_start_skn_fd_ag%, %free_we_latest_start_alt_1_skn_fd_ag%)
-  else
-    16:00;
-
-%_free_we_latest_start_skn_fd_ag% =
-  /* Set 17:00 if the WOP after the weekend ends after 09:00 Monday */
-  if %next_non_free_weekend_wop_starts_after_earliest_end_alt_2_skn_fd_ag% then
-    %free_we_latest_start_alt_2_skn_fd_ag%
-  /* Set [start time for the WOP after the weekend - 64:00] if that wop starts between 06:00 and 09:00 Monday */
-  else if next  (wop(roster), wop.%start_od% >= %free_we_earliest_end_alt_1_skn_fd_ag%)
-          where (not wop.%is_allowed_on_free_weekend%) then
-    time_of_day(next  (wop(roster), wop.%start_hb% - %free_we_minimum_duration_skn_fd_ag%)
-                where (not wop.%is_allowed_on_free_weekend%))
-  /* Set 14:00 if the WOP after the weekend starts earlier than 06:00 Monday */
-  else
-    %free_we_latest_start_alt_1_skn_fd_ag%;
-
-/* Check if the next WOP not allowed on free weekends starts after 09:00 the following Monday */
-%next_non_free_weekend_wop_starts_after_earliest_end_alt_2_skn_fd_ag% =
-  let end_hb_current_wop = wop.%end_hb%;
-  default(next  (wop(roster), fundamental.%day_of_week%(wop.%start_day%) > 1 or
-                              wop.%start_od% > %free_we_earliest_end_alt_2_skn_fd_ag% or
-                              (wop.%start_hb% >= end_hb_current_wop + %week_hours% and
-                               wop.%start_od% < %free_we_earliest_end_alt_1_skn_fd_ag%))
-          where (not wop.%is_allowed_on_free_weekend%),
-          true);
-
-%free_we_earliest_end_skn_fd_ag% =
-  if system_db_parameters.%k17_skn_fc_valid%(wop.%start_hb%) then
-    default(%_free_we_earliest_end_skn_fd_ag%, %free_we_earliest_end_alt_2_skn_fd_ag%)
-  else
-    07:00;
-
-%_free_we_earliest_end_skn_fd_ag% =
-  /* Set 06:00 if the WOP before the weekend ends before 14:00 Friday */
-  if %prev_non_free_weekend_wop_ends_before_latest_start_alt_1_skn_fd_ag% then
-    %free_we_earliest_end_alt_1_skn_fd_ag%
-  /* Set [end time for the WOP before the weekend + 64:00] if that wop ends between 14:00 and 17:00 Monday */
-  else if prev  (wop(roster), fundamental.%day_of_week%(wop.%end_day%) = 5 and
-                              wop.%end_od% <= %free_we_latest_start_alt_2_skn_fd_ag%)
-          where (not wop.%is_allowed_on_free_weekend%) then
-    time_of_day(prev  (wop(roster), wop.%end_hb% + %free_we_minimum_duration_skn_fd_ag%)
-                where (not wop.%is_allowed_on_free_weekend%))
-  /* Set 09:00 if the WOP before the weekend ends later than 17:00 Friday */
-  else
-    %free_we_earliest_end_alt_2_skn_fd_ag%;
-
-/* Check if the previous WOP not allowed on free weekends ends before 14:00 the previous Friday */
-%prev_non_free_weekend_wop_ends_before_latest_start_alt_1_skn_fd_ag% =
-  let start_hb_current_wop = wop.%start_hb%;
-  default(prev(wop(roster), wop.%end_hb% <= start_hb_current_wop - %week_hours% or
-                            fundamental.%day_of_week%(wop.%end_day%) < 5 or
-                            (fundamental.%day_of_week%(wop.%end_day%) = 5 and
-                             wop.%end_od% < %free_we_latest_start_alt_1_skn_fd_ag%))
-          where (not wop.%is_allowed_on_free_weekend%),
-          true);
-
-%free_we_start_tow_skn_fd_ag% =
-  if %free_we_latest_start_skn_fd_ag% <= %free_we_latest_start_alt_2_skn_fd_ag% then
-    96:00 + %free_we_latest_start_skn_fd_ag%
-  else
-    96:00 + %free_we_latest_start_alt_2_skn_fd_ag%;
-
-%free_we_end_tow_skn_fd_ag% =
-  if %free_we_earliest_end_skn_fd_ag% >= %free_we_earliest_end_alt_1_skn_fd_ag% then
-    %free_we_earliest_end_skn_fd_ag%
-  else
-    %free_we_earliest_end_alt_1_skn_fd_ag%;
 
 %trip_is_single_day_greenland% =
   is_first(trip(wop)) and is_last(trip(wop)) and
