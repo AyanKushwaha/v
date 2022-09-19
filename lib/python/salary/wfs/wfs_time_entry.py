@@ -213,9 +213,33 @@ class TimeEntry(WFSReport):
                     planning_group = planninggroup_from_id(crew_id, duty_start_day)
                     log.info('NORDLYS: planning group {z} '.format(z = planning_group))
                     if planning_group == "SVS":
-
-
-                         # Checkout on Day-off overtime 
+                        if 'report_common.%%number_of_active_legs%%' > 0:
+                            start_dt = abs_to_datetime(duty_start_day) + timedelta(days=i)
+                            start_dt_start_abs = AbsTime(start_dt.year, start_dt.month, start_dt.day, 0, 0)
+                            start_dt_end_abs = start_dt_start_abs + RelTime('24:00')
+                            prev_duty_hrs_before_sick = duty_bag.rescheduling.period_inf_prev_duty_time(start_dt_start_abs,start_dt_end_abs)
+                            if is_weekend and 'report_roster.%%is_public_holiday%%':
+                                general_holiday_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND_HOLIDAY',crew_id,country)
+                                general_holiday_duty_hrs = _standby_callout_time
+                                event_data['CNLN_PROD_WEEKEND_HOLIDAY']['hrs'] = general_holiday_duty_hrs
+                                event_data['CNLN_PROD_WEEKEND_HOLIDAY']['paycode'] = general_holiday_paycode
+                                event_data['CNLN_PROD_WEEKEND_HOLIDAY']['dt'] = abs_to_datetime(duty_start_day)
+                            else:
+                                general_holiday_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND_HOLIDAY',crew_id,country)
+                                general_holiday_duty_hrs = _standby_callout_time
+                                event_data['CNLN_PROD_WEEKDAY']['hrs'] = general_holiday_paycode
+                                event_data['CNLN_PROD_WEEKDAY']['paycode'] = general_holiday_duty_hrs
+                                event_data['CNLN_PROD_WEEKDAY']['dt'] = abs_to_datetime(duty_start_day)
+                                log.info('{general_holiday_paycode} {general_holiday_duty_hrs} {duty_start_day}'.format(general_holiday_paycode=general_holiday_paycode, general_holiday_duty_hrs=general_holiday_duty_hrs, duty_start_day=duty_start_day ))
+                        if 'duty.%%is_on_duty_illness_link%%' == TRUE and prev_duty_hrs_before_sick > 0 :
+                            general_sick_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_SICK',crew_id,country)
+                            general_sick_hrs = reltime('24:00')
+                            event_data['CNLN_PROD_SICK']['hrs'] = general_sick_hrs 
+                            event_data['CNLN_PROD_SICK']['paycode'] = general_sick_paycode
+                            event_data['CNLN_PROD_SICK']['dt'] = abs_to_datetime(duty_start_day)
+                        
+                            
+                        # Checkout on Day-off overtime 
                         general_ot_paycode_day_off = self.paycode_handler.paycode_from_event('CNLN_LAND_DAY_OFF', crew_id, country,rank)
                         general_ot_hrs_day_off = integer_to_reltime(duty_bag.report_overtime.OT_units_SVS())
                         event_data['CNLN_LAND_DAY_OFF']['hrs'] = general_ot_hrs_day_off                 
@@ -541,11 +565,12 @@ class TimeEntry(WFSReport):
         else:
             return False
 
-    def _standby_callout_time(self,duty_bag):
-        time = 'leg.%%standby_duty_time_before_factor%%'
+    def active_duty_hrs(self,duty_bag):
+        duty_start_hb = duty_bag.duty.start_hb()
+        duty_end_hb = duty_bag.duty.end_hb()
         if duty_bag.duty.has_active_flight:
             if duty_bag.standby.duty_is_standby_callout:
-                return time
+                return duty_end_hb - duty_start_hb
         else:
             return 0
         
@@ -804,7 +829,7 @@ class TimeEntry(WFSReport):
            }
         }
         '''
-        event_types = ('OT', 'OT_LATE_CO', 'TEMP','CNLN_OT_45_50','CNLN_OT_50_PLUS','CNLN_LAND_DAY_OFF')
+        event_types = ('OT', 'OT_LATE_CO', 'TEMP','CNLN_OT_45_50','CNLN_OT_50_PLUS','CNLN_LAND_DAY_OFF','CNLN_PROD_WEEKEND_HOLIDAY','CNLN_PROD_SICK')
 
         event_data_t = dict()
         
@@ -1180,6 +1205,8 @@ class TimeEntry(WFSReport):
                         saslink_7_calendar_45_50_ot = [r for r in candidates[duty_start_dt] if r['event'] == 'CNLN_OT_45_50']
                         saslink_7_calendar_50_ot = [r for r in candidates[duty_start_dt] if r['event'] ==  'CNLN_OT_50_PLUS']
                         saslink_land_day_off_ot = [r for r in candidates[duty_start_dt] if r['event'] ==  'CNLN_LAND_DAY_OFF']
+                        saslink_holiday = [r for r in candidates[duty_start_dt] if r['event'] ==  'CNLN_PROD_WEEKEND_HOLIDAY']
+                        saslink_sick = [r for r in candidates[duty_start_dt] if r['event'] ==  'CNLN_PROD_SICK']
 
                         # Check if any event can be considered removed from the roster
                         if len(general_ot) > 0:
@@ -1202,7 +1229,15 @@ class TimeEntry(WFSReport):
                         elif len(saslink_land_day_off_ot) > 0:
                             log.info('NORDLYS: Checking for removed overtime on day-off on roster on {dt}'.format(dt=duty_start_dt))    
                             recs_to_remove.extend(self._remove_saslink_land_day_off_ot(crew_id, duty_bag, duty_start_dt, saslink_land_day_off_ot))
-
+                        
+                        elif len(saslink_weekend_holiday) > 0:
+                            log.info('NORDLYS: Checking for removed overtime on day-off on roster on {dt}'.format(dt=duty_start_dt))    
+                            recs_to_remove.extend(self._remove_saslink_holiday(crew_id, duty_bag, duty_start_dt, saslink_weekend_holiday))
+                        
+                        elif len(saslink_sick) > 0:
+                            log.info('NORDLYS: Checking for removed sick data on day-off on roster on {dt}'.format(dt=duty_start_dt))    
+                            recs_to_remove.extend(self._remove_saslink_sick(crew_id, duty_bag, duty_start_dt, saslink_sick))
+                        
                         elif len(temp) > 0:
                             if duty_bag.crew.is_temporary_at_date(duty_start_dt):
                                 log.info('NORDLYS: Checking for removed tempcrew hours on roster on {dt}'.format(dt=duty_start_dt))
@@ -1372,6 +1407,22 @@ class TimeEntry(WFSReport):
         if (default_reltime(duty_bag.report_overtime.OT_units_SVS()) == RelTime('00:00')) :
             general_ot_day_off_removals_svs.append(saslink_land_day_off_ot[0]['rec'])
         return general_ot_day_off_removals_svs
+
+    def _remove_saslink_holiday(self, crew_id, duty_bag, duty_start_dt, saslink_holiday ):
+        general_holiday_removals_svs = []
+        if (_standby_callout_time == RelTime('00:00')) :
+            general_holiday_removals_svs.append(saslink_holiday[0]['rec'])
+        return general_holiday_removals_svs
+
+    def _remove_saslink_sick(self, crew_id, duty_bag, duty_start_dt, saslink_sick ):
+        general_sick_svs = []
+        start_dt = abs_to_datetime(duty_start_day) + timedelta(days=i)
+        start_dt_start_abs = AbsTime(start_dt.year, start_dt.month, start_dt.day, 0, 0)
+        start_dt_end_abs = start_dt_start_abs + RelTime('24:00')
+        prev_duty_hrs_before_sick = duty_bag.rescheduling.period_inf_prev_duty_time(start_dt_start_abs,start_dt_end_abs)
+        if ('duty.%%is_on_duty_illness_link%%' == TRUE and prev_duty_hrs_before_sick == RelTime('00:00')) :
+            general_holiday_removals_svs.append(saslink_sick[0]['rec'])
+        return general_sick_svs
 
     '''
     Main data extraction END
