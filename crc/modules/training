@@ -588,6 +588,71 @@ export %program_has_new_on_trip% =
   type = "LC" and 
   %last_recurrent_performed_of_type%("LC", ac_qual, date) > fundamental.%now_date% - 7*24:00;
 
+export %has_A2_leg_in_trip% = any(leg(trip),leg.%qual% = "A2");
+export %has_A3_leg_in_trip% = any(leg(trip),leg.%qual% = "A3");
+export %has_A5_leg_in_trip% = any(leg(trip),leg.%qual% = "A5");
+
+export %has_PC_renewal_qual_A2%(Abstime date) =
+    let last_trip_start_day = default(last(trip(roster), trip.%start_day%)
+                                      where((trip.%start_day%) <= date), date);
+    any(trip(roster),(trip.%is_skill_test% or trip.%is_pc_change_month%) and (trip.%start_day% < last_trip_start_day) and %has_A2_leg_in_trip%);
+
+export %has_PC_renewal_qual_A3%(Abstime date) =
+    let last_trip_start_day = default(last(trip(roster), trip.%start_day%)
+                                      where((trip.%start_day%) <= date), date);
+    any(trip(roster),(trip.%is_skill_test% or trip.%is_pc_change_month%) and (trip.%start_day% < last_trip_start_day) and %has_A3_leg_in_trip%);
+
+export %has_PC_renewal_qual_A5%(Abstime date) =
+    let last_trip_start_day = default(last(trip(roster), trip.%start_day%)
+                                      where((trip.%start_day%) <= date), date);
+    any(trip(roster),(trip.%is_skill_test% or trip.%is_pc_change_month%) and (trip.%start_day% < last_trip_start_day) and %has_A5_leg_in_trip%);
+
+export %has_LC_qual_A2%(Abstime date) =
+    let last_trip_start_day = default(last(trip(roster), trip.%start_day%)
+                                      where((trip.%start_day%) <= date), date);
+    any(trip(roster),trip.%is_lc% and (trip.%start_day% < last_trip_start_day) and %has_A2_leg_in_trip%);
+
+export %has_LC_qual_A3%(Abstime date) =
+    let last_trip_start_day = default(last(trip(roster), trip.%start_day%)
+                                      where((trip.%start_day%) <= date), date);
+    any(trip(roster),trip.%is_lc% and (trip.%start_day% < last_trip_start_day) and %has_A3_leg_in_trip%);
+
+export %has_LC_qual_A5%(Abstime date) =
+    let last_trip_start_day = default(last(trip(roster), trip.%start_day%)
+                                      where((trip.%start_day%) <= date), date);
+    any(trip(roster),trip.%is_lc% and (trip.%start_day% < last_trip_start_day) and %has_A5_leg_in_trip%);
+
+
+export %last_leg_qual%(Abstime date) =
+    last(trip(roster), trip.%qual%) where((trip.%start_day%) <= date);
+
+export %has_last_leg_qual_LC%(Abstime date) =
+    last(trip(roster), trip.%is_lc%) where((trip.%start_day%) <= date);
+
+export %has_matching_qual_pc%(Abstime date) =
+    if %last_leg_qual%(date) = "A2" then %has_PC_renewal_qual_A2%(date)
+    else if %last_leg_qual%(date) = "A3" then %has_PC_renewal_qual_A3%(date)
+    else if %last_leg_qual%(date) = "A5" then %has_PC_renewal_qual_A5%(date)
+    else false;
+
+export %has_matching_qual_LC%(Abstime date) =
+    if %last_leg_qual%(date) = "A2" then %has_LC_qual_A2%(date)
+    else if %last_leg_qual%(date) = "A3" then %has_LC_qual_A3%(date)
+    else if %last_leg_qual%(date) = "A5" then %has_LC_qual_A5%(date)
+    else false;
+
+table check_matching_qual_table(String type, Abstime date) =
+  model_crew.%congrouptype_find%(crew.%id%, fundamental.%pp_start%),%last_leg_qual%(date),%has_PC_renewal_qual_A2%(date),%has_PC_renewal_qual_A3%(date), %has_PC_renewal_qual_A5%(date) -> export %check_matching_pc_leg_qual%;
+  "MFF-A2A3","A2", False, True, -   ->  (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("PC","A5") = default
+(type,"")) or (concat("OPC","A5") = default(type,""));
+  "MFF-A2A3","A3", True, False, -   ->  ("PC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("PC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
+  "MFF-A2A5","A2", False, - , True  ->  (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("PC","A5") = default
+(type,"")) or (concat("OPC","A5") = default(type,""));
+  "MFF-A2A5","A5", True, - ,  False ->  ("PC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,""));
+   - ,  - ,  -,  -, -               ->  void_bool;
+end
+
+
 export %recurrent_type_registered_ix%(Int ix, Abstime date) =
   %recurrent_type_registered%(ix, date);
 export %current_acqual_recurrent_type_registered_ix%(Int ix, Abstime date, String acqual) =
@@ -1716,12 +1781,15 @@ export %recurrent_type_expiry_date_incl_performed%(String type, String ac_qual, 
       check_date = if check_expiry then stop_date else date,
       validity = %validity%(type, date),
       recurrent_performed = default(%recurrent_performed%(type, ac_qual, check_date), false);
-  if %planned_rec_doc_creator%(type, ac_qual, date) then
-    add_months(round_up_month(date), validity)
-  else if recurrent_performed  then
-    add_months((if expiry_date = %abstimemin% then %pp_start% else expiry_date), validity)
+  if crew.%is_MFF% then
+     %recurrent_type_expiry_date_incl_performed_MFF%(type, ac_qual, date, check_expiry)
   else
-    expiry_date;
+    if %planned_rec_doc_creator%(type, ac_qual, date) then
+      add_months(round_up_month(date), validity)
+    else if recurrent_performed  then
+      add_months((if expiry_date = %abstimemin% then %pp_start% else expiry_date), validity)
+    else
+      expiry_date;
 
 export %recurrent_type_expiry_date_incl_performed_MFF%(String type, String ac_qual, Abstime date, bool check_expiry) =
   let expiry_date = default(%recurrent_type_expiry_date%(type, ac_qual, date), %abstimemin%),
@@ -1730,11 +1798,28 @@ export %recurrent_type_expiry_date_incl_performed_MFF%(String type, String ac_qu
       validity = %validity%(type, date),
       recurrent_performed = default(%recurrent_performed%(type, ac_qual, check_date), false);
   if %planned_rec_doc_creator_MFF%(type, ac_qual, date) then
-    add_months(round_up_month(date), validity)
-  else if recurrent_performed  then
+   if type in doc_per_qual and not %has_matching_qual_pc%(date) then
+     if %check_matching_pc_leg_qual%(type, date) then
+      add_months(round_up_month(date), validity)
+   else if recurrent_performed  then
     add_months((if expiry_date = %abstimemin% then %pp_start% else expiry_date), validity)
-  else
+   else
     expiry_date;
+   else if type = "LC" then
+     if %has_matching_qual_LC%(date) or %has_last_leg_qual_LC%(date) then
+      add_months(round_up_month(date), validity)
+     else if recurrent_performed  then
+      add_months((if expiry_date = %abstimemin% then %pp_start% else expiry_date), validity)
+     else
+      expiry_date;
+   else add_months(round_up_month(date), validity)
+  else if recurrent_performed  then
+     add_months((if expiry_date = %abstimemin% then %pp_start% else expiry_date), validity)
+  else
+     expiry_date;
+
+
+set doc_per_qual = "PC","OPC","PCA3","OPCA3","PCA5","OPCA5";
     
 export %recurrent_type_performed_expiry_date_matching_type%(String type, String ac_qual, Abstime date, bool check_expiry) =
   let expiry_date = default(%recurrent_type_expiry_date%(type, ac_qual, date), %abstimemin%),
