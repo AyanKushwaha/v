@@ -557,6 +557,20 @@ export %_recurrent_type_registered%(String rec_type, String ac_qual, Abstime dat
                       %unplanned_training_of_type_on_qual_before%("LC", last_trip_start_day, "") or
                       %unplanned_training_of_type_on_qual_before%("ILC", last_trip_start_day, "")));
 
+%planned_rec_doc_creator_MFF%(String type, String ac_qual, Abstime date) =
+    let last_trip_start_day = default(last(trip(roster), trip.%start_day%)
+                                      where(trip.%start_day% <= date), date);
+    any(trip(roster), (type = "LC" and (trip.%is_ilc% or trip.%is_lc%)) or
+                      ((trip.%is_skill_test% or trip.%is_pc_change_month%) and
+                       type in recurrent_sim_training_set))
+    where (trip.%start_day% < last_trip_start_day)
+    or
+    (%planned_rec_doc_creator_by_training_log%(type, ac_qual)) or
+    (type = "LC" and (%program_has_ilc%(last_trip_start_day) or
+                      %program_has_lc%(last_trip_start_day, ac_qual) or
+                      %unplanned_training_of_type_on_qual_before%("LC", last_trip_start_day, "") or
+                      %unplanned_training_of_type_on_qual_before%("ILC", last_trip_start_day, "")));
+
 %planned_rec_doc_creator_by_training_log%(String type, String ac_qual) =
   not void(%last_recurrent_creator_in_training_log%(type, ac_qual));
 
@@ -638,6 +652,7 @@ export %first_recurrent_doc_expiry_date% =
   %first_recurrent_doc_expiry_date_at_date%(%pp_start%);
 
 set rec_doc_per_qual = "LC", "PC", "OPC";
+set pcopc_doc_per_qual = "PCA3" ,"OPCA3" ,"PCA5" ,"OPCA5";
 
 %first_recurrent_doc_expiry_date_at_date%(Abstime end_date) =
   default(
@@ -706,8 +721,30 @@ export %recurrent_type_performed%(Int ix, Abstime date) =
       default(date < %recurrent_type_expiry_date%(rec_type, %any_ac_qual%, date), false) or
       default(date < %recurrent_type_expiry_date_incl_performed%(rec_type, %any_ac_qual%, date, false), false);
 
+export %recurrent_type_performed_MFF%(Int ix, Abstime date) =
+    let rec_type = %_recurrent_group%(ix, date);
+
+    /* First we do a quick check against table.
+       If that fails we do the more complex roster lookup that includes rec doc
+       creators. */
+    if rec_type in rec_doc_per_qual then
+      all(times(crew.%max_iter%("ACQUAL", date)),
+         default(date < %recurrent_type_expiry_date%(rec_type, crew.%qln%("ACQUAL", date, %times_index_0%), date), false) or
+         default(date < %recurrent_type_expiry_date_incl_performed_MFF%(rec_type, trip.%qual% , date, false), false))
+      where (%recurrent_type_valid_for_ac_qual%(ix, date, crew.%qln%("ACQUAL", date, %times_index_0%)))
+    else if rec_type in pcopc_doc_per_qual then
+      default(date < %recurrent_type_expiry_date%(rec_type, %any_ac_qual%, date), false) or
+      default(date < %recurrent_type_expiry_date_incl_performed_MFF%(rec_type, trip.%qual% , date, false), false)
+    else
+      default(date < %recurrent_type_expiry_date%(rec_type, %any_ac_qual%, date), false) or
+      default(date < %recurrent_type_expiry_date_incl_performed%(rec_type, %any_ac_qual%, date, false), false);
+
+
 export %recurrent_type_performed_ix%(Int ix, Abstime date) =
-  default(%recurrent_type_performed%(ix, date), false);
+  if crew.%is_MFF% then
+    default(%recurrent_type_performed_MFF%(ix, date), false)
+  else
+    default(%recurrent_type_performed%(ix, date), false); 
   
 /* Used in failtext and crew warnings */
 export %unperformed_recurrent_types%(Abstime date) =
@@ -1680,6 +1717,19 @@ export %recurrent_type_expiry_date_incl_performed%(String type, String ac_qual, 
       validity = %validity%(type, date),
       recurrent_performed = default(%recurrent_performed%(type, ac_qual, check_date), false);
   if %planned_rec_doc_creator%(type, ac_qual, date) then
+    add_months(round_up_month(date), validity)
+  else if recurrent_performed  then
+    add_months((if expiry_date = %abstimemin% then %pp_start% else expiry_date), validity)
+  else
+    expiry_date;
+
+export %recurrent_type_expiry_date_incl_performed_MFF%(String type, String ac_qual, Abstime date, bool check_expiry) =
+  let expiry_date = default(%recurrent_type_expiry_date%(type, ac_qual, date), %abstimemin%),
+      stop_date = nmax(expiry_date, %pp_end%),
+      check_date = if check_expiry then stop_date else date,
+      validity = %validity%(type, date),
+      recurrent_performed = default(%recurrent_performed%(type, ac_qual, check_date), false);
+  if %planned_rec_doc_creator_MFF%(type, ac_qual, date) then
     add_months(round_up_month(date), validity)
   else if recurrent_performed  then
     add_months((if expiry_date = %abstimemin% then %pp_start% else expiry_date), validity)
