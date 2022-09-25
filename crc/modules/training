@@ -566,8 +566,8 @@ export %_recurrent_type_registered%(String rec_type, String ac_qual, Abstime dat
     where (trip.%start_day% < last_trip_start_day)
     or
     (%planned_rec_doc_creator_by_training_log%(type, ac_qual)) or
-    (type = "LC" and (%program_has_ilc%(last_trip_start_day) or
-                      %program_has_lc%(last_trip_start_day, ac_qual) or
+    (type = "LC" and (%program_has_ilc_MFF%(last_trip_start_day, ac_qual) or
+                      %program_has_lc_MFF%(last_trip_start_day, ac_qual) or
                       %unplanned_training_of_type_on_qual_before%("LC", last_trip_start_day, "") or
                       %unplanned_training_of_type_on_qual_before%("ILC", last_trip_start_day, "")));
 
@@ -587,6 +587,19 @@ export %program_has_new_on_trip% =
      planned LC/ILC hasn't been performed */
   type = "LC" and 
   %last_recurrent_performed_of_type%("LC", ac_qual, date) > fundamental.%now_date% - 7*24:00;
+
+%program_has_training_MFF%(Abstime date, String type, String ac_qual) =
+  any(times(%training_activities%(date)),
+      %course_attribute%(date, %times_index_0%) = type) or
+  /* Handling the case where the training need end date is passed, but a
+     planned LC/ILC hasn't been performed */
+  type = "LC" and
+  %last_recurrent_performed_of_type_MFF%("LC", ac_qual, date) > fundamental.%now_date% - 7*24:00;
+
+export %program_has_ilc_MFF%(Abstime date, String ac_qual) =
+    %program_has_training_MFF%(date, "ILC", ac_qual);
+export %program_has_lc_MFF%(Abstime date, String ac_qual) =
+    %program_has_training_MFF%(date, "LC", ac_qual);
 
 export %has_A2_leg_in_trip% = any(leg(trip),leg.%qual% = "A2");
 export %has_A3_leg_in_trip% = any(leg(trip),leg.%qual% = "A3");
@@ -1855,6 +1868,16 @@ export %last_recurrent_performed_of_type%(String type, String ac_qual, Abstime d
                  %_opc_fullfilled_by_pc%(type)) and
                  not %trip_is_sim_assist%
                  ), 
+          default(%last_recurrent_date_in_training_log%(type, ac_qual), 1jan1986));
+
+export %last_recurrent_performed_of_type_MFF%(String type, String ac_qual, Abstime date) =
+  default(last(trip(roster), round_up_month(trip.%start_utc%))
+          where ((trip.%is_ground_duty% or (type = "LC" and ac_qual = trip.%qual%)) and
+                 trip.%start_hb% < date and
+                 (%trip_has_rectype%(type) or
+                 %_opc_fullfilled_by_pc%(type)) and
+                 not %trip_is_sim_assist%
+                 ),
           default(%last_recurrent_date_in_training_log%(type, ac_qual), 1jan1986));
 
 /* This is a simplification. If there is a PC or OPC (A3/A4) of the wrong type
