@@ -1107,13 +1107,19 @@ export %recurrent_performed%(String type, String ac_qual, Abstime date) =
     %recurrent_emg_performed%(type, date)
   /* 2. Recurrent simulator training */
   else if type in recurrent_sim_training_set then
-    %recurrent_sim_performed%(type, date)
+    if crew.%is_MFF% and type in doc_per_qual then
+      %recurrent_sim_performed_MFF%(type, date)
+    else
+      %recurrent_sim_performed%(type, date)
   /* 3. Recurrent CRM training */
   else if type in recurrent_crm_training_set then
     %recurrent_crm_performed%(type, date)
   /* 4. Recurrent flight training */
   else if type in recurrent_flight_training_set then
-    %recurrent_flight_training_performed%(type, ac_qual, date)
+    if crew.%is_MFF% then
+      %recurrent_flight_training_performed_MFF%(type, ac_qual, date)
+    else
+      %recurrent_flight_training_performed%(type, ac_qual, date)
   /* 5. Recurrent CRMC training */
   else if type in recurrent_crmc_training_set then
     %recurrent_crmc_performed%(type, date)
@@ -1326,6 +1332,15 @@ end
          %duty_is_own_sim%)
   or %_recurrent_performed_by_training_log%(type,date,"", earliest_assignment_def);    /*ok for duty as well */
 
+%recurrent_sim_performed_MFF%(String type, Abstime date) =
+  let rec_ac_qual = trip.%qual%,
+      earliest_assignment_def = default(%earliest_rec_assignment%(type, rec_ac_qual, date), %pp_start% - 45 * 24:00);
+  any(duty(roster), %reqd_recurrent_sim%(type))
+  where (duty.%start_hb% < date and
+         duty.%start_hb% >= earliest_assignment_def and
+         %duty_is_own_sim%)
+  or %_recurrent_performed_by_training_log%(type,date,"", earliest_assignment_def);
+
 /* earliest_date, if supplied, should be used to only check assignment in 
    "may have" interval. Only of use for PC/OPC. 1Jan1986 can be supplied to
    disable. */
@@ -1536,6 +1551,25 @@ export %recurrent_crmc_performed%(String type, Abstime date) =
     %_recurrent_flight_training_performed%(type, date, ac_qual, expiry_date);
 
 %_recurrent_flight_training_performed%(String type, Abstime date, String ac_qual, Abstime expiry_date) =
+any(trip(roster), %reqd_recurrent_flight_training%(type, ac_qual))
+where (trip.%has_active_flight% and
+        (expiry_date > trip.%end_hb% or
+              (trip.%start_hb% <= date and any(leg(trip),leg.%is_active_flight%)
+              where (leg.%start_hb% > expiry_date and
+                      %is_lc_or_preceded_by_lc%))))
+or %recurrent_performed_by_training_log%(type,date,ac_qual);
+
+%recurrent_flight_training_performed_MFF%(String type, String doc_ac_qual, Abstime date) =
+  let ac_qual = %recurrent_type_expiry_ac_qual%(type, doc_ac_qual, date),
+      expiry_date = default(%recurrent_type_expiry_date%(type, trip.%qual%, date),1jan1986);
+  if ac_qual = "A3 or A4 or A5" then /* Handles the case where upcoming lc qual is "A3 or A5" */
+    %_recurrent_flight_training_performed_MFF%(type, date, "A3", expiry_date)
+    or %_recurrent_flight_training_performed_MFF%(type, date, "A4", expiry_date)
+    or %_recurrent_flight_training_performed_MFF%(type, date, "A5", expiry_date)
+  else
+    %_recurrent_flight_training_performed%(type, date, ac_qual, expiry_date);
+
+%_recurrent_flight_training_performed_MFF%(String type, Abstime date, String ac_qual, Abstime expiry_date) =
 any(trip(roster), %reqd_recurrent_flight_training%(type, ac_qual))
 where (trip.%has_active_flight% and
         (expiry_date > trip.%end_hb% or
