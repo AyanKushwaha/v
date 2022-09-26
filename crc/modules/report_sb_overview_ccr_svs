@@ -1,0 +1,381 @@
+module report_sb_overview_ccr inherits report_sb_overview
+
+import crew;
+import fundamental;
+import planning_area;
+import duty;
+import task;
+import fdp;
+import oma16;
+import oma16_defs;
+import rules_svs_indust_cct;
+import rules_indust_common;
+import duty_time;
+
+%planning_group_productivity% = parameter 62 
+    remark "What is the likelyhood that a sick day is on a production day";
+
+redefine %sb_rank% =
+    let rank = crew.%rank%;
+    if rank = "AS" then
+        "AH"
+    else
+        rank;
+        
+export iterator sb_rank_overview_set =
+  partition(chain)
+  by(%sb_rank%,
+     %sb_crew_qualification%,
+     crew.%planning_group%);
+end
+        
+%sb_crew_qualification% = 
+    if crew.%is_long_haul_pp_start% then
+        "LH"
+    else
+        "SH";
+    
+        
+redefine %roster_multi_sb_qual% =
+    let quals = crew.%ac_qln_sep_string%(duty.%start_hb%),
+    len = length(quals);
+    substr(quals, 1, len - 1);
+    
+
+    
+redefine %in_planning_area% = 
+    if fundamental.%is_roster% then
+        planning_area.%crew_is_in_planning_area%
+    else
+        planning_area.%trip_is_in_planning_area%;
+
+redefine %duty_is_illness% =
+   fundamental.%is_roster% and (%duty_is_illness_overview_report% or duty.%is_child_illness%);
+   
+%duty_is_short_illness% =
+   fundamental.%is_roster% and (%duty_is_short_illness_overview_report%);
+
+%duty_is_child_illness% =
+   fundamental.%is_roster% and (%duty_is_child_illness_overview_report%);
+   
+%duty_is_long_illness% =
+   fundamental.%is_roster% and (%duty_is_long_illness_overview_report%);
+   
+%duty_is_illness_overview_report% =
+  first(leg(duty), %leg_is_illness_overview_report%);
+  
+%duty_is_short_illness_overview_report% =
+  first(leg(duty), %leg_is_short_illness_overview_report%);
+
+%duty_is_child_illness_overview_report% =
+  duty.%is_child_illness%;
+
+%duty_is_long_illness_overview_report% =
+  first(leg(duty), %leg_is_long_illness_overview_report%);
+  
+%leg_is_freeday_illness% =
+    task.%is_freeday_illness%(leg.%code%);
+
+%leg_is_longterm_illness% =
+    task.%is_longterm_illness%(leg.%code%);
+
+%leg_is_illness_overview_report% = leg.%is_illness% and not %leg_is_freeday_illness%;
+
+%leg_is_short_illness_overview_report% =
+    %leg_is_illness_overview_report% and not %leg_is_longterm_illness%;
+    
+%leg_is_long_illness_overview_report% =
+    %leg_is_longterm_illness%  and not %leg_is_short_illness_overview_report%;
+ 
+redefine %duty_is_standby_to_consider% =
+    fundamental.%is_roster% and (duty.%is_standby%) and %sb_is_unused%;
+    
+%sb_is_unused% =
+    true;
+
+/* this (and many others) is called from report */    
+%sb_is_useable% =
+    %availabal_time_for_sb% >= 6:00;
+
+%duty_is_sh_standby_to_consider% =
+    %duty_is_standby_to_consider% and not duty.%is_standby_line% and %in_planning_area%;
+
+redefine %duty_is_resorce_pool_to_consider% =
+    fundamental.%is_roster% and crew.%is_resource_pool_pp_start_or_pp_end% and (%duty_is_freeto_use%);
+    
+redefine %crew_has_upper_category% = crew.%rank% = fundamental.%upper_cat%;
+redefine %crew_has_lower_category% = crew.%rank% in fundamental.lower_cat_set;
+
+%day_of_week%(abstime date) =
+    (time_of_week(date) /24:00) + 1;
+
+
+%no_estimated_sick_on_date%(Abstime date) =
+    let day_of_week = %day_of_week%(date);
+    %get_sick_on_weekday%(day_of_week);
+    
+%no_estimated_short_sick_on_date%(Abstime date) =
+    let day_of_week = %day_of_week%(date);
+    %get_short_sick_on_weekday%(day_of_week);
+    
+%no_estimated_long_sick_on_date%(Abstime date) =
+    let day_of_week = %day_of_week%(date);
+    %get_long_sick_on_weekday%(day_of_week);
+
+%no_estimated_child_sick_on_date%(Abstime date) =
+    let day_of_week = %day_of_week%(date);
+    %get_child_sick_on_weekday%(day_of_week);
+    
+table sick_on_weekday(int weekday) =
+    weekday -> %get_sick_on_weekday%;
+    1 -> %get_sick_on_monday%;
+    2 -> %get_sick_on_tuesday%;
+    3 -> %get_sick_on_wednesday%;
+    4 -> %get_sick_on_thursday%;
+    5 -> %get_sick_on_friday%;
+    6 -> %get_sick_on_saturday%;
+    7 -> %get_sick_on_sunday%;
+    - -> void_int;
+end
+
+%get_sick_on_monday% =
+   %_get_sick_on_weekday%(1);
+   
+%get_sick_on_tuesday% =
+   %_get_sick_on_weekday%(2);
+%get_sick_on_wednesday% =
+   %_get_sick_on_weekday%(3);
+%get_sick_on_thursday% =
+   %_get_sick_on_weekday%(4);
+%get_sick_on_friday% =
+   %_get_sick_on_weekday%(5);
+%get_sick_on_saturday% =
+   %_get_sick_on_weekday%(6);
+%get_sick_on_sunday% =
+   %_get_sick_on_weekday%(7);
+    
+
+   
+    
+/*%get_short_sick_on_weekday%(int weekday) =
+    %_get_short_sick_on_weekday%(weekday);*/
+    
+table short_sick_on_weekday(int weekday) =
+    weekday -> %get_short_sick_on_weekday%;
+    1 -> %get_short_sick_on_monday%;
+    2 -> %get_short_sick_on_tuesday%;
+    3 -> %get_short_sick_on_wednesday%;
+    4 -> %get_short_sick_on_thursday%;
+    5 -> %get_short_sick_on_friday%;
+    6 -> %get_short_sick_on_saturday%;
+    7 -> %get_short_sick_on_sunday%;
+    - -> void_int;
+end
+
+%get_short_sick_on_monday% =
+   %_get_short_sick_on_weekday%(1);
+   
+%get_short_sick_on_tuesday% =
+   %_get_short_sick_on_weekday%(2);
+%get_short_sick_on_wednesday% =
+   %_get_short_sick_on_weekday%(3);
+%get_short_sick_on_thursday% =
+   %_get_short_sick_on_weekday%(4);
+%get_short_sick_on_friday% =
+   %_get_short_sick_on_weekday%(5);
+%get_short_sick_on_saturday% =
+   %_get_short_sick_on_weekday%(6);
+%get_short_sick_on_sunday% =
+   %_get_short_sick_on_weekday%(7);
+   
+    
+/*%get_long_sick_on_weekday%(int weekday) =
+   %_get_long_sick_on_weekday%(weekday);*/
+   
+table long_sick_on_weekday(int weekday) =
+    weekday -> %get_long_sick_on_weekday%;
+    1 -> %get_long_sick_on_monday%;
+    2 -> %get_long_sick_on_tuesday%;
+    3 -> %get_long_sick_on_wednesday%;
+    4 -> %get_long_sick_on_thursday%;
+    5 -> %get_long_sick_on_friday%;
+    6 -> %get_long_sick_on_saturday%;
+    7 -> %get_long_sick_on_sunday%;
+    - -> void_int;
+end
+
+%get_long_sick_on_monday% =
+   %_get_long_sick_on_weekday%(1);
+   
+%get_long_sick_on_tuesday% =
+   %_get_long_sick_on_weekday%(2);
+%get_long_sick_on_wednesday% =
+   %_get_long_sick_on_weekday%(3);
+%get_long_sick_on_thursday% =
+   %_get_long_sick_on_weekday%(4);
+%get_long_sick_on_friday% =
+   %_get_long_sick_on_weekday%(5);
+%get_long_sick_on_saturday% =
+   %_get_long_sick_on_weekday%(6);
+%get_long_sick_on_sunday% =
+   %_get_long_sick_on_weekday%(7);
+   
+
+/*%get_child_sick_on_weekday%(int weekday) =
+    %_get_child_sick_on_weekday%(weekday);*/
+    
+table child_sick_on_weekday(int weekday) =
+    weekday -> %get_child_sick_on_weekday%;
+    1 -> %get_child_sick_on_monday%;
+    2 -> %get_child_sick_on_tuesday%;
+    3 -> %get_child_sick_on_wednesday%;
+    4 -> %get_child_sick_on_thursday%;
+    5 -> %get_child_sick_on_friday%;
+    6 -> %get_child_sick_on_saturday%;
+    7 -> %get_child_sick_on_sunday%;
+    - -> void_int;
+end
+
+%get_child_sick_on_monday% =
+   %_get_child_sick_on_weekday%(1);
+   
+%get_child_sick_on_tuesday% =
+   %_get_child_sick_on_weekday%(2);
+%get_child_sick_on_wednesday% =
+   %_get_child_sick_on_weekday%(3);
+%get_child_sick_on_thursday% =
+   %_get_child_sick_on_weekday%(4);
+%get_child_sick_on_friday% =
+   %_get_child_sick_on_weekday%(5);
+%get_child_sick_on_saturday% =
+   %_get_child_sick_on_weekday%(6);
+%get_child_sick_on_sunday% =
+   %_get_child_sick_on_weekday%(7);
+    
+%_get_sick_on_weekday%(int weekday) =
+    (%no_sick_on_date%(%secure_weekday_start%(weekday, 0)) + 
+     %no_sick_on_date%(%secure_weekday_start%(weekday, 1)) +
+     %no_sick_on_date%(%secure_weekday_start%(weekday, 2))) / 3;
+    
+%_get_short_sick_on_weekday%(int weekday) =
+    (%no_short_sick_on_date%(%secure_weekday_start%(weekday, 0)) +
+    %no_short_sick_on_date%(%secure_weekday_start%(weekday, 1)) +
+    %no_short_sick_on_date%(%secure_weekday_start%(weekday, 2))) / 3;
+    
+%_get_long_sick_on_weekday%(int weekday) =
+    (%no_long_sick_on_date%(%secure_weekday_start%(weekday, 0)) +
+    %no_long_sick_on_date%(%secure_weekday_start%(weekday, 1)) +
+    %no_long_sick_on_date%(%secure_weekday_start%(weekday, 2))) / 3;
+
+%_get_child_sick_on_weekday%(int weekday) =
+    (%no_child_sick_on_date%(%secure_weekday_start%(weekday, 0)) +
+    %no_child_sick_on_date%(%secure_weekday_start%(weekday, 1)) +
+    %no_child_sick_on_date%(%secure_weekday_start%(weekday, 2))) /3;
+    
+%duty_on_date%(abstime date) =
+    duty.%start_day% <= date and
+    duty.%end_hb% > date;
+    
+%pp_date_ix% =    
+    %pp_start% + (%py_index1%-1) * 24:00;
+    
+%no_est_sick_on_date_ix% =
+    %no_estimated_sick_on_date%(%pp_date_ix%);
+    
+%no_est_short_sick_on_date_ix% =
+    %no_estimated_short_sick_on_date%(%pp_date_ix%);
+    
+%no_est_long_sick_on_date_ix% =
+    %no_estimated_long_sick_on_date%(%pp_date_ix%);
+
+%no_est_child_sick_on_date_ix% =
+    %no_estimated_child_sick_on_date%(%pp_date_ix%);
+    
+%no_sick_on_date_ix% =
+    %no_sick_on_date%(%pp_date_ix%);
+    
+%no_bl_on_date_ix% =
+    %no_bl_on_date%(%pp_date_ix%);
+    
+%no_short_sick_on_date_ix% =
+    %no_short_sick_on_date%(%pp_date_ix%);
+    
+%no_long_sick_on_date_ix% =
+    %no_long_sick_on_date%(%pp_date_ix%);
+
+%no_child_sick_on_date_ix% =
+    %no_child_sick_on_date%(%pp_date_ix%);
+    
+%no_sick_on_date_context%(Abstime date) =
+    context(sp_crew, %no_sick_on_date%(date));
+    
+      
+%no_bl_on_date_context%(Abstime date) =
+    context(sp_crew, %no_bl_on_date%(date));  
+    
+%no_sick_on_date%(Abstime date) =
+    count(duty_set) where (%duty_is_illness% and %duty_on_date%(date));
+    
+%no_bl_on_date%(Abstime date) =
+    count(duty_set) where (%duty_is_bl% and %duty_on_date%(date));
+    
+%duty_is_bl% =
+    duty.%is_blank_day%;
+    
+%no_short_sick_on_date%(Abstime date) =
+    count(duty_set) where (%duty_is_short_illness% and %duty_on_date%(date));
+
+%no_child_sick_on_date%(Abstime date) =
+    (%_no_child_sick_on_date%(date) + 5000) / 10000;
+    
+%likelihood_of_production_on_date% =
+    %planning_group_productivity% * crew.%part_time_factor_duty_start%;
+
+%_no_child_sick_on_date%(Abstime date) =
+	sum(duty_set, %likelihood_of_production_on_date%) where (%duty_is_child_illness% and %duty_on_date%(date));	
+
+
+%no_long_sick_on_date%(Abstime date) =
+    (%_no_long_sick_on_date%(date) + 5000)  / 10000;
+    
+%_no_long_sick_on_date%(Abstime date) =
+    sum(duty_set, %likelihood_of_production_on_date%) where (%duty_is_long_illness% and %duty_on_date%(date));
+    
+%max_duty_fdp_diff% =
+    oma16.%max_daily_fdp% -
+    default(fdp.%time%, 0:00);
+
+%block_time_28_days_end_diff% =
+    oma16_defs.%max_block_time_in_28_days% -
+    oma16.%block_time_in_last_28_days_end_day_hb%;
+
+%block_time_28_days_start_diff% =
+    oma16_defs.%max_block_time_in_28_days% -
+    oma16.%block_time_in_last_28_days_start_day_hb%;
+
+%block_time_in_calendar_year% =
+    oma16_defs.%max_block_time_in_calendar_year% -
+    oma16.%block_time_in_calendar_year%;
+
+%max_duty_time_in_7_days_end_diff% = 
+    rules_svs_indust_cct.%max_duty_time_in_7_days% -
+    duty_time.%7_days_end_day%;
+
+%max_duty_time_in_7_days_start_diff% =
+    rules_svs_indust_cct.%max_duty_time_in_7_days% -
+    duty_time.%7_days_start_day%;
+    
+    
+%duty_time_1x24_hrs_diff% =    
+    rules_indust_common.%duty_time_1x24_hrs_diff%;
+    
+%availabal_time_for_sb% =
+    nmin(%duty_time_1x24_hrs_diff%, %max_duty_time_in_7_days_start_diff%, %block_time_in_calendar_year%, %block_time_28_days_start_diff%, %block_time_28_days_end_diff%, %max_duty_fdp_diff%);
+    
+%morning_sb% =
+  duty.%start_od_lt% <= 9:00;
+  
+%ca1_duty_start% =
+    crew.%is_scc_trip_start%; 
+    
+
