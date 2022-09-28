@@ -354,7 +354,7 @@ class PerDiemTripManager:
         perDiemTrip.perDiemExtraEndTime = [AbsTime(endtime) for endtime in trip[TRIP_PER_DIEM_EXTRA_END_TIMES].split(',')]
         perDiemTrip.perDiemExtraCompensation = [int(compensation) / 100 for compensation in trip[TRIP_PER_DIEM_EXTRA_COMPENSATION].split(',')]
         perDiemTrip.perDiemExtraCurrency = trip[TRIP_PER_DIEM_EXTRA_CURRENCY].split(',')
-        perDiemTrip.perDiemExtraExchangeRate = [float(rate) for rate in trip[TRIP_PER_DIEM_EXTRA_EXCHANGE_RATE].split(',')]
+        perDiemTrip.perDiemExtraExchangeRate = [float(rate) if type(float(rate)) != str else 0 for rate in trip[TRIP_PER_DIEM_EXTRA_EXCHANGE_RATE].split(',')]
         perDiemTrip.perDiemExtraExchangeUnit = [int(unit) for unit in trip[TRIP_PER_DIEM_EXTRA_EXCHANGE_UNIT].split(',')]
         perDiemTrip.perDiemExtraType = trip[TRIP_PER_DIEM_EXTRA_TYPE].split(',')
 
