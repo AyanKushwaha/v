@@ -75,9 +75,13 @@ class TimeEntry(WFSReport):
     def extract_data(self, crew_id):
         log.info('NORDLYS: Extracting data for Time Entry report for crew {crew}...'.format(crew=crew_id))
         data = []
+        # collects the data from wfs_corrected table for corrections 
         data.extend(self._wfs_corrected(crew_id))
+        # collects data from roster for hrs 
         data.extend(self._roster_events(crew_id))
+        # collects data from account_entry table for days_off         
         data.extend(self._account_transactions(crew_id))
+        # collects all the records that are removed from roster 
         data.extend(self._removed_records(crew_id, data))
         return data
     '''
@@ -95,6 +99,7 @@ class TimeEntry(WFSReport):
         calulated_tmp_hrs = []
         crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start, self.end)
         
+        # collects the data in diff list on the basis of type of duty 
         non_mid_tmp_hrs = []
         mid_tmp_hrs = []
         unfit_tmp_hrs = []
@@ -104,7 +109,7 @@ class TimeEntry(WFSReport):
         log.info('NORDLYS: Extracting roster data for {0}'.format(crew_id))
 
         is_unfit_spanning = False
-
+        # we need to skip second split duty 
         is_split = False
         split_count = 1
 
@@ -166,12 +171,14 @@ class TimeEntry(WFSReport):
                             log.info('NORDLYS: Found blank day for temporary crew {crew} at {dt}'.format(crew=crew_id, dt=duty_start_day)) 
                             continue
                         elif duty_bag.duty.is_freeday():
+                            # no need to report free day
                             log.info('NORDLYS: Found Free day for temporary crew {crew} at {dt}'.format(crew=crew_id, dt=duty_start_day))
                             continue
                         
                         tmp_paycode = self.paycode_handler.paycode_from_event('TEMP', crew_id, country, rank)
                         
                         if duty_bag.duty.has_unfit_for_flight_star():
+                            # in case of unfit we need to report prev hrs before unfit 
                             log.info('NORDLYS: Found unfit duty for temporary crew {crew} at {dt}'.format(crew=crew_id, dt=duty_start_day))
                             if is_unfit_spanning == True:
                                 is_unfit_spanning = False
@@ -179,11 +186,13 @@ class TimeEntry(WFSReport):
                                 is_unfit_spanning,unfitData = self._calculate_unfit_hrs(duty_bag,duty_start_day,is_unfit_spanning,country)
                                 unfit_tmp_hrs.extend(unfitData)
                         elif duty_bag.duty.is_child_illness() or duty_bag.duty.is_on_duty_illness():
+                            # in case of ill or child ill need to report prev hrs 
                             log.info('NORDLYS: Found ILL duty for temporary crew {crew} at {dt}'.format(crew=crew_id, dt=duty_start_day))
                             sickData = self._calculate_before_sick_hrs(duty_bag,country)
                             if sickData:
                                 sick_tmp_hrs.extend(sickData)                        
                         elif duty_bag.duty_period.is_split():
+                            # in case of split duty need to report hrs on first day only 
                             log.info('NORDLYS: Found split duty for temporary crew {crew} at {dt}'.format(crew=crew_id, dt=duty_start_day)) 
                             if duty_bag.duty_period.start_day_hb() < self.start:
                                 continue
@@ -196,15 +205,22 @@ class TimeEntry(WFSReport):
                                 is_split = False 
                                 split_count = 1
                         elif self._is_mid_night_spanning(duty_bag):
+                            # if duty is spanning over midnight then report hrs accodingly 
                             log.info('NORDLYS: Found midnight spanning duty for temporary crew {crew} at {dt}'.format(crew=crew_id, dt=duty_start_day)) 
                             midData = self._temporary_mid_hours(duty_bag, duty_start_day, tmp_paycode, crew_id, extperkey)
                             if midData:
                                 mid_tmp_hrs.extend(midData)
                         else:
+                            # othere remaining duties are reported in normal duties 
                             log.info('NORDLYS: Found normal duty for temporary crew {crew} at {dt}'.format(crew=crew_id, dt=duty_start_day)) 
                             nonMidData = self._temporary_non_mid_hours(duty_bag, duty_start_day, tmp_paycode, crew_id, extperkey)
                             if nonMidData:
                                 non_mid_tmp_hrs.extend(nonMidData)
+                    # Regarding Overtime :-
+                    # it is for both RP crews and non RP crews 
+                    # Overtime Types - ( Late checkout , 7_calendar_days overtime )
+                    # Late checkout -> for FC there is FD units , for FC overtime merge with 7_calendar_days
+                    # 7_calendar_days overtime -> reports if crew did more then 47.5 hrs duty in last 7 days                                
 
                     if monthly_ot[abs_to_datetime(duty_start_day).month]['val'] == None:
                         month = abs_to_datetime(duty_start_day).month
@@ -363,6 +379,7 @@ class TimeEntry(WFSReport):
         return data
 
     def _wfs_corrected(self,crew_id):
+        # this method collects the TE corrections from wfs_corrected table 
         data = []
         table = tm.table('wfs_corrected')
         uniq_dates = set()
@@ -377,7 +394,7 @@ class TimeEntry(WFSReport):
 
             wfs_corrected_data.append(rec)
             uniq_dates.add(i.work_day)
-
+        # if multiple records are present in table it will pick only max id record 
         for dt in uniq_dates:
             mx_id = -1
             for rec in wfs_corrected_data:
@@ -394,7 +411,7 @@ class TimeEntry(WFSReport):
         return data 
     
     def _check_in_wfs_corrected(self, crew_id, extperkey, wfs_paycode, curr_dt, hrs, days_off):
-        
+        # if correction record is present in wfs_corrected table then no need to report other record         
         table = tm.table('wfs_corrected')
 
         curr_dt = AbsTime(curr_dt.year,curr_dt.month,curr_dt.day,0,0)
@@ -412,6 +429,8 @@ class TimeEntry(WFSReport):
 
     
     def _calculate_before_sick_hrs(self,duty_bag,country):
+       # collect the data before the crew sick 
+       # there is a crew publish info table which helps to get the previous informed data 
 
         rec = []
 
@@ -442,7 +461,7 @@ class TimeEntry(WFSReport):
         
 
     def _calculate_unfit_hrs(self,duty_bag,duty_start_day,is_spanning,country):
-
+        # this is also collect data of previous informed duty from crew publish info table 
         duty_start_day = duty_bag.duty.start_day()
         duty_end_day = duty_bag.duty.end_day()
 
@@ -540,7 +559,8 @@ class TimeEntry(WFSReport):
             return False
 
     def _temporary_split_hours(self, duty_bag, start_dt, paycode, crew_id, extperkey,split_found):
-
+        # if there is split duty spanning b/w tow days then we need to report whole hrs on first day
+        # if total hrs > 24 then need to report rem = total - 24 on second day 
         duty_start_hb = duty_bag.duty.start_hb()
         duty_end_hb = duty_bag.duty.end_hb()
         
@@ -569,6 +589,7 @@ class TimeEntry(WFSReport):
         return data_split,split_found
     
     def _temporary_non_mid_hours(self, duty_bag, start_dt, paycode, crew_id, extperkey):
+        # all the normal duties are need to report in this category
         tmp_hrs_list = []
         curr_abs = start_dt
                
@@ -589,7 +610,9 @@ class TimeEntry(WFSReport):
         return tmp_hrs_list
 
     def _temporary_mid_hours(self,duty_bag,start_dt, paycode, crew_id, extperkey):
-
+        # if a duty spanning over mid night then 
+        # the part of duty on day one need to report on day one 
+        # the part of duty on day two need to report on day two 
         duty_start_hb = duty_bag.duty.start_hb()
         duty_end_hb = duty_bag.duty.end_hb()
         
@@ -619,6 +642,7 @@ class TimeEntry(WFSReport):
         return mid_night_data
 
     def _days_of_spanning(self,duty_bag,is_midnight_spanning):
+        # if duty is spanning more then a day , it will return number of days 
         if is_midnight_spanning:
             duty_start_day = duty_bag.duty.start_day()
             duty_end_day = duty_bag.duty.end_day()
@@ -825,6 +849,7 @@ class TimeEntry(WFSReport):
             return []
         
         for dated_tnx in transactions:
+          if dated_tnx['tnx_dt'] >= self.start:
             tnx = dated_tnx['tnx']
             tnx_dt = dated_tnx['tnx_dt']
             days_off = dated_tnx['days_off']
@@ -964,8 +989,8 @@ class TimeEntry(WFSReport):
                     # No need for update on this record. Skipping to next....
                     log.debug('NORDLYS: No update needed for this record...')
         elif days_off == 0 or hours == RelTime('00:00'):
+            # if days off or hrs of new record is 0 then no need to create any entry             
             log.info('NORDLYS: No pre-existing records found... days off or hrs found as 0')
-            pass
         else:
             log.info('NORDLYS: No pre-existing records found... Adding new record')
             insert_row_data = {
@@ -1144,10 +1169,10 @@ class TimeEntry(WFSReport):
                                     log.info("NORDLYS: Found unfit , midnight or temp duty for removal")
                         else:
                             recs_to_remove.extend(self._remove_event_replaced_by_block(second_day, duty_bag.duty.end_day(), candidates))
-                            log.info("Nordlys : Added _remove_event_replaced_by_block {0}".format(recs_to_remove))
+                            log.info("NORDLYS: Added _remove_event_replaced_by_block {0}".format(recs_to_remove))
                     
                     if candidates.has_key(duty_start_dt) == False and duty_bag.duty_period.is_split():
-                        log.info("NORDLYS : Setting is_split to zero in removal")
+                        log.info("NORDLYS: Setting is_split to zero in removal")
                         is_split = 0
                     
                     if candidates.has_key(duty_start_dt):
@@ -1486,7 +1511,7 @@ class TimeEntry(WFSReport):
         query_f3_f7 = '&(|(account=F3)(account=F7))(|(reasoncode=OUT Payment)(reasoncode=IN Payment Correction))'
 
         transactions = account_entry_t.search('(&(tim>={st})(tim<={end})(|(&{account_query}{reasoncode_query})({query_f3_f7})))'.format(
-            st=self.start,
+            st=self.start.adddays(-7),
             end=self.end,
             account_query=account_query,
             reasoncode_query=reasoncode_query,

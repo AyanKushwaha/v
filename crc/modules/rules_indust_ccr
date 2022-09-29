@@ -1971,12 +1971,13 @@ export %days_LOA_in_period%(Abstime start, Abstime stop) =
 
 /*
 ** Rule:
-**    Min number of rest hours after long haul production for FD SKS.
+**    Min number of rest hours after long haul production for FD.
 **
 ** Description:
 **   Checks that the number of hours scheduled after long haul production is at
 **   least the minimum hours. This rule is valid for all FD with LH duty.
-     SKCMS-651, SKCMS-2760, SKCMS-2923
+**   Crew with a mix of SH and LH in their wop is exempted.
+     SKCMS-651, SKCMS-2760, SKCMS-2923, SKCMS-3081
 **
 ** Level: Trip
 **
@@ -1992,23 +1993,49 @@ export rule (on) ind_min_lh_rest_hours_after_first =
     startdate = next(trip(chain), trip.%start_hb%);
     severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
     failobject = next(trip(chain), trip.%failobject_start%);
-    failtext(Reltime value, Reltime limit) = rules.%failtext_rel%("Coll: Min. rest hours after LH ", value, limit);
+    failtext %ind_min_lh_rest_hours_after_first_failtext%;
 
     remark "Coll: Min rest hours after long haul production",
-    planner "Check that the number of hours after this scheduled production is at least 72:00 hours. ";
+    planner "Check that the number of hours after this scheduled production is at least 72:00 hours."
+            "Or minimum 3 days if wop is a mix of SH and LH.";
 end
 
 %ind_min_lh_rest_hours_after_first_valid% =
+    trip.%in_pp_extended_start_5d_before% and
     last(duty(trip), %min_rest_time_after_lh_valid%) and
-    trip.%in_pp_extended_start_5d_before%;
+    not wop.%is_SH_LH%;
 
+%min_rest_hours_after_first_lh% = 
+    if %trip_is_preceded_by_SH_not_bought% 
+        then %min_free_mff_sh_lh_mix%
+     else 72:00;
+
+%min_free_mff_sh_lh_mix% =
+    72:00 + (24:00 - trip.%end_od%);
+
+%trip_is_preceded_by_SH_not_bought% =
+  default(prev(trip(wop), %_trip_is_SH_not_bought%), false);
+
+%_trip_is_SH_not_bought% =
+  trip.%is_short_haul% and
+  not trip.%is_bought%;
+
+%ind_min_lh_rest_hours_after_first_failtext% =
+    let value_days = %rest_day_after_duty%,
+        limit_days = %min_rest_days_after_second_lh%,
+        value = trip.%planned_rest_time%,
+        limit = %min_rest_hours_after_first_lh%;
+     if %trip_is_preceded_by_SH_not_bought% then
+            rules.%failtext_int%("Coll: Min. rest days after LH ",value_days, limit_days)
+        else rules.%failtext_rel%("Coll: Min. rest hours after LH ", value, limit);
 
 /*
 ** Rule:
 **    Min number of rest days after second long haul production for FD.
 **
 ** Description:
-**   Check previous long haul production before this long haul production; if the previous
+**   If wop is a mix of SH and LH then 3 F are required.
+**   Or check previous long haul production before this long haul production; if the previous
 **   long haul production had less than minimum amount of rest days then rule checks the
 **   number of second rest days against minimum amount of rest days.
 **
@@ -2016,7 +2043,7 @@ end
 **   (if __FIRST_REST__ < min.rest.days then __SECOND_REST__ >= min.rest.days)
 **
 **   This rule is valid for all FD on LH duty. 
-**   SKCMS-651, SKCMS-2760, SKCMS-2923
+**   SKCMS-651, SKCMS-2760, SKCMS-2923, SKCMS-3081
 **
 ** Level: Trip
 **
@@ -2040,11 +2067,10 @@ export rule (on) ind_min_lh_rest_days_after_second =
 end
 
 %ind_min_lh_rest_days_after_second_valid% =
+    trip.%in_pp_extended_start_5d_before% and
     last(duty(trip), %min_rest_time_after_lh_valid%) and
-    %is_preceded_with_long_haul_trip_with_less_than_min_rest_days% and
-    trip.%in_pp_extended_start_5d_before%;
+    (%is_preceded_with_long_haul_trip_with_less_than_min_rest_days% or wop.%is_SH_LH%);
 
-%min_rest_hours_after_first_lh% = 72:00;
 %min_rest_days_after_second_lh% = 3;
 
 /* Level: Duty */
@@ -2064,10 +2090,9 @@ export %rest_day_after_duty% =
 
 
 export %is_preceded_with_long_haul_trip_with_less_than_min_rest_days% =
-    default(
-        prev(trip(chain) where(trip.%has_active_long_haul%),
-            (%rest_day_after_duty% < %min_rest_days_after_second_lh%))
-        ,false);
+    default(prev(wop(chain) where(wop.%has_production%),
+            (wop.%has_active_long_haul% and last(trip(wop),%rest_day_after_duty% < %min_rest_days_after_second_lh%)))
+            ,false);
 
 export %ind_min_lh_rest_failobject% =
     let first_rest_end = next(duty(chain),
@@ -2084,7 +2109,7 @@ export %ind_min_lh_rest_failobject% =
     %FD_on_LH_duty% and not freedays.%east_to_west_or_west_to_east%;
 
 %FD_on_LH_duty% =
-    (duty.%is_SKI% or (crew.%has_agmt_group_sk_fd_mff% and duty.%with_long_haul_ac%) or duty.%is_LH_with_NX_ac%) and
+    (duty.%is_SKI% or duty.%is_long_haul%) and
     fundamental.%flight_crew%;
 
 
@@ -4809,6 +4834,7 @@ end
 
 %max_sh_days_before_lh% =
     if crew.%has_agmt_group_skd_cc% or
+    (crew.%has_agmt_group_sks_cc% and system_db_parameters.%max_1_sh_before_lh_sks_cc%(%pp_start%)) or
     ((crew.%has_agmt_group_sk_fd_mff% or (crew.%is_pilot% and %is_lrp2%))
       and (%nr_of_sh_duty_days_in_wop% >= 2)) then
     1
