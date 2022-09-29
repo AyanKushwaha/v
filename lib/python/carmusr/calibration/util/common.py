@@ -1,11 +1,14 @@
-'''
+"""
 Common stuff in Calibration for Rave code generation, KPI generation and reports which typically depend on
-defintions in the product specification.
+definitions in the product specification.
 
 Created on 24 Nov 2020
 
 @author: steham
-'''
+"""
+
+
+from __future__ import absolute_import
 
 from Localization import MSGR
 
@@ -23,14 +26,14 @@ def get_atomic_iterator_for_level(bag, level_name):
 
 # The variants of the calibration analysis tools
 
-class CalibAnalysisVariants:
+class CalibAnalysisVariants(object):
 
-    class Default:
+    class Default(object):
         key = "default"
         title = "{} {}".format(config_per_product.DEFAULT_VARIANT_KIND_STRING, MSGR("analysis"))
         crs_table_name = config_per_product.DEFAULT_VARIANT_RULE_TABLE_NAME
 
-    class TimetableAnalysis:
+    class TimetableAnalysis(object):
         key = "timetable"
         title = MSGR("Timetable analysis")
         crs_table_name = "TimetableRuleRegistrationTable"

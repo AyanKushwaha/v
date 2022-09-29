@@ -1,3 +1,7 @@
+from __future__ import absolute_import
+from six.moves import map
+from six.moves import range
+from six.moves import zip
 from collections import namedtuple, defaultdict
 import os
 import re
@@ -10,15 +14,36 @@ from Localization import MSGR, bl_msgr
 
 from carmusr.calibration.mappings import studio_palette
 from carmusr.calibration.util import complement
+from carmusr.calibration.util import basics
 from carmusr.calibration.util import common
 from carmusr.calibration.util import calibration_rules
 
 
-COLORS = [studio_palette.JeppesenBlue,
-          studio_palette.JeppesenLightBlue,
-          studio_palette.ReportBlue,
-          studio_palette.ReportLightBlue,
-          studio_palette.Green]
+def value2colour(value):
+    """
+    The value must be hashable
+    """
+    MAX_RED = 221
+    MAX_GREEN = 233
+    MAX_BLUE = 253
+    MIN_RED = 10
+    MIN_GREEN = 30
+    MIN_BLUE = 40
+    MIN_TOT = 230
+    MAX_TOT = 650
+    hash_value = int((abs(hash(value)) % 1000000000) * 15.3)
+    red = hash_value % (MAX_RED - MIN_RED) + MIN_RED
+    max_green = min(MAX_GREEN, MAX_TOT - red - (MIN_BLUE + 5))
+    min_green = max(MIN_GREEN, MIN_TOT - red - (MAX_BLUE - 5))
+    green_diff = max_green - min_green
+    hash_value = hash_value // green_diff
+    green = hash_value % green_diff + min_green
+    max_blue = min(MAX_BLUE, MAX_TOT - red - green)
+    min_blue = max(MIN_BLUE, MIN_TOT - red - green)
+    blue_diff = max_blue - min_blue
+    hash_value = hash_value // blue_diff
+    blue = hash_value % blue_diff + min_blue
+    return "#%0.2X%0.2X%0.2X" % (red, green, blue)
 
 # Categories ################################################
 
@@ -26,21 +51,21 @@ IN_OTHER_STR = MSGR("In Other")
 IN_OTHER_DESC = MSGR("In Comparison plan on same or different crew position")
 NOT_IN_OTHER_STR = MSGR("Not in Other")
 NOT_IN_OTHER_DESC = MSGR("Not in Comparison Plan")
+UNDEF_STR = MSGR("Illegal")
 
 # rank refers to order of presentation in graphs.
 CatProperties = namedtuple("CatProperties", "rank color desc")
 
 CAT_PROPERTIES_NOT_IN_OTHER = CatProperties(100, studio_palette.DarkGrey, NOT_IN_OTHER_DESC)
-CAT_PROPERTIES_NONE = CatProperties(0, None, "")
+CAT_PROPERTIES_UNDEF = CatProperties(0, basics.ILLEGAL_COLOUR, UNDEF_STR)
 CAT_PROPERTIES_SIMPLE_IN_OTHER = CatProperties(1, studio_palette.JeppesenLightBlue, IN_OTHER_DESC)
 
 
 class CategoriesHandler(object):
     """
     Calculates and keeps track of categories found,
-    and what color and rank to use for them in reports.
+    and what colour and rank to use for them in reports.
     """
-    default_colors = COLORS
 
     def __init__(self, comp_plan_slices, cri):
         # comp_plan_slices is a PlanSlice object or None
@@ -51,27 +76,33 @@ class CategoriesHandler(object):
         self.cat_rank_var = cri.cat_rank_var
         self.cat_color_var = cri.cat_color_var
         self.categories = {}
-        self.cat_properties_factory = CatPropertiesFactory(self.default_colors)
+        self.cat_properties_factory = CatPropertiesFactory()
 
     def has_categories(self):
-        return filter(None, self.categories.keys())
+        return bool([cat for cat in self.categories if cat != UNDEF_STR])
 
     def register_not_in_other_category(self):
         if NOT_IN_OTHER_STR not in self.categories:
             self.categories[NOT_IN_OTHER_STR] = CAT_PROPERTIES_NOT_IN_OTHER
         return NOT_IN_OTHER_STR
 
-    def bar_color(self, rule_ix, cat):
-        if not cat or not self.categories[cat].color:
-            return self.default_colors[rule_ix]
-        else:
-            return self.categories[cat].color
+    def bar_color(self, cat):
+        return self.categories[cat].color
 
     def get_sorted_categories(self):
-        return sorted(self.categories, key=lambda x: self.categories[x].rank)
+
+        def key_f(x):
+            # Rank can be any data type in Rave and also void, but the rank for CAT_PROPERTIES_NOT_IN_OTHER is int.
+            # We must survive a mix of int, None and another data type also in PY3.
+            rank = self.categories[x].rank
+            if rank is None:
+                rank = 0
+            return (isinstance(rank, int), rank)
+
+        return sorted(self.categories, key=key_f)
 
     def get_and_register_cat(self, bag, tripslice_or_crew_comp):
-        # Note: If a comparisonplan is considered "tripslice_or_crew_comp" must be an instance of SliceCompareCategory
+        # Note: If a comparison plan is considered "tripslice_or_crew_comp" must be an instance of "Slice"
         #       else an int is OK. Performance.
         # Returns: sub_cat_name, sequence of (cat_name, num_crew)
         if self.comp_plan_keys:  # True if a comparison plan is considered
@@ -85,6 +116,7 @@ class CategoriesHandler(object):
                 cat = bl_msgr(str(rave.eval(bag, self.cat_var)[0]))
                 if cat not in self.categories:
                     self.categories[cat] = self.cat_properties_factory.get(bag,
+                                                                           cat,
                                                                            self.cat_rank_var,
                                                                            self.cat_color_var,
                                                                            "")
@@ -93,17 +125,16 @@ class CategoriesHandler(object):
                 cat = "{}, {}".format(IN_OTHER_STR, cat_0)
                 if cat not in self.categories:
                     self.categories[cat] = self.cat_properties_factory.get(bag,
+                                                                           cat,
                                                                            self.cat_rank_var,
                                                                            self.cat_color_var,
-                                                                           ", ".join(filter(None, (IN_OTHER_DESC, cat_0))))
+                                                                           ", ".join(s for s in (IN_OTHER_DESC, cat_0) if s))
             else:
-                cat = NOT_IN_OTHER_STR
-                if cat not in self.categories:
-                    self.categories[cat] = CAT_PROPERTIES_NOT_IN_OTHER
+                cat = self.register_not_in_other_category()
         else:  # category definition is missing for the rule
             if is_in_other is None:  # no comparison plan is considered
-                cat = ""
-                cat_properties = CAT_PROPERTIES_NONE
+                cat = UNDEF_STR
+                cat_properties = CAT_PROPERTIES_UNDEF
             elif is_in_other:
                 cat = IN_OTHER_STR
                 cat_properties = CAT_PROPERTIES_SIMPLE_IN_OTHER
@@ -139,30 +170,22 @@ class CatPropertiesFactory(object):
     Sets colour and order on category.
     Using color defined in rave or fallback color.
     """
-    def __init__(self, default_colors):
-        self.next_color_ix = 0
-        self.default_colors = default_colors
 
-    def _get_update_next_color_ix(self):
-        val = self.next_color_ix
-        self.next_color_ix = (self.next_color_ix + 1) % len(self.default_colors)
-        return val
-
-    def get(self, bag, rank_var, color_var, desc):
+    def get(self, bag, cat_key, rank_var, color_var, desc):
 
         if rank_var is None:
-            rank = 0
+            rank = cat_key
         else:
             try:
                 rank, = rave.eval(bag, rank_var)
             except rave.RaveError as e:
-                Errlog.log("CALIBRATION: Warning. Exception raised when calculating category rank using Rave variable '%s'. Rank 0 will be used."
+                Errlog.log("CALIBRATION: Warning. Exception raised when calculating category rank using Rave variable '%s'. Default rank will be used."
                            % rank_var.name())
                 Errlog.log("CALIBRATION: Exception message: %s" % e)
-                rank = 0
+                rank = cat_key
 
         if color_var is None:
-            color = self.default_colors[self._get_update_next_color_ix()]
+            color = value2colour(cat_key)
         else:
             try:
                 color_str, = rave.eval(bag, color_var)
@@ -177,7 +200,7 @@ class CatPropertiesFactory(object):
                 color_str = None
 
             if color_str is None:
-                color = self.default_colors[self._get_update_next_color_ix()]
+                color = value2colour(cat_key)
             elif re.match("^#[a-fA-F0-9]{6}$", color_str):
                 color = color_str
             else:
@@ -187,21 +210,12 @@ class CatPropertiesFactory(object):
                     n = color_var.name()
                     Errlog.log("CALIBRATION: Warning. The specified colour name '%s' from the Rave variable '%s'" % (color_str, n))
                     Errlog.log("CALIBRATION: is not present in the Studio palette and is not an RGB code. Default colour will be used.")
-                    color = self.default_colors[self._get_update_next_color_ix()]
+                    color = value2colour(cat_key)
 
         return CatProperties(rank, color, desc)
 
 
 # Comparison plan ####################################################################
-
-def load():
-    buf = Variable("")
-    Cui.CuiGetLocalPlanPath(Cui.gpc_info, buf)
-    byp = {"TYPE": "TT",
-           "ID": "CALIBRATION_FROM_SP",
-           "selection": buf.value}
-    Cui.CuiPlanCalibration(byp, Cui.gpc_info)
-
 
 def bag_is_comparison_plan_bag(bag):
     if not ComparisonPlanHandler.a_plan_is_loaded():
@@ -216,13 +230,14 @@ def get_comparison_plan_bag():
 
 class ComparisonPlanHandler(object):
 
-    _saved_sets = {}
+    _saved_lists = {}
     _saved_slices = {}
     saved_other = {}   # Used by externals. Cleared by clear_cached_values_if_needed.
 
     _saved_rave_keyw = rave.keyw("global_fp_name")
     _saved_comp_raw_plan_path = None
     _saved_comp_plan_change_time = None
+    _saved_first_leg_id = None
 
     def __init__(self, *args, **kw):
         raise NotImplementedError("Not supported")
@@ -269,13 +284,13 @@ class ComparisonPlanHandler(object):
         if not comp_key_var:
             return None
         key = (comp_key_var.name(), level)
-        if key not in cls._saved_sets:
-            comp_keys = set()
+        if key not in cls._saved_lists:
+            comp_keys = list()
             for bag in cls._bags(level):
                 comp_key, = rave.eval(bag, comp_key_var)
-                comp_keys.add(comp_key)
-            cls._saved_sets[key] = comp_keys
-        return cls._saved_sets[key]
+                comp_keys.append(comp_key)
+            cls._saved_lists[key] = comp_keys
+        return cls._saved_lists[key]
 
     @classmethod
     def _bags(cls, level):
@@ -288,7 +303,7 @@ class ComparisonPlanHandler(object):
     def clear_cached_values_if_needed(cls):
     # Must be called before the class can be used when the comparison plan may have been changed.
         def clear_stored_values():
-            cls._saved_sets.clear()
+            cls._saved_lists.clear()
             cls._saved_slices.clear()
             cls.saved_other.clear()
 
@@ -300,19 +315,23 @@ class ComparisonPlanHandler(object):
             cls._saved_rave_keyw = rave.keyw("global_fp_name")
 
         # Test if new comparison plan
-        new_raw_path = cls._get_comparison_raw_plan_path()
+        new_raw_path, new_first_leg_id = cls._get_comparison_raw_plan_path_and_first_leg_id()
         new_plan_change_time = os.path.getmtime(new_raw_path) if new_raw_path and os.path.exists(new_raw_path) else None
-        if (new_raw_path != cls._saved_comp_raw_plan_path) or (new_plan_change_time != cls._saved_comp_plan_change_time):
+        clear_condition = (new_raw_path != cls._saved_comp_raw_plan_path or
+                           new_plan_change_time != cls._saved_comp_plan_change_time or
+                           new_first_leg_id != cls._saved_first_leg_id)
+        if clear_condition:
             clear_stored_values()
+            cls._saved_first_leg_id = new_first_leg_id
             cls._saved_comp_raw_plan_path = new_raw_path
             cls._saved_comp_plan_change_time = new_plan_change_time
 
     @classmethod
-    def _get_comparison_raw_plan_path(cls):
+    def _get_comparison_raw_plan_path_and_first_leg_id(cls):
         comp_bag = get_comparison_plan_bag()
         for chain_bag in comp_bag.chain_set():  # This takes time for big plans.
-            return rave.eval(chain_bag, rave.keyw("reference_plan_name"))[0]
-        return None
+            return rave.eval(chain_bag, rave.keyw("reference_plan_name"), rave.first(rave.Level.atom(), rave.keyw("leg_identifier")))
+        return None, None
 
 
 #
@@ -330,7 +349,7 @@ def filtered_slice_from_bag(comp_key_expr, bag):
     return Slice(comp_key=comp_key_val[0], crew_vector=crew_vector)
 
 
-class SliceCompareCategory:
+class SliceCompareCategory(object):
     """
     When comparing connections or other sequences defined by keys
     between current and comparison plan,
@@ -484,6 +503,8 @@ class Slice(object):
 
     def __eq__(self, other):
         return self.comp_key == other.comp_key and self.crew_vector == other.crew_vector
+
+    __hash__ = None
 
     def __str__(self):
         return 'Slice key:"{0}", vector:{1}'.format(self.comp_key, self.crew_vector)

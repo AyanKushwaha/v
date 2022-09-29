@@ -2,6 +2,8 @@
 # Pie Charts
 #
 
+from __future__ import division
+from __future__ import absolute_import
 import carmensystems.publisher.api as prt
 
 from carmusr.calibration.mappings import DrawExt
@@ -10,15 +12,14 @@ from carmusr.calibration.mappings import studio_palette as sp
 
 class PieMember(object):
 
-    def __init__(self, label, value, add_to_tooltip_txt=None, **kw):
+    def __init__(self, label, value, **kw):
         self.label = label
         self.value = value
-        self.add_to_tooltip_txt = add_to_tooltip_txt
         self.kw = kw
 
     def get_common_tooltip_txt(self, tot):
-            txt = "%s (%0.1f%%)" % (self.value, 100.0 * self.value / tot) if int(self.value) else "-"
-            return "%s: %s %s" % (self.label, txt, self.add_to_tooltip_txt or "")
+            txt = "%s (%0.1f%%)" % (self.value, 100 * self.value / tot) if int(self.value) else "-"
+            return "%s: %s" % (self.label, txt)
 
 
 class PieChart(prt.Canvas):
@@ -28,10 +29,11 @@ class PieChart(prt.Canvas):
 
     min_percent = 1.2
 
-    def __init__(self, width, height, members, tooltip_header="", *args, **kw):
+    def __init__(self, width, height, members, tooltip_header="", tooltip_footer="", *args, **kw):
 
         self.members = members
         self.tooltip_header = tooltip_header
+        self.tooltip_footer = tooltip_footer
         prt.Canvas.__init__(self, width, height, *args, **kw)
 
     def draw_value(self, tot, value):
@@ -46,7 +48,7 @@ class PieChart(prt.Canvas):
         tot = sum((m.value for m in self.members), data_type(0))
         common_tooltip_text = "\n".join(m.get_common_tooltip_txt(tot) for m in self.members)
         for m in self.members:
-            m._tooltip = "%s%s\n\n%s" % (self.tooltip_header, m.label, common_tooltip_text)
+            m._tooltip = "%s%s\n\n%s%s" % (self.tooltip_header, m.label, common_tooltip_text, self.tooltip_footer)
 
         acc = 0
         for mem in self.members:
@@ -65,8 +67,8 @@ class PieChart(prt.Canvas):
                 de.circle_arc(0,
                               0,
                               rad,
-                              360.0 * mem._acc / acc,
-                              360.0 * (mem._acc + mem._draw_value) / acc,
+                              360 * mem._acc / acc,
+                              360 * (mem._acc + mem._draw_value) / acc,
                               True,
                               colour=sp.Black,
                               tooltip=mem._tooltip,

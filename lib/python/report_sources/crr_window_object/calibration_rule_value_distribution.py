@@ -1,6 +1,9 @@
-'''
+"""
 Rule Value Distribution Report
-'''
+"""
+
+
+from __future__ import absolute_import
 
 import carmusr.calibration.report_rule_value_distribution as rr
 
