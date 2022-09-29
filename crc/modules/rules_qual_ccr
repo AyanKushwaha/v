@@ -415,20 +415,18 @@ end
      
 %qln_recurrent_training_performed_ALL_valid% =
   roster.%check_rules% and
-  any(leg(duty), leg.%is_flt_sby_or_bl%) and
-  not training.%crew_has_training_bl_during_restr% and
-  %active_duty_in_trip_after_rec_doc_expiry_date% and
   trip.%in_pp% and
+  not training.%crew_has_training_bl_during_restr% and
+/* 1Jan1986 is unregistered docs, handled by other rule */
+  training.%first_recurrent_doc_expiry_date% > 1Jan1986 and
   (trip.%end_hb% >= training.%first_recurrent_doc_expiry_date% or
   duty.%end_hb% >= training.%first_recurrent_doc_expiry_date%) and
-  
-  /* 1Jan1986 is unregistered docs, handled by other rule */
-  training.%first_recurrent_doc_expiry_date% > 1Jan1986 and
+  duty.%has_production% and
   not (%crew_is_pilot% and any(leg(duty), (crew_pos.%is_supernum% and not %_LC_instructor_in_supernum%))) and
-
-  (any(leg(duty), training.%unperformed_recurrent_types_with_matching_qual%(duty.%start_hb%)) or
-  any(leg(duty), training.%unperformed_recurrent_types_with_matching_qual%(leg.%end_hb%)));
-
+  %active_duty_in_trip_after_rec_doc_expiry_date% and
+  any(leg(duty), training.%unperformed_recurrent_types_with_matching_qual%(duty.%start_hb%) or 
+  training.%unperformed_recurrent_types_with_matching_qual%(leg.%end_hb%))
+  where (leg.%is_flt_sby_or_bl%);
 
 set inst_lc_codes = "LC", "ILC";
 %_LC_instructor_in_supernum% =
@@ -444,9 +442,9 @@ set inst_lc_codes = "LC", "ILC";
 %qln_recurrent_training_performed_all_failobject_calc%(Bool consider_now) =
   first(leg(trip),
         first(leg(chain), leg.%failobject_departure%) from (current)
-        where(leg.%is_flt_sby_or_bl% and
+         where(leg.%is_flt_sby_or_bl% and
               not %all_needed_recurrent_training_performed_leg% and
-              ((not consider_now) or leg.%start_utc% >= %now%)));
+              (not consider_now)));
 
 %all_needed_recurrent_training_performed_leg% =
   training.%all_required_recurrent_performed%(leg.%end_hb%);
@@ -456,14 +454,20 @@ set inst_lc_codes = "LC", "ILC";
        duty.%has_production% and
        not (%crew_is_pilot% and %t_flight_when_only_lc_needed%) and
        training.%nr_expired_recurrent_docs_duty_start% > 0 and
-       not training.%all_required_recurrent_performed_duty_start%);
+       not(if(crew.%is_mff% and (round_down(trip.%end_hb%,24:00) = trip.%trip_last_day_of_month%)) then 
+           training.%all_required_recurrent_performed_leg_start%
+        else
+           training.%all_required_recurrent_performed_duty_start%));
        
 %all_needed_recurrent_training_performed_trip% =
   not(
        trip.%has_production% and
        not (%crew_is_pilot% and %t_flight_when_only_lc_needed%) and
        training.%nr_expired_recurrent_docs_trip_end% > 0 and
-       not training.%all_required_recurrent_performed_trip_end%);
+       not (if (crew.%is_mff% and (round_down(trip.%end_hb%,24:00) = trip.%trip_last_day_of_month%)) then 
+          training.%all_required_recurrent_performed_leg_end%
+         else
+          training.%all_required_recurrent_performed_trip_end%));
 
 %missed_recurrent_training_failtext% =
   concat("OMA: Rec. expiry dates passed, needs: ",
