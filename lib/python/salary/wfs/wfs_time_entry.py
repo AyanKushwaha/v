@@ -214,23 +214,23 @@ class TimeEntry(WFSReport):
                     log.info('NORDLYS: planning group {z} '.format(z = planning_group))
                     if planning_group == "SVS":
                         if 'report_common.%%number_of_active_legs%%' > 0:
-                            start_dt = abs_to_datetime(duty_start_day) + timedelta(days=i)
+                            start_dt = abs_to_datetime(duty_start_day) + timedelta(days=0)
                             start_dt_start_abs = AbsTime(start_dt.year, start_dt.month, start_dt.day, 0, 0)
                             start_dt_end_abs = start_dt_start_abs + RelTime('24:00')
                             prev_duty_hrs_before_sick = duty_bag.rescheduling.period_inf_prev_duty_time(start_dt_start_abs,start_dt_end_abs)
-                            if is_weekend and 'report_roster.%%is_public_holiday%%':
-                                general_holiday_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND_HOLIDAY',crew_id,country)
+                            if self.is_weekend(duty_start) and 'report_roster.%%is_public_holiday%%':
+                                general_holiday_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND',crew_id,country)
                                 general_holiday_duty_hrs = _standby_callout_time
-                                event_data['CNLN_PROD_WEEKEND_HOLIDAY']['hrs'] = general_holiday_duty_hrs
-                                event_data['CNLN_PROD_WEEKEND_HOLIDAY']['paycode'] = general_holiday_paycode
-                                event_data['CNLN_PROD_WEEKEND_HOLIDAY']['dt'] = abs_to_datetime(duty_start_day)
+                                event_data['CNLN_PROD_WEEKEND']['hrs'] = general_holiday_duty_hrs
+                                event_data['CNLN_PROD_WEEKEND']['paycode'] = general_holiday_paycode
+                                event_data['CNLN_PROD_WEEKEND']['dt'] = abs_to_datetime(duty_start_day)
                             else:
-                                general_holiday_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND_HOLIDAY',crew_id,country)
+                                general_holiday_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND',crew_id,country)
                                 general_holiday_duty_hrs = _standby_callout_time
                                 event_data['CNLN_PROD_WEEKDAY']['hrs'] = general_holiday_paycode
                                 event_data['CNLN_PROD_WEEKDAY']['paycode'] = general_holiday_duty_hrs
                                 event_data['CNLN_PROD_WEEKDAY']['dt'] = abs_to_datetime(duty_start_day)
-                                log.info('{general_holiday_paycode} {general_holiday_duty_hrs} {duty_start_day}'.format(general_holiday_paycode=general_holiday_paycode, general_holiday_duty_hrs=general_holiday_duty_hrs, duty_start_day=duty_start_day ))
+                                log.info('NORDLYSSSSSSs: general holiday {general_holiday_paycode} {general_holiday_duty_hrs} {duty_start_day}'.format(general_holiday_paycode=general_holiday_paycode, general_holiday_duty_hrs=general_holiday_duty_hrs, duty_start_day=duty_start_day ))
                         if 'duty.%%is_on_duty_illness_link%%' == TRUE and prev_duty_hrs_before_sick > 0 :
                             general_sick_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_SICK',crew_id,country)
                             general_sick_hrs = reltime('24:00')
@@ -829,7 +829,7 @@ class TimeEntry(WFSReport):
            }
         }
         '''
-        event_types = ('OT', 'OT_LATE_CO', 'TEMP','CNLN_OT_45_50','CNLN_OT_50_PLUS','CNLN_LAND_DAY_OFF','CNLN_PROD_WEEKEND_HOLIDAY','CNLN_PROD_SICK')
+        event_types = ('OT', 'OT_LATE_CO', 'TEMP','CNLN_OT_45_50','CNLN_OT_50_PLUS','CNLN_LAND_DAY_OFF','CNLN_PROD_WEEKEND','CNLN_PROD_SICK')
 
         event_data_t = dict()
         
@@ -1205,7 +1205,7 @@ class TimeEntry(WFSReport):
                         saslink_7_calendar_45_50_ot = [r for r in candidates[duty_start_dt] if r['event'] == 'CNLN_OT_45_50']
                         saslink_7_calendar_50_ot = [r for r in candidates[duty_start_dt] if r['event'] ==  'CNLN_OT_50_PLUS']
                         saslink_land_day_off_ot = [r for r in candidates[duty_start_dt] if r['event'] ==  'CNLN_LAND_DAY_OFF']
-                        saslink_holiday = [r for r in candidates[duty_start_dt] if r['event'] ==  'CNLN_PROD_WEEKEND_HOLIDAY']
+                        saslink_holiday = [r for r in candidates[duty_start_dt] if r['event'] ==  'CNLN_PROD_WEEKEND']
                         saslink_sick = [r for r in candidates[duty_start_dt] if r['event'] ==  'CNLN_PROD_SICK']
 
                         # Check if any event can be considered removed from the roster

@@ -3,7 +3,7 @@ Handler for generating time entry report data for WFS
 """
 from AbsTime import AbsTime
 from AbsDate import AbsDate
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import carmensystems.rave.api as rave
 import collections
@@ -218,6 +218,31 @@ class TimeEntryReport(WFSReport):
                     
                     planning_group = planninggroup_from_id(crew_id, duty_start_day)
                     if planning_group == "SVS":
+                        if 'report_common.%%number_of_active_legs%%' > 0:
+                            start_dt = abs_to_datetime(duty_start_day) + timedelta(days=0)
+                            start_dt_start_abs = AbsTime(start_dt.year, start_dt.month, start_dt.day, 0, 0)
+                            start_dt_end_abs = start_dt_start_abs + RelTime('24:00')
+                            prev_duty_hrs_before_sick = duty_bag.rescheduling.period_inf_prev_duty_time(start_dt_start_abs,start_dt_end_abs)
+                            if self.is_weekend(start) and 'report_roster.%%is_public_holiday%%':
+                                general_holiday_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND',crew_id,country)
+                                general_holiday_duty_hrs = _standby_callout_time
+                                event_data['CNLN_PROD_WEEKEND']['hrs'] = general_holiday_duty_hrs
+                                event_data['CNLN_PROD_WEEKEND']['paycode'] = general_holiday_paycode
+                                event_data['CNLN_PROD_WEEKEND']['dt'] = abs_to_datetime(duty_start_day)
+                            else:
+                                general_holiday_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND',crew_id,country)
+                                general_holiday_duty_hrs = _standby_callout_time
+                                event_data['CNLN_PROD_WEEKDAY']['hrs'] = general_holiday_paycode
+                                event_data['CNLN_PROD_WEEKDAY']['paycode'] = general_holiday_duty_hrs
+                                event_data['CNLN_PROD_WEEKDAY']['dt'] = abs_to_datetime(duty_start_day)
+                                log.info('NORDLYSSSSSSs: general holiday {general_holiday_paycode} {general_holiday_duty_hrs} {duty_start_day}'.format(general_holiday_paycode=general_holiday_paycode, general_holiday_duty_hrs=general_holiday_duty_hrs, duty_start_day=duty_start_day ))
+                        if 'duty.%%is_on_duty_illness_link%%' == TRUE and prev_duty_hrs_before_sick > 0 :
+                            general_sick_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_SICK',crew_id,country)
+                            general_sick_hrs = reltime('24:00')
+                            event_data['CNLN_PROD_SICK']['hrs'] = general_sick_hrs 
+                            event_data['CNLN_PROD_SICK']['paycode'] = general_sick_paycode
+                            event_data['CNLN_PROD_SICK']['dt'] = abs_to_datetime(duty_start_day)
+                        
                         # Checkout on Day-off overtime 
                         general_ot_paycode_day_off = self.paycode_handler.paycode_from_event('CNLN_LAND_DAY_OFF', crew_id, country,rank)
                         general_ot_hrs_day_off = integer_to_reltime(duty_bag.report_overtime.OT_units_SVS())
@@ -542,6 +567,26 @@ class TimeEntryReport(WFSReport):
         else:
             return False
 
+    def active_duty_hrs(self,duty_bag):
+        duty_start_hb = duty_bag.duty.start_hb()
+        duty_end_hb = duty_bag.duty.end_hb()
+        if duty_bag.duty.has_active_flight:
+            if duty_bag.standby.duty_is_standby_callout:
+                return duty_end_hb - duty_start_hb
+        else:
+            return 0
+    
+    def is_weekend(self,start):
+        weekday_num = start.weekday()
+        log.info('NORDLYS: Weekday Day Number {sd}'.format(sd=weekday_num))
+        if weekday_num <= 4:
+            log.debug('NORDLYS: Day is between Monday-Friday {day}'.format(day=weekday_num))
+            return False
+        else:
+            log.debug('NORDLYS: Day is between Saturday or Sunday {day}'.format(day=weekday_num))
+            return True
+        return False    
+
     def _temporary_split_hours(self, duty_bag, start_dt, paycode, crew_id, extperkey,split_found):
 
         duty_start_hb = duty_bag.duty.start_hb()
@@ -788,7 +833,7 @@ class TimeEntryReport(WFSReport):
            }
         }
         '''
-        event_types = ('OT', 'OT_LATE_CO', 'TEMP','CNLN_OT_45_50','CNLN_OT_50_PLUS', 'CNLN_LAND_DAY_OFF')
+        event_types = ('OT', 'OT_LATE_CO', 'TEMP','CNLN_OT_45_50','CNLN_OT_50_PLUS','CNLN_LAND_DAY_OFF','CNLN_PROD_WEEKEND','CNLN_PROD_SICK')
         event_data_t = dict()
         
         for e in event_types:
