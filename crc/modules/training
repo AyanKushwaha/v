@@ -665,6 +665,29 @@ table check_matching_qual_table(String type, Abstime date) =
    - ,  - ,  -,  -, -               ->  void_bool;
 end
 
+table recurrent_performed_qual_table(String type) =
+  model_crew.%congrouptype_find%(crew.%id%, fundamental.%pp_start%), trip.%qual%  -> export %recurrent_performed_qual_match%;
+  "MFF-A2A3","A2"  -> (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("PC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
+  "MFF-A2A3","A3"  -> ("PC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("PC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
+  "MFF-A2A5","A2"  -> (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("PC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
+  "MFF-A2A5","A5"  -> ("PC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,""));
+   - ,  -          -> void_bool;
+end
+
+table failtext_qual_table(String type, Abstime date) =
+  model_crew.%congrouptype_find%(crew.%id%, fundamental.%pp_start%), %recurrent_performed_check_failtext%(type, "A2", date) , %recurrent_performed_check_failtext%(type, "A3", date) , %recurrent_performed_check_failtext%(type, "A5", date) -> export %failtext_qual_match%;
+  "MFF-A2A3", False, False, -   -> "A2A3";
+  "MFF-A2A3", True,  False, -   ->  "A3";
+  "MFF-A2A3", False, True , -   ->  "A2";
+  "MFF-A2A5", False, - , False  -> "A2A5";
+  "MFF-A2A5", True,  - , False  ->  "A5";
+  "MFF-A2A5", False, -, True    ->  "A2";
+   - ,  -  , - , -              ->  void_string;
+end
+
+%recurrent_performed_check_failtext%(String type, String qual, Abstime date) =
+      default(date < %recurrent_type_expiry_date%(type, qual , date), false) or
+      default(date < %recurrent_type_expiry_date_incl_performed_MFF%(type, qual , date, false), false);
 
 export %recurrent_type_registered_ix%(Int ix, Abstime date) =
   %recurrent_type_registered%(ix, date);
@@ -872,10 +895,18 @@ export %unperformed_recurrent_types_with_matching_qual%(Abstime date) =
     
     let ac_qual =
         if rec_type = "LC" then
-            if crew.%is_MFF% and length(trip.%qual%) = 2 then
-              %recurrent_type_expiry_ac_qual%(rec_type, trip.%qual%, date)
+            if crew.%is_MFF% then
+              if length(trip.%qual%) = 2 then
+                 trip.%qual%
+              else 
+                %failtext_qual_match%(rec_type, date)
             else
               %recurrent_type_expiry_ac_qual%(rec_type, %active_ac_qual%, date)
+        else if crew.%is_MFF% and rec_type in doc_per_qual then
+          if length(trip.%qual%) = 2 then
+            trip.%qual%
+          else 
+            %failtext_qual_match%(rec_type, date)
         else 
            %recurrent_type_expiry_ac_qual%(rec_type, %any_ac_qual%, date);
     concat(rec_type,
@@ -1847,10 +1878,14 @@ export %recurrent_type_expiry_date_incl_performed_MFF%(String type, String ac_qu
       add_months(round_up_month(date), validity)
      else if recurrent_performed  then
       add_months((if expiry_date = %abstimemin% then %pp_start% else expiry_date), validity)
+     else if %recurrent_performed_qual_match%(type) then
+      add_months((if expiry_date = %abstimemin% then %pp_start% else expiry_date), validity)
      else
       expiry_date
    else add_months(round_up_month(date), validity)
   else if recurrent_performed  then
+     add_months((if expiry_date = %abstimemin% then %pp_start% else expiry_date), validity)
+  else if %recurrent_performed_qual_match%(type) then
      add_months((if expiry_date = %abstimemin% then %pp_start% else expiry_date), validity)
   else
      expiry_date;
