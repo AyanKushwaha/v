@@ -559,6 +559,20 @@ export %_recurrent_type_registered%(String rec_type, String ac_qual, Abstime dat
                       %unplanned_training_of_type_on_qual_before%("LC", last_trip_start_day, "") or
                       %unplanned_training_of_type_on_qual_before%("ILC", last_trip_start_day, "")));
 
+%planned_rec_doc_creator_MFF%(String type, String ac_qual, Abstime date) =
+    let last_trip_start_day = default(last(trip(roster), trip.%start_day%)
+                                      where(trip.%start_day% <= date), date);
+    any(trip(roster), (type = "LC" and (trip.%is_ilc% or trip.%is_lc%) and ac_qual = trip.%qual%) or
+                      ((trip.%is_skill_test% or trip.%is_pc_change_month%) and
+                       type in recurrent_sim_training_set))
+    where (trip.%start_day% < last_trip_start_day)
+    or
+    (%planned_rec_doc_creator_by_training_log%(type, ac_qual)) or
+    (type = "LC" and (%program_has_ilc_MFF%(last_trip_start_day, ac_qual) or
+                      %program_has_lc_MFF%(last_trip_start_day, ac_qual) or
+                      %unplanned_training_of_type_on_qual_before%("LC", last_trip_start_day, "") or
+                      %unplanned_training_of_type_on_qual_before%("ILC", last_trip_start_day, "")));
+
 %planned_rec_doc_creator_by_training_log%(String type, String ac_qual) =
   not void(%last_recurrent_creator_in_training_log%(type, ac_qual));
 
@@ -575,6 +589,82 @@ export %program_has_new_on_trip% =
      planned LC/ILC hasn't been performed */
   type = "LC" and 
   %last_recurrent_performed_of_type%("LC", ac_qual, date) > fundamental.%now_date% - 7*24:00;
+
+%program_has_training_MFF%(Abstime date, String type, String ac_qual) =
+  any(times(%training_activities%(date)),
+      %course_attribute%(date, %times_index_0%) = type) or
+  /* Handling the case where the training need end date is passed, but a
+     planned LC/ILC hasn't been performed */
+  type = "LC" and
+  %last_recurrent_performed_of_type_MFF%("LC", ac_qual, date) > fundamental.%now_date% - 7*24:00;
+
+export %program_has_ilc_MFF%(Abstime date, String ac_qual) =
+    %program_has_training_MFF%(date, "ILC", ac_qual);
+export %program_has_lc_MFF%(Abstime date, String ac_qual) =
+    %program_has_training_MFF%(date, "LC", ac_qual);
+
+export %has_A2_leg_in_trip% = any(leg(trip),leg.%qual% = "A2");
+export %has_A3_leg_in_trip% = any(leg(trip),leg.%qual% = "A3");
+export %has_A5_leg_in_trip% = any(leg(trip),leg.%qual% = "A5");
+
+export %has_PC_renewal_qual_A2%(Abstime date) =
+    let last_trip_start_day = default(last(trip(roster), trip.%start_day%)
+                                      where((trip.%start_day%) <= date), date);
+    any(trip(roster),(trip.%is_skill_test% or trip.%is_pc_change_month%) and (trip.%start_day% < last_trip_start_day) and %has_A2_leg_in_trip%);
+
+export %has_PC_renewal_qual_A3%(Abstime date) =
+    let last_trip_start_day = default(last(trip(roster), trip.%start_day%)
+                                      where((trip.%start_day%) <= date), date);
+    any(trip(roster),(trip.%is_skill_test% or trip.%is_pc_change_month%) and (trip.%start_day% < last_trip_start_day) and %has_A3_leg_in_trip%);
+
+export %has_PC_renewal_qual_A5%(Abstime date) =
+    let last_trip_start_day = default(last(trip(roster), trip.%start_day%)
+                                      where((trip.%start_day%) <= date), date);
+    any(trip(roster),(trip.%is_skill_test% or trip.%is_pc_change_month%) and (trip.%start_day% < last_trip_start_day) and %has_A5_leg_in_trip%);
+
+export %last_leg_qual%(Abstime date) =
+    last(trip(roster), trip.%qual%) where((trip.%start_day%) <= date);
+
+export %has_matching_qual_pc%(Abstime date) =
+    if %last_leg_qual%(date) = "A2" then %has_PC_renewal_qual_A2%(date)
+    else if %last_leg_qual%(date) = "A3" then %has_PC_renewal_qual_A3%(date)
+    else if %last_leg_qual%(date) = "A5" then %has_PC_renewal_qual_A5%(date)
+    else false;
+
+table check_matching_qual_table(String type, Abstime date) =
+  model_crew.%congrouptype_find%(crew.%id%, fundamental.%pp_start%),%last_leg_qual%(date),%has_PC_renewal_qual_A2%(date),%has_PC_renewal_qual_A3%(date), %has_PC_renewal_qual_A5%(date) -> export %check_matching_pc_leg_qual%;
+  "MFF-A2A3","A2", False, True, -   ->  (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("PC","A5") = default
+(type,"")) or (concat("OPC","A5") = default(type,""));
+  "MFF-A2A3","A3", True, False, -   ->  ("PC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("PC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
+  "MFF-A2A5","A2", False, - , True  ->  (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("PC","A5") = default
+(type,"")) or (concat("OPC","A5") = default(type,""));
+  "MFF-A2A5","A5", True, - ,  False ->  ("PC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,""));
+   - ,  - ,  -,  -, -               ->  void_bool;
+end
+
+table recurrent_performed_qual_table(String type) =
+  model_crew.%congrouptype_find%(crew.%id%, fundamental.%pp_start%), trip.%qual%  -> export %recurrent_performed_qual_match%;
+  "MFF-A2A3","A2"  -> (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("PC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
+  "MFF-A2A3","A3"  -> ("PC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("PC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
+  "MFF-A2A5","A2"  -> (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("PC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
+  "MFF-A2A5","A5"  -> ("PC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,""));
+   - ,  -          -> void_bool;
+end
+
+table failtext_qual_table(String type, Abstime date) =
+  model_crew.%congrouptype_find%(crew.%id%, fundamental.%pp_start%), %recurrent_performed_check_failtext%(type, "A2", date) , %recurrent_performed_check_failtext%(type, "A3", date) , %recurrent_performed_check_failtext%(type, "A5", date) -> export %failtext_qual_match%;
+  "MFF-A2A3", False, False, -   -> "A2A3";
+  "MFF-A2A3", True,  False, -   ->  "A3";
+  "MFF-A2A3", False, True , -   ->  "A2";
+  "MFF-A2A5", False, - , False  -> "A2A5";
+  "MFF-A2A5", True,  - , False  ->  "A5";
+  "MFF-A2A5", False, -, True    ->  "A2";
+   - ,  -  , - , -              ->  void_string;
+end
+
+%recurrent_performed_check_failtext%(String type, String qual, Abstime date) =
+      default(date < %recurrent_type_expiry_date%(type, qual , date), false) or
+      default(date < %recurrent_type_expiry_date_incl_performed_MFF%(type, qual , date, false), false);
 
 export %recurrent_type_registered_ix%(Int ix, Abstime date) =
   %recurrent_type_registered%(ix, date);
@@ -609,7 +699,7 @@ export %unregistered_recurrent_types%(Abstime date) =
 export %nr_expired_recurrent_docs%(Abstime date) =
     if date >= %pp_start% and date <= %pp_end% and
        %nr_expired_recurrent_docs_pp_start% = 0 and
-       %first_recurrent_doc_expiry_date_pp_start% >= %pp_end%
+       %first_recurrent_doc_expiry_date_pp_start% >= %pp_end% and not crew.%is_MFF%
     then 0
     else %_nr_expired_recurrent_docs%(date);
 
@@ -640,6 +730,7 @@ export %first_recurrent_doc_expiry_date% =
   %first_recurrent_doc_expiry_date_at_date%(%pp_start%);
 
 set rec_doc_per_qual = "LC", "PC", "OPC";
+set pcopc_doc_per_qual = "PCA3" ,"OPCA3" ,"PCA5" ,"OPCA5";
 
 %first_recurrent_doc_expiry_date_at_date%(Abstime end_date) =
   default(
@@ -708,8 +799,24 @@ export %recurrent_type_performed%(Int ix, Abstime date) =
       default(date < %recurrent_type_expiry_date%(rec_type, %any_ac_qual%, date), false) or
       default(date < %recurrent_type_expiry_date_incl_performed%(rec_type, %any_ac_qual%, date, false), false);
 
+export %recurrent_type_performed_MFF%(Int ix, Abstime date) =
+    let rec_type = %_recurrent_group%(ix, date);
+
+    /* First we do a quick check against table.
+       If that fails we do the more complex roster lookup that includes rec doc
+       creators. */
+    if (rec_type in rec_doc_per_qual or rec_type in pcopc_doc_per_qual) then
+      default(date < %recurrent_type_expiry_date%(rec_type, trip.%qual%, date), false) or
+      default(date < %recurrent_type_expiry_date_incl_performed_MFF%(rec_type, trip.%qual% , date, false), false)
+    else
+      default(date < %recurrent_type_expiry_date%(rec_type, %any_ac_qual%, date), false) or
+      default(date < %recurrent_type_expiry_date_incl_performed%(rec_type, %any_ac_qual%, date, false), false);
+
 export %recurrent_type_performed_ix%(Int ix, Abstime date) =
-  default(%recurrent_type_performed%(ix, date), false);
+  if crew.%is_MFF% then
+    default(%recurrent_type_performed_MFF%(ix, date), false)
+  else
+    default(%recurrent_type_performed%(ix, date), false);
   
 /* Used in failtext and crew warnings */
 export %unperformed_recurrent_types%(Abstime date) =
@@ -764,7 +871,18 @@ export %unperformed_recurrent_types_with_matching_qual%(Abstime date) =
     
     let ac_qual =
         if rec_type = "LC" then
+          if crew.%is_MFF% then
+            if length(trip.%qual%) = 2 then
+              trip.%qual%
+            else
+              %failtext_qual_match%(rec_type, date)
+          else
             %recurrent_type_expiry_ac_qual%(rec_type, %active_ac_qual%, date)
+        else if crew.%is_MFF% and rec_type in doc_per_qual then
+          if length(trip.%qual%) = 2 then
+            trip.%qual%
+          else
+            %failtext_qual_match%(rec_type, date)
         else 
            %recurrent_type_expiry_ac_qual%(rec_type, %any_ac_qual%, date);
     concat(rec_type,
@@ -1006,6 +1124,25 @@ export %recurrent_performed%(String type, String ac_qual, Abstime date) =
     %recurrent_crmc_performed%(type, date)
   else
     false;
+
+export %recurrent_performed_MFF%(String type, String ac_qual, Abstime date) =
+  /* 1. Recurrent emergency training */
+  if type in recurrent_emg_training_set then
+    %recurrent_emg_performed%(type, date)
+  /* 2. Recurrent simulator training */
+  else if type in recurrent_sim_training_set then
+    %recurrent_sim_performed_MFF%(type, date)
+  /* 3. Recurrent CRM training */
+  else if type in recurrent_crm_training_set then
+    %recurrent_crm_performed%(type, date)
+  /* 4. Recurrent flight training */
+  else if type in recurrent_flight_training_set then
+    %recurrent_flight_training_performed_MFF%(type, ac_qual, date)
+  /* 5. Recurrent CRMC training */
+  else if type in recurrent_crmc_training_set then
+    %recurrent_crmc_performed%(type, date)
+  else
+    false;
     
 export %recurrent_not_performed_in_pp_ix%(Int ix) =
   %recurrent_type_expiry_date_pp_start_ix%(ix) <= %pp_end% and
@@ -1212,6 +1349,15 @@ end
          duty.%start_hb% >= earliest_assignment_def and
          %duty_is_own_sim%)
   or %_recurrent_performed_by_training_log%(type,date,"", earliest_assignment_def);    /*ok for duty as well */
+
+%recurrent_sim_performed_MFF%(String type, Abstime date) =
+  let rec_ac_qual = trip.%qual%,
+      earliest_assignment_def = default(%earliest_rec_assignment%(type, rec_ac_qual, date), %pp_start% - 45 * 24:00);
+  any(duty(roster), %reqd_recurrent_sim%(type))
+  where (duty.%start_hb% < date and
+         duty.%start_hb% >= earliest_assignment_def and
+         %duty_is_own_sim%)
+  or %_recurrent_performed_by_training_log%(type,date,"", earliest_assignment_def);
 
 /* earliest_date, if supplied, should be used to only check assignment in 
    "may have" interval. Only of use for PC/OPC. 1Jan1986 can be supplied to
@@ -1431,6 +1577,20 @@ where (trip.%has_active_flight% and
                       %is_lc_or_preceded_by_lc%))))
 or %recurrent_performed_by_training_log%(type,date,ac_qual);
 
+%recurrent_flight_training_performed_MFF%(String type, String doc_ac_qual, Abstime date) =
+  let ac_qual = %recurrent_type_expiry_ac_qual%(type, doc_ac_qual, date),
+      expiry_date = default(%recurrent_type_expiry_date%(type, trip.%qual%, date),1jan1986);
+  %_recurrent_flight_training_performed_MFF%(type, date, ac_qual, expiry_date);
+
+%_recurrent_flight_training_performed_MFF%(String type, Abstime date, String ac_qual, Abstime expiry_date) =
+any(trip(roster), %reqd_recurrent_flight_training_MFF%(type, ac_qual))
+where (trip.%has_active_flight% and
+        (expiry_date > trip.%end_hb% or
+              (trip.%start_hb% <= date and any(leg(trip),leg.%is_active_flight%)
+              where (leg.%start_hb% > expiry_date and
+                      %is_lc_or_preceded_by_lc%))))
+or %recurrent_performed_by_training_log%(type,date,ac_qual);
+
 %_recurrent_flight_training_performed_after_expiry%(String type, Abstime date, String ac_qual, Abstime expiry_date) =
   any(trip(roster), %reqd_recurrent_flight_training%(type, ac_qual))
   where (not any(leg(trip),leg.%is_active_flight%)
@@ -1450,6 +1610,10 @@ or %recurrent_performed_by_training_log%(type,date,ac_qual);
       %nr_recurrent_flight_training_legs%(type, "") >=
       %min_recurrent_flight_training_legs%
   else
+  %nr_recurrent_flight_training_legs%(type, ac_qual) >=
+    %min_recurrent_flight_training_legs%;
+
+%reqd_recurrent_flight_training_MFF%(String type, String ac_qual) =
   %nr_recurrent_flight_training_legs%(type, ac_qual) >=
     %min_recurrent_flight_training_legs%;
 
@@ -1687,6 +1851,32 @@ export %recurrent_type_expiry_date_incl_performed%(String type, String ac_qual, 
     add_months((if expiry_date = %abstimemin% then %pp_start% else expiry_date), validity)
   else
     expiry_date;
+
+export %recurrent_type_expiry_date_incl_performed_MFF%(String type, String ac_qual, Abstime date, bool check_expiry) =
+  let expiry_date = default(%recurrent_type_expiry_date%(type, ac_qual, date), %abstimemin%),
+      stop_date = nmax(expiry_date, %pp_end%),
+      check_date = if check_expiry then stop_date else date,
+      validity = %validity%(type, date),
+      recurrent_performed = default(%recurrent_performed_MFF%(type, ac_qual, check_date), false);
+  if %planned_rec_doc_creator_MFF%(type, ac_qual, date) then
+   if type in doc_per_qual and not %has_matching_qual_pc%(date) then
+     if %check_matching_pc_leg_qual%(type, date) then
+      add_months(round_up_month(date), validity)
+     else if recurrent_performed  then
+      add_months((if expiry_date = %abstimemin% then %pp_start% else expiry_date), validity)
+     else if %recurrent_performed_qual_match%(type) then
+      add_months((if expiry_date = %abstimemin% then %pp_start% else expiry_date), validity)
+     else
+      expiry_date
+   else add_months(round_up_month(date), validity)
+  else if recurrent_performed  then
+     add_months((if expiry_date = %abstimemin% then %pp_start% else expiry_date), validity)
+  else if %recurrent_performed_qual_match%(type) then
+     add_months((if expiry_date = %abstimemin% then %pp_start% else expiry_date), validity)
+  else
+     expiry_date;
+
+set doc_per_qual = "PC","OPC","PCA3","OPCA3","PCA5","OPCA5";
     
 export %recurrent_type_performed_expiry_date_matching_type%(String type, String ac_qual, Abstime date, bool check_expiry) =
   let expiry_date = default(%recurrent_type_expiry_date%(type, ac_qual, date), %abstimemin%),
@@ -1730,6 +1920,16 @@ export %last_recurrent_performed_of_type%(String type, String ac_qual, Abstime d
                  %_opc_fullfilled_by_pc%(type)) and
                  not %trip_is_sim_assist%
                  ), 
+          default(%last_recurrent_date_in_training_log%(type, ac_qual), 1jan1986));
+
+export %last_recurrent_performed_of_type_MFF%(String type, String ac_qual, Abstime date) =
+  default(last(trip(roster), round_up_month(trip.%start_utc%))
+          where (((trip.%is_ground_duty% or type = "LC") and ac_qual = trip.%qual% ) and
+                 trip.%start_hb% < date and
+                 (%trip_has_rectype%(type) or
+                 %_opc_fullfilled_by_pc%(type)) and
+                 not %trip_is_sim_assist%
+                 ),
           default(%last_recurrent_date_in_training_log%(type, ac_qual), 1jan1986));
 
 /* This is a simplification. If there is a PC or OPC (A3/A4) of the wrong type
