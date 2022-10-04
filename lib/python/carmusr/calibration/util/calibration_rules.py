@@ -1,6 +1,9 @@
 """
 Handling of calibration rules for reports and Custom-KPIs
 """
+
+
+from __future__ import absolute_import
 import os
 import re
 from collections import defaultdict
@@ -10,6 +13,7 @@ from carmensystems.mave import etab
 import Crs
 from Localization import MSGR
 from jcms.calibration import plan
+from jcms.calibration import rave_util
 import carmensystems.studio.cpmbuffer as cpmb
 
 from carmusr.calibration import mappings
@@ -31,6 +35,7 @@ COMP_KEY = "comp_key"
 CATEGORY = "category"
 COMMENT = "comment"
 DESCRIPTION = "description"
+KPI_LABEL = "kpi_short_label"
 
 
 class CalibrationRuleContainer(object):
@@ -141,7 +146,7 @@ class CalibrationRuleItemError(Exception):
 
 class CalibrationRuleItem(object):
     """
-    For rules which can't be used in calibration an CalibrationRuleItemError exception is raised.
+    For rules which can't be used in calibration a CalibrationRuleItemError exception is raised.
     The attributes STATION, COMP_KEY and LB_CATEGORY may be None.
     """
     registered_attributes = ((RULE_NAME, rave_code_explorer._BasicRuleInfo),
@@ -150,6 +155,7 @@ class CalibrationRuleItem(object):
                              (COMP_KEY, rave.var),
                              (CATEGORY, rave.var),
                              (DESCRIPTION, str),
+                             (KPI_LABEL, str),
                              (COMMENT, str))
 
     derived_attributes = ((IS_VALID, VarOrExpr, "valid"),
@@ -245,14 +251,17 @@ class CalibrationRuleItem(object):
                                                       getattr(self, LIMIT).expr_str))
         self.op_with_equal_sign = "=" in getattr(self, OP)
         self.bin_value = getattr(self, BIN).value()
+
+        self.rule_on = rave.rule(self.rule_key).on() if self.rule_key in rave_code_explorer.RuleInfoHandler().rules else None
+
         self.data_type = type(self.bin_value)
         self.bin_resolution = self.data_type(1)
         self.min_diff_for_bin_one = self.data_type(0 if self.op_with_equal_sign else 1)
         self.max_diff_for_bin_one = self.min_diff_for_bin_one + self.bin_value - self.bin_resolution
 
         self.cat_var = getattr(self, CATEGORY)
-        self.cat_rank_var = basics.get_rave_variable("{}_rank".format(self.cat_var.name())) if self.cat_var else None
-        self.cat_color_var = basics.get_rave_variable("{}_color".format(self.cat_var.name())) if self.cat_var else None
+        self.cat_rank_var = rave_util.get_rave_variable("{}_rank".format(self.cat_var.name())) if self.cat_var else None
+        self.cat_color_var = rave_util.get_rave_variable("{}_color".format(self.cat_var.name())) if self.cat_var else None
 
     @staticmethod
     def _get_attrib_as_string(erow, attribute):
@@ -299,6 +308,7 @@ class CalibRuleRegistrationEtableHandler(object):
                              COMP_KEY,
                              CATEGORY,
                              DESCRIPTION,
+                             KPI_LABEL,
                              COMMENT)
         self._etable_real_path = self.get_etab_path(variant_key)
         if not os.path.exists(self._etable_real_path):
@@ -351,6 +361,7 @@ class CalibRuleRegistrationEtableHandler(object):
                             get_val(COMP_KEY),
                             get_val(CATEGORY),
                             getattr(cri, DESCRIPTION) or "",
+                            getattr(cri, KPI_LABEL) or "",
                             getattr(cri, COMMENT) or ""))
 
     def save_etable(self):
@@ -375,6 +386,8 @@ class CalibRuleRegistrationEtableHandler(object):
                 '                      - a string colour variable, returning a colour name or an RGB code, named the same as the'
                 'category with a suffix "_color".',
                 '  "description" - A text with details displayed to the user (\\n can be used for newline in the text).',
+                '  "kpi_short_label" - Alternative label in the rule vector parts of the KPI report. '
+                'The rule remark is used as default if kpi_short_label is an empty string',
                 '  "comment" - Not used by the programs.',
                 '',
                 'Note:',
@@ -489,8 +502,7 @@ class VirtualRulesHandler(object):
     def _my_init(self, rule_set_name):
         self._rule_set_name = rule_set_name
         self.rules = {}
-        self._doc_file_path = os.path.expandvars('$CARMTMP/crc/rule_set/GPC/%s.xml' % self._rule_set_name)  # created by normal Rave compilation.
-        self._saved_compile_time = os.path.getmtime(self._doc_file_path)
+        self._saved_compile_time = rave_code_explorer.get_compilation_time_for_rule_set(self._rule_set_name)
         self._etable_real_path = self.get_etab_path()
         if not os.path.exists(self._etable_real_path):
             self.create_empty_table()
@@ -502,13 +514,13 @@ class VirtualRulesHandler(object):
         pconfig = config_per_product.get_config_for_active_product()
 
         if not tbh.bag:
-            raise Exception("Calibration: A local plan which not is empty must be loaded for calculation of the level of virtual rules.")
+            raise Exception("Calibration: A local plan which is not empty must be loaded for calculation of the level of virtual rules.")
 
         for row in self._etable:
             self.rules[row.name] = VirtualRule(row, tbh, pconfig)
 
     def _is_up_to_date(self):
-        return (os.path.getmtime(self._doc_file_path) == self._saved_compile_time and
+        return (rave_code_explorer.get_compilation_time_for_rule_set(self._rule_set_name) == self._saved_compile_time and
                 os.path.exists(self._etable_real_path) and
                 os.path.getmtime(self._etable_real_path) == self._etab_change_time and
                 self._etable_real_path == self.get_etab_path())

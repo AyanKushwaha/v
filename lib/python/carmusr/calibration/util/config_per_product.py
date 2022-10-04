@@ -1,8 +1,11 @@
-'''
+"""
 Created on 19 Nov 2020
 
 @author: steham
-'''
+"""
+
+
+from __future__ import absolute_import
 import os
 from collections import namedtuple
 

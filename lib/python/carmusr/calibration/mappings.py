@@ -8,11 +8,13 @@ Indirect dependencies:
 * There are no indirect dependencies of python modules.
 """
 
+
 # Python modules
- 
+
+from __future__ import absolute_import
+
 from carmstd import translation_type_ext  # @UnusedImport
 from carmstd import date_extensions  # @UnusedImport
-
 from carmstd import bag_handler  # @UnusedImport
 from carmstd import report_generation  # @UnusedImport
 from report_sources.include.studiopalette import studio_palette  # @UnusedImport
@@ -35,8 +37,8 @@ LEVEL_TRIP_ATOMIC_ITERATOR_NAME = "iterators.trip_set"
 
 # Definitions in Rave needed in Calibration reports
 
-rave_variable_for_planning_period_start = "fundamental.pp_start"
-rave_variable_for_planning_period_end = "fundamental.pp_end"
+rave_variable_for_planning_period_start_date = "fundamental.pp_start"
+rave_variable_for_planning_period_end_date = "fundamental.pp_end"
 
 
 # Image files used by the Calibration reports (in "CARMUSR/images")
@@ -48,4 +50,4 @@ image_file_name_client_logo = "sas_logo.jpg"
 
 # Presentation
 
-LENGTH_SHORT_RULE_LABEL = 20
+LENGTH_SHORT_RULE_LABEL = 52  # Used to get a short rule label inside the rule specific Custom-KPI tables.

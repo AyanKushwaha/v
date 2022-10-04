@@ -1,6 +1,9 @@
-'''
+"""
 Compare plans
-'''
+"""
+
+
+from __future__ import absolute_import
 
 from carmusr.calibration import report_compare_plans as compare_plans
 

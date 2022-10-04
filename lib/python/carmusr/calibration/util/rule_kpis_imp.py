@@ -1,4 +1,6 @@
+from __future__ import absolute_import
 from collections import defaultdict
+from functools import reduce
 
 from carmensystems import kpi
 from Localization import MSGR
@@ -54,6 +56,7 @@ def get_calib_matrix_and_vectors(rule_datas, variant):
     for rule_data in rule_datas:
         vector_values = []
         rule_label = rule_data.label
+        kpi_rule_label = rule_data.kpi_label if rule_data.kpi_label else rule_label
         current_group = None
         for label1, _cs, label2, _delim, value_calc, type_s, _act, _kw in get_kpi_defs(variant)[1:]:
             if label1:
@@ -61,7 +64,7 @@ def get_calib_matrix_and_vectors(rule_datas, variant):
             kpi_label = "%s %s" % (current_group, label2)
             value = kpi_round_etc(rule_data, type_s, value_calc(rule_data))
             matrix_values.append(((rule_label, kpi_label), value))
-            vector_values.append(("[%s]     %s" % (truncate_rule_label(rule_label), kpi_label),
+            vector_values.append(("[%s]     %s" % (truncate_rule_label(kpi_rule_label), kpi_label),
                                   value or 0))
         vector_list.append(kpi.KpiVector(MSGR("Calibration: ") + rule_label,
                                          vector_values,
@@ -96,14 +99,14 @@ def kpi_round_etc(rd, type_s, val):
     if type_s == "I":
         return val or None
     if type_s == "P":
-        return int(round(val * 10)) if val else None
+        return basics.round_to_int(val * 10) if val else None
     if isinstance(val, float):
         if val.is_integer():
             return int(val)
         elif rd.data_type is int:
-            return int(round(val))  # No decimals for KPIs of int rules.
+            return basics.round_to_int(val)  # No decimals for KPIs of int rules.
         else:
-            return int(round(val))  # No decimals for KPIs of RelTime rules.
+            return basics.round_to_int(val)  # No decimals for KPIs of RelTime rules.
     return val
 
 
@@ -116,10 +119,12 @@ class RuleData(object):
         self.bin_size = int(bin_size)
         max_diff_for_bin_one = int(rule_item.max_diff_for_bin_one)
         self.label = rule_item.rule_label
+        self.kpi_label = getattr(rule_item, calib_rules.KPI_LABEL)
         self.description = getattr(rule_item, calib_rules.DESCRIPTION)
         self.key = rule_item.rule_key
         is_valid_var = getattr(rule_item, calib_rules.IS_VALID).rave_obj
         rule_body_expr = rule_item.rule_body_expr
+        self.rule_on = rule_item.rule_on
 
         # Avoid RelTime for better performance
         if self.data_type is RelTime:
@@ -340,6 +345,10 @@ class RuleData(object):
     def get_percent_in_first_bin_crew_slices(self):
         return basics.percentage_value(self.get_num_crew_slices_in_first_bin(), self.get_num_valid_crew_slices())
 
+    # Rule is on (virtual rules count as on)
+    def rule_is_on(self):
+        return self.rule_on is None or self.rule_on
+
 
 class RaveObject(object):
 
@@ -379,7 +388,7 @@ def get_kpi_defs(variant_key):
     defs.append((MSGR("Illegal"), 2, "#", 2, RuleData.get_num_illegal_crew_slices, "I", RuleData.get_illegal_ids, {}))
     defs.append((None, None, "%x10", 1, RuleData.get_percent_illegal_crew_slices, "P", RuleData.get_illegal_ids, {}))
 
-    defs.append((MSGR("In 1st bin"), 2, "#", 0, RuleData.get_num_crew_slices_in_first_bin, "I", RuleData.get_in_first_bin_ids, {}))
+    defs.append((basics.IN_FIRST_BIN_LABEL, 2, "#", 0, RuleData.get_num_crew_slices_in_first_bin, "I", RuleData.get_in_first_bin_ids, {}))
     defs.append((None, None, "%x10", 0, RuleData.get_percent_in_first_bin_crew_slices, "P", RuleData.get_in_first_bin_ids, {}))
     defs.append((MSGR("Bin"), 1, MSGR("size"), 3, lambda rd: rd.bin_size, "RT", None, {}))
 
