@@ -1,13 +1,15 @@
-'''
+"""
 Classes used in the config_per_product for definition of the details table in the Rule Details report.
-'''
+"""
 
+
+from __future__ import absolute_import
 from Localization import MSGR
 import carmensystems.publisher.api as prt
 import carmensystems.rave.api as rave
+from jcms.calibration import rave_util
 
 from carmusr.calibration import mappings
-from carmusr.calibration.util import basics
 
 
 class RuleDetailsItem(object):
@@ -32,7 +34,7 @@ class RuleDetails(object):
     @classmethod
     def get_default_last_items(cls):
         return (RuleDetailsItem(MSGR("Legal"), '"S_LEGAL"'),
-                RuleDetailsItem(MSGR("Category"), '"S_CAT"'),
+                RuleDetailsItem(MSGR("Category"), '"S_CAT"', {}, {}),
                 RuleDetailsItem(MSGR("Limit"), '"S_LIMIT"'),
                 RuleDetailsItem(MSGR("Value"), '"S_VALUE"'),
                 RuleDetailsItem(MSGR("Diff"), '"S_DIFF"'))
@@ -51,9 +53,9 @@ class RuleDetailsLegRule(RuleDetails):
     @classmethod
     def get_items(cls):
         items = cls.get_default_first_items()
-        items += (RuleDetailsItem(MSGR("From"), rave.var("calibration_mappings.leg_start_station")),
-                  RuleDetailsItem(MSGR("To"), rave.var("calibration_mappings.leg_end_station")),
-                  RuleDetailsItem(MSGR("Next"), rave.var("calibration_mappings.next_leg_end_station")),
+        items += (RuleDetailsItem(MSGR("From"), rave.var("calibration_mappings.leg_start_station"), {}, {}),
+                  RuleDetailsItem(MSGR("To"), rave.var("calibration_mappings.leg_end_station"), {}, {}),
+                  RuleDetailsItem(MSGR("Next"), rave.var("calibration_mappings.next_leg_end_station"), {}, {}),
                   RuleDetailsItem((MSGR("Flight"), MSGR("no")),
                                   rave.var("calibration_mappings.leg_flight_nr_str")),
                   RuleDetailsItem(MSGR("Dep. (UTC)"), rave.var("calibration_mappings.leg_start_utc")),
@@ -61,18 +63,16 @@ class RuleDetailsLegRule(RuleDetails):
                   RuleDetailsItem((MSGR("Arr. time of"), MSGR("day (local)")), rave.var("calibration_mappings.leg_end_od_lt")),
                   cls.get_slice_item())
 
-        arr_dev_var = basics.get_rave_variable("calibration_history.has_arr_dev")
-        # arr_dev_var is None if  CARMSYS < 26.7, assume arr_dev table exists, otherwise ask!
-        if arr_dev_var is None or rave.eval(arr_dev_var)[0]:
-            items += (RuleDetailsItem(MSGR("P1"), basics.get_rave_variable("calibration_history.flight_arr_dev_by_percentile_minutes")),
-                      RuleDetailsItem(MSGR("P2"), basics.get_rave_variable("calibration_history.flight_arr_dev_by_percentile_2_minutes")),
+        if rave_util.check_arr_dev_table():
+            items += (RuleDetailsItem(MSGR("P1"), rave_util.get_rave_variable("calibration_history.flight_arr_dev_by_percentile_reltime")),
+                      RuleDetailsItem(MSGR("P2"), rave_util.get_rave_variable("calibration_history.flight_arr_dev_by_percentile_2_reltime")),
                       RuleDetailsItem((MSGR("Historic"), MSGR("samples")),
-                                      basics.get_rave_variable("calibration_history.arr_dev_flight_count")))
+                                      rave_util.get_rave_variable("calibration_history.arr_dev_flight_count")))
 
-        if basics.operational_codes_table_is_considered():
-            items += (RuleDetailsItem(MSGR("Delay code"), basics.get_rave_variable("studio_calibration.delay_code_str")),
+        if rave_util.check_operational_codes_table():
+            items += (RuleDetailsItem(MSGR("Delay code"), rave_util.get_rave_variable("calibration_operational_codes.delay_code_str")),
                       RuleDetailsItem((MSGR("Next delay"), MSGR("code")),
-                                      basics.get_rave_variable("studio_calibration.next_leg_delay_code_str"),
+                                      rave_util.get_rave_variable("studio_calibration.next_leg_delay_code_str"),
                                       ))
 
         return items + cls.get_default_last_items()
@@ -84,8 +84,8 @@ class RuleDetailsDutyRule(RuleDetails):
     def get_items(cls):
 
         items = cls.get_default_first_items()
-        items += (RuleDetailsItem((MSGR("Duty Start"), MSGR("Station")), rave.var("calibration_mappings.duty_start_station")),
-                  RuleDetailsItem((MSGR("Duty End"), MSGR("Station")), rave.var("calibration_mappings.duty_end_station")),
+        items += (RuleDetailsItem((MSGR("Duty Start"), MSGR("Station")), rave.var("calibration_mappings.duty_start_station"), {}, {}),
+                  RuleDetailsItem((MSGR("Duty End"), MSGR("Station")), rave.var("calibration_mappings.duty_end_station"), {}, {}),
                   RuleDetailsItem(MSGR("Duty Start (UTC)"), rave.var("calibration_mappings.duty_start_utc")),
                   RuleDetailsItem(MSGR("Key"), rave.var("report_calibration.duty_content_string"),
                                   {"align": prt.CENTER},
@@ -100,8 +100,8 @@ class RuleDetailsTripRule(RuleDetails):
     @classmethod
     def get_items(cls):
         items = cls.get_default_first_items()
-        items += (RuleDetailsItem(MSGR("Base"), rave.var("calibration_mappings.homebase")),
-                  RuleDetailsItem(MSGR("Name"), rave.first(rave.level(mappings.LEVEL_LEG), rave.keyw("crr_name"))),
+        items += (RuleDetailsItem(MSGR("Base"), rave.var("calibration_mappings.homebase"), {}, {}),
+                  RuleDetailsItem(MSGR("Name"), rave.first(rave.level(mappings.LEVEL_LEG), rave.keyw("crr_name")), {}, {}),
                   RuleDetailsItem(MSGR("Start (UTC)"), rave.first(rave.level(mappings.LEVEL_DUTY), rave.var("calibration_mappings.duty_start_utc"))),
                   RuleDetailsItem(MSGR("Key"), rave.var("report_calibration.trip_content_string"),
                                   {"align": prt.CENTER},

@@ -1,6 +1,9 @@
-'''
+"""
 Sensitivity Index Distribution Report
-'''
+"""
+
+
+from __future__ import absolute_import
 
 import carmusr.calibration.report_si as si_report
 

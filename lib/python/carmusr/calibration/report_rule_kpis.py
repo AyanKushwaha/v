@@ -1,6 +1,10 @@
 """
-Detailed rule KPIs
+Detailed rule KPIs report.
 """
+
+
+from __future__ import absolute_import
+import six
 
 from Localization import MSGR
 from RelTime import RelTime
@@ -68,7 +72,7 @@ class RuleKPIforPRTReport(object):
             return RelTime(val)
         return val
 
-    def get_table(self, kpi_defs):
+    def get_table(self, kpi_defs, use_rule_filter=False):
 
         table = ru.SimpleTable("Rule KPIs", use_page=False)
 
@@ -89,6 +93,11 @@ class RuleKPIforPRTReport(object):
             sub_title_row_2.add(prt.Text(label2, align=prt.CENTER, border=prt.border(right=1 if is_last & 1 else None)))
 
         for rule_data in self.rule_datas:
+
+            if use_rule_filter:
+                if (ru.hide_rule_off() and not rule_data.rule_is_on()) or (ru.hide_if_no_valid() and rule_data.get_num_valid_crew_slices() == 0):
+                    continue
+
             row = table.add(prt.Row(border=prt.border(inner_wall=1, colour=sp.Grey),
                                     font=prt.font(size=8)))
             for label1, _cs, label2, is_last, value_calc, type_s, leg_id_calc_or_report, kw in kpi_defs:
@@ -98,7 +107,7 @@ class RuleKPIforPRTReport(object):
                     item = row.add(prt.Text(self.my_format(rule_data, type_s, value_calc(rule_data))))
                 item.set(border=prt.border(right=1 if is_last & 1 else None))
 
-                for attr_name, attr_value in kw.iteritems():
+                for attr_name, attr_value in six.iteritems(kw):
                     if attr_name in ("align", "valign"):
                         continue
                     if callable(attr_value):

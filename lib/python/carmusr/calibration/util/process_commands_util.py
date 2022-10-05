@@ -227,5 +227,4 @@ def get_text_for_sub_plan_comment(operation, plan_name, command):
 
 
 if is_being_reloaded:
-    reload(__import__("carmusr.calibration.command_create_single_legs_plan_for_timetable_analysis", fromlist=[None]))
     reload(__import__("carmusr.calibration.command_move_or_refresh_plans", fromlist=[None]))
