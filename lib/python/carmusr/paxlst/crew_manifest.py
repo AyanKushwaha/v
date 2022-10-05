@@ -452,6 +452,9 @@ class CrewManifest(CrewList):
         elif country == 'DK':
             self.p = paxlst_impl.PAXLST_DK
             self.recipient = 'DKGOVAPI'
+        elif country == 'IE':
+            self.p = paxlst_impl.PAXLST_IE
+            self.recipient = 'IECSAPIS'
         elif country == 'NO':
             self.p = paxlst_impl.PAXLST_NO
             self.recipient = 'NORAPIS'
@@ -478,7 +481,7 @@ class CrewManifest(CrewList):
             self.p = paxlst_impl.PAXLST_RU_fo
             self.recipient = 'ACDPDP'
         else:
-            raise ValueError("CrewManifest(): country must be one of 'JP', 'TH', 'US', 'CN', 'IN', 'GB', 'RU', 'RU_fo', 'TR', 'DK', 'MX', 'CA', 'NO'.")
+            raise ValueError("CrewManifest(): country must be one of 'JP', 'TH', 'US', 'CN', 'IN', 'GB', 'RU', 'RU_fo', 'TR', 'DK', 'MX', 'CA', 'IE', 'NO'.")
         self.ticket = db.get_cl_ticket(country=self.country, fd=leg.fd, udor=leg.udor, adep=leg.adep) # XXX
         self.make_list(leg)
 
@@ -540,7 +543,7 @@ class CrewManifest(CrewList):
         
         access_reference_tmp ="%s%02d" % (self.ticket.refid, self.ticket.revision)
         reference_tmp1 = "%s11" % iref
-        if self.country == "NO":
+        if self.country in ("NO","IE"):
             fd_no = fd_parser(leg.fd)
             refid_no = "%s%s%s/%s/%s" % ( fd_no.carrier,
                 fd_no.number, fd_no.suffix, str(tools.edi_date(leg.std_utc)), str(tools.edi_time(leg.std_utc)))
@@ -559,7 +562,7 @@ class CrewManifest(CrewList):
         m.append(self.p.BGM('250', self.document_id))
 
         # Reference (not allowed for JP, NO)
-        if self.country not in ('JP', 'NO'):
+        if self.country not in ('JP', 'NO', 'IE'):
             m.append(self.p.RFF('TN', self.ticket.refid, self.ticket.revision))
 
         # Reporter
@@ -682,7 +685,7 @@ class CrewManifest(CrewList):
 
         # 180 - Place of birth
         # [acosta:09/127@01:55] Not mentioned in UK document.
-        if self.country == "NO":
+        if self.country in ("NO","IE"):
             tmp_locstr = "LOC+180+"+ str(co.alpha2to3(crew.birth_country)) + ":::" + latin1_to_edifact(crew.birth_place, level="MRZ") + "'"
             L.append(tmp_locstr)
         elif self.country == "CA":
