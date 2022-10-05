@@ -21,7 +21,7 @@ reload(salary.ec.ec_perdiem_statement_mailer.ECPerdiemInterface)
 
 regions = ['DK', 'NO', 'SE']
 now = date.now()
-firstdate = AbsTime(now.year - 1 if now.month == 1 or now.month == 2 else now.year, 11 if now.month == 1 else (12 if now.month == 2 else now.month - 2), 1, 0, 0)
+firstdate = AbsTime(now.year - 1 if now.month == 1 else now.year, 12 if now.month == 1 else now.month - 1, 1, 0, 0)
 lastdate = AbsTime(now.year, now.month, 1, 0, 0)
 
 @argfix
