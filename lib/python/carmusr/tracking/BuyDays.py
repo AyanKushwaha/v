@@ -8,7 +8,7 @@
 import carmensystems.rave.api as R
 import Cui
 import utils.Names as Names
-import RelTime
+from RelTime import RelTime
 import tm
 from modelserver import EntityNotFoundError
 import carmusr.HelperFunctions as HF
@@ -167,6 +167,14 @@ def buy_days(crew_id, start_time, end_time, leg_type, comment="", bought_day_typ
             current_row.end_time >= end_time and \
             current_row.end_time not in periods_to_merge  # Don't forget to merge end if needed
 
+def integer_to_reltime(val):
+    if val is None:
+        return RelTime('00:00')
+    else:
+        val = ("%02d" % val) + ":00"
+        val = RelTime(val)
+    return val
+
 def buy_days_svs(crew_id, start_time, end_time, leg_type, comment="",time_hh_sby="", time_mm_sby="", time_hh_prod="", time_mm_prod="",time_hh="", time_mm="", bought_day_type="", has_agmt_skd_cc=False, is_valid=False):
 
     time_hh_Sby, = R.eval('bought_days.%%hr_udor%%("%s")' % str(time_hh_sby))
@@ -216,27 +224,35 @@ def buy_days_svs(crew_id, start_time, end_time, leg_type, comment="",time_hh_sby
                     current_row = next_row
             elif current_row.end_time >= end_time:
                 if is_type_bought_sby:
-                    current_row.hours = time_hh_Sby
-                    current_row.minutes = time_mm_Sby
+                    time_hour_Sby = integer_to_reltime(int(time_hh_Sby[0:2]))
+                    time_minute_Sby = integer_to_reltime(int(time_mm_Sby[3:]))
+                    current_row.hours = time_hour_Sby
+                    current_row.minutes = time_minute_Sby
                 elif is_type_bought_prod:
-                    current_row.hours = time_hh_Prod
-                    current_row.minutes = time_mm_Prod
+                    time_hour_Prod = integer_to_reltime(int(time_hh_Prod[0:2]))
+                    time_minute_Prod = integer_to_reltime(int(time_mm_Prod[3:]))
+                    current_row.hours = time_hour_Prod
+                    current_row.minutes = time_minute_Prod
                 else:
-                    current_row.hours = time_HH
-                    current_row.minutes = time_MM
+                    time_HH_hour = integer_to_reltime(int(time_HH[0:2]))
+                    time_MM_minute = integer_to_reltime(int(time_MM[3:]))
+                    current_row.hours = time_HH_hour
+                    current_row.minutes = time_MM_minute
                 
                 break
             elif current_row.day_type == row_day_type and current_row.account_name == bought_day_type:
                 # Increase period
                 current_row.end_time = current_row.end_time.adddays(1)
                 if is_type_bought_sby:
-                    current_row.hours = time_hh_Sby
-
-                
-                    current_row.minutes = time_mm_Sby
+                    time_hour_Sby = integer_to_reltime(int(time_hh_Sby[0:2]))
+                    time_minute_Sby = integer_to_reltime(int(time_mm_Sby[3:]))
+                    current_row.hours = time_hour_Sby
+                    current_row.minutes = time_minute_Sby
                 if is_type_bought_prod:
-                    current_row.hours = time_hh_Prod
-                    current_row.minutes = time_mm_Prod
+                    time_hour_Prod = integer_to_reltime(int(time_hh_Prod[0:2]))
+                    time_minute_Prod = integer_to_reltime(int(time_mm_Prod[3:]))
+                    current_row.hours = time_hour_Prod
+                    current_row.minutes = time_minute_Prod
             else:
                 # Start new period
                 start_time = current_row.end_time
@@ -255,14 +271,22 @@ def buy_days_svs(crew_id, start_time, end_time, leg_type, comment="",time_hh_sby
                 current_row.account_name = bought_duty
             current_row.end_time = start_time.adddays(1)
             if is_type_bought_sby:
-                current_row.hours = time_hh_Sby
-                current_row.minutes = time_mm_Sby
+                time_hour_Sby = integer_to_reltime(int(time_hh_Sby[0:2]))
+                time_minute_Sby = integer_to_reltime(int(time_mm_Sby[3:]))
+                print time_hour_Sby,type(time_hour_Sby)
+                print time_minute_Sby,type(time_minute_Sby)
+                current_row.hours = time_hour_Sby
+                current_row.minutes = time_minute_Sby
             if is_type_bought_prod:
-                current_row.hours = time_hh_Prod
-                current_row.minutes = time_mm_Prod
+                time_hour_Prod = integer_to_reltime(int(time_hh_Prod[0:2]))
+                time_minute_Prod = integer_to_reltime(int(time_mm_Prod[3:]))
+                current_row.hours = time_hour_Prod
+                current_row.minutes = time_minute_Prod
             if is_type_bought_duty:
-                current_row.hours = time_HH
-                current_row.minutes = time_MM
+                time_HH_hour = integer_to_reltime(int(time_HH[0:2]))
+                time_MM_minute = integer_to_reltime(int(time_MM[3:]))
+                current_row.hours = time_HH_hour
+                current_row.minutes = time_MM_minute
 
             
             current_row.uname = uname
@@ -385,7 +409,7 @@ def markDaysAsBought(buy):
     # Truncate period to fit planning period
     pp_start, = R.eval('fundamental.%loaded_data_period_start%')
     pp_end, = R.eval('fundamental.%loaded_data_period_end%')
-    pp_end += RelTime.RelTime('00:01')  # pp_end_time is inclusive 23:59..
+    pp_end += RelTime('00:01')  # pp_end_time is inclusive 23:59..
 
     if is_buy and (start_time < pp_start or pp_end < end_time):
         cfhExtensions.show(
