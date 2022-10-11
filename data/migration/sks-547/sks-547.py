@@ -84,7 +84,10 @@ class PcOpcFixer(object):
         print "Entering get_ops_for_activity_set"
         ops = []
         # activity_set table update
+        row_ix = 0
         for row in fixrunner.dbsearch(self.dc, 'activity_set', "grp IN ('{}', '{}')".format(PC, OPC)):
+            row_ix += 1
+            print "activity_set: row #%s: %s" % (row_ix, str(row))
             row['si'] = row['si'].replace(OPC, OTS)
             row['si'] = row['si'].replace(PC, LPC)
             if row['grp'] in (OPC,):
@@ -378,7 +381,7 @@ def fixit(dc, *a, **k):
         print "op #%s: %s" % (op_counter, str(op))
     return ops
 
-fixit.program = 'sks-517.py (%s)' % __version__
+fixit.program = 'sks-547.py (%s)' % __version__
 
 if __name__ == '__main__':
     fixit()
