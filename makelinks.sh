@@ -22,7 +22,7 @@ echo "Right directory"
 declare -a softLinks=(
     "/opt/Carmen/CARMDATA/carmdata/" "current_carmdata"
     "current_carmsys_cct" "current_carmsys"
-    "/opt/Carmen/CARMSYS/mr-tracking-28.10.54171_CARMSYS" "current_carmsys_cct"
+    "/opt/Carmen/CARMSYS/mr-tracking-27.8.36951_CARMSYS" "current_carmsys_cct"
     "current_carmtmp_cct" "current_carmtmp"
     "/opt/Carmen/CARMTMP/$(whoami)/CARMTMP/tracking_carmtmp_${version}" "current_carmtmp_cct"
     "local_template_SASDEV.xml" "etc/local.xml"
