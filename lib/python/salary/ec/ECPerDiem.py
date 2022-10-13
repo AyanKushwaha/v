@@ -426,6 +426,7 @@ class PerDiemTripManager:
                         perDiemLeg.allocatedPerDiem = (
                         duty[DUTY_PER_DIEM_ALLOCATED] / 4.0) if duty[DUTY_PER_DIEM_ALLOCATED] != None else 0
 
+
                     perDiemLeg.perDiemStopTime = duty[DUTY_PER_DIEM_REST_TIME]
                     perDiemLeg.actualStopTime = duty[DUTY_ACTUAL_REST_TIME]
                     if not perDiemLeg.perDiemStopTime:
