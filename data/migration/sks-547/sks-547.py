@@ -3,16 +3,22 @@ import re
 
 import adhoc.fixrunner as fixrunner
 
-__version__ = '2022_03_1_a'
+__version__ = '2022_10_12_a'
 
 # Historical data to be considered upto 5 years from now
 valid_from = int(AbsTime("01Jan2017"))
 
 PC, _pc, _pc_, OPC, _opc, _opc_ = "PC", "_pc", "_pc_", "OPC", "_opc", "_opc_"
 LPC, _lpc, _lpc_, OTS, _ots, _ots_ = "LPC", "_lpc", "_lpc_", "OTS", "_ots", "_ots_"
+_opc_or_ots_ = "_opc_or_ots_"
+OPC_OR_OTS = "OPC or OTS"
+OPCOTS = "OPCOTS"
 REC = "REC"
+PLACEHOLDER = "APAPLACEHOLDER"
 
 SIM_ACT = {PC: LPC, OPC: OTS}
+SIM_ACT_OPCOTS = {PC: LPC, OPC: OPCOTS}
+SIM_ACT_OPC_OR_OTS = {PC: LPC, OPC: OPC_OR_OTS}
 
 
 class PcOpcFixer(object):
@@ -23,7 +29,7 @@ class PcOpcFixer(object):
     def get_link_crews(self):
         link_contract_types = []
         link_crews = []
-        for row in fixrunner.dbsearch(self.dc, 'crew_contract_set', "agmtgroup IN ('SVS_FD_AG', 'SV_CC_AG')"):
+        for row in fixrunner.dbsearch(self.dc, 'crew_contract_set', "agmtgroup IN ('SVS_FD_AG', 'SVS_CC_AG')"):
             link_contract_types.append(row['id'])
         for row in fixrunner.dbsearch(self.dc, 'crew_contract', "contract IN %s" % str(tuple(link_contract_types))):
             link_crews.append(row['crew'])
@@ -32,6 +38,12 @@ class PcOpcFixer(object):
         
     def pc_lpc_replace(self, pc_lpc, string):
         return re.sub(r"\b{}\b".format(pc_lpc), SIM_ACT[pc_lpc], string)
+    
+    def pc_lpc_replace_opcots(self, pc_lpc, string):
+        return re.sub(r"\b{}\b".format(pc_lpc), SIM_ACT_OPCOTS[pc_lpc], string)
+    
+    def pc_lpc_replace_opc_or_ots(self, pc_lpc, string):
+        return re.sub(r"\b{}\b".format(pc_lpc), SIM_ACT_OPCOTS[pc_lpc], string)
     
     def crew_is_link(self, crew):
         crew_is_link = crew in self.link_crews
@@ -43,17 +55,16 @@ class PcOpcFixer(object):
         ops = []
         needs_update = False
         for row in fixrunner.dbsearch(self.dc, 'activity_group', "id IN ('{}', '{}')".format(PC, OPC)):
-            if row['id'] not in (OPC,):
-                ops.append(fixrunner.createOp('activity_group', 'D',
-                                              {'id': row['id'],
-                                              }))
+            ops.append(fixrunner.createOp('activity_group', 'D',
+                                          {'id': row['id'],
+                                          }))
             needs_update = True
         if needs_update:
             for row in [PC, OPC]:
                 ops.append(fixrunner.createOp('activity_group', 'N',
-                                                {'id': SIM_ACT[row],
+                                                {'id': SIM_ACT_OPCOTS[row],
                                                  'cat':REC,
-                                                 'si': "{} simulator".format(SIM_ACT[row]),
+                                                 'si': "{} simulator".format(SIM_ACT_OPC_OR_OTS[row]),
                                                 }))
         return ops
     
@@ -64,19 +75,18 @@ class PcOpcFixer(object):
         ops = []
         activity_group_period = []
         for row in fixrunner.dbsearch(self.dc, 'activity_group_period', "id IN ('{}', '{}')".format(PC, OPC)):
-            if row['id'] not in (OPC,):
-                ops.append(fixrunner.createOp('activity_group_period', 'D',
-                                             {'id': row['id'],
-                                             }))
+            ops.append(fixrunner.createOp('activity_group_period', 'D',
+                                          {'id': row['id'],
+                                          }))
             activity_group_period.append(row)
             needs_update = True
         if needs_update:
             for row in activity_group_period:
-                row['id'] = SIM_ACT[row['id']]
+                row['id'] = SIM_ACT_OPCOTS[row['id']]
                 if row['si'].startswith(PC):
                     row['si'] = row['si'].replace(PC, LPC)
                 else:
-                    row['si'] = row['si'].replace(OPC, OTS)
+                    row['si'] = row['si'].replace(OPC, OPC_OR_OTS)
                 ops.append(fixrunner.createOp('activity_group_period', 'N', row))
         return ops
     
@@ -87,18 +97,14 @@ class PcOpcFixer(object):
         row_ix = 0
         for row in fixrunner.dbsearch(self.dc, 'activity_set', "grp IN ('{}', '{}')".format(PC, OPC)):
             row_ix += 1
-            print "activity_set: row #%s: %s" % (row_ix, str(row))
-            row['si'] = row['si'].replace(OPC, OTS)
+            row['si'] = row['si'].replace(OPC, PLACEHOLDER)
             row['si'] = row['si'].replace(PC, LPC)
-            if row['grp'] in (OPC,):
-                action = 'N'
-            else:
-                action = 'U'
-                # create new copy, keep old one as well for link crew
+            row['si'] = row['si'].replace(PLACEHOLDER, OPC_OR_OTS)
+            action = 'U'
             ops.append(fixrunner.createOp('activity_set', action,
                                             {'id': row['id'],
-                                             'grp': SIM_ACT[row['grp']],
-                                             'si': self.pc_lpc_replace(row['grp'], row['si']),
+                                             'grp': SIM_ACT_OPCOTS[row['grp']],
+                                             'si': self.pc_lpc_replace_opc_or_ots(row['grp'], row['si']),
                                             }))
            
         return ops
@@ -109,14 +115,14 @@ class PcOpcFixer(object):
         ops = []
         crew_document_set = []
         for row in fixrunner.dbsearch(self.dc, 'crew_document_set', "SUBSTR(subtype, 1, 2) = '{}' or SUBSTR(subtype, 1, 3) = '{}' or SUBSTR(subtype, -2, 2) = '{}' or SUBSTR(subtype, -3, 3) = '{}'".format(PC, OPC, PC, OPC)):
-            if row['subtype'] not in (OPC, ):
+            if OPC not in row['subtype']:
                 ops.append(fixrunner.createOp('crew_document_set', 'D',
                                               {'typ': row['typ'],
                                                'subtype': row['subtype'],
                                               }))
             crew_document_set.append(row)
         for row in crew_document_set:
-            if row['subtype'].startswith(PC) or row['subtype'].endswith(PC):
+            if not row['subtype'] == OPC and (row['subtype'].startswith(PC) or row['subtype'].endswith(PC)):
                 row['subtype'] = row['subtype'].replace(PC, LPC)
             else:
                 row['subtype'] = row['subtype'].replace(OPC, OTS)
@@ -160,9 +166,10 @@ class PcOpcFixer(object):
         ops = []
         crew_recurrent_set = []
         for row in fixrunner.dbsearch(self.dc, 'crew_recurrent_set', "SUBSTR(typ, 1, 2) = '{}' or SUBSTR(typ, 1, 3) = '{}'".format(PC, OPC)):
-            if not row['typ'] in (OPC,):
+            if not OPC in row['typ']:
                 ops.append(fixrunner.createOp('crew_recurrent_set', 'D',
-                                                {'typ': row['typ']}))
+                                              {'typ': row['typ'],
+                                               'validfrom' : row['validfrom']}))
             crew_recurrent_set.append(row)
         for row in crew_recurrent_set:
             if row['typ'].startswith(PC):
@@ -179,7 +186,7 @@ class PcOpcFixer(object):
         ops = []
         training_log_set = []
         for row in fixrunner.dbsearch(self.dc, 'training_log_set', "SUBSTR(typ, 1, 2) = '{}' or SUBSTR(typ, 1, 3) = '{}'".format(PC, OPC)):
-            if not row['typ'] in (OPC,):
+            if not OPC in row['typ']:
                 ops.append(fixrunner.createOp('training_log_set', 'D',
                                                 {'typ': row['typ']}))
             training_log_set.append(row)
@@ -198,7 +205,7 @@ class PcOpcFixer(object):
         crew_training_log = []
         for row in fixrunner.dbsearch(self.dc, 'crew_training_log', "tim>={} and (SUBSTR(typ, 1, 2) = '{}' or SUBSTR(typ, 1, 3) = '{}')".format(valid_from, PC, OPC)):
             crew = row['crew']
-            if self.crew_is_link(crew) and row['typ'] in (OPC, ):
+            if self.crew_is_link(crew) and OPC in row['typ']:
                 continue
             ops.append(fixrunner.createOp('crew_training_log', 'D',
                                            {'crew': row['crew'],
@@ -221,15 +228,14 @@ class PcOpcFixer(object):
         ops = []
         simulator_set = []
         for row in fixrunner.dbsearch(self.dc, 'simulator_set', "grp IN ('{}', '{}')".format(PC, OPC)):
-            if row['grp'] not in (OPC,):
-                ops.append(fixrunner.createOp('simulator_set', 'D',
-                                                {'grp': row['grp'],
-                                                 'legtime': row['legtime']}))
+            ops.append(fixrunner.createOp('simulator_set', 'D',
+                                          {'grp': row['grp'],
+                                          'legtime': row['legtime']}))
             simulator_set.append(row)
         for row in simulator_set:
-            row['grp'] = SIM_ACT[row['grp']]
-            row['simdesc'] = self.pc_lpc_replace(PC, row['simdesc'])
-            row['simdesc'] = self.pc_lpc_replace(OPC, row['simdesc'])
+            row['grp'] = SIM_ACT_OPCOTS[row['grp']]
+            row['simdesc'] = self.pc_lpc_replace_opcots(PC, row['simdesc'])
+            row['simdesc'] = self.pc_lpc_replace_opcots(OPC, row['simdesc'])
             ops.append(fixrunner.createOp('simulator_set', 'N', row))
          
         return ops
@@ -240,15 +246,14 @@ class PcOpcFixer(object):
         ops = []
         lpc_opc_ots_composition = []
         for row in fixrunner.dbsearch(self.dc, 'lpc_opc_ots_composition', "simtype_grp IN ('{}', '{}')".format(PC, OPC)):
-            if row['simtype_grp'] not in (OPC,):
-                ops.append(fixrunner.createOp('lpc_opc_ots_composition', 'D',
-                                                {'simtype_grp': row['simtype_grp'],
-                                                 'simtype_legtime': row['simtype_legtime'],
-                                                 'qual': row['qual'],
-                                                 'validfrom': row['validfrom']}))
+            ops.append(fixrunner.createOp('lpc_opc_ots_composition', 'D',
+                                          {'simtype_grp': row['simtype_grp'],
+                                          'simtype_legtime': row['simtype_legtime'],
+                                          'qual': row['qual'],
+                                          'validfrom': row['validfrom']}))
             lpc_opc_ots_composition.append(row)
         for row in lpc_opc_ots_composition:
-            row['simtype_grp'] = SIM_ACT[row['simtype_grp']]
+            row['simtype_grp'] = SIM_ACT_OPCOTS[row['simtype_grp']]
             ops.append(fixrunner.createOp('lpc_opc_ots_composition', 'N', row))
         return ops
     
@@ -258,12 +263,11 @@ class PcOpcFixer(object):
         ops = []
         simulator_briefings = []
         for row in fixrunner.dbsearch(self.dc, 'simulator_briefings', "simtype_grp IN ('{}', '{}')".format(PC, OPC)):
-            if row['simtype_grp'] not in (OPC,):
-                ops.append(fixrunner.createOp('simulator_briefings', 'D',
-                                                {'simtype_grp': row['simtype_grp']}))
+            ops.append(fixrunner.createOp('simulator_briefings', 'D',
+                                           {'simtype_grp': row['simtype_grp']}))
             simulator_briefings.append(row)
         for row in simulator_briefings:
-            row['simtype_grp'] = SIM_ACT[row['simtype_grp']]
+            row['simtype_grp'] = SIM_ACT_OPCOTS[row['simtype_grp']]
             ops.append(fixrunner.createOp('simulator_briefings', 'N', row))
                     
         return ops
@@ -274,9 +278,10 @@ class PcOpcFixer(object):
         ops = []
         simulator_composition = []
         for row in fixrunner.dbsearch(self.dc, 'simulator_composition', "grp IN ('{}', '{}')".format(PC, OPC)):
-            if row['grp'] not in (OPC,):
-                ops.append(fixrunner.createOp('simulator_composition', 'D',
-                                                {'grp': row['grp']}))
+            ops.append(fixrunner.createOp('simulator_composition', 'D',
+                                          {'grp': row['grp'],
+                                           'special' : row['special'],
+                                           'validfrom' : row['validfrom']}))
             simulator_composition.append(row)
         for row in simulator_composition:
             row['grp'] = SIM_ACT[row['grp']]
@@ -291,7 +296,7 @@ class PcOpcFixer(object):
         ops = []
         special_schedules = []
         for row in fixrunner.dbsearch(self.dc, 'special_schedules', "validfrom>={} and str_val IN ('{}', '{}')".format(valid_from, PC, OPC)):
-            if self.crew_is_link(row['crewid']) and row['str_val'] in (OPC,):
+            if self.crew_is_link(row['crewid']) and OPC in row['str_val']:
                 continue
             ops.append(fixrunner.createOp('special_schedules', 'D',
                                             {'crewid': row['crewid'],
@@ -319,10 +324,10 @@ class PcOpcFixer(object):
                 agreement_validity.append(row)
         for row in agreement_validity:
             row['id'] = row['id'].replace(_pc, _lpc)
-            row['id'] = row['id'].replace(_opc, _ots)
             row['id'] = row['id'].replace(_pc_.upper(), _lpc_.upper())
-            row['id'] = row['id'].replace(_opc_.upper(), _ots_.upper())
             row['si'] = self.pc_lpc_replace(PC, row['si'])
+            row['id'] = row['id'].replace(_opc, _ots)
+            row['id'] = row['id'].replace(_opc_.upper(), _ots_.upper())
             row['si'] = self.pc_lpc_replace(OPC, row['si'])
             ops.append(fixrunner.createOp('agreement_validity', 'N', row))
           
@@ -346,9 +351,9 @@ class PcOpcFixer(object):
                 rule_exception.append(row)
         for row in rule_exception:
             row['ruleid'] = row['ruleid'].replace(_pc_, _lpc_)
-            row['ruleid'] = row['ruleid'].replace(_opc_, _ots_)
-            row['ruleremark'] = self.pc_lpc_replace(PC, row['ruleremark'])
+            row['ruleid'] = row['ruleid'].replace(_opc_, _opc_or_ots_)
             row['ruleremark'] = self.pc_lpc_replace(OPC, row['ruleremark'])
+            row['ruleremark'] = self.pc_lpc_replace(PC, row['ruleremark'])
             ops.append(fixrunner.createOp('rule_exception', 'N', row))
         return ops
 
@@ -367,7 +372,7 @@ def fixit(dc, *a, **k):
     ops += pc_opc_fixer.get_ops_for_training_log_set()
     ops += pc_opc_fixer.get_ops_for_crew_training_log()
     ops += pc_opc_fixer.get_ops_for_simulator_set()
-    ops +=pc_opc_fixer.get_ops_for_lpc_opc_ots_composition()
+    ops += pc_opc_fixer.get_ops_for_lpc_opc_ots_composition()
     ops += pc_opc_fixer.get_ops_for_simulator_briefings()
     ops += pc_opc_fixer.get_ops_for_simulator_composition()
     ops += pc_opc_fixer.get_ops_for_special_schedules()
@@ -381,7 +386,7 @@ def fixit(dc, *a, **k):
         print "op #%s: %s" % (op_counter, str(op))
     return ops
 
-fixit.program = 'sks-547.py (%s)' % __version__
+fixit.program = 'sks-547.py  (%s)' % __version__
 
 if __name__ == '__main__':
     fixit()
