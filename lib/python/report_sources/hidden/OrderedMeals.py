@@ -428,7 +428,7 @@ class OrderedMeals(SASReport):
 
                 order_added = self._add_or_increase_meal(flight, meal, meals) or order_added
 
-            for order_line in TM.meal_spc_order_upd_line.search('(order.order_update_num=%s)' % order.order_update_num):
+            for order_line in TM.meal_slpc_order_upd_line.search('(order.order_update_num=%s)' % order.order_update_num):
 
                 special_meal = SpecialMeal(
                     loadDate=order_line.load_flight.udor,

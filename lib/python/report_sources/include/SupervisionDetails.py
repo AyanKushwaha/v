@@ -50,8 +50,8 @@ class SupervisionDetails(SASReport):
                 'logname': 'crew.%login_name%',
                 'rank': 'crew.%rank%',
                 'lifus_act': 'salary.%inst_lifus_act%',
-                'pc_opc': 'salary.%inst_pc_opc%',
-                'pc_opc_bd': 'salary.%inst_pc_opc_bd%',
+                'lpc_opc_ots': 'salary.%inst_lpc_opc_or_ots%',
+                'lpc_opc_ots_bd': 'salary.%inst_lpc_opc_or_ots_bd%',
                 'type_rating': 'salary.%inst_type_rating%',
                 'type_rating_bd': 'salary.%inst_type_rating_bd%',
                 'crm': 'salary.%inst_crm%',
@@ -81,7 +81,7 @@ class SupervisionDetails(SASReport):
             'ades': 'leg.%end_station%',
             'time': 'leg.%time%',
             'inst_type': 'salary.%inst_allowance%',
-            'is_pc_opc_bd': 'salary.%inst_count_pc_opc_brief_debrief%',
+            'is_lpc_opc_ots_bd': 'salary.%inst_count_lpc_opc_or_ots_brief_debrief%',
             'is_type_rating_bd': 'salary.%inst_count_type_rating_brief_debrief%',
             'sim_skill_bd_time': 'salary.%inst_sim_skill_bd_time%',
             'sim_skill_briefing_time': 'salary.%inst_sim_skill_briefing_time%',
@@ -160,7 +160,7 @@ class SupervisionDetails(SASReport):
 
     def get_type(self, t):
         try:
-            type = ('', 'A/C, LIFUS', 'PC/OPC', 'T/R', 'CLASSROOM', 'LCI SH', 'CRM', 'CC', 'SKILL-Test', 'SIM', 'LCI LH', 'New Hire Follow Up','Supernum, Release')[int(str(t)[-2:])]
+            type = ('', 'A/C, LIFUS', 'LPC/OPC/OTS', 'T/R', 'CLASSROOM', 'LCI SH', 'CRM', 'CC', 'SKILL-Test', 'SIM', 'LCI LH', 'New Hire Follow Up','Supernum, Release')[int(str(t)[-2:])]
             return type
         except:
             return '?'

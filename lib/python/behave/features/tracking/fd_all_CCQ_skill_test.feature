@@ -1,12 +1,12 @@
-@TRACKING @PC @CCQ @FD
-Feature: Check if CCQ Skill test rule has valid PC document
+@TRACKING @LPC @CCQ @FD
+Feature: Check if CCQ Skill test rule has valid LPC document
 
   Background: set up for tracking
     Given Tracking
     Given planning period from 1SEP2019 to 1OCT2019
 
     @SCENARIO1_A2A3
-    Scenario: Check if A3 CCQ Skill test should be performed before expiry of original PC doc
+    Scenario: Check if A3 CCQ Skill test should be performed before expiry of original LPC doc
     Given a crew member with
            | attribute       | value      | valid from | valid to  |
            | region          | SKD        | 26MAY2008  | 09SEP2019 |
@@ -18,7 +18,7 @@ Feature: Check if CCQ Skill test rule has valid PC document
     Given crew member 1 has qualification "ACQUAL+A3" from 09SEP2019 to 01JAN2036
     Given crew member 1 has acqual qualification "ACQUAL+A2+AIRPORT+SMI" from 22JUL2017 to 31AUG2020
     Given crew member 1 has restriction "TRAINING+DCT" from 09SEP2019 to 25NOV2019
-    Given crew member 1 has document "REC+PC" from 01SEP2019 to 30JUN2020 and has qualification "A2"
+    Given crew member 1 has document "REC+LPC" from 01SEP2019 to 30JUN2020 and has qualification "A2"
 
     Given table crew_training_need additionally contains the following
     | crew           | part | validfrom | validto    | course      | attribute | flights | maxdays | acqual |
@@ -31,11 +31,11 @@ Feature: Check if CCQ Skill test rule has valid PC document
 
     When I show "crew" in window 1
     Then rave "rules_training_ccr.%prev_typerate_valid%" shall be "True" on leg 1 on trip 1 on roster 1
-    and the rule "rules_training_ccr.trng_ccq_skilltest_requires_valid_pc_doc" shall pass on leg 1 on trip 1 on roster 1
+    and the rule "rules_training_ccr.trng_ccq_skilltest_requires_valid_lpc_doc" shall pass on leg 1 on trip 1 on roster 1
 
 
     @SCENARIO1_A2A5
-    Scenario: Check if A5 CCQ Skill test should be performed before expiry of original PC doc
+    Scenario: Check if A5 CCQ Skill test should be performed before expiry of original LPC doc
     Given a crew member with
            | attribute       | value      | valid from | valid to  |
            | region          | SKD        | 26MAY2008  | 09SEP2019 |
@@ -47,7 +47,7 @@ Feature: Check if CCQ Skill test rule has valid PC document
     Given crew member 1 has qualification "ACQUAL+A5" from 09SEP2019 to 01JAN2036
     Given crew member 1 has acqual qualification "ACQUAL+A2+AIRPORT+SMI" from 22JUL2017 to 31AUG2020
     Given crew member 1 has restriction "TRAINING+DCT" from 09SEP2019 to 25NOV2019
-    Given crew member 1 has document "REC+PC" from 01SEP2019 to 30JUN2020 and has qualification "A2"
+    Given crew member 1 has document "REC+LPC" from 01SEP2019 to 30JUN2020 and has qualification "A2"
 
     Given table crew_training_need additionally contains the following
     | crew           | part | validfrom | validto    | course      | attribute | flights | maxdays | acqual |
@@ -60,11 +60,11 @@ Feature: Check if CCQ Skill test rule has valid PC document
 
     When I show "crew" in window 1
     Then rave "rules_training_ccr.%prev_typerate_valid%" shall be "True" on leg 1 on trip 1 on roster 1
-    and the rule "rules_training_ccr.trng_ccq_skilltest_requires_valid_pc_doc" shall pass on leg 1 on trip 1 on roster 1
+    and the rule "rules_training_ccr.trng_ccq_skilltest_requires_valid_lpc_doc" shall pass on leg 1 on trip 1 on roster 1
 
 
     @SCENARIO2_A2A3
-    Scenario: Missing PCA2 document at A3 CCQ
+    Scenario: Missing LPCA2 document at A3 CCQ
     Given a crew member with
            | attribute       | value      | valid from | valid to  |
            | region          | SKD        | 26MAY2008  | 09SEP2019 |
@@ -88,11 +88,11 @@ Feature: Check if CCQ Skill test rule has valid PC document
 
     When I show "crew" in window 1
     Then rave "rules_training_ccr.%prev_typerate_valid%" shall be "False" on leg 1 on trip 1 on roster 1
-    and the rule "rules_training_ccr.trng_ccq_skilltest_requires_valid_pc_doc" shall fail on leg 1 on trip 1 on roster 1
+    and the rule "rules_training_ccr.trng_ccq_skilltest_requires_valid_lpc_doc" shall fail on leg 1 on trip 1 on roster 1
 
 
     @SCENARIO2_A2A5
-    Scenario: Missing PCA2 document at A5 CCQ
+    Scenario: Missing LPCA2 document at A5 CCQ
     Given a crew member with
            | attribute       | value      | valid from | valid to  |
            | region          | SKD        | 26MAY2008  | 09SEP2019 |
@@ -116,11 +116,11 @@ Feature: Check if CCQ Skill test rule has valid PC document
 
     When I show "crew" in window 1
     Then rave "rules_training_ccr.%prev_typerate_valid%" shall be "False" on leg 1 on trip 1 on roster 1
-    and the rule "rules_training_ccr.trng_ccq_skilltest_requires_valid_pc_doc" shall fail on leg 1 on trip 1 on roster 1
+    and the rule "rules_training_ccr.trng_ccq_skilltest_requires_valid_lpc_doc" shall fail on leg 1 on trip 1 on roster 1
 
 
     @SCENARIO3_A2A3
-    Scenario: A3 CCQ crew has no valid pc document on september
+    Scenario: A3 CCQ crew has no valid lpc document on september
     Given a crew member with
            | attribute       | value      | valid from | valid to  |
            | region          | SKD        | 26MAY2008  | 09SEP2019 |
@@ -132,7 +132,7 @@ Feature: Check if CCQ Skill test rule has valid PC document
     Given crew member 1 has qualification "ACQUAL+A3" from 09SEP2019 to 01JAN2036
     Given crew member 1 has acqual qualification "ACQUAL+A2+AIRPORT+SMI" from 22JUL2017 to 31AUG2020
     Given crew member 1 has restriction "TRAINING+DCT" from 09SEP2019 to 25NOV2019
-    Given crew member 1 has document "REC+PC" from 01OCT2019 to 25NOV2020 and has qualification "A2"
+    Given crew member 1 has document "REC+LPC" from 01OCT2019 to 25NOV2020 and has qualification "A2"
 
     Given table crew_training_need additionally contains the following
     | crew           | part | validfrom | validto   | course      | attribute | flights | maxdays | acqual |
@@ -145,11 +145,11 @@ Feature: Check if CCQ Skill test rule has valid PC document
 
     When I show "crew" in window 1
     Then rave "rules_training_ccr.%prev_typerate_valid%" shall be "False" on leg 1 on trip 1 on roster 1
-    and the rule "rules_training_ccr.trng_ccq_skilltest_requires_valid_pc_doc" shall fail on leg 1 on trip 1 on roster 1
+    and the rule "rules_training_ccr.trng_ccq_skilltest_requires_valid_lpc_doc" shall fail on leg 1 on trip 1 on roster 1
 
 
     @SCENARIO3_A2A5
-    Scenario: A5 CCQ crew has no valid pc document on september
+    Scenario: A5 CCQ crew has no valid lpc document on september
     Given a crew member with
            | attribute       | value      | valid from | valid to  |
            | region          | SKD        | 26MAY2008  | 09SEP2019 |
@@ -161,7 +161,7 @@ Feature: Check if CCQ Skill test rule has valid PC document
     Given crew member 1 has qualification "ACQUAL+A5" from 09SEP2019 to 01JAN2036
     Given crew member 1 has acqual qualification "ACQUAL+A2+AIRPORT+SMI" from 22JUL2017 to 31AUG2020
     Given crew member 1 has restriction "TRAINING+DCT" from 09SEP2019 to 25NOV2019
-    Given crew member 1 has document "REC+PC" from 01OCT2019 to 25NOV2020 and has qualification "A2"
+    Given crew member 1 has document "REC+LPC" from 01OCT2019 to 25NOV2020 and has qualification "A2"
 
     Given table crew_training_need additionally contains the following
     | crew           | part | validfrom | validto   | course      | attribute | flights | maxdays | acqual |
@@ -174,12 +174,12 @@ Feature: Check if CCQ Skill test rule has valid PC document
 
     When I show "crew" in window 1
     Then rave "rules_training_ccr.%prev_typerate_valid%" shall be "False" on leg 1 on trip 1 on roster 1
-    and the rule "rules_training_ccr.trng_ccq_skilltest_requires_valid_pc_doc" shall fail on leg 1 on trip 1 on roster 1
+    and the rule "rules_training_ccr.trng_ccq_skilltest_requires_valid_lpc_doc" shall fail on leg 1 on trip 1 on roster 1
 
 
 
     @SCENARIO4_A3A5A2
-Scenario: Check if A2 CCQ Skill test should be performed before expiry of original PC doc
+Scenario: Check if A2 CCQ Skill test should be performed before expiry of original LPC doc
     Given a crew member with
            | attribute       | value      | valid from | valid to  |
            | region          | SKD        | 26MAY2008  | 09SEP2019 |
@@ -190,7 +190,7 @@ Scenario: Check if A2 CCQ Skill test should be performed before expiry of origin
     Given crew member 1 has qualification "ACQUAL+A3" from 26MAR2008 to 09SEP2019
     Given crew member 1 has qualification "ACQUAL+A5" from 15JUL2008 to 18OCT2019
     Given crew member 1 has restriction "TRAINING+DCT" from 09SEP2019 to 25NOV2019
-    Given crew member 1 has document "REC+PCA3A5" from 15SEP2008 to 09DEC2019
+    Given crew member 1 has document "REC+LPCA3A5" from 15SEP2008 to 09DEC2019
 
     Given table crew_training_need additionally contains the following
     | crew           | part | validfrom | validto    | course      | attribute | flights | maxdays | acqual |
@@ -203,5 +203,5 @@ Scenario: Check if A2 CCQ Skill test should be performed before expiry of origin
 
     When I show "crew" in window 1
     Then rave "rules_training_ccr.%prev_typerate_valid%" shall be "True" on leg 1 on trip 1 on roster 1
-    and the rule "rules_training_ccr.trng_ccq_skilltest_requires_valid_pc_doc" shall pass on leg 1 on trip 1 on roster 1
+    and the rule "rules_training_ccr.trng_ccq_skilltest_requires_valid_lpc_doc" shall pass on leg 1 on trip 1 on roster 1
 

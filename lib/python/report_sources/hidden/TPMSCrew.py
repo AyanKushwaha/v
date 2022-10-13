@@ -205,11 +205,11 @@ class TPMSRoutines():
             iicmeq_qual_code_type   = cd .doc.typ
 
             if cd.doc.typ == "REC":
-              if (cd.doc.subtype in ["OPCA3", "OPCA4","OPCA5", "OPCA3A5", "PCA3", "PCA4","PCA5", "PCA3A5"]):
+              if (cd.doc.subtype in ["OPCA3", "OPCA4", "OPCA5", "OPCA3A5", "OTSA3", "OTSA4", "OTSA5", "OTSA3A5", "LPCA3", "LPCA4", "LPCA5", "LPCA3A5"]):
                 tmp = cd.doc.subtype
                 tmp2=tmp.split("C")
                 iicmeq_qual_code = tmp2[0] + "C"
-                iicmeq_act_group_name = tmp2[1]
+                iicmeq_act_group_name = tmp2[1]TPMSCrew.py
               elif (cd.doc.subtype in ["CRM", "CRMC"]):
                 iicmeq_qual_code = cd.doc.subtype
             elif cd.doc.typ == "MEDICAL" :
@@ -319,7 +319,7 @@ class TPMSRoutines():
                         iipili_remark,
                         iipili_staff_id,
                         iipili_to_date,]
-            if iipili_licence_type_code != "Temp PC" :
+            if iipili_licence_type_code != "Temp LPC" :
                 pilot_licence_data_rows.append(data_row)
 
         write_tab(f,fieldnames_tab_pilot_licence,pilot_licence_data_rows,'II_PilotLicense')

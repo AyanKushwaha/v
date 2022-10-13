@@ -33,11 +33,11 @@ table fd_warnings(Int section, Int priority) =
     redefine export String %section_priority_code%,    
     redefine export String %section_priority_descr%; 
   
-  /* OPC */
+  /* OPC/OTS */
   1, 1 -> "Recurrent", %warning_s1%, %warning_s1_code%, %warning_s1_description%;
   1, 2 -> "Recurrent", %warning_s2%, %warning_s2_code%, %warning_s2_description%;
           
-  /* PC */
+  /* LPC */
   2, 1 -> "Recurrent", %warning_y1%, %warning_y1_code%, %warning_y1_description%;
   2, 2 -> "Recurrent", %warning_y2%, %warning_y2_code%, %warning_y2_description%;
   
@@ -66,7 +66,7 @@ table fd_warnings(Int section, Int priority) =
   9, 1 -> "LCP warning", %warning_l1%, %warning_l1_code%, %warning_l1_description%;
   9, 2 -> "LCP warning", %warning_l2%, %warning_l2_code%, %warning_l2_description%;
   
-  /* OPC/PC planned too close after vacation */
+  /* OPC/OTS/LPC planned too close after vacation */
   10, 1 -> "Recurrent", false, "", ""; /* Dummy warning since there is no real v1 warning */
   10, 2 -> "Recurrent", %warning_v2%, %warning_v2_code%, %warning_v2_description%; 
   
@@ -91,9 +91,9 @@ end
   else expiry;
   
 /*
-** S: OPC needed in pp (prio 1)
-** Warn if OPC document is expired at end of pp and there is no OPC activity
-** in pp. This implies that crew must perform OPC during pp.
+** S: OPC/OTS needed in pp (prio 1)
+** Warn if OPC/OTS document is expired at end of pp and there is no OPC activity
+** in pp. This implies that crew must perform OPC/OTS during pp.
 */
 
 %crew_opc_1_expires_in_pp% =
@@ -102,33 +102,53 @@ end
 %crew_opc_2_expires_in_pp%  = 
     training.%opc_date_2_incl_perf%(%warning_period_check_performed_end%)
     <= %warning_period_end%;
+
+%crew_ots_1_expires_in_pp% =
+    training.%ots_date_1_incl_perf%(%warning_period_check_performed_end%)
+    <= %warning_period_end%;
+%crew_ots_2_expires_in_pp%  = 
+    training.%ots_date_2_incl_perf%(%warning_period_check_performed_end%)
+    <= %warning_period_end%;
+
+%crew_opc_or_ots_1_expires_in_pp% =
+    %crew_opc_1_expires_in_pp% or %crew_ots_1_expires_in_pp%;
+
+%crew_opc_or_ots_2_expires_in_pp% =
+    %crew_opc_2_expires_in_pp% or %crew_ots_2_expires_in_pp%;
+
 redefine %warning_s1% =
   not %warning_y1% and
   (if not crew.%is_double_qualified% then 
-    %crew_opc_1_expires_in_pp%
-  else if not training.%pc_opc_match_pp_start% then 
-    %crew_opc_1_expires_in_pp% or
-    %crew_opc_2_expires_in_pp%
+    %crew_opc_or_ots_1_expires_in_pp%
+  else if not training.%lpc_opc_or_ots_match_pp_start% then
+    %crew_opc_or_ots_1_expires_in_pp% or %crew_opc_or_ots_2_expires_in_pp%
   else
     false);
 %warning_s1_code% = "S";
 %warning_s1_description% = 
   if crew.%is_double_qualified% then
-    if %crew_opc_1_expires_in_pp% then
-      concat(training.%opc_code_1%, " needed in pp, expiry date is ",
-             %expiry_date_inclusive%(training.%opc_date_1%))
-    else
-      concat(training.%opc_code_2%, " needed in pp, expiry date is ",
-             %expiry_date_inclusive%(training.%opc_date_2%))
+      if %crew_opc_1_expires_in_pp% then
+          concat(training.%opc_code_1%, " needed in pp, expiry date is ",
+                 %expiry_date_inclusive%(training.%opc_date_1%))
+      else if %crew_ots_1_expires_in_pp% then
+          concat(training.%ots_code_1%, " needed in pp, expiry date is ",
+                 %expiry_date_inclusive%(training.%ots_date_1%))
+      else if %crew_opc_2_expires_in_pp% then
+          concat(training.%opc_code_2%, " needed in pp, expiry date is ",
+                 %expiry_date_inclusive%(training.%opc_date_2%))
+      else
+          concat(training.%ots_code_2%, " needed in pp, expiry date is ",
+                 %expiry_date_inclusive%(training.%ots_date_2%))
   else
-    concat("OPC needed in pp, expiry date is ",
-           %expiry_date_inclusive%(training.%opc_date_1%));
+        concat("OPC needed in pp, expiry date is ",
+            %expiry_date_inclusive%(training.%opc_ots_date_1%));
+
             
 /*
-** s: OPC needed in month after pp (prio 2)
-** Warn if OPC document is expires during themonth after pp and there is no OPC
+** s: OPC/OTS needed in month after pp (prio 2)
+** Warn if OPC/OTS document is expires during themonth after pp and there is no OPC/OTS
 ** activity planned in the month after pp. This implies
-** that crew must perform OPC during the month after pp
+** that crew must perform OPC/OTS during the month after pp
 */
 
 %crew_opc_1_expires_in_month_after_pp% =
@@ -139,94 +159,114 @@ redefine %warning_s1% =
     let exp = training.%opc_date_2_incl_perf%(%a_month_after_warning_period%);
     exp > %warning_period_end% and
     exp <= %a_month_after_warning_period%;
+
+%crew_ots_1_expires_in_month_after_pp% =
+    let exp = training.%ots_date_1_incl_perf%(%a_month_after_warning_period%);
+    exp > %warning_period_end% and
+    exp <= %a_month_after_warning_period%;
+%crew_ots_2_expires_in_month_after_pp% =
+    let exp = training.%ots_date_2_incl_perf%(%a_month_after_warning_period%);
+    exp > %warning_period_end% and
+    exp <= %a_month_after_warning_period%;
+
 redefine %warning_s2% = 
   not (%warning_y1% or %warning_y2%) and
-  (if not crew.%is_double_qualified% then 
-    %crew_opc_1_expires_in_month_after_pp%
-  else if not training.%pc_opc_match_pp_start% then 
-     %crew_opc_1_expires_in_month_after_pp%
-     or
-     %crew_opc_2_expires_in_month_after_pp%
+  (if not crew.%is_double_qualified% then
+        %crew_opc_1_expires_in_month_after_pp% or %crew_ots_1_expires_in_month_after_pp%
+  else if not training.%lpc_opc_or_ots_match_pp_start% then 
+        (%crew_opc_1_expires_in_month_after_pp% or
+        %crew_opc_2_expires_in_month_after_pp%) or
+        (%crew_ots_1_expires_in_month_after_pp% or
+        %crew_ots_2_expires_in_month_after_pp%)
   else
     false);
+
 %warning_s2_code% = "s";
+
 %warning_s2_description% = 
-  if crew.%is_double_qualified% then
-    if %crew_opc_1_expires_in_month_after_pp% then
-      concat(training.%opc_code_1%, " needed in month after pp, expiry date is ",
-             %expiry_date_inclusive%(training.%opc_date_1%))
+    if crew.%is_double_qualified% then
+        if %crew_opc_1_expires_in_month_after_pp% then
+            concat(training.%opc_code_1%, " needed in month after pp, expiry date is ",
+                   %expiry_date_inclusive%(training.%opc_date_1%))
+        else if %crew_ots_1_expires_in_month_after_pp% then
+            concat(training.%ots_code_1%, " needed in month after pp, expiry date is ",
+                   %expiry_date_inclusive%(training.%ots_date_1%))
+        else if %crew_opc_2_expires_in_month_after_pp% then
+            concat(training.%opc_code_2%, " needed in month after pp, expiry date is ",
+                   %expiry_date_inclusive%(training.%opc_date_2%))
+        else
+            concat(training.%ots_code_2%, " needed in month after pp, expiry date is ",
+                   %expiry_date_inclusive%(training.%ots_date_2%))
     else
-      concat(training.%opc_code_2%, " needed in month after pp, expiry date is ",
-             %expiry_date_inclusive%(training.%opc_date_2%))
-  else
-    concat("OPC needed in month after pp, expiry date is ",
-         %expiry_date_inclusive%(training.%opc_date_1%));
+        concat("OPC/OTS needed in month after pp, expiry date is ",
+               %expiry_date_inclusive%(training.%opc_ots_date_1%));
+
   
 /*
-** Y: PC needed in pp (prio 1)
-** Warn if PC document is expired at pp_end. This implies 
-** that crew must perform PC during pp.
+** Y: LPC needed in pp (prio 1)
+** Warn if LPC document is expired at pp_end. This implies 
+** that crew must perform LPC during pp.
 */
 
-%crew_pc_1_expires_in_pp% =
-    %doc_exp%(training.%pc_date_1_incl_perf%(%warning_period_check_performed_end%))
+%crew_lpc_1_expires_in_pp% =
+    %doc_exp%(training.%lpc_date_1_incl_perf%(%warning_period_check_performed_end%))
     <= %warning_period_end%;
-%crew_pc_2_expires_in_pp% = 
-    %doc_exp%(training.%pc_date_2_incl_perf%(%warning_period_check_performed_end%))
+%crew_lpc_2_expires_in_pp% = 
+    %doc_exp%(training.%lpc_date_2_incl_perf%(%warning_period_check_performed_end%))
     <= %warning_period_end%;
 redefine %warning_y1% =
   if not crew.%is_double_qualified% then 
-    %crew_pc_1_expires_in_pp%
+    %crew_lpc_1_expires_in_pp%
   else
-   %crew_pc_1_expires_in_pp%
+   %crew_lpc_1_expires_in_pp%
    or
-   %crew_pc_2_expires_in_pp%;
+   %crew_lpc_2_expires_in_pp%;
 %warning_y1_code% = "Y";
 %warning_y1_description% = 
   if crew.%is_double_qualified% then
-    if %crew_pc_1_expires_in_pp% then
-      concat(training.%pc_code_1%, " needed in pp, expiry date is ",
-             %expiry_date_inclusive%(training.%pc_date_1%))
+    if %crew_lpc_1_expires_in_pp% then
+      concat(training.%lpc_code_1%, " needed in pp, expiry date is ",
+             %expiry_date_inclusive%(training.%lpc_date_1%))
     else
-      concat(training.%pc_code_2%, " needed in pp, expiry date is ",
-             %expiry_date_inclusive%(training.%pc_date_2%))
+      concat(training.%lpc_code_2%, " needed in pp, expiry date is ",
+             %expiry_date_inclusive%(training.%lpc_date_2%))
   else
-    concat("PC needed in pp, expiry date is ",
-           %expiry_date_inclusive%(training.%pc_date_1%));
+    concat("LPC needed in pp, expiry date is ",
+           %expiry_date_inclusive%(training.%lpc_date_1%));
 
 /*
-** y: PC needed month after pp (prio 2)
-** Warn if PC document is expired at pp_end + 1 month. This implies
-** that crew must perform PC during month after pp
+** y: LPC needed month after pp (prio 2)
+** Warn if LPC document is expired at pp_end + 1 month. This implies
+** that crew must perform LPC during month after pp
 */
 
-%crew_pc_1_expires_in_month_after_pp% =
-    let exp = training.%pc_date_1_incl_perf%(%a_month_after_warning_period%);
+%crew_lpc_1_expires_in_month_after_pp% =
+    let exp = training.%lpc_date_1_incl_perf%(%a_month_after_warning_period%);
     exp > %warning_period_end% and
     exp <= %a_month_after_warning_period%;
-%crew_pc_2_expires_in_month_after_pp% = 
-    let exp = training.%pc_date_2_incl_perf%(%a_month_after_warning_period%);
+%crew_lpc_2_expires_in_month_after_pp% = 
+    let exp = training.%lpc_date_2_incl_perf%(%a_month_after_warning_period%);
     exp > %warning_period_end% and
     exp <= %a_month_after_warning_period%;
 redefine %warning_y2% = 
   if not crew.%is_double_qualified% then
-    %crew_pc_1_expires_in_month_after_pp%
+    %crew_lpc_1_expires_in_month_after_pp%
   else 
-    %crew_pc_1_expires_in_month_after_pp%
+    %crew_lpc_1_expires_in_month_after_pp%
     or
-    %crew_pc_2_expires_in_month_after_pp%;
+    %crew_lpc_2_expires_in_month_after_pp%;
 %warning_y2_code% = "y";
 %warning_y2_description% = 
   if crew.%is_double_qualified% then
-    if %crew_pc_1_expires_in_month_after_pp% then
-      concat(training.%pc_code_1%, " needed in month after pp, expiry date is ",
-             %expiry_date_inclusive%(training.%pc_date_1%))
+    if %crew_lpc_1_expires_in_month_after_pp% then
+      concat(training.%lpc_code_1%, " needed in month after pp, expiry date is ",
+             %expiry_date_inclusive%(training.%lpc_date_1%))
     else
-      concat(training.%pc_code_2%, " needed in month after pp, expiry date is ",
-             %expiry_date_inclusive%(training.%pc_date_2%))
+      concat(training.%lpc_code_2%, " needed in month after pp, expiry date is ",
+             %expiry_date_inclusive%(training.%lpc_date_2%))
   else
-    concat("PC needed in month after pp, expiry date is ",
-         %expiry_date_inclusive%(training.%pc_date_1%));
+    concat("LPC needed in month after pp, expiry date is ",
+         %expiry_date_inclusive%(training.%lpc_date_1%));
 
 /*
 ** E: PGT needed in pp (prio 1)
@@ -647,14 +687,14 @@ redefine %warning_l2% =
          where(%warning_l2_for_airport%(%ski_airport%(%times_index_0%))));
   
 /*
-** v: OPC/PC planned too close after vacation (prio 2)
+** v: OTS/OPC/LPC planned too close after vacation (prio 2)
 */
 
 export %warning_v2_p% = 
   parameter 7
-  remark "Min days between end of vacation and OPC/PC";
+  remark "Min days between end of vacation and LPC/OPC/OTS";
 redefine %warning_v2% = 
-  any(trip(roster), training.%trip_is_own_pc_opc% and
+  any(trip(roster), training.%trip_is_own_lpc_opc_or_ots% and
       (%vacation_ends_too_close%(trip.%start_day%)))
   where(trip.%starts_in_pp%);
 %vacation_ends_too_close%(Abstime date) = 
@@ -662,11 +702,11 @@ redefine %warning_v2% =
   where(trip.%end_day% >= date - (%warning_v2_p% * 24:00) and
         trip.%end_day% < date);
 %warning_v2_code% = "v";
-%warning_v2_description% = "OPC/PC planned too close after vacation";
+%warning_v2_description% = "LPC/OPC/OTS planned too close after vacation";
 
 
 /*
-** R: Lack of registration of recurrent dates PC OPC LC PGT RCRM (prio 1)
+** R: Lack of registration of recurrent dates LPC OPC OTS LC PGT RCRM (prio 1)
 */
 
 redefine %warning_r1% = 

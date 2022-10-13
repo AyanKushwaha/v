@@ -220,7 +220,8 @@ end
 **
 **     AST since 01nov2012
 **     OPC since 01jan2013
-**     PC  since 01jan2013
+**     OTS since 01jan2013
+**     LPC since 01jan2013
 **
 ** Agreement:
 **   Fleet Chief Pilot
@@ -238,11 +239,11 @@ export rule (off) qln_airport_SFO_ok_FC =
   startdate  = trip.%start_UTC%;
   severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
   failobject = %qln_airport_SFO_ok_FC_failobject%;
-  failtext "FC/FP must perform required OPC/PC/AST before SFO";
-  remark "(CCR) OMA: FC/FP must perform OPC/PC/AST before SFO",
+  failtext "FC/FP must perform required OPC/OTS/LPC/AST before SFO";
+  remark "(CCR) OMA: FC/FP must perform OPC/OTS/LPC/AST before SFO",
   planner "The rule checks that before flying to SFO, commanders and co-pilots"
-          " have performed one of AST since 01nov2012, OPC since 01jan2013,"
-          " PC  since 01jan2013.";
+          " have performed one of AST since 01nov2012, OPC/OTS since 01jan2013,"
+          " LPC  since 01jan2013.";
 end
 
 %qln_airport_SFO_ok_FC_failobject% =
@@ -257,8 +258,10 @@ end
 %has_apt_qual_requirement_SFO% =
   training.%last_simulator_date_of_type%("OPC",trip.%start_day%, "A3") >= 01jan13 or
   training.%last_simulator_date_of_type%("OPC",trip.%start_day%, "A4") >= 01jan13 or
-  training.%last_simulator_date_of_type%("PC",trip.%start_day%, "A3") >= 01jan13 or
-  training.%last_simulator_date_of_type%("PC",trip.%start_day%, "A4") >= 01jan13 or
+  training.%last_simulator_date_of_type%("OTS",trip.%start_day%, "A3") >= 01jan13 or
+  training.%last_simulator_date_of_type%("OTS",trip.%start_day%, "A4") >= 01jan13 or
+  training.%last_simulator_date_of_type%("LPC",trip.%start_day%, "A3") >= 01jan13 or
+  training.%last_simulator_date_of_type%("LPC",trip.%start_day%, "A4") >= 01jan13 or
   training.%last_simulator_date_of_type%("AST",trip.%start_day%, "A3") >= 01nov12 or
   training.%last_simulator_date_of_type%("AST",trip.%start_day%, "A4") >= 01nov12;
 
@@ -309,44 +312,44 @@ end
     
 /*
 ** Rule:
-**    PC/OPC intended for FC
+**    LPC/OPC/OTS intended for FC
 **
 ** Description:
-**    Check that if PC/OPC is intended for Flight Captain, crew's rank is FC
+**    Check that if LPC/OPC/OTS is intended for Flight Captain, crew's rank is FC
 **
 ** Agreement:
 **    Functional
 */
-rule qln_pc_opc_intended_for_fc_FC =
+rule qln_lpc_opc_or_ots_intended_for_fc_FC =
   valid roster.%check_rules% and
         trip.%in_pp_extended% and
-        trip.%is_pc_or_opc% and
+        trip.%is_lpc_opc_or_ots% and
         training.%sim_trip_assigned_to_student% and
         not crew.%is_leased_trip_start% and
         not trip.%is_skill_test% and
-        training.%pc_opc_trip_intended_for_two_fc% and
+        training.%lpc_opc_or_ots_trip_intended_for_two_fc% and
         rule_exceptions.%rule_on%(trip.%start_UTC%);
   crew.%rank_trip_start% = "FC";
   startdate  = trip.%start_utc%;
   severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject =  %qln_pc_opc_intended_for_fc_FC_failobject%;
-  failtext "FC PC/OPC only for FC";
-  remark "(CCR) OMA: Assign PC/OPC intended for FC on FC only",
+  failobject =  %qln_lpc_opc_or_ots_intended_for_fc_FC_failobject%;
+  failtext "FC LPC/OPC/OTS only for FC";
+  remark "(CCR) OMA: Assign LPC/OPC/OTS intended for FC on FC only",
   planner "";
 end
 
-%qln_pc_opc_intended_for_fc_FC_failobject% =
+%qln_lpc_opc_or_ots_intended_for_fc_FC_failobject% =
   first(leg(trip),leg.%failobject_departure%) where 
-    (leg.%is_pc_or_opc% and leg.%pc_opc_intended_for_two_fc% and
+    (leg.%is_lpc_opc_or_ots% and leg.%lpc_opc_or_ots_intended_for_two_fc% and
      not (crew.%rank_leg_start% = "FC"));
 
 /*
 ** Rule:
-**    Crew allowed lower on OPC
+**    Crew allowed lower on OPC/OTS
 **
 ** Description:
 **    Check if crew is assigned lower, he/she must perform OPC and be
-**    allowed to perform lower OPC's
+**    allowed to perform lower OPC/OTS's
 **
 ** Agreement:
 **    Functional
@@ -354,121 +357,123 @@ end
 rule qln_crew_allowed_lower_on_opc_FC =
   valid roster.%check_rules% and
         leg.%in_pp_extended% and
-        (leg.%is_pc% or leg.%is_opc%) and
+        (leg.%is_lpc% or leg.%is_opc_ots%) and
         not crew.%is_leased%(leg.%start_utc%) and
         crew_pos.%lower_rank% and
         rule_exceptions.%rule_on%(leg.%start_UTC%);
-  training.%leg_is_opc% and %fbr_opc_leg_ok%;
+  (training.%leg_is_opc% or training.%leg_is_ots%) and %fbr_opc_or_ots_leg_ok%;
   startdate  = leg.%start_utc%;
   severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
   failobject = leg.%failobject_departure%;
-  failtext "OMA: Lower rank on OPC";
-  remark "OMA: Crew not allowed lower rank on OPC";
+  failtext "OMA: Lower rank on OPC/OTS";
+  remark "OMA: Crew not allowed lower rank on OPC/OTS";
 end
         
-%fbr_opc_leg_ok% =
+%fbr_opc_or_ots_leg_ok% =
     let fbr_req = leg.%lower_rank_allowed%;
-    training.%leg_is_opc% and
+    (training.%leg_is_opc% or
+    training.%leg_is_ots%)and
     fbr_req <> "NONE" and
     (fbr_req = "ALL" or
      fbr_req = "INSTR" and crew.%is_instructor_leg_start%);
 
 /*
 ** Rule:
-**    Max OPC's assigned lower rank in period
+**    Max OPC/OTS's assigned lower rank in period
 **
 ** Description:
 **    Check if crew is assigned lower, he/she must not have performed the
-**    previous OPC lower. The evaulation is done by checking that previous
-**    OPC is without attribut "LOWER".
+**    previous OPC/OTS lower. The evaulation is done by checking that previous
+**    OPC/OTS is without attribut "LOWER".
 **
 ** Agreement:
 */
-rule qln_max_opc_assigned_lower_rank_in_period_FC =
+rule qln_max_opc_or_ots_assigned_lower_rank_in_period_FC =
   valid roster.%check_rules% and
         trip.%in_pp_extended% and
-        trip.%is_opc% and
+        trip.%is_opc_ots% and
         not crew.%is_leased_trip_start% and
         crew_pos.%trip_lower_rank% and
         rule_exceptions.%rule_on%(trip.%start_utc%);
         
-  not training.%last_logged_opc_perfomed_lower%;
+  not (training.%last_logged_opc_perfomed_lower% or training.%last_logged_ots_perfomed_lower%);
 
   startdate  = trip.%start_utc%;
   severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %qln_max_opc_assigned_lower_rank_in_period_FC_failobject%;
-  failtext "OMA: Previous OPC performed LOWER";
-  remark "OMA: Max lower rank OPC's in period";
+  failobject = %qln_max_opc_or_ots_assigned_lower_rank_in_period_FC_failobject%;
+  failtext "OMA: Previous OPC/OTS performed LOWER";
+  remark "OMA: Max lower rank OPC/OTS's in period";
 end
 
-%qln_max_opc_assigned_lower_rank_in_period_FC_failobject% =
+%qln_max_opc_or_ots_assigned_lower_rank_in_period_FC_failobject% =
   first(leg(trip),leg.%failobject_departure%) where 
-    (leg.%is_opc% and crew_pos.%lower_rank%);
+    ((leg.%is_opc_ots%) and crew_pos.%lower_rank%);
     
 /*
 ** Rule:
-**    Min/Max number of days between PC/OPC and ASF
+**    Min/Max number of days between LPC/OPC/OTS and ASF
 **
 ** Description:
 **
 ** Agreement:
 **    Functional
 */
-rule (off) qln_min_days_btw_pc_opc_and_asf_FC =
+rule (off) qln_min_days_btw_lpc_opc_ots_and_asf_FC =
   valid roster.%check_rules% and
         trip.%in_pp_extended% and
-        (trip.%is_pc_or_opc% or trip.%is_asf%) and
+        (trip.%is_lpc_opc_or_ots% or trip.%is_asf%) and
         not crew.%is_leased_trip_start%;
-  %days_since%(trip.%start_utc%, %last_performed_pc_opc_or_asf%)
-    >= %min_days_btw_pc_opc_and_asf_p% - 
+  %days_since%(trip.%start_utc%, %last_performed_lpc_opc_ots_or_asf%)
+    >= %min_days_btw_lpc_opc_ots_and_asf_p% - 
        rule_exceptions.%overshoot_int%(trip.%start_UTC%);
   startdate  = trip.%start_utc%;
   severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %qln_min_days_btw_pc_opc_and_asf_FC_failobject%;
+  failobject = %qln_min_days_btw_lpc_opc_ots_and_asf_FC_failobject%;
   failtext(Int value, Int limit) =
-    rules.%failtext_int%("Days btw PC/OPC and ASF",value,limit);
-  remark "(CCR) Func: Min nr of days between PC/OPC and ASF",
+    rules.%failtext_int%("Days btw LPC/OPC/OTS and ASF",value,limit);
+  remark "(CCR) Func: Min nr of days between LPC/OPC and ASF",
   planner "";
 end
 
-%qln_min_days_btw_pc_opc_and_asf_FC_failobject% =
+%qln_min_days_btw_lpc_opc_ots_and_asf_FC_failobject% =
   first(leg(trip),leg.%failobject_departure%) where
-    (%days_since%(leg.%start_UTC%,%last_performed_pc_opc_or_asf%) 
-     < %min_days_btw_pc_opc_and_asf_p% and
-     (task.%is_asf%(leg.%code%) or leg.%is_pc_or_opc%));
+    (%days_since%(leg.%start_UTC%,%last_performed_lpc_opc_ots_or_asf%) 
+     < %min_days_btw_lpc_opc_ots_and_asf_p% and
+     (task.%is_asf%(leg.%code%) or leg.%is_lpc_opc_or_ots%));
 
-%last_performed_pc_opc_or_asf% =
-  nmin(training.%last_perf_date_for_act_of_type%("PC", trip.%start_utc%),
+%last_performed_lpc_opc_ots_or_asf% =
+  nmin(training.%last_perf_date_for_act_of_type%("LPC", trip.%start_utc%),
        training.%last_perf_date_for_act_of_type%("OPC", trip.%start_utc%),
+       training.%last_perf_date_for_act_of_type%("OTS", trip.%start_utc%),
        training.%last_perf_date_for_act_of_type%("ASF", trip.%start_utc%));
 
 rule (off) qln_max_days_btw_pc_opc_and_asf_FC =
   valid roster.%check_rules% and
         trip.%in_pp_extended% and
-        (trip.%is_pc_or_opc% or trip.%is_asf%) and
+        (trip.%is_lpc_opc_or_ots% or trip.%is_asf%) and
         not crew.%is_leased_trip_start%;
-  %days_since%(trip.%start_utc%, %last_performed_pc_opc_or_asf%)
-    <= %max_days_btw_pc_opc_and_asf_p% + 
+  %days_since%(trip.%start_utc%, %last_performed_lpc_opc_ots_or_asf%)
+    <= %max_days_btw_lpc_opc_ots_and_asf_p% + 
        rule_exceptions.%overshoot_int%(trip.%start_UTC%);
   startdate  = trip.%start_utc%;
   severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %qln_max_days_btw_pc_opc_and_asf_FC_failobject%;
+  failobject = %qln_max_days_btw_lpc_opc_ots_and_asf_FC_failobject%;
   failtext(Int value, Int limit) =
-    rules.%failtext_int%("Days btw PC/OPC and ASF",value,limit);
-  remark "(CCR) Func: Max nr of days between PC/OPC and ASF",
+    rules.%failtext_int%("Days btw LPC/OPC/OTS and ASF",value,limit);
+  remark "(CCR) Func: Max nr of days between LPC/OPC/OTS and ASF",
   planner "";
 end
 
-%qln_max_days_btw_pc_opc_and_asf_FC_failobject% =
+%qln_max_days_btw_lpc_opc_ots_and_asf_FC_failobject% =
   first(leg(trip),leg.%failobject_departure%) where
-    (%days_since%(leg.%start_UTC%,%last_performed_pc_opc_or_asf%) > 
-     %max_days_btw_pc_opc_and_asf_p% and
-     (leg.%is_asf% or leg.%is_pc_or_opc%));
+    (%days_since%(leg.%start_UTC%,%last_performed_lpc_opc_ots_or_asf%) > 
+     %max_days_btw_lpc_opc_ots_and_asf_p% and
+     (leg.%is_asf% or leg.%is_lpc_opc_or_ots%));
 
-%min_days_btw_pc_opc_and_asf_p% = parameter 60
-  remark "Min days between PC/OPC and ASF";
-%max_days_btw_pc_opc_and_asf_p% = parameter 90
-  remark "Max days between PC/OPC and ASF";
+%min_days_btw_lpc_opc_ots_and_asf_p% = parameter 60
+  remark "Min days between LPC/OPC/OTS and ASF";
+%max_days_btw_lpc_opc_ots_and_asf_p% = parameter 90
+  remark "Max days between LPC/OPC/OTS and ASF";
 
   
 /* 

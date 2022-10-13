@@ -61,7 +61,7 @@ def saveLinkScenario(test_mode_params=None):
         'hotel_transport',
         'lh_apt_exceptions',
         'minimum_connect',
-        'pc_opc_composition',
+        'lpc_opc_or_ots_composition',
         'preferred_hotel',
         'preferred_hotel_exc',
         'property',

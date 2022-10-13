@@ -32,7 +32,7 @@ Feature: Checks to see that recurrent training is performed
 
       When I show "crew" in window 1
       Then the rule "rules_qual_ccr.qln_recurrent_training_performed_ALL" shall fail on leg 1 on trip 1 on roster 1
-      and rave "rules_qual_ccr.%missed_recurrent_training_failtext%" shall be "OMA: Rec. expiry dates passed, needs: CRM, LC, CRM, PC, PGT" on leg 1 on trip 1 on roster 1
+      and rave "rules_qual_ccr.%missed_recurrent_training_failtext%" shall be "OMA: Rec. expiry dates passed, needs: CRM, LC, CRM, LPC, PGT" on leg 1 on trip 1 on roster 1
 
     @SCENARIO2
     Scenario: Recurrent document must be valid for production, even if training in trip (CRM)

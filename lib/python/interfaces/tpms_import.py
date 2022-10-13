@@ -22,7 +22,7 @@ def main():
 
     source_folder = os.path.join(os.environ['CARMTMP'], 'ftp', 'in')
     backup_folder = os.path.join(os.environ['CARMTMP'], 'ftp', 'tpms_import_processed')
-    DOCUMENT_WHITELIST = ['LC', 'PC', 'OPC', 'CRM', 'CRMC']
+    DOCUMENT_WHITELIST = ['LC', 'LPC', 'OPC', 'OTS', 'CRM', 'CRMC']
 
     if not os.path.exists(backup_folder):
         os.makedirs(backup_folder)
@@ -97,7 +97,7 @@ def main():
 
 
     def _update_crew_document(row_no, row):
-        split_sub_type = row[qual_code] in ('OPC', 'PC') and row[act_group_name] in ('A3','A4','A5','A3A5')
+        split_sub_type = row[qual_code] in ('OPC', 'OTS', 'LPC') and row[act_group_name] in ('A3','A4','A5','A3A5')
         if split_sub_type:
             row[qual_code] += row[act_group_name]
         key = _get_key(row, row_no)
@@ -138,7 +138,7 @@ def main():
         rec_expr = R.foreach(
             R.iter("iterators.leg_set",
                    sort_by = 'leg.%start_utc%',
-                   where = ('leg.%%end_date%% = %s' % str(exam_date), 'leg.%is_pc_or_opc% or leg.%is_crm% or leg.%is_crmc%')), #TODO update criteria for PGT CRM etc.
+                   where = ('leg.%%end_date%% = %s' % str(exam_date), 'leg.%is_lpc_opc_or_ots% or leg.%is_crm% or leg.%is_crmc%')), #TODO update criteria for PGT CRM etc.
             # These values are keys in the attr tables
             'training_log.%rec_leg_type%',
             'training_log.%rec_leg_time%',
@@ -164,7 +164,7 @@ def main():
         This function is used to primarily to tag a leg so that CMS knows it has
         updated a document (by having the RECURRENT attribute).
         It also sets a value to indicate which document was primarily updated
-        (typically PC if more than one).
+        (typically LPC if more than one).
         This function is copied from CrewTableHandler
         """
         (crew_id, leg_type, leg_time, leg_code, adep) = leg_key

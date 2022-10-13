@@ -30,16 +30,16 @@ codes = {
         'NO': '3225',
         'SE': '379',
     }, "Instructor - LIFUS/AC-training"),
-    'INST_PC_OPC': ({
+    'INST_LPC_OPC_OTS': ({
         'DK': '0677',
         'NO': '3226',
         'SE': '366',
-    }, "Instructor - PC/OPC"),
-    'INST_PC_OPC_BD': ({
-        'DK': 'PCOPCBD',
-        'NO': 'PCOPCBD',
-        'SE': 'PCOPCBD',
-    }, "Instructor - PC/OPC (Brief/Debrief)"),
+    }, "Instructor - LPC/OPC/OTS"),
+    'INST_LPC_OPC_OTS_BD': ({
+        'DK': 'LPCOPCOTSBD',
+        'NO': 'LPCOPCOTSBD',
+        'SE': 'LPCOPCOTSBD',
+    }, "Instructor - LPC/OPC/OTS (Brief/Debrief)"),
     'INST_TYPE_RATING': ({
         'DK': '0679',
         'NO': '3227',

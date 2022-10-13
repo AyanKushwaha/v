@@ -150,8 +150,8 @@ end
     qualification.%crew_has_qln_leg_start%;
 
 %trng_min_active_sectors_after_ctr_flight_failtext%(Int value, Int limit) =
-  if %consider_asf_ast_pc_opc% then
-    rules.%failtext_int%(concat("ASF, AST or PC/OPC and remaining ",
+  if %consider_asf_ast_lpc_opc_or_ots% then
+    rules.%failtext_int%(concat("ASF, AST or LPC/OPC/OTS and remaining ",
                                 %consolidation_ac_qual%,
                                 " sectors within 150 days after FAM flight ",
                                 format_time(%consolidation_period_end_150d_hb% - 24:00, "%02d%b%Y"),
@@ -173,7 +173,7 @@ end
       else
         rules.%failtext_int%(concat("OMA: Min ",
                                     %consolidation_ac_qual%,
-                                    " sectors within 90 days after FAM flight needs ASF, PC or OPC ",
+                                    " sectors within 90 days after FAM flight needs ASF, LPC or OPC/OTS ",
                                     format_time(%consolidation_period_end_90d_hb% - 24:00, "%02d%b%Y"),
                                     ":"), value, limit);
 
@@ -186,14 +186,14 @@ end
 **    
 ** Description:
 **    If the crew has completed 8-9 sectors within the first 90 days after FAM FLT,
-**    has FMST amd does not have ASF/PC/OPC, the rule check that the distance is at most
+**    has FMST amd does not have ASF/LPC/OPC/OTS, the rule check that the distance is at most
 **    three days between FMST and the next consolidation flight. Fail object is the
 **    consolidation flight.
 */
 export rule trng_max_days_between_fmst_and_cons_flt =
   valid %leg_qual% = %consolidation_ac_qual% and
         leg.%is_active_flight% and
-        (not %consider_asf_ast_pc_opc%) and
+        (not %consider_asf_ast_lpc_opc_or_ots%) and
         %consider_fmst% and
         %is_first_leg_after_fmst% and
         (%nr_consolidation_sectors_after_fmst_before_pp% = 0) and
@@ -231,10 +231,10 @@ end
 %consider_fmst% = training.%consider_fmst%;
 %last_fmst_date_hb% = training.%last_fmst_date_hb%;
 
-%consider_asf_ast_pc_opc% = training.%consider_asf_ast_pc_opc%;
+%consider_asf_ast_lpc_opc_or_ots% = training.%consider_asf_ast_lpc_opc_or_ots%;
 
 %nr_consolidation_sectors_in_90d_or_120d_or_150d% =
-  if %consider_asf_ast_pc_opc% then
+  if %consider_asf_ast_lpc_opc_or_ots% then
     %nr_consolidation_sectors_in_150d%
   else
     if %consider_fmst% then
@@ -484,7 +484,7 @@ end
 */
 export rule qln_absence_flight_training_performed_ALL =
   valid %qln_absence_training_performed_valid% and
-        not (leg.%is_pc_or_opc% or leg.%is_cc_rec%) and
+        not (leg.%is_lpc_opc_or_ots% or leg.%is_cc_rec%) and
         %crew_is_absent% and
         (not %absence_requires_ground_training% or
          %days_since_absence_ground_training% <= absence.%max_days_from_ground_training%);
@@ -1185,10 +1185,10 @@ end
 
 /*
 SKCMS-2875
-Rule: Rule that controls that crew needing PC is not assigned to 
-      same sim slot as crew needing OPC (OTS)
+Rule: Rule that controls that crew needing LPC is not assigned to 
+      same sim slot as crew needing OPC/OTS
 Desc: Create new rule that controls
-      - Trainees having PC (Y*) and trainees having OPC (OTS) S* are 
+      - Trainees having LPC (Y*) and trainees having OPC/OTS S* are 
         not assigned to same simulator
       - Crew with attribute SIM ASSIST can still have S* while the other 
         trainee has Y*
@@ -1196,29 +1196,32 @@ Desc: Create new rule that controls
       - The rule shall fail on both trainees in case of a mismatch of 
         training attributes on a Y* or S* session
 */
-export rule comp_mixed_pc_ots_not_allowed_in_sim =
+export rule comp_mixed_lpc_opc_or_ots_not_allowed_in_sim =
   valid roster.%check_rules% and 
         leg.%in_pp_extended% and 
-        leg.%is_pc_or_opc% and 
+        leg.%is_lpc_opc_or_ots% and 
         rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
   
-  (leg.%is_pc_or_opc%) and
-  not %has_pc_opc_mismatch% ;
+  (leg.%is_lpc_opc_or_ots%) and
+  not %has_lpc_opc_or_ots_mismatch% ;
   
   startdate  = leg.%activity_scheduled_start_time_UTC%;
   severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
   failobject = leg.%failobject_departure%;
-  failtext "PC and OTS must not be mixed in same simulator";
-  remark "PC and OTS must not be mixed in same simulator",
-  planner "PC and OTS must not be mixed in same simulator";
+  failtext "LPC and OPC/OTS must not be mixed in same simulator";
+  remark "LPC and OPC/OTS must not be mixed in same simulator",
+  planner "LPC and OPC/OTS must not be mixed in same simulator";
 end
 
-%has_pc_opc_mismatch% =
-    if training.%leg_is_pc% and not (leg.%is_any_sim_instr% or leg.%is_forced_sim_assist% or leg.%is_sim_assist_landings%) then
-      default(any(equal_legs, training.%leg_is_opc%) 
+%has_lpc_opc_or_ots_mismatch% =
+    if training.%leg_is_lpc% and not (leg.%is_any_sim_instr% or leg.%is_forced_sim_assist% or leg.%is_sim_assist_landings%) then
+      default(any(equal_legs, training.%leg_is_opc_or_ots%) 
       where (not (leg.%is_any_sim_instr% or leg.%is_forced_sim_assist% or leg.%is_sim_assist_landings%)),false)
-    else if training.%leg_is_opc% and not (leg.%is_any_sim_instr% or leg.%is_forced_sim_assist% or leg.%is_sim_assist_landings%) then
-      default(any(equal_legs, training.%leg_is_pc%) 
+    else if training.%leg_is_opc_or_ots% and not (leg.%is_any_sim_instr% or leg.%is_forced_sim_assist% or leg.%is_sim_assist_landings%) then
+      default(any(equal_legs, training.%leg_is_lpc%) 
+      where (not (leg.%is_any_sim_instr% or leg.%is_forced_sim_assist% or leg.%is_sim_assist_landings%)),false)
+    else if training.%leg_is_opc_or_ots% and not (leg.%is_any_sim_instr% or leg.%is_forced_sim_assist% or leg.%is_sim_assist_landings%) then
+      default(any(equal_legs, training.%leg_is_lpc%) 
       where (not (leg.%is_any_sim_instr% or leg.%is_forced_sim_assist% or leg.%is_sim_assist_landings%)),false)
     else
       false;

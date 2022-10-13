@@ -1357,7 +1357,7 @@ def _find_crew_position(chain_object, attribute, area=None, crew_id=""):
             if rostered:
                 current_assigned_pos, = chain_object.eval('crew_pos.%assigned_pos%')
                 assigned_rank = HF.pos2rank(current_assigned_pos)
-                # We should keep the assigned_rank for OPC since it can be a lower assignment.
+                # We should keep the assigned_rank for OPC/OTS since it can be a lower assignment.
                 # For other cases we should move the position.
                 if simRank in ("FC", "FP"):
                     assignRank = assigned_rank

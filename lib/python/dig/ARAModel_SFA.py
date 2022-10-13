@@ -60,7 +60,7 @@ def defaultConfig():
     #                           attr='OAAID' and next_revid=0 and deleted='N')")
 
     comp.selectBy(['period_start','period_end'],"$.udor >= %:1 and $.udor <= %:2 and \
-          activity in (select id from activity_set where grp in ('OPC','ASF','AST', 'FFS', 'SIM') and \
+          activity in (select id from activity_set where grp in ('OPC/OTS','ASF','AST', 'FFS', 'SIM') and \
                                     statcode<>'C' and \
                         ((substr(id,2,1) in ('1','2','3','4','5','6','7','8','9','0') and substr(id, 2,1)<> '7') or \
                         (substr(id,2,1) not in ('1','2','3','4','5','6','7','8','9','0') and \
@@ -106,7 +106,7 @@ def defaultConfig():
     comp.action("delete")
     comp.selectBy(['period_start','period_end'],"$.task_udor >= %:1 and $.task_udor <= %:2 and $.attr='OAAID' and \
           exists (select * from ground_task g1 where task_id=id and task_udor=udor and \
-          activity in (select id from activity_set where grp in ('OPC','ASF','AST', 'FFS', 'SIM') and \
+          activity in (select id from activity_set where grp in ('OPC/OTS','ASF','AST', 'FFS', 'SIM') and \
                         ((substr(id,2,1) in ('1','2','3','4','5','6','7','8','9','0') and substr(id, 2,1)<> '7') or \
                         (substr(id,2,1) not in ('1','2','3','4','5','6','7','8','9','0') and \
                         (length(id)<3 or substr(id, 3,1)<> '7'))) \
@@ -180,7 +180,7 @@ def defaultConfig():
     comp.selectBy(['period_start','period_end'],"$.udor >= %:1 and $.udor <= %:2 and \
            exists (select * from trip_ground_duty, ground_task where trip_id=$.id and \
                    trip_ground_duty.task_id = ground_task.id and $.udor=ground_task.udor and ground_task.activity in \
-                   (select id from activity_set where grp in ('OPC','ASF','AST', 'FFS', 'SIM') and \
+                   (select id from activity_set where grp in ('OPC/OTS','ASF','AST', 'FFS', 'SIM') and \
                         ((substr(id,2,1) in ('1','2','3','4','5','6','7','8','9','0') and substr(id, 2,1)<> '7') or \
                         (substr(id,2,1) not in ('1','2','3','4','5','6','7','8','9','0') and \
                         (length(id)<3 or substr(id, 3,1)<> '7'))) and \
@@ -207,7 +207,7 @@ def defaultConfig():
     comp.selectBy(['period_start','period_end'],"$.trip_udor >= %:1 and $.trip_udor <= %:2 and \
            exists (select * from ground_task where \
                    $.task_id = ground_task.id and $.task_udor=ground_task.udor and ground_task.activity in \
-                   (select id from activity_set where grp in ('OPC','ASF','AST', 'FFS', 'SIM') and \
+                   (select id from activity_set where grp in ('OPC/OTS','ASF','AST', 'FFS', 'SIM') and \
                         ((substr(id,2,1) in ('1','2','3','4','5','6','7','8','9','0') and substr(id, 2,1)<> '7') or \
                         (substr(id,2,1) not in ('1','2','3','4','5','6','7','8','9','0') and \
                         (length(id)<3 or substr(id, 3,1)<> '7'))) and \
@@ -332,7 +332,7 @@ def defaultConfig():
     #comp.selectBy(['period_start','period_end'],"$.task_udor >= %:1 and $.task_udor <= %:2 and \
     #       exists (select * from ground_task where \
     #               $.task_id = ground_task.id and $.task_udor=ground_task.udor and ground_task.activity in \
-    #               (select id from activity_set where grp in ('OPC','ASF','AST', 'FFS') and \
+    #               (select id from activity_set where grp in ('OPC/OTS','ASF','AST', 'FFS') and \
     #                                next_revid=0 and deleted='N') \
     #               and ground_task.next_revid=0 and ground_task.deleted='N')")
 

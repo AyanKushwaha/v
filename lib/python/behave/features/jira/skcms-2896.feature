@@ -1,4 +1,4 @@
-Feature: A3A5 pilots in need of PCA3A5 training, should get S5 converted to Y5.
+Feature: A3A5 pilots in need of LPCA3A5 training, should get S5 converted to Y5.
 Background: Set up for Tracking
 
 Given Tracking
@@ -11,12 +11,12 @@ Given a crew member with
     
 
 @PASS_1
-Scenario: leg_is_pc shall be True
+Scenario: leg_is_lpc shall be True
     
     Given crew member 1 has qualification "ACQUAL+A3" from 1AUG2019 to 30APR2022
 	Given crew member 1 has qualification "ACQUAL+A5" from 1AUG2019 to 30APR2022
 	
-    Given crew member 1 has document "REC+PCA3A5" from 8FEB2019 to 30APR2022
+    Given crew member 1 has document "REC+LPCA3A5" from 8FEB2019 to 30APR2022
 
 
     Given a trip with the following activities
@@ -28,20 +28,20 @@ Scenario: leg_is_pc shall be True
 
     When I show "crew" in window 1
 
-    Then rave "training.%leg_is_pc%" shall be "True" on leg 1 on trip 1 on roster 1
+    Then rave "training.%leg_is_lpc%" shall be "True" on leg 1 on trip 1 on roster 1
     Then rave "leg.%code%" shall be "S5" on leg 1 on trip 1 on roster 1
     Then rave "training.%leg_code_redefined%" shall be "Y5" on leg 1 on trip 1 on roster 1
     
   #########################################
 @PASS_2
-  Scenario: leg_is_pc shall be False
+  Scenario: leg_is_lpc shall be False
 
     
     
     Given crew member 1 has qualification "ACQUAL+A3" from 1AUG2019 to 28FEB2022
 	Given crew member 1 has qualification "ACQUAL+A5" from 1AUG2019 to 28FEB2022
 	
-    Given crew member 1 has document "REC+PCA3A5" from 8FEB2019 to 28FEB2022
+    Given crew member 1 has document "REC+LPCA3A5" from 8FEB2019 to 28FEB2022
 
 
     Given a trip with the following activities
@@ -53,6 +53,6 @@ Scenario: leg_is_pc shall be True
 
     When I show "crew" in window 1
 
-    Then rave "training.%leg_is_pc%" shall be "False" on leg 1 on trip 1 on roster 1
+    Then rave "training.%leg_is_lpc%" shall be "False" on leg 1 on trip 1 on roster 1
     Then rave "leg.%code%" shall be "S5" on leg 1 on trip 1 on roster 1
     

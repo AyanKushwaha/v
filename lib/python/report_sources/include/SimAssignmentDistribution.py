@@ -4,7 +4,7 @@
  Sim Assignment Distribution
 
  Contains the information about assigned
- recurrent training: PC,OPC,AST,ASF,PGT,RCRM
+ recurrent training: LPC,OPC,OTS,AST,ASF,PGT,RCRM
   
  Created:    June 2007
  By:         Peter, Jeppesen Systems AB
@@ -60,7 +60,7 @@ class SimAssignmentDistribution(SASReport):
             date += RelTime(24,0)
         
         # Get the compdays in use
-        #SimAssignInUse = "OPC","OPC3","OPC4","PC","PC3","PC4","AST","ASF","PGT","CRM","EMG"
+        #SimAssignInUse = "OPC","OPC3","OPC4","OTS","OTS3","OTS4","LPC","LPC3","LPC4","AST","ASF","PGT","CRM","EMG"
         #"F0","F1","F3","F3S","F31","F35","F7S","BL1"
         
         #compdaysInUseRave = R.set('compdays.in_use').members()

@@ -104,7 +104,7 @@ class GDTaskCodeString(Cfh.String):
         """Return None if value is valid, else text string."""
         if not value in self.task_codes.keys():
             return "Unknown task code (%s)." % value
-        elif self.task_codes[value] in ['OPC','AST','ASF','FFS','SIM']:
+        elif self.task_codes[value] in ['OPC','OTS','AST','ASF','FFS','SIM']:
             #Collect the crew complement from rave table
             self.complementList = []
             for i in range(1,11):
@@ -944,7 +944,7 @@ def update_ground_duty():
         taskname = ground_task_properties['taskcode']
         comp_changed = new_comp != current_comp
 
-        if task_codes[taskname] in ['OPC','AST','ASF','FFS','SIM']:
+        if task_codes[taskname] in ['OPC','OTS','AST','ASF','FFS','SIM']:
             if has_sim_exception:
                 set_sim_need(taskname, form.complement, task_udor, task.id)    
             if comp_changed:
@@ -1249,7 +1249,7 @@ def create_ground_duty():
             
         taskname = ground_task_properties['taskcode']
 
-        if task_codes[taskname] in ['OPC','AST','ASF','FFS','SIM']:
+        if task_codes[taskname] in ['OPC','OTS','AST','ASF','FFS','SIM']:
             need_list = []
             for i in range(1,11):
                 try:
@@ -1582,7 +1582,7 @@ def create_trip(task_udor, trip_base, tripname, complement, task, trip_list):
             
 ##         taskname = ground_task_properties['taskcode']
 
-##         if task_codes[taskname] in ['OPC','AST','ASF','FFS','SIM']:
+##         if task_codes[taskname] in ['OPC','OTS','AST','ASF','FFS','SIM']:
 ##             need_list = []
 ##             for i in range(1,11):
 ##                 try:

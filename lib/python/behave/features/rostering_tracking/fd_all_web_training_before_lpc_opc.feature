@@ -1,12 +1,12 @@
-@FD @PC @OPC @TRAINING
-Feature: Test that web trainings are scheduled correct relatively PC/OPC.
+@FD @LPC @OPC @TRAINING
+Feature: Test that web trainings are scheduled correct relatively LPC/OPC.
 
   Background:
     Given Tracking
 
     Given table agreement_validity additionally contains the following
       | id                    | validfrom | validto   |
-      | web_training_pc_LH_17 | 1JAN2000  | 31DEC2035 |
+      | web_training_lpc_LH_17 | 1JAN2000  | 31DEC2035 |
 
     Given a crew member with
       | attribute  | value     | valid from | valid to  |
@@ -37,7 +37,7 @@ Feature: Test that web trainings are scheduled correct relatively PC/OPC.
   Scenario: Duplicated web trainings should be avoided - spring.
     Given planning period from 1Apr2020 to 1May2020
 
-    Given crew member 1 has document "REC+PCA3" from 1APR2018 to 1APR2021
+    Given crew member 1 has document "REC+LPCA3" from 1APR2018 to 1APR2021
     Given crew member 1 has document "REC+OPCA3" from 1APR2019 to 1MAY2020
 
     Given crew member 1 has a personal activity "WTA21" at station "ARN" that starts at 20APR2020 04:00 and ends at 20APR2020 14:00
@@ -52,7 +52,7 @@ Feature: Test that web trainings are scheduled correct relatively PC/OPC.
   Scenario: Duplicated web trainings should be avoided - autumn.
     Given planning period from 01Sep2020 to 01Oct2020
 
-    Given crew member 1 has document "REC+PCA3" from 1APR2018 to 1NOV2020
+    Given crew member 1 has document "REC+LPCA3" from 1APR2018 to 1NOV2020
     Given crew member 1 has document "REC+OPCA3" from 1APR2019 to 1MAY2021
 
     Given crew member 1 has a personal activity "WTA22" at station "ARN" that starts at 20SEP2020 04:00 and ends at 20SEP2020 14:00
@@ -64,10 +64,10 @@ Feature: Test that web trainings are scheduled correct relatively PC/OPC.
 ######################################################################################################
 
   @SCENARIO3
-  Scenario: Web training is not required at PC or OPC SKILL TEST.
+  Scenario: Web training is not required at LPC or OPC SKILL TEST.
     Given planning period from 01Apr2020 to 01May2020
 
-    Given crew member 1 has document "REC+PCA3" from 1APR2018 to 1MAY2021
+    Given crew member 1 has document "REC+LPCA3" from 1APR2018 to 1MAY2021
     Given crew member 1 has document "REC+OPCA3" from 1APR2019 to 1APR2021
 
     Given a trip with the following activities
@@ -91,26 +91,26 @@ Feature: Test that web trainings are scheduled correct relatively PC/OPC.
     Given crew member 1 has a personal activity "BL20" at station "ARN" that starts at 1MAY2020 10:00 and ends at 3MAY2020 10:00
 
     When I show "crew" in window 1
-    Then the rule "rules_qual_ccr.qln_min_days_btw_pc_opc_and_web_trg_FC" shall pass on leg 2 on trip 1 on roster 1
-    and the rule "rules_qual_ccr.qln_min_days_btw_pc_opc_and_web_trg_FC" shall pass on leg 2 on trip 2 on roster 1
+    Then the rule "rules_qual_ccr.qln_min_days_btw_lpc_opc_or_ots_and_web_trg_FC" shall pass on leg 2 on trip 1 on roster 1
+    and the rule "rules_qual_ccr.qln_min_days_btw_lpc_opc_or_ots_and_web_trg_FC" shall pass on leg 2 on trip 2 on roster 1
     and the rule "rules_training_cct.trng_web_training_needed" shall pass on leg 1 on trip 3 on roster 1
 
 ######################################################################################################
 
   @SCENARIO4
-  Scenario: Missing web training within spring eval period before PC or OPC is illegal.
+  Scenario: Missing web training within spring eval period before LPC or OPC is illegal.
     Given planning period from 01Apr2020 to 01May2020
 
-    Given crew member 1 has document "REC+PCA3" from 1APR2018 to 1APR2020
+    Given crew member 1 has document "REC+LPCA3" from 1APR2018 to 1APR2020
     Given crew member 1 has document "REC+OPCA3" from 1APR2019 to 1APR2021
 
     Given crew member 2 has qualification "ACQUAL+A4" from 30OCT2017 to 01JAN2036
-    Given crew member 2 has document "REC+PCA3" from 1APR2019 to 1APR2021
+    Given crew member 2 has document "REC+LPCA3" from 1APR2019 to 1APR2021
     Given crew member 2 has document "REC+OPCA3" from 1APR2019 to 1MAY2021
-    Given crew member 2 has document "REC+PCA4" from 1APR2019 to 1APR2021
+    Given crew member 2 has document "REC+LPCA4" from 1APR2019 to 1APR2021
     Given crew member 2 has document "REC+OPCA4" from 1APR2019 to 1MAY2020
 
-    # PC
+    # LPC
     Given a trip with the following activities
       | act    | car | num    | dep stn | arr stn | dep             | arr             | ac_typ | code |
       | dh     | SK  | 000001 | ARN     | CPH     | 16APR2020 05:45 | 16APR2020 06:55 | 73O    |      |
@@ -149,10 +149,10 @@ Feature: Test that web trainings are scheduled correct relatively PC/OPC.
     Given trip 4 is assigned to crew member 2 in position FP
 
     When I show "crew" in window 1
-    Then the rule "rules_qual_ccr.qln_min_days_btw_pc_opc_and_web_trg_FC" shall fail on leg 2 on trip 1 on roster 1
-    and the rule "rules_qual_ccr.qln_min_days_btw_pc_opc_and_web_trg_FC" shall pass on leg 2 on trip 3 on roster 1
-    and the rule "rules_qual_ccr.qln_min_days_btw_pc_opc_and_web_trg_FC" shall fail on leg 2 on trip 1 on roster 2
-    and the rule "rules_qual_ccr.qln_min_days_btw_pc_opc_and_web_trg_FC" shall pass on leg 2 on trip 3 on roster 2
+    Then the rule "rules_qual_ccr.qln_min_days_btw_lpc_opc_or_ots_and_web_trg_FC" shall fail on leg 2 on trip 1 on roster 1
+    and the rule "rules_qual_ccr.qln_min_days_btw_lpc_opc_or_ots_and_web_trg_FC" shall pass on leg 2 on trip 3 on roster 1
+    and the rule "rules_qual_ccr.qln_min_days_btw_lpc_opc_or_ots_and_web_trg_FC" shall fail on leg 2 on trip 1 on roster 2
+    and the rule "rules_qual_ccr.qln_min_days_btw_lpc_opc_or_ots_and_web_trg_FC" shall pass on leg 2 on trip 3 on roster 2
     and rave "training.%wt_earliest_date%" shall be "01JAN2020 00:00" on leg 2 on trip 1 on roster 1
     and rave "training.%wt_latest_date%" shall be "01APR2020 00:00" on leg 2 on trip 1 on roster 1
     and rave "training.%wt_earliest_date%" shall be "01FEB2020 00:00" on leg 2 on trip 1 on roster 2
@@ -161,23 +161,23 @@ Feature: Test that web trainings are scheduled correct relatively PC/OPC.
 ######################################################################################################
 
   @SCENARIO5
-  Scenario: Missing web training within autumn eval period before PC or OPC is illegal.
+  Scenario: Missing web training within autumn eval period before LPC or OPC is illegal.
     Given planning period from 01SEP2020 to 01OCT2020
 
     Given crew member 1 has qualification "ACQUAL+A4" from 30OCT2017 to 01JAN2036
     Given crew member 1 has qualification "ACQUAL+A5" from 30OCT2017 to 01JAN2036
-    Given crew member 1 has document "REC+PCA3" from 01APR2018 to 01APR2021
+    Given crew member 1 has document "REC+LPCA3" from 01APR2018 to 01APR2021
     Given crew member 1 has document "REC+OPCA3" from 01APR2019 to 01APR2021
-    Given crew member 1 has document "REC+PCA4" from 1APR2019 to 01NOV2020
+    Given crew member 1 has document "REC+LPCA4" from 1APR2019 to 01NOV2020
     Given crew member 1 has document "REC+OPCA4" from 1APR2019 to 01APR2021
-    Given crew member 1 has document "REC+PCA5" from 1APR2019 to 01APR2021
+    Given crew member 1 has document "REC+LPCA5" from 1APR2019 to 01APR2021
     Given crew member 1 has document "REC+OPCA5" from 1APR2019 to 01APR2021
 
 
-    Given crew member 2 has document "REC+PCA3" from 01APR2019 to 01APR2021
+    Given crew member 2 has document "REC+LPCA3" from 01APR2019 to 01APR2021
     Given crew member 2 has document "REC+OPCA3" from 01APR2019 to 01SEP2020
 
-    # PC
+    # LPC
     Given a trip with the following activities
       | act    | car | num    | dep stn | arr stn | dep             | arr             | ac_typ | code |
       | dh     | SK  | 000001 | ARN     | CPH     | 16SEP2020 05:45 | 16SEP2020 06:55 | 73O    |      |
@@ -216,10 +216,10 @@ Feature: Test that web trainings are scheduled correct relatively PC/OPC.
     Given trip 4 is assigned to crew member 2 in position FP
 
     When I show "crew" in window 1
-    Then the rule "rules_qual_ccr.qln_min_days_btw_pc_opc_and_web_trg_FC" shall fail on leg 2 on trip 1 on roster 1
-    and the rule "rules_qual_ccr.qln_min_days_btw_pc_opc_and_web_trg_FC" shall pass on leg 2 on trip 3 on roster 1
-    and the rule "rules_qual_ccr.qln_min_days_btw_pc_opc_and_web_trg_FC" shall fail on leg 2 on trip 1 on roster 2
-    and the rule "rules_qual_ccr.qln_min_days_btw_pc_opc_and_web_trg_FC" shall pass on leg 2 on trip 3 on roster 2
+    Then the rule "rules_qual_ccr.qln_min_days_btw_lpc_opc_or_ots_and_web_trg_FC" shall fail on leg 2 on trip 1 on roster 1
+    and the rule "rules_qual_ccr.qln_min_days_btw_lpc_opc_or_ots_and_web_trg_FC" shall pass on leg 2 on trip 3 on roster 1
+    and the rule "rules_qual_ccr.qln_min_days_btw_lpc_opc_or_ots_and_web_trg_FC" shall fail on leg 2 on trip 1 on roster 2
+    and the rule "rules_qual_ccr.qln_min_days_btw_lpc_opc_or_ots_and_web_trg_FC" shall pass on leg 2 on trip 3 on roster 2
     and rave "training.%wt_earliest_date%" shall be "01AUG2020 00:00" on leg 2 on trip 1 on roster 1
     and rave "training.%wt_latest_date%" shall be "01NOV2020 00:00" on leg 2 on trip 1 on roster 1
     and rave "training.%wt_earliest_date%" shall be "01JUL2020 00:00" on leg 2 on trip 1 on roster 2
@@ -228,12 +228,12 @@ Feature: Test that web trainings are scheduled correct relatively PC/OPC.
 ######################################################################################################
 
   @SCENARIO6
-  Scenario: Web training needed before PC.
+  Scenario: Web training needed before LPC.
     Given planning period from 1Apr2020 to 1May2020
 
-    Given crew member 1 has document "REC+PCA3" from 01JUN2019 to 01JUL2020
+    Given crew member 1 has document "REC+LPCA3" from 01JUN2019 to 01JUL2020
     Given crew member 1 has document "REC+OPCA3" from 01OCT2019 to 01OCT2021
-    Given crew member 2 has document "REC+PCA3" from 01JUN2019 to 01JUL2020
+    Given crew member 2 has document "REC+LPCA3" from 01JUN2019 to 01JUL2020
     Given crew member 2 has document "REC+OPCA3" from 01OCT2019 to 01OCT2021
 
     Given crew member 1 has a personal activity "WTA21" at station "ARN" that starts at 24APR2020 04:00 and ends at 24APR2020 14:00
@@ -265,9 +265,9 @@ Feature: Test that web trainings are scheduled correct relatively PC/OPC.
   Scenario: Web training needed before OPC.
     Given planning period from 1Apr2020 to 1May2020
 
-    Given crew member 1 has document "REC+PCA3" from 01OCT2019 to 01OCT2021
+    Given crew member 1 has document "REC+LPCA3" from 01OCT2019 to 01OCT2021
     Given crew member 1 has document "REC+OPCA3" from 01JUN2019 to 01JUL2020
-    Given crew member 2 has document "REC+PCA3" from 01OCT2019 to 01OCT2021
+    Given crew member 2 has document "REC+LPCA3" from 01OCT2019 to 01OCT2021
     Given crew member 2 has document "REC+OPCA3" from 01JUN2019 to 01JUL2020
 
     Given another crew member with
@@ -281,7 +281,7 @@ Feature: Test that web trainings are scheduled correct relatively PC/OPC.
       | published  | 01MAY2020 | 01JAN1986  |           |
 
     Given crew member 3 has qualification "ACQUAL+A2" from 30OCT2017 to 01JAN2036
-    Given crew member 3 has document "REC+PC" from 01OCT2019 to 01OCT2021
+    Given crew member 3 has document "REC+LPC" from 01OCT2019 to 01OCT2021
     Given crew member 3 has document "REC+OPC" from 01JUN2019 to 01JUL2020
 
     Given crew member 1 has a personal activity "WTA21" at station "ARN" that starts at 24APR2020 04:00 and ends at 24APR2020 14:00
@@ -326,9 +326,9 @@ Feature: Test that web trainings are scheduled correct relatively PC/OPC.
   Scenario: Web training in correct period - spring
     Given planning period from 1Apr2020 to 1May2020
 
-    Given crew member 1 has document "REC+PCA3" from 01OCT2019 to 01OCT2021
+    Given crew member 1 has document "REC+LPCA3" from 01OCT2019 to 01OCT2021
     Given crew member 1 has document "REC+OPCA3" from 01JUN2019 to 01JUL2020
-    Given crew member 2 has document "REC+PCA3" from 01OCT2019 to 01OCT2021
+    Given crew member 2 has document "REC+LPCA3" from 01OCT2019 to 01OCT2021
     Given crew member 2 has document "REC+OPCA3" from 01JUN2019 to 01JUL2020
 
     Given crew member 1 has a personal activity "WTA21" at station "ARN" that starts at 24APR2020 04:00 and ends at 24APR2020 14:00
@@ -348,9 +348,9 @@ Feature: Test that web trainings are scheduled correct relatively PC/OPC.
   Scenario: Web training in correct period - autumn
     Given planning period from 1Oct2020 to 1Nov2020
 
-    Given crew member 1 has document "REC+PCA3" from 01OCT2019 to 01OCT2021
+    Given crew member 1 has document "REC+LPCA3" from 01OCT2019 to 01OCT2021
     Given crew member 1 has document "REC+OPCA3" from 01JUN2019 to 01JUL2020
-    Given crew member 2 has document "REC+PCA3" from 01OCT2019 to 01OCT2021
+    Given crew member 2 has document "REC+LPCA3" from 01OCT2019 to 01OCT2021
     Given crew member 2 has document "REC+OPCA3" from 01JUN2019 to 01JUL2020
 
     Given crew member 1 has a personal activity "WTA21" at station "ARN" that starts at 24OCT2020 04:00 and ends at 24OCT2020 14:00
@@ -367,10 +367,10 @@ Feature: Test that web trainings are scheduled correct relatively PC/OPC.
 ######################################################################################################
 
   @SCENARIO10
-  Scenario: Web training required before OPC FORCED, PC FORCED and PC RENEWAL.
+  Scenario: Web training required before OPC FORCED, LPC FORCED and LPC RENEWAL.
     Given planning period from 1Apr2020 to 1May2020
 
-    Given crew member 1 has document "REC+PCA3" from 01OCT2019 to 01OCT2021
+    Given crew member 1 has document "REC+LPCA3" from 01OCT2019 to 01OCT2021
     Given crew member 1 has document "REC+OPCA3" from 01JUN2019 to 01JUN2020
 
     Given a trip with the following activities
@@ -380,7 +380,7 @@ Feature: Test that web trainings are scheduled correct relatively PC/OPC.
       | ground |     |        | CPH     | CPH     | 01APR2020 12:30 | 01APR2020 14:30 |        | Y6   |
       | dh     | SK  | 000002 | CPH     | ARN     | 01APR2020 19:00 | 01APR2020 20:15 | 73O    |      |
 
-    Given trip 1 is assigned to crew member 1 in position FP with attribute TRAINING="PC FORCED"
+    Given trip 1 is assigned to crew member 1 in position FP with attribute TRAINING="LPC FORCED"
 
     Given a trip with the following activities
       | act    | car | num    | dep stn | arr stn | dep             | arr             | ac_typ | code |
@@ -398,7 +398,7 @@ Feature: Test that web trainings are scheduled correct relatively PC/OPC.
       | ground |     |        | CPH     | CPH     | 10APR2020 12:30 | 10APR2020 14:30 |        | Y6   |
       | dh     | SK  | 000002 | CPH     | ARN     | 10APR2020 19:00 | 10APR2020 20:15 | 73O    |      |
 
-    Given trip 3 is assigned to crew member 1 in position FP with attribute TRAINING="PC RENEWAL"
+    Given trip 3 is assigned to crew member 1 in position FP with attribute TRAINING="LPC RENEWAL"
 
     Given crew member 1 has a personal activity "BL20" at station "ARN" that starts at 1MAY2020 22:00 and ends at 3MAY2020 22:00
 
@@ -406,22 +406,22 @@ Feature: Test that web trainings are scheduled correct relatively PC/OPC.
     Then the rule "rules_training_cct.trng_web_training_needed" shall fail on leg 2 on trip 1 on roster 1
     and the rule "rules_training_cct.trng_web_training_needed" shall fail on leg 2 on trip 2 on roster 1
     and the rule "rules_training_cct.trng_web_training_needed" shall fail on leg 2 on trip 3 on roster 1
-    and the rule "rules_qual_ccr.qln_min_days_btw_pc_opc_and_web_trg_FC" shall fail on leg 2 on trip 1 on roster 1
-    and the rule "rules_qual_ccr.qln_min_days_btw_pc_opc_and_web_trg_FC" shall fail on leg 2 on trip 2 on roster 1
-    and the rule "rules_qual_ccr.qln_min_days_btw_pc_opc_and_web_trg_FC" shall fail on leg 2 on trip 3 on roster 1
+    and the rule "rules_qual_ccr.qln_min_days_btw_lpc_opc_or_ots_and_web_trg_FC" shall fail on leg 2 on trip 1 on roster 1
+    and the rule "rules_qual_ccr.qln_min_days_btw_lpc_opc_or_ots_and_web_trg_FC" shall fail on leg 2 on trip 2 on roster 1
+    and the rule "rules_qual_ccr.qln_min_days_btw_lpc_opc_or_ots_and_web_trg_FC" shall fail on leg 2 on trip 3 on roster 1
 
 ######################################################################################################
 
   @CORONA
-  # Special Corona case: some crew completed the web training during spring but could not perform PC and
-  # got their documents prolonged instead and the PC activity will be scheduled during the summer.
+  # Special Corona case: some crew completed the web training during spring but could not perform LPC and
+  # got their documents prolonged instead and the LPC activity will be scheduled during the summer.
   # Web training rules are not applicable in this situation.
-  Scenario: Special Corona case: crew with autumn PC and completed WTX2 course during spring is legal.
+  Scenario: Special Corona case: crew with autumn LPC and completed WTX2 course during spring is legal.
     Given planning period from 1Aug2020 to 1Sep2020
 
-    Given crew member 1 has document "REC+PCA3" from 01OCT2019 to 01SEP2020
+    Given crew member 1 has document "REC+LPCA3" from 01OCT2019 to 01SEP2020
     Given crew member 1 has document "REC+OPCA3" from 01JUN2019 to 01SEP2020
-    Given crew member 2 has document "REC+PCA3" from 01OCT2019 to 01SEP2020
+    Given crew member 2 has document "REC+LPCA3" from 01OCT2019 to 01SEP2020
     Given crew member 2 has document "REC+OPCA3" from 01JUN2019 to 01SEP2020
 
     Given table crew_training_log additionally contains the following
@@ -444,11 +444,11 @@ Feature: Test that web trainings are scheduled correct relatively PC/OPC.
     When I show "crew" in window 1
     Then the rule "rules_training_cct.trng_web_training_needed" shall pass on leg 2 on trip 1 on roster 1
     and the rule "rules_training_cct.trng_web_training_needed" shall pass on leg 3 on trip 1 on roster 1
-    and the rule "rules_qual_ccr.qln_min_days_btw_pc_opc_and_web_trg_FC" shall pass on leg 2 on trip 1 on roster 1
-    and the rule "rules_qual_ccr.qln_min_days_btw_pc_opc_and_web_trg_FC" shall pass on leg 3 on trip 1 on roster 1
+    and the rule "rules_qual_ccr.qln_min_days_btw_lpc_opc_or_ots_and_web_trg_FC" shall pass on leg 2 on trip 1 on roster 1
+    and the rule "rules_qual_ccr.qln_min_days_btw_lpc_opc_or_ots_and_web_trg_FC" shall pass on leg 3 on trip 1 on roster 1
     and the rule "rules_training_cct.trng_web_training_needed" shall fail on leg 2 on trip 1 on roster 2
     and the rule "rules_training_cct.trng_web_training_needed" shall fail on leg 3 on trip 1 on roster 2
-    and the rule "rules_qual_ccr.qln_min_days_btw_pc_opc_and_web_trg_FC" shall fail on leg 2 on trip 1 on roster 2
-    and the rule "rules_qual_ccr.qln_min_days_btw_pc_opc_and_web_trg_FC" shall fail on leg 3 on trip 1 on roster 2
+    and the rule "rules_qual_ccr.qln_min_days_btw_lpc_opc_or_ots_and_web_trg_FC" shall fail on leg 2 on trip 1 on roster 2
+    and the rule "rules_qual_ccr.qln_min_days_btw_lpc_opc_or_ots_and_web_trg_FC" shall fail on leg 3 on trip 1 on roster 2
 
 ######################################################################################################

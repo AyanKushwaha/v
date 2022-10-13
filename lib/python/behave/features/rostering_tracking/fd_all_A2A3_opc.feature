@@ -1,4 +1,4 @@
-Feature: Rules that checks that PC/OPC documents are handled correctly when you switch AC types
+Feature: Rules that checks that LPC/OPC documents are handled correctly when you switch AC types
 
     Background:
         Given planning period from 01JAN2020 to 31JAN2020
@@ -21,8 +21,8 @@ Feature: Rules that checks that PC/OPC documents are handled correctly when you 
         |crew         | doc_typ | doc_subtype | validfrom | validto   | docno | maindocno | issuer| si | ac_qual|
         |crew member 1| REC     | OPC         | 01JAN2020 | 01JUN2020 |       |           |       |    | A2     |
         |crew member 1| REC     | OPC         | 01JUL2019 | 31DEC2020 |       |           |       |    | 38     |
-        |crew member 1| REC     | PC          | 01JAN2020 | 01MAY2020 |       |           |       |    | A2     |
-        |crew member 1| REC     | PC          | 01JUL2019 | 31DEC2020 |       |           |       |    | 38     |
+        |crew member 1| REC     | LPC         | 01JAN2020 | 01MAY2020 |       |           |       |    | A2     |
+        |crew member 1| REC     | LPC         | 01JUL2019 | 31DEC2020 |       |           |       |    | 38     |
         |crew member 1| REC     | LC          | 01JAN2020 | 01JUL2020 |       |           |       |    | A2     |
         |crew member 1| REC     | LC          | 01JUL2019 | 31DEC2020 |       |           |       |    | 38     |
 
@@ -34,6 +34,6 @@ Feature: Rules that checks that PC/OPC documents are handled correctly when you 
       
         When I show "crew" in window 1
         Then rave "training.%all_required_recurrent_dates_registered_trip_start%" shall be "True" on leg 1 on trip 1 on roster 1
-        and rave "crg_info.%pc_str%" shall be " PC: Apr20"
+        and rave "crg_info.%lpc_str%" shall be " LPC: Apr20"
         and rave "crg_info.%opc_str%" shall be "OPC: May20"
         and rave "crg_info.%lc_str%" shall be " LC: Jun20 "

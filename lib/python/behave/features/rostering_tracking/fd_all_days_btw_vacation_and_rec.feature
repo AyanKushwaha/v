@@ -2,13 +2,13 @@
 # Developed for JIRA: SKCMS-2058
 
 @planning @FD
-Feature: PC or OPC activity too soon after vacation.
+Feature: LPC or OPC activity too soon after vacation.
 Background:
     Given planning period from 1mar2018 to 31mar2018
 
     ###################################################################################
     @scenario1
-    Scenario: Check that rule fails if PC is too soon after vacation.
+    Scenario: Check that rule fails if LPC is too soon after vacation.
 
     Given another crew member with
     | attribute       | value     | valid from | valid to |
@@ -34,7 +34,7 @@ Background:
 
     ###################################################################################
     @scenario2
-    Scenario: Check that rule passes when PC or OPC is enough days from vacation.
+    Scenario: Check that rule passes when LPC or OPC is enough days from vacation.
 
     Given another crew member with
     | attribute       | value     | valid from | valid to |
@@ -60,7 +60,7 @@ Background:
 
     ###################################################################################
     @scenario3
-    Scenario: Check that rule fails when PC duty is too soon after vacation even when preceded with other duties in trip.
+    Scenario: Check that rule fails when LPC duty is too soon after vacation even when preceded with other duties in trip.
 
     Given another crew member with
     | attribute       | value     | valid from | valid to |
@@ -86,7 +86,7 @@ Background:
 
     ###################################################################################
     @scenario4
-    Scenario: Check that rule passes when PC duty is enough days from vacation even when preceded with other duties in trip.
+    Scenario: Check that rule passes when LPC duty is enough days from vacation even when preceded with other duties in trip.
 
     Given another crew member with
     | attribute       | value     | valid from | valid to |

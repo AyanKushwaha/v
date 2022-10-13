@@ -1,5 +1,5 @@
-@FD @PC @OPC @TRAINING
-Feature: Test PC and OPC
+@FD @LPC @OPC @TRAINING
+Feature: Test LPC and OPC
 
    Background:
      Given Tracking
@@ -9,7 +9,7 @@ Feature: Test PC and OPC
    # JIRA - SKAM-822  
    #################
    @TRACKING @SCENARIO1
-   Scenario: Check that PC is within training evaluation period spring starts in December
+   Scenario: Check that LPC is within training evaluation period spring starts in December
 
 
    Given a crew member with homebase "STO"
@@ -46,7 +46,7 @@ Feature: Test PC and OPC
    # JIRA - SKAM-822  
    #################
    @TRACKING @SCENARIO2
-   Scenario: Check that PC is within training evaluation period spring starts in January
+   Scenario: Check that LPC is within training evaluation period spring starts in January
 
 
    Given a crew member with homebase "STO"
