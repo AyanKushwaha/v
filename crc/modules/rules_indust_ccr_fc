@@ -2150,6 +2150,91 @@ end
 
 %_max_prod_days_in_month_vg_fc% =  19;
 
+/*
+** Rule:
+**  Max duty time 2 months (Jan-feb, Mar-Apr etc...)
+** Description:
+**  Duty time in 2 months may not exceed the number of working(P) days x
+**  9:30.
+**  Rule is only valid for SKD FD.
+**  Duty time is calculated according to union agreements but standby counts
+**  as in SubpartQ.
+**
+** Agreement: GM (CR 242)
+**
+** FC K11 - applies to SKD (FG + VG), SKN (FG + VG), SKS FG
+*/
+
+rule (off) ind_max_duty_time_2_months_fc =
+  valid %ind_max_duty_time_2_months_fc_valid%;
+
+  %_duty_time_2_months_fc% <=
+  duty_time.%max_duty_time_2_months_fc% +
+    rule_exceptions.%overshoot_rel%(wop.%start_utc%);
+
+  startdate = wop.%start_utc%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_duty_time_2_months_fc_failobject%;
+  failtext(Reltime value, Reltime limit) =
+    rules.%failtext_rel%("OPT Coll: Max duty time in 2 months",value,limit);
+  remark "OPT Coll: Max duty time in 2 months (FC K17)",
+  planner "OPT This rule checks that FC SH (excl. SKS VG) are not scheduled more"
+          " than P x 9:30 hours of duty time in two fixed calendar months,"
+          " Jan+Feb, Mar+Apr etc. For SKN VG the limit is P x 8:48 hours.";
+end
+
+
+%_duty_time_2_months_fc% =
+  duty_time.%duty_time_fc_in_period%(%duty_time_2_months_start_check%,
+                                     round_up_month(wop.%start_hb%)) -
+  duty_time.%passive_plus_reduction%(%duty_time_2_months_start_check%,
+                                     round_up_month(wop.%start_hb%));
+
+
+%duty_time_month_plus_1% = add_months(duty_time.%duty_time_2_months_start_check%, 1);
+
+%acc_for_previous_month% =
+  accumulators.%nr_planned_p_days_2_months_fc%
+    (duty_time.%duty_time_2_months_start_check%, %duty_time_month_plus_1%);
+
+%duty_time_2_months_start_check% =
+  if %acc_for_previous_month% > 0 then
+    duty_time.%duty_time_2_months_start_check%
+  else
+    %duty_time_month_plus_1%;
+
+%ind_max_duty_time_2_months_fc_valid% =
+   base_product.%is_rostering% and
+   roster.%check_rules% and
+   fundamental.%even_month_by_month_start%(%pp_start%) and
+   wop.%is_last_on_duty_in_month% and
+   wop.%start_month_start% = %pp_start% and
+   (crew.%has_agmt_group_skd% or crew.%has_agmt_group_skn% or crew.%has_agmt_group_sks%) and
+   not crew.%is_leased_wop_start%;
+
+
+%ind_max_duty_time_2_months_fc_failobject% =
+  let month_start_check = %duty_time_2_months_start_check%,
+      limit = duty_time.%max_duty_time_2_months_fc%;
+  default(
+    last(duty(wop),
+         prev(duty(chain),
+              next(duty(chain),
+                   default(first(leg(duty), leg.%failobject_departure%)
+                           where(duty_time.%duty_time_fc_in_period%(
+                                   month_start_check,
+                                   leg.%end_hb% +
+                                   leg.%check_out%) > limit),
+                           duty.%failobject_start%))
+              where(duty_period.%is_on_duty%))
+         where(duty_time.%duty_time_fc_in_period%(month_start_check,
+                                                  duty.%end_hb%) <= limit)),
+    wop.%failobject_start%);
+
+/* Dummy variables for CC additional weekend, needed for rudob logic */
+export %ind_additional_weekend_days_in_period_sks_valid_crew% = false;
+export %day_is_a_weekend_day%(Abstime d) = false;
+
 /* SKCMS-2153 */
 export rule ind_training_a5_crew_need_ast_in_pca3a5_grace_period =
     valid %agreement_valid_a5_ast_before_pc% and
@@ -2218,3 +2303,4 @@ else 00:00;
 
 /* end of file */
 
+ 
