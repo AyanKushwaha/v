@@ -2152,6 +2152,77 @@ end
 
 /*
 ** Rule:
+**   Maximum FDP extension duties in calendar month for FC.
+**
+** Description:
+**   Check the number of SH FDP extension duties in a calendar month.
+**
+** SKCMS-3069
+*/
+
+export rule ind_max_fdp_with_extension_7_days =		
+  valid trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and
+        trip.%is_short_haul% and
+        duty_period.%is_last_duty_period_on_start_day% and
+        oma16.%is_extended_fdp%; 
+        
+  %ind_num_extended_fdps_in_last_7_days% <= %ind_max_extended_fdps_in_7_days% + rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_fdp_with_extension_in_7_days_ALL_failboject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%(concat("Coll: Max extended FDPs in 7 days ",
+                                format_time( duty_period.%last_7_days_start_day_start% +24:00 ,"%d%b"), "-",
+                                format_time( duty_period.%last_7_days_start_day_end% ,"%d%b")),
+                         value,limit);
+  remark "Coll: FD max extended FDPs in 7 days",
+  planner "The rules checks that the number of FDPs with extension in 7 calendar days for FD is less than maximum allowed according to K22 agreement";
+end
+
+export %ind_max_extended_fdps_in_7_days% = 1;
+
+export %ind_is_extended_sh_fdp% =
+      let  start = duty.%start_month_start%,
+           stop = duty.%start_month_end%;
+           fdp.%start_utc% >= start and
+           fdp.%end_utc% < stop and
+           duty_period.%is_on_duty% and
+           oma16.%is_extended_fdp% and
+           duty.%is_short_haul%;
+
+
+%ind_num_extended_fdps_in_last_7_days% = 
+  let start = duty_period.%last_7_days_start_day_start%;
+  count(duty(chain))
+    from (current)
+    backwards
+    while (fdp.%start_utc% >= start)
+    where (duty_period.%is_on_duty% and
+           %ind_is_extended_sh_fdp%);   
+
+        
+
+%ind_max_fdp_with_extension_in_7_days_ALL_failboject% =
+  let start_7_days = duty_period.%last_7_days_start_day_start%,
+      end_7_days = duty_period.%last_7_days_start_day_end%,
+      overshoot = rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+  last(leg(duty),
+       prev(leg(chain),next(leg(chain),leg.%failobject_departure%)) where
+        (count(duty(chain))
+           from (current)
+           backwards
+           while (fdp.%start_utc% >= start_7_days)
+           where (%ind_is_extended_sh_fdp%) <=
+         %ind_max_extended_fdps_in_7_days% +
+         overshoot)) where
+  (leg.%start_hb% < end_7_days);
+
+
+/*
+** Rule:
 **  Max duty time 2 months (Jan-feb, Mar-Apr etc...)
 ** Description:
 **  Duty time in 2 months may not exceed the number of working(P) days x
