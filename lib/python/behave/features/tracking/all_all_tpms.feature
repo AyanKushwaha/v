@@ -393,11 +393,11 @@ Feature: Check expressions used in TPMS reports
 
      When I show "crew" in window 1
 
-     Then rave "report_tpms.%leg_id%" shall be "TPMSRGTARN26Dec2019" on leg 1 on trip 1 on roster 1
-     Then rave "report_tpms.%leg_id%" shall be "TPMSRGTARN26Dec2019" on leg 1 on trip 1 on roster 2
-     Then rave "report_tpms.%leg_id%" shall be "TPMSRGTARN26Dec2019" on leg 1 on trip 1 on roster 3
-     Then rave "report_tpms.%leg_id%" shall be "TPMSRGTARN26Dec2019" on leg 1 on trip 1 on roster 4
-     Then rave "report_tpms.%leg_id%" shall be "TPMSRGTARN26Dec2019" on leg 1 on trip 1 on roster 5
+     Then rave "report_tpms.%leg_id%" shall be "TPMSRECARN26Dec2019" on leg 1 on trip 1 on roster 1
+     Then rave "report_tpms.%leg_id%" shall be "TPMSPGTARN26Dec2019" on leg 1 on trip 1 on roster 2
+     Then rave "report_tpms.%leg_id%" shall be "TPMSPGTARN26Dec2019" on leg 1 on trip 1 on roster 3
+     Then rave "report_tpms.%leg_id%" shall be "TPMSPGTARN26Dec2019" on leg 1 on trip 1 on roster 4
+     Then rave "report_tpms.%leg_id%" shall be "TPMSRECARN26Dec2019" on leg 1 on trip 1 on roster 5
 
    @SCENARIO14 @TPMS @WET_DRILL
    Scenario: Check that event id is correct for activities WD1, WD2, WD3, OLWD

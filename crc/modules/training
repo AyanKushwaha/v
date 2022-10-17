@@ -378,7 +378,9 @@ export %is_nth_non_zftt_lifus%(Int num) =
 /* Count number of attended ETOPS LIFUS/LC in training log */
 export %training_log_ETOPS_lifus_count%(Abstime st, Abstime et) =
   if st>et then 0
-  else %training_log_count%(st, et, "ETOPS LIFUS/LC");
+  else (%training_log_count%(st, et, "ETOPS LIFUS/LC") +
+        %training_log_count%(st, et, "ETOPS LIFUS") +
+        %training_log_count%(st, et, "ETOPS LC"));
 
 /****************************************************************
  * Section 2: Recurrent training
@@ -1421,14 +1423,13 @@ export %recurrent_crmc_performed%(String type, Abstime date) =
     %_recurrent_flight_training_performed%(type, date, ac_qual, expiry_date);
 
 %_recurrent_flight_training_performed%(String type, Abstime date, String ac_qual, Abstime expiry_date) =
-  any(trip(roster), %reqd_recurrent_flight_training%(type, ac_qual))
-  where (trip.%has_active_flight% and
-         (expiry_date > trip.%end_hb% or
-          not any(leg(trip),leg.%is_active_flight%)
-                where (leg.%start_hb% > expiry_date and
-                       not %is_lc_or_preceded_by_lc%)))
-  or
-  %recurrent_performed_by_training_log%(type,date,ac_qual);
+any(trip(roster), %reqd_recurrent_flight_training%(type, ac_qual))
+where (trip.%has_active_flight% and
+        (expiry_date > trip.%end_hb% or
+              (trip.%start_hb% <= date and any(leg(trip),leg.%is_active_flight%)
+              where (leg.%start_hb% > expiry_date and
+                      %is_lc_or_preceded_by_lc%))))
+or %recurrent_performed_by_training_log%(type,date,ac_qual);
 
 %_recurrent_flight_training_performed_after_expiry%(String type, Abstime date, String ac_qual, Abstime expiry_date) =
   any(trip(roster), %reqd_recurrent_flight_training%(type, ac_qual))
@@ -1958,11 +1959,13 @@ export %crew_has_program_on_leg% =
       stop = nmin(%course_end%(date), date),
       attr = %course_attribute%(date, ix),
       qual = %course_acqual%(date, ix);
-  if attr <> "FAM FLT" and attr <> "ETOPS LIFUS/LC" then
-    %nr_acts_of_type_and_code_in_ival%(attr, qual, start, stop)
-  else if attr = "ETOPS LIFUS/LC" then  /* Ugly fix for ETOPS LIFUS/LC: allow activities to be performed after course end */
-    %nr_acts_of_type_and_code_in_ival%(attr, qual, start, %pp_end%)
-    /*%nr_acts_of_type_and_code_in_ival%(attr, qual, start, stop + %max_days_between_lrp2_and_etops_lifus_lc% * 24:00)*/
+  if attr <> "FAM FLT" and substr(attr,1,7) <> "ETOPS L" then
+      %nr_acts_of_type_and_code_in_ival%(attr, qual, start, stop)
+  else if substr(attr,1,7) = "ETOPS L" then  /* Ugly fix for ETOPS LIFUS/LC: allow activities to be performed after course end */
+    %nr_acts_of_type_and_code_in_ival%("ETOPS LIFUS/LC", qual, start, %pp_end%) +
+    %nr_acts_of_type_and_code_in_ival%("ETOPS LIFUS", qual, start, %pp_end%) +
+    %nr_acts_of_type_and_code_in_ival%("ETOPS LC", qual, start, %pp_end%)
+  /*%nr_acts_of_type_and_code_in_ival%(attr, qual, start, stop + %max_days_between_lrp2_and_etops_lifus_lc% * 24:00)*/
   else /* Ugly fix for FAM FLT: allow activities to be performed after course end */
     %nr_acts_of_type_and_code_in_ival%(attr, qual, start, stop + %max_days_between_sim_and_fam_flt% * 24:00);
 
@@ -3090,6 +3093,10 @@ table acceptable_companion(String main_cat, String type, String code, Abstime da
                                     "ETOPS LIFUS/LC";*/
   "F","ETOPS LIFUS/LC",    -, - -> crew.%is_etops_lifus_lc_instr%(date),
                                     crew.%is_etops_lifus_lc_instr_str%;
+  "F","ETOPS LIFUS",    -, - -> crew.%is_etops_lifus_lc_instr%(date),
+                                    crew.%is_etops_lifus_lc_instr_str%;
+  "F","ETOPS LC",    -, - -> crew.%is_etops_lifus_lc_instr%(date),
+                                    crew.%is_etops_lifus_lc_instr_str%;
 
 
 
@@ -3137,14 +3144,20 @@ table acceptable_companion(String main_cat, String type, String code, Abstime da
   "F", "Simulator", -, -  -> crew.%is_tri_tre_sfi_sfe_sup%(code, date), 
                           "TRI/TRE, SFI/SFE, SUP, OL";
   &
-  /* CJ has LINST as req for all training types */
-  "C", <>"NEW", "CJ", - -> crew.%is_linst_ac_qual_instr%(code, date) and %tagged_instructor%(type, ignore_tag), "LINST";
-  "C", <>"NEW", "38", - -> crew.%rank_at_date%(date) = "AP", "Purser";
-  "C", <>"FAM FLT",  "EJ", - -> crew.%is_lcs%(date), "LCS";
-  &
-  "C", "AS TRAINING", "AL", - -> crew.%is_as_instr%(date) and %tagged_instructor%(type, ignore_tag), "AS INSTR";
-  "C", "AP TRAINING",  -, -   -> crew.%rank_at_date%(date) = "AP", "Purser";
-/*  "C", "FOLLOW UP",    -, -   -> crew.%rank_at_date%(date) = "AP", "Purser";*/
+/*Link flight training*/
+  "C", "LC",            "EJ",   - -> crew.%is_lcs%(date), "LCS";
+  "C", "ILC",           "EJ",   - -> crew.%is_lcs%(date), "LCS";
+  "C", "LC AP-POS",     "EJ",   - -> crew.%is_lcs%(date), "LCS";
+  "C", "LINE FLIGHT",   "EJ",   - -> crew.%is_scc%(date), "SCC";
+  "C", "LINE FLIGHT SCC","EJ",  - -> crew.%is_scc%(date), "SCC";
+  "C", "FAM FLT",       "EJ",   - -> crew.%is_scc%(date), "SCC";
+  /*SK flight training*/
+  "C", "AS TRAINING",   "AL",   - -> crew.%is_as_instr%(date) and %tagged_instructor%(type, ignore_tag), "AS INSTR";
+  "C", "AP TRAINING",    -,     - -> crew.%rank_at_date%(date) = "AP", "Purser";
+/*  "C", "FOLLOW UP",    -,     - -> crew.%rank_at_date%(date) = "AP", "Purser";*/
+  "C", "RELEASE",        -,     - -> crew.%rank_at_date%(date) = "AP", "Purser";
+  "C", "SUPERNUM",       -,     - -> crew.%rank_at_date%(date) = "AP", "Purser";
+  "C", "X SUPERNUM",     -,     - -> crew.%rank_at_date%(date) = "AP", "Purser";
   &
     -, "NEW", -, - -> not leg.%is_new% and crew.%main_func_at_date%(date) = main_cat, "Instr";
   &
@@ -3559,11 +3572,13 @@ export %max_days_before_fam_flt% =
 
 /* Used for rudob between LRP2 and ETOPS LIFUS/LC */
 export %etops_lifus_lc_needed% =
-  let etops_lifus_lc_perf_date = default(%last_perf_date_for_flight_of_type_and_code%("ETOPS LIFUS/LC", %etops_lifus_lc_needed_ac_qual%, %etops_lifus_lc_needed_end%), %abstimemin%);
+  let etops_lifus_lc_perf_date = default(nmax(%last_perf_date_for_flight_of_type_and_code%("ETOPS LIFUS/LC", %etops_lifus_lc_needed_ac_qual%, %etops_lifus_lc_needed_end%),
+                                              %last_perf_date_for_flight_of_type_and_code%("ETOPS LIFUS", %etops_lifus_lc_needed_ac_qual%, %etops_lifus_lc_needed_end%)), %abstimemin%);
 
-  etops_lifus_lc_perf_date < %etops_lifus_lc_needed_start%;
+etops_lifus_lc_perf_date < %etops_lifus_lc_needed_start%;
 
-export %etops_lifus_lc_needed_ac_qual% = %ac_qual_of_last_training_before%("ETOPS LIFUS/LC", %pp_end%);
+export %etops_lifus_lc_needed_ac_qual% = default(%ac_qual_of_last_training_before%("ETOPS LIFUS/LC", %pp_end%),%ac_qual_of_last_training_before%("ETOPS LIFUS", %pp_end%));
+
 export %etops_lifus_lc_needed_start% =
   let lrp2 = %last_perf_date_for_act_of_type_and_code%("COURSE", "LRP2", leg.%start_utc%);
 

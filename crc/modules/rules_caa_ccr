@@ -941,8 +941,8 @@ end
 **   previous weekly rest period
 **
 ** Description:
-**   Check that there is no more than 7x24hrs between start of a rest period and    
-**   the end of the previous weekly rest period
+**   Check that there is no more than 168h between start of a rest period and    
+**   the end of the previous weekly rest period. Soft limit of 166h is enabled in Tracking
 **
 ** Agreement:
 **   OMA16
@@ -954,26 +954,36 @@ rule caa_oma16_max_time_between_weekly_rest_ALL =
         duty_period.%is_on_duty% and
         duty_period.%has_duty_to_check_weekly_rest%;
     duty_period.%time_since_last_weekly_rest% <=
-    oma16_defs.%max_time_between_weekly_rest%;
+    oma16_defs.%max_time_between_weekly_rest% -
+    oma16.%max_time_between_weekly_rest_buffer%(duty.%start_hb%) +
+      rule_exceptions.%overshoot_rel_on_off%(duty.%start_UTC%);
   startdate = duty.%start_UTC%;
   severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
   failobject = %caa_oma16_max_time_between_weekly_rest_ALL_failobject%;
   failtext(Reltime value, Reltime limit) =
-    rules.%failtext_rel%("CAA: OMA16 max time between weekly rest ",
-                         value,limit);
+   %caa_oma16_max_time_between_weekly_rest_failtext%(value, limit);
   remark "(CCR) CAA: OMA16 max time between weekly rest",
   planner "The rule checks that there is no more than 7x24hrs from the start of"
-          " a rest period to the end of the previous weekly rest period.";
+          " a rest period to the end of the previous weekly rest period." 
+          " There is a soft limit of 166h in Tracking.";
 end
+
+%caa_oma16_max_time_between_weekly_rest_failtext%(Reltime value, Reltime limit) =
+   let normal = value > oma16_defs.%max_time_between_weekly_rest%,
+       prefix = if normal then "CAA" else "Soft",
+       new_limit = if normal
+                   then oma16_defs.%max_time_between_weekly_rest%
+                   else limit;
+   rules.%failtext_rel%(concat(prefix, ": OMA16 max time between weekly rest; "), value, new_limit);
 
 %caa_oma16_max_time_between_weekly_rest_ALL_failobject% =
   let current_duty = duty.%start_UTC%,
-      overshoot = rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
+  overshoot = rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
   default(prev(duty(chain),next(duty(chain),duty.%failobject_start%)
-                     where (duty.%start_UTC% <= current_duty and
+                     where (duty.%start_UTC% >= current_duty and
                             duty_period.%is_on_duty% and
                             duty_period.%time_since_last_weekly_rest% >
-                            oma16_defs.%max_time_between_weekly_rest% + overshoot))
+                            oma16_defs.%max_time_between_weekly_rest% - oma16.%max_time_between_weekly_rest_buffer%(duty.%start_hb%) + overshoot))
            where (duty_period.%has_weekly_rest_after%),
            duty.%failobject_start%);
 

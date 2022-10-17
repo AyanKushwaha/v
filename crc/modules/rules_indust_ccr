@@ -1971,12 +1971,13 @@ export %days_LOA_in_period%(Abstime start, Abstime stop) =
 
 /*
 ** Rule:
-**    Min number of rest hours after long haul production for FD SKS.
+**    Min number of rest hours after long haul production for FD.
 **
 ** Description:
 **   Checks that the number of hours scheduled after long haul production is at
 **   least the minimum hours. This rule is valid for all FD with LH duty.
-     SKCMS-651, SKCMS-2760, SKCMS-2923
+**   Crew with a mix of SH and LH in their wop is exempted.
+     SKCMS-651, SKCMS-2760, SKCMS-2923, SKCMS-3081
 **
 ** Level: Trip
 **
@@ -1992,23 +1993,49 @@ export rule (on) ind_min_lh_rest_hours_after_first =
     startdate = next(trip(chain), trip.%start_hb%);
     severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
     failobject = next(trip(chain), trip.%failobject_start%);
-    failtext(Reltime value, Reltime limit) = rules.%failtext_rel%("Coll: Min. rest hours after LH ", value, limit);
+    failtext %ind_min_lh_rest_hours_after_first_failtext%;
 
     remark "Coll: Min rest hours after long haul production",
-    planner "Check that the number of hours after this scheduled production is at least 72:00 hours. ";
+    planner "Check that the number of hours after this scheduled production is at least 72:00 hours."
+            "Or minimum 3 days if wop is a mix of SH and LH.";
 end
 
 %ind_min_lh_rest_hours_after_first_valid% =
+    trip.%in_pp_extended_start_5d_before% and
     last(duty(trip), %min_rest_time_after_lh_valid%) and
-    trip.%in_pp_extended_start_5d_before%;
+    not wop.%is_SH_LH%;
 
+%min_rest_hours_after_first_lh% = 
+    if %trip_is_preceded_by_SH_not_bought% 
+        then %min_free_mff_sh_lh_mix%
+     else 72:00;
+
+%min_free_mff_sh_lh_mix% =
+    72:00 + (24:00 - trip.%end_od%);
+
+%trip_is_preceded_by_SH_not_bought% =
+  default(prev(trip(wop), %_trip_is_SH_not_bought%), false);
+
+%_trip_is_SH_not_bought% =
+  trip.%is_short_haul% and
+  not trip.%is_bought%;
+
+%ind_min_lh_rest_hours_after_first_failtext% =
+    let value_days = %rest_day_after_duty%,
+        limit_days = %min_rest_days_after_second_lh%,
+        value = trip.%planned_rest_time%,
+        limit = %min_rest_hours_after_first_lh%;
+     if %trip_is_preceded_by_SH_not_bought% then
+            rules.%failtext_int%("Coll: Min. rest days after LH ",value_days, limit_days)
+        else rules.%failtext_rel%("Coll: Min. rest hours after LH ", value, limit);
 
 /*
 ** Rule:
 **    Min number of rest days after second long haul production for FD.
 **
 ** Description:
-**   Check previous long haul production before this long haul production; if the previous
+**   If wop is a mix of SH and LH then 3 F are required.
+**   Or check previous long haul production before this long haul production; if the previous
 **   long haul production had less than minimum amount of rest days then rule checks the
 **   number of second rest days against minimum amount of rest days.
 **
@@ -2016,7 +2043,7 @@ end
 **   (if __FIRST_REST__ < min.rest.days then __SECOND_REST__ >= min.rest.days)
 **
 **   This rule is valid for all FD on LH duty. 
-**   SKCMS-651, SKCMS-2760, SKCMS-2923
+**   SKCMS-651, SKCMS-2760, SKCMS-2923, SKCMS-3081
 **
 ** Level: Trip
 **
@@ -2040,11 +2067,10 @@ export rule (on) ind_min_lh_rest_days_after_second =
 end
 
 %ind_min_lh_rest_days_after_second_valid% =
+    trip.%in_pp_extended_start_5d_before% and
     last(duty(trip), %min_rest_time_after_lh_valid%) and
-    %is_preceded_with_long_haul_trip_with_less_than_min_rest_days% and
-    trip.%in_pp_extended_start_5d_before%;
+    (%is_preceded_with_long_haul_trip_with_less_than_min_rest_days% or wop.%is_SH_LH%);
 
-%min_rest_hours_after_first_lh% = 72:00;
 %min_rest_days_after_second_lh% = 3;
 
 /* Level: Duty */
@@ -2064,10 +2090,9 @@ export %rest_day_after_duty% =
 
 
 export %is_preceded_with_long_haul_trip_with_less_than_min_rest_days% =
-    default(
-        prev(trip(chain) where(trip.%has_active_long_haul%),
-            (%rest_day_after_duty% < %min_rest_days_after_second_lh%))
-        ,false);
+    default(prev(wop(chain) where(wop.%has_production%),
+            (wop.%has_active_long_haul% and last(trip(wop),%rest_day_after_duty% < %min_rest_days_after_second_lh%)))
+            ,false);
 
 export %ind_min_lh_rest_failobject% =
     let first_rest_end = next(duty(chain),
@@ -2084,7 +2109,7 @@ export %ind_min_lh_rest_failobject% =
     %FD_on_LH_duty% and not freedays.%east_to_west_or_west_to_east%;
 
 %FD_on_LH_duty% =
-    (duty.%is_SKI% or (crew.%has_agmt_group_sk_fd_mff% and duty.%with_long_haul_ac%) or duty.%is_LH_with_NX_ac%) and
+    (duty.%is_SKI% or duty.%is_long_haul%) and
     fundamental.%flight_crew%;
 
 
@@ -2267,15 +2292,6 @@ table check_in_time_limitations(Int ix) =
                      prev(wop(roster), wop.%end_utc%),
                      08:00,
                      "LH charter with 2 freedays";
-
-   false, "SKN", 10 -> crew.%in_variable_group%(wop.%start_hb%) and
-                     crew.%has_agmt_group_skn_cc_at_date%(wop.%start_hb%) and
-                     (wop.%is_preceded_by_FS_Weekend% or wop.%is_preceded_by_FS1_Weekend%) and
-                     %ci_start_day_of_week%=1 and
-                     not system_db_parameters.%k20_skn_cc_weekend_is_3day%(wop.%start_hb%),
-                     prev(wop(roster),wop.%end_utc%),
-                     06:00,
-                     "Free FS weekend";
 
     false,    -, 11 ->  crew.%has_agmt_group_skn_cc%
                      and first(leg(wop),leg.%is_standby_with_rest%) where (not leg.%is_rest%)
@@ -2566,13 +2582,6 @@ table check_out_time_limitations(Int ix) =
   false, "SKS", 2 -> %next_wop_is_F7S%,
                      23:59,
                      "F7S";
-
-  false, "SKN", 2 -> crew.%in_variable_group%(wop.%start_hb%) and
-                     crew.%has_agmt_group_nkf_cc_at_date%(wop.%start_hb%) and
-                     (wop.%is_followed_by_fs_weekend% or wop.%is_followed_by_fs1_weekend%) and
-                     not system_db_parameters.%k20_skn_cc_weekend_is_3day%(wop.%start_hb%),
-                     18:00,
-                     "Free FS weekend";
   
   false, -, 7 -> default(crew.%has_agmt_group_sks_cc%
                   and crew.%in_variable_group_at_date%(wop.%start_hb%)
@@ -2981,15 +2990,10 @@ end
 
 /*
 ** Rule:
-**    Minimum free weekends in period (30 days, calendar month)
+**    Minimum free weekends in period (calendar month)
 **
 ** Description:
-**    The rule checks that there is at least 1 free weekend in period.
-**    For FC SKI, the period is a calendar month, whereas it for other scandinavian SAS CC
-**    except SNK_CC_AG is 30 days rolling and checking backwards from next free weekend.
-**    For SNK_CC_AG and QA_CC_AG limit is a month calender.
-**    For QA_FD_AG limit is a month calender plus no gap between free weekend bigger than 5 week.
-**
+**    The rule checks that there is at least 1 free weekend in period (calendar month).
 **    The rule is valid for both LH and SH.
 **
 ** Agreement:
@@ -2997,6 +3001,7 @@ end
 **    CAU J.1.2c, J.2.1.5
 **    NKF 8
 **    SCCA H.1.4a, H.2.5
+**    FD K22 §5 stk 7.1 (SKCMS-3067)
 **
 **  NOTE:
 **  Resource constraint for CG for this rule is defined in cg_model
@@ -3005,40 +3010,29 @@ end
 export rule ind_min_free_weekend_in_period_ALL =
   valid %ind_min_free_weekend_in_period_ALL_valid%
     and rule_exceptions.%rule_on%(trip.%start_month_start%);
-  /* Last previous free weekend from this wop must be greater
-   * than month start (if monthly limit) or next free weekend - 30/35 days */
-  /*not void(trip.%code%)  and */ freedays.%has_free_weekend_in_period_by_date%(trip.%start_month_start%);
+
+    freedays.%has_free_weekend_in_period_by_date%(trip.%start_month_start%);
   startdate  = trip.%start_month_start%;
   severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
   failobject = trip.%failobject_start%;
   failtext %min_free_weekends_in_period_failtext%;
-  remark "Coll: Min 1 free weekend in period",
-  planner "Check that at least 1 free weekend is scheduled in the period."
-          " For FC SKI, the period is calendar month, for all others the"
-          " period is from next possible free weekend start and 30 or 35 days backwards.";
+  remark "Coll: Min 1 free weekend in calendar month",
+  planner "Check that at least 1 free weekend is scheduled in the calendar month.";
 end
 
 %ind_min_free_weekend_in_period_ALL_valid% =
-    let pp_start = fundamental.%pp_start%;
     roster.%check_rules% and
-    not crew.%is_leased_wop_start% and
-    not (%flight_crew% and
-    training.%month_is_in_school_period_min_7x24% and
-    training.%wop_is_in_school_period_min_7x24%) and
-    not trip.%is_allowed_on_free_weekend% and
     crew.%in_variable_group_wop_start% and
     freedays.%trip_is_last_not_free_we_in_month% and
     %r_valid_min_free_weekends% and
-    (if (crew.%has_agmt_group_sk_scand% or crew.%has_agmt_group_qa_fd%) and not crew.%has_agmt_group_skn_cc_at_date%(pp_start) then
-        not (crew.%is_temporary% and
-        (crew.%is_SKD% or not (format_time(trip.%start_month_start%, "%b") in summer_months)))
-    else if crew.%has_agmt_group_skn_cc_at_date%(pp_start) and not crew.%is_temporary% then
-        true
-    else if crew.%has_agmt_group_qa_at_date%(pp_start) or trip.%is_qa_fd% then
-        not crew.%is_temporary% and
-        %agreement_valid_ind_min_free_weekend_in_period_qa_k15%(pp_start)
-    else
-        false); /* Because others crew like asian CC are not covered by this rule */
+    not (%flight_crew% and
+    training.%month_is_in_school_period_min_7x24% and
+    training.%wop_is_in_school_period_min_7x24%) and
+    not crew.%is_leased_wop_start% and
+    not (crew.%is_temporary% and
+        (crew.%has_agmt_group_skn_cc_at_date%(%pp_start%) or
+        (crew.%is_SKD% or not (format_time(trip.%start_month_start%, "%b") in summer_months)))) and
+    not (crew.%has_agmt_group_skk_cc% or crew.%has_agmt_group_skj_cc%); /* Because others crew like asian CC are not covered by this rule */
 
 %agreement_valid_ind_min_free_weekend_in_period_qa_k15%(Abstime pp_start) =
   %agreement_valid%("min_free_we_monthly_qa_k15", pp_start);
@@ -3067,24 +3061,10 @@ end
   */
 
   trip.%start_month_start% = round_down_month(%pp_start%);
-/*
-  if freedays.%free_we_period_is_month% then
-    trip.%start_month_start% = round_down_month(%pp_start%)
-  else
-    trip.%in_pp%;
-*/
 
 %min_free_weekends_in_period_failtext% =
   concat("Coll: No free weekend in ",
            format_time(trip.%start_month_start%, "%b"));
-        /*(if freedays.%free_we_period_is_month% then 
-           format_time(trip.%start_month_start%, "%b")
-         else
-           concat(format_time(freedays.%free_we_period_start%,
-                              "period (%02d%b%02y - "),
-                  format_time(freedays.%free_we_period_start% +
-                              freedays.%free_weekend_max_days% * 24:00, "%02d%b%02y)"))));
-*/
 
 /********************
 *** Super Freedays **
@@ -4809,6 +4789,7 @@ end
 
 %max_sh_days_before_lh% =
     if crew.%has_agmt_group_skd_cc% or
+    (crew.%has_agmt_group_sks_cc% and system_db_parameters.%max_1_sh_before_lh_sks_cc%(%pp_start%)) or
     ((crew.%has_agmt_group_sk_fd_mff% or (crew.%is_pilot% and %is_lrp2%))
       and (%nr_of_sh_duty_days_in_wop% >= 2)) then
     1
