@@ -214,29 +214,65 @@ class TimeEntry(WFSReport):
                     log.info('NORDLYS: planning group {z} '.format(z = planning_group))
                     if planning_group == "SVS":
                         if 'report_common.%%number_of_active_legs%%' > 0:
+                            if 'duty.%%has_active_flight%%' or 'standby.%%duty_is_standby_callout%%':
+                                start_dt = abs_to_datetime(duty_start_day)
+                                end_dt = abs_to_datetime(duty_end_day)
+                                nr_days = abs(end_dt - start_dt).days
+                                # if nr_days == 0:
+                                #     nr_days = 1
+                                active_hours = default_reltime(duty_bag.report_overtime.active_duty_hrs())
+                                public_holiday= duty_bag.report_roster.is_public_holiday_link(duty_start_day)
+                                if start_dt==end_dt:
+                                    if self.is_weekend(start_dt) or public_holiday:
+                                        paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND',crew_id,country,rank)
+                                        event_data['CNLN_PROD_WEEKEND']['hrs'] = active_hours
+                                        event_data['CNLN_PROD_WEEKEND']['paycode'] = paycode
+                                        event_data['CNLN_PROD_WEEKEND']['dt'] = abs_to_datetime(duty_end_day)
+                                    else:   
+                                        paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY',crew_id,country,rank)
+                                        event_data['CNLN_PROD_WEEKDAY']['hrs'] = active_hours
+                                        event_data['CNLN_PROD_WEEKDAY']['paycode'] = paycode
+                                        event_data['CNLN_PROD_WEEKDAY']['dt'] = abs_to_datetime(duty_end_day)
+                                    log.info('NORDLYSSSSSSs: general holiday {general_holiday_paycode} {general_holiday_duty_hrs} {duty_start_day}'.format(general_holiday_paycode=general_holiday_paycode, general_holiday_duty_hrs=general_holiday_duty_hrs, duty_start_day=duty_start_day ))
+                                else:
+                                    for day in range(0, nr_days+1):
+                                        curr_dt = abs_to_datetime(duty_start_day) + timedelta(days=day)
+                                        start_time = RelTime(duty_bag.report_overtime.duty_starttime())
+                                        end_dttime = RelTime(duty_bag.report_overtime.duty_endtime())
+                                        log.info('NORDLYS:{END_TIME},{START_TIME}'.format(END_TIME=end_dttime,START_TIME=start_time))
+
+                                        if day == 0:
+                                            duty_hrs = (RelTime('24:00') - start_time)
+                                        elif day==nr_days:
+                                            duty_hrs = end_dttime
+                                            log.info('NORDLYS:{DUTY_HRS},{duty_end}'.format(DUTY_HRS=duty_hrs,duty_end=end_dttime))
+
+                                        if (self.is_weekend(curr_dt) or public_holiday):
+                                            paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND',crew_id,country,rank)
+                                            event_data['CNLN_PROD_WEEKEND']['hrs'] = duty_hrs
+                                            event_data['CNLN_PROD_WEEKEND']['paycode'] = paycode
+                                            event_data['CNLN_PROD_WEEKEND']['dt'] = curr_dt
+                                        else:
+                                        # if(self.is_weekday(curr_dt) and public_holiday) or (self.is_weekday(curr_dt)):
+                                            paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY',crew_id,country,rank)
+                                            event_data['CNLN_PROD_WEEKDAY']['hrs'] = duty_hrs
+                                            event_data['CNLN_PROD_WEEKDAY']['paycode'] = paycode
+                                            event_data['CNLN_PROD_WEEKDAY']['dt'] = curr_dt
+                    
+                        duty_illness = duty_bag.report_overtime.is_on_duty_illness_link()
+                        if duty_illness == True:
                             start_dt = abs_to_datetime(duty_start_day) + timedelta(days=0)
                             start_dt_start_abs = AbsTime(start_dt.year, start_dt.month, start_dt.day, 0, 0)
                             start_dt_end_abs = start_dt_start_abs + RelTime('24:00')
                             prev_duty_hrs_before_sick = duty_bag.rescheduling.period_inf_prev_duty_time(start_dt_start_abs,start_dt_end_abs)
-                            if self.is_weekend(duty_start) and 'report_roster.%%is_public_holiday%%':
-                                general_holiday_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND',crew_id,country)
-                                general_holiday_duty_hrs = _standby_callout_time
-                                event_data['CNLN_PROD_WEEKEND']['hrs'] = general_holiday_duty_hrs
-                                event_data['CNLN_PROD_WEEKEND']['paycode'] = general_holiday_paycode
-                                event_data['CNLN_PROD_WEEKEND']['dt'] = abs_to_datetime(duty_start_day)
-                            else:
-                                general_holiday_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND',crew_id,country)
-                                general_holiday_duty_hrs = _standby_callout_time
-                                event_data['CNLN_PROD_WEEKDAY']['hrs'] = general_holiday_paycode
-                                event_data['CNLN_PROD_WEEKDAY']['paycode'] = general_holiday_duty_hrs
-                                event_data['CNLN_PROD_WEEKDAY']['dt'] = abs_to_datetime(duty_start_day)
-                                log.info('NORDLYSSSSSSs: general holiday {general_holiday_paycode} {general_holiday_duty_hrs} {duty_start_day}'.format(general_holiday_paycode=general_holiday_paycode, general_holiday_duty_hrs=general_holiday_duty_hrs, duty_start_day=duty_start_day ))
-                        if 'duty.%%is_on_duty_illness_link%%' == TRUE and prev_duty_hrs_before_sick > 0 :
-                            general_sick_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_SICK',crew_id,country)
-                            general_sick_hrs = reltime('24:00')
-                            event_data['CNLN_PROD_SICK']['hrs'] = general_sick_hrs 
-                            event_data['CNLN_PROD_SICK']['paycode'] = general_sick_paycode
-                            event_data['CNLN_PROD_SICK']['dt'] = abs_to_datetime(duty_start_day)
+                            log.info('NORDLYS:{DUTY_ILLNESS}{PREV_DUTY_HRS}'.format(DUTY_ILLNESS=duty_illness,PREV_DUTY_HRS=prev_duty_hrs_before_sick))
+                            if (prev_duty_hrs_before_sick != 0) :
+                                general_sick_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_SICK',crew_id,country,rank)
+                                general_sick_hrs = RelTime('24:00')
+                                event_data['CNLN_PROD_SICK']['hrs'] = general_sick_hrs 
+                                event_data['CNLN_PROD_SICK']['paycode'] = general_sick_paycode
+                                event_data['CNLN_PROD_SICK']['dt'] = abs_to_datetime(duty_start_day)
+                                
                         
                             
                         # Checkout on Day-off overtime 
@@ -1410,7 +1446,7 @@ class TimeEntry(WFSReport):
 
     def _remove_saslink_holiday(self, crew_id, duty_bag, duty_start_dt, saslink_holiday ):
         general_holiday_removals_svs = []
-        if (_standby_callout_time == RelTime('00:00')) :
+        if (self.active_duty_hrs(duty_bag) == RelTime('00:00')) :
             general_holiday_removals_svs.append(saslink_holiday[0]['rec'])
         return general_holiday_removals_svs
 

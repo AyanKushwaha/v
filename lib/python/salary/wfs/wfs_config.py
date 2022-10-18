@@ -293,7 +293,7 @@ class PaycodeHandler:
         elif event_type in ('F3',):
             rank = '_{r}'.format(r=rank) if country in ('NO', 'DK') else ''
             return PAYCODE_FROM_EVENT['F0_{e}_{c}{r}'.format(e=event_type, c=country, r=rank)]
-        elif event_type in ('CNLN_OT_45_50', 'CNLN_OT_50_PLUS', 'CNLN_LAND_DAY_OFF'):
+        elif event_type in ('CNLN_OT_45_50', 'CNLN_OT_50_PLUS', 'CNLN_LAND_DAY_OFF','CNLN_PROD_WEEKEND','CNLN_PROD_WEEKDAY','CNLN_PROD_SICK'):
             return PAYCODE_FROM_EVENT['{e}_{c}'.format(e=event_type, c=country)]
         elif event_type in ('F7',):
             rank = '_{r}'.format(r=rank) if country in ('NO', 'DK', 'SE') else ''

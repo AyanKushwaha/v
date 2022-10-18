@@ -29,7 +29,7 @@ echo "  * Setting up CARMENV ..."
 
 cd $CARMUSR/data/migration/$RELEASE
 
-echo " - Processing migration tasks"
+echo " - Processing migration tasks" 
 
 #### Insert migration tasks below ####
 # Example:
