@@ -83,6 +83,10 @@ class TimeEntry(WFSReport):
     '''
     Overridden functions END
     '''
+
+    '''
+    Link Flight Duty Function Start
+    '''
     def _calculate_before_sick_hrs_link(self,duty_bag):
         rec = []
         duty_start_day = duty_bag.duty.start_day()
@@ -152,9 +156,9 @@ class TimeEntry(WFSReport):
             if record[0] in updated_dates:
                 for index, value in enumerate(updated):
                     if value[0] == record[0]:
-                        log.info("NORDLYS: {0}".format(day_hours_link))
+                        log.debug("NORDLYS: {0}".format(day_hours_link))
                         active_hours = value[1] + record[1]
-                        log.info("NORDLYS: {0} First: {1}, Second: {2}".format(active_hours, value[1], record[1]))
+                        log.debug("NORDLYS: {0} First: {1}, Second: {2}".format(active_hours, value[1], record[1]))
                         updated[index] = (record[0], active_hours, record[2])
                         break
             else:
@@ -162,8 +166,17 @@ class TimeEntry(WFSReport):
                 updated_dates.append(record[0])
 
         return updated
-
-        return updated
+   
+    def is_weekend(self,start):
+        weekday_num = start.weekday()
+        log.info('NORDLYS: Weekday Day Number {sd}'.format(sd=weekday_num))
+        if weekday_num <= 4:
+            log.debug('NORDLYS: Day is between Monday-Friday {day}'.format(day=weekday_num))
+            return False
+        else:
+            log.debug('NORDLYS: Day is between Saturday or Sunday {day}'.format(day=weekday_num))
+            return True
+        return False
     '''
     Main data extraction START
     '''
@@ -661,19 +674,6 @@ class TimeEntry(WFSReport):
             return True
         else:
             return False
-
-        
-    def is_weekend(self,start):
-        weekday_num = start.weekday()
-        log.info('NORDLYS: Weekday Day Number {sd}'.format(sd=weekday_num))
-        if weekday_num <= 4:
-            log.debug('NORDLYS: Day is between Monday-Friday {day}'.format(day=weekday_num))
-            return False
-        else:
-            log.debug('NORDLYS: Day is between Saturday or Sunday {day}'.format(day=weekday_num))
-            return True
-        return False
-
 
     def _temporary_split_hours(self, duty_bag, start_dt, paycode, crew_id, extperkey,split_found):
 
@@ -1338,7 +1338,7 @@ class TimeEntry(WFSReport):
                                 if duty_bag.duty.has_unfit_for_flight_star():
                                     if duty_bag.duty.start_day() != duty_bag.duty.end_day():
                                         roster_duty_dates.append((crew_id,duty_bag.duty.end_day()))
-                                elif country_from_id(crew_id, self.start) != 'SE' and (duty_bag.duty.is_child_illness() or duty_bag.duty.is_on_duty_illness() or duty_bag.duty.is_on_duty_illness_link()):
+                                elif country_from_id(crew_id, self.start) != 'SE' and (duty_bag.duty.is_child_illness() or duty_bag.duty.is_on_duty_illness()):
                                     days = (int(str(duty_bag.duty.end_day() - duty_bag.duty.start_day()).split(':')[0])//24) + 1
                                     for i in range(days):
                                         roster_duty_dates.append((crew_id,duty_bag.duty.start_day().adddays(i)))

@@ -387,6 +387,8 @@ class TimeEntryReport(WFSReport):
 
 
                 final_calulated_tmp_hrs = sorted(final_calulated_tmp_hrs,key=lambda x:x[0])
+                log.info("NORDLYS: Tmp hrs for crew {crew} is {tmp_hrs}".format(crew=crew_id,tmp_hrs=final_calulated_tmp_hrs))
+
                 final_link_hrs = sorted(final_link_hrs, key=lambda x: x[0])
                 
                 # for tmp hrs in file 
@@ -1016,7 +1018,14 @@ class TimeEntryReport(WFSReport):
         log.info('NORDLYS: {0} nr of crew with account data extracted without VA/VA1'.format(len(dict_t)))
         return dict_t
 
-    
+    '''
+    Cache functions END
+    '''
+
+    '''
+    Link Flight Duty Function Start
+    '''
+
     def _calculate_before_sick_hrs_link(self,duty_bag):
         rec = []
         duty_start_day = duty_bag.duty.start_day()
@@ -1086,9 +1095,9 @@ class TimeEntryReport(WFSReport):
             if record[0] in updated_dates:
                 for index, value in enumerate(updated):
                     if value[0] == record[0]:
-                        log.info("NORDLYS: {0}".format(day_hours_link))
+                        log.debug("NORDLYS: {0}".format(day_hours_link))
                         active_hours = value[1] + record[1]
-                        log.info("NORDLYS: {0} First: {1}, Second: {2}".format(active_hours, value[1], record[1]))
+                        log.debug("NORDLYS: {0} First: {1}, Second: {2}".format(active_hours, value[1], record[1]))
                         updated[index] = (record[0], active_hours, record[2])
                         break
             else:
@@ -1096,8 +1105,9 @@ class TimeEntryReport(WFSReport):
                 updated_dates.append(record[0])
 
         return updated
+    
     '''
-    Cache functions END
+    Link Flight Duty Function Start
     '''
-     
+
 
