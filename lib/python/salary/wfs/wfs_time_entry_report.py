@@ -245,7 +245,7 @@ class TimeEntryReport(WFSReport):
                             prev_duty_hrs_before_sick = duty_bag.rescheduling.period_inf_prev_duty_time(start_dt_start_abs,start_dt_end_abs)
                             if prev_duty_hrs_before_sick != 0:
                                 sick_data_link = self._calculate_before_sick_hrs_link(duty_bag)
-                                log.info('NORDLYS:{SICK_DATA}'.format(SICK_DATA=sick_data_link))
+                                log.info('NORDLYS:Link sick data {SICK_DATA}'.format(SICK_DATA=sick_data_link))
                                 sick_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_SICK', crew_id, country,rank)
                                 for val in sick_data_link:
                                     valid_events.append({'paycode':sick_paycode,
@@ -322,6 +322,8 @@ class TimeEntryReport(WFSReport):
                         valid_events.extend([event for event in event_data.values() if event['hrs'] > RelTime('00:00')])
             total_duty_hrs_link = sorted(total_duty_hrs_link,key=lambda x:x[0])
             total_duty_hrs_link = self._combine_duty_hours(total_duty_hrs_link)
+
+            log.info('NORDLYS:Total duty hrs link {hrs}'.format(hrs=total_duty_hrs_link))
 
             for val in total_duty_hrs_link:
                 valid_events.append({'paycode':val[2],
@@ -583,18 +585,6 @@ class TimeEntryReport(WFSReport):
             return True
         else:
             return False
-
-    
-    def is_weekend(self,start):
-        weekday_num = start.weekday()
-        log.info('NORDLYS: Weekday Day Number {sd}'.format(sd=weekday_num))
-        if (weekday_num <= 4):
-            log.debug('NORDLYS: Day is Sunday and Saturday {day}'.format(day=weekday_num))
-            return False
-        else:
-            log.debug('NORDLYS: Day is between Monday or Firday {day}'.format(day=weekday_num))
-            return True
-        return False
 
 
     def _temporary_split_hours(self, duty_bag, start_dt, paycode, crew_id, extperkey,split_found):
@@ -1105,6 +1095,17 @@ class TimeEntryReport(WFSReport):
                 updated_dates.append(record[0])
 
         return updated
+
+    def is_weekend(self,start):
+        weekday_num = start.weekday()
+        log.info('NORDLYS: Weekday Day Number {sd}'.format(sd=weekday_num))
+        if (weekday_num <= 4):
+            log.debug('NORDLYS: Day is Sunday and Saturday {day}'.format(day=weekday_num))
+            return False
+        else:
+            log.debug('NORDLYS: Day is between Monday or Firday {day}'.format(day=weekday_num))
+            return True
+        return False
     
     '''
     Link Flight Duty Function Start
