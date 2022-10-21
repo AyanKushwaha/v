@@ -30,7 +30,7 @@ import os
 from smtplib import SMTP
 from carmensystems.basics.atfork.atfork import basics_fork, BASICS_ATFORK_NONE
 from carmensystems.dig.framework.handler import MessageHandlerBase, CallNextHandlerResult
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # constants and initialization ==========================================={{{1
 log = logging.getLogger('salary.ec.ec_perdiem_statement_mailer.ECMailApi')
@@ -667,12 +667,13 @@ class CrewStatementEmailer(MessageHandlerBase):
         subject = self.subjects
         body = self.bodies
         cid = path.split("/")[-1]
-        date = datetime.now().strftime("%b%Y")
+        previous_mon = datetime.now() - timedelta(days=31)
+        date = previous_mon.strftime("%b%Y")
         if "{date}" in body: body = body.replace("{date}",  date)
         if "{date}" in subject: subject = subject.replace("{date}", date)
     
         msg = MIMEMultipart()
-        to = "%s@sas.dk" % cid.split(".")[0]
+        to = "%s@sas.%s" % (cid.split(".")[0], extsys.lower())
         msg['From'] = "%s <%s>" % (self.displayFrom, self.defaultFrom)
         msg['To'] = to
         msg['Date'] = formatdate(localtime=True)
@@ -684,7 +685,7 @@ class CrewStatementEmailer(MessageHandlerBase):
         mailer = SMTP(self.smtp, self.smtpPort)
         part.add_header('Content-Disposition', 'attachment; filename="ECPerDiemReport_%s_%s"' % (date, cid))
         msg.attach(part)
-        print("   email  %s" % cid)
+       print("   email  %s" % cid)
         try:
             isMailSent = mailer.sendmail(self.defaultFrom, to, msg.as_string())
         except Exception as e:
