@@ -63,7 +63,13 @@ PAYCODE_FROM_EVENT = {
             'CNLN_LAND_DAY_OFF_DK': 'SAS_DK_CNLN_LAND_DAY_OFF',
             'CNLN_LAND_DAY_OFF_NO': 'SAS_NO_CNLN_LAND_DAY_OFF',
             'CNLN_SOLD_DK'      :   'SAS_DK_CNLN_SOLD_FDAY',
-            'CNLN_SOLD_NO'      :   'SAS_NO_CNLN_SOLD_FDAY'
+            'CNLN_SOLD_NO'      :   'SAS_NO_CNLN_SOLD_FDAY',
+            'CNLN_PROD_WEEKDAY_DK': 'SAS_DK_CNLN_PROD_WEEKDAY',
+            'CNLN_PROD_WEEKEND_DK':   'SAS_DK_CNLN_PROD_WEEKEND_HOLIDAY',
+            'CNLN_PROD_SICK_DK' :   'SAS_DK_CNLN_PROD_SICK',
+            'CNLN_PROD_WEEKDAY_NO': 'SAS_NO_CNLN_PROD_WEEKDAY',
+            'CNLN_PROD_WEEKEND_NO':   'SAS_NO_CNLN_PROD_WEEKEND_HOLIDAY',
+            'CNLN_PROD_SICK_NO' :   'SAS_NO_CNLN_PROD_SICK'
         }
 
 EVENT_FROM_PAYCODE = {
@@ -131,7 +137,13 @@ EVENT_FROM_PAYCODE = {
             'SAS_NO_CNLN_SOLD_FDAY'         : 'SOLD',
             'SAS_DK_CNLN_Sold_Fhour_Duty_Co': 'SOLD',
             'SAS_DK_CNLN_Sold_FDay'         : 'SOLD',
-            'SAS_DK_CNLN_OT_50+'            : 'CNLN_OT_50_Plus'
+            'SAS_DK_CNLN_OT_50+'            : 'CNLN_OT_50_Plus',
+            'SAS_DK_CNLN_PROD_WEEKDAY'      : 'CNLN_PROD_WEEKDAY',
+            'SAS_DK_CNLN_PROD_WEEKEND_HOLIDAY': 'CNLN_PROD_WEEKEND', 
+            'SAS_DK_CNLN_PROD_SICK'         :'CNLN_PROD_SICK',
+            'SAS_NO_CNLN_PROD_WEEKDAY'      :'CNLN_PROD_WEEKDAY',
+            'SAS_NO_CNLN_PROD_WEEKEND_HOLIDAY':'CNLN_PROD_WEEKEND',
+            'SAS_NO_CNLN_PROD_SICK'         :'CNLN_PROD_SICK'  
 }
 
 ACCOUNT_PAYCODES = (
@@ -185,7 +197,13 @@ ROSTER_PAYCODES = (
     'SAS_NO_CNLN_OT_45_50',
     'SAS_DK_CNLN_LAND_DAY_OFF',
     'SAS_NO_CNLN_LAND_DAY_OFF',
-    'SAS_NO_CNLN_OT_50_PLUS'
+    'SAS_NO_CNLN_OT_50_PLUS',
+    'SAS_DK_CNLN_PROD_WEEKDAY',
+    'SAS_DK_CNLN_PROD_WEEKEND_HOLIDAY',
+    'SAS_DK_CNLN_PROD_SICK',
+    'SAS_NO_CNLN_PROD_WEEKDAY',
+    'SAS_NO_CNLN_PROD_WEEKEND_HOLIDAY',
+    'SAS_NO_CNLN_PROD_SICK'
 
 )
 
@@ -233,7 +251,10 @@ EVENT_FROM_ARTICLE_PAYCODES = {
 	'F0_F3'             :	'F3',
     'CNLN_OT_45_50'     :   'CNLN_OT_45_50',
     'CNLN_LAND_DAY_OFF' :   'CNLN_LAND_DAY_OFF',
-    'CNLN_OT_50_PLUS'   :   'CNLN_OT_50_PLUS'
+    'CNLN_OT_50_PLUS'   :   'CNLN_OT_50_PLUS',
+    'CNLN_PROD_WEEKDAY' :   'CNLN_PROD_WEEKDAY',
+    'CNLN_PROD_WEEKEND': 'CNLN_PROD_WEEKEND',
+    'CNLN_PROD_SICK'    :   'CNLN_PROD_SICK'
 	}
 
 
@@ -272,7 +293,7 @@ class PaycodeHandler:
         elif event_type in ('F3',):
             rank = '_{r}'.format(r=rank) if country in ('NO', 'DK') else ''
             return PAYCODE_FROM_EVENT['F0_{e}_{c}{r}'.format(e=event_type, c=country, r=rank)]
-        elif event_type in ('CNLN_OT_45_50', 'CNLN_OT_50_PLUS', 'CNLN_LAND_DAY_OFF'):
+        elif event_type in ('CNLN_OT_45_50', 'CNLN_OT_50_PLUS', 'CNLN_LAND_DAY_OFF','CNLN_PROD_WEEKEND','CNLN_PROD_WEEKDAY','CNLN_PROD_SICK'):
             return PAYCODE_FROM_EVENT['{e}_{c}'.format(e=event_type, c=country)]
         elif event_type in ('F7',):
             rank = '_{r}'.format(r=rank) if country in ('NO', 'DK', 'SE') else ''
