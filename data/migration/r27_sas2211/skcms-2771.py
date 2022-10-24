@@ -46,7 +46,7 @@ def fixit(dc, *a, **k):
 
     ops.append(fixrunner.createOp('salary_article', 'N', {
         'extsys': 'NO',
-        'extartid':'411A',
+        'extartid':'3223',
         'validfrom': validfrom,
         'validto':  validto,
         'intartid': 'CNLN_PROD_WEEKDAY',
@@ -55,7 +55,7 @@ def fixit(dc, *a, **k):
 
     ops.append(fixrunner.createOp('salary_article', 'N', {
         'extsys': 'NO',
-        'extartid':'412A',
+        'extartid':'3236',
         'validfrom': validfrom,
         'validto':  validto,
         'intartid': 'CNLN_PROD_WEEKEND',
@@ -64,7 +64,7 @@ def fixit(dc, *a, **k):
 
     ops.append(fixrunner.createOp('salary_article', 'N', {
         'extsys': 'NO',
-        'extartid':'413A',
+        'extartid':'3237',
         'validfrom': validfrom,
         'validto':  validto,
         'intartid': 'CNLN_PROD_SICK',
