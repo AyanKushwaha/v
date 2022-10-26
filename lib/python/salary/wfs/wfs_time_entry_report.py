@@ -416,7 +416,6 @@ class TimeEntryReport(WFSReport):
         uniq_dates = set()
         wfs_corrected_data = []
         final_wfs_corrected_data = []
-        uniq_paycodes = set()
 
         for i in table.search("(&(crew_id={crew})(work_day>={start})(work_day<={end}))".format(crew=crew_id,start=self.start,end=self.end)):
 
@@ -424,17 +423,15 @@ class TimeEntryReport(WFSReport):
 
             wfs_corrected_data.append(rec)
             uniq_dates.add(i.work_day)
-            uniq_paycodes.add(i.wfs_paycode)
 
         for dt in uniq_dates:
-            for pc in uniq_paycodes:
-                mx_id = -1
-                for rec in wfs_corrected_data:
-                    if rec[4] == dt and rec[3] == pc:
-                        if rec[0] > mx_id:
-                            mx_id = rec[0]
-                            mx_rec = rec
-                final_wfs_corrected_data.append(mx_rec) 
+            mx_id = -1
+            for rec in wfs_corrected_data:
+                if rec[4] == dt:
+                    if rec[0] > mx_id:
+                        mx_id = rec[0]
+                        mx_rec = rec
+            final_wfs_corrected_data.append(mx_rec) 
 
         for rec in final_wfs_corrected_data:
             corrected_rec = self._latest_record(rec[1], rec[2], rec[3], abs_to_datetime(rec[4]), rec[5], rec[6])
