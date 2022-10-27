@@ -21,7 +21,7 @@ def main():
     fixit()
  
 def update_crew_qual():
-    with open('/users/tcskuyadm/repo/CARMUSR/SAS-Tracking/lib/python/adhoc/crew_qual_corrections/crew_qualification_corrections.csv') as csvFile:
+    with open('/opt/Carmen/CARMUSR/LIVEFEED/lib/python/adhoc/crew_qual_corrections/crew_qualification_corrections.csv') as csvFile:
         data = csv.reader(csvFile, delimiter=';', quotechar='|')
         for row in data:
             crewList.append(dict({'id': row[0],'qual_typ': row[1],'qual_subtype': row[2],'validfrom': row[3]}))         
