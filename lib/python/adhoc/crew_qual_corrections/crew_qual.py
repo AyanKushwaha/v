@@ -21,7 +21,7 @@ def main():
     fixit()
  
 def update_crew_qual():
-    with open('/opt/Carmen/CARMUSR/LIVEFEED/lib/python/adhoc/crew_qual_corrections/crew_qualification_corrections.csv') as csvFile:
+    with open('/users/tcskuyadm/repo/CARMUSR/SAS-Tracking/lib/python/adhoc/crew_qual_corrections/crew_qualification_corrections.csv') as csvFile:
         data = csv.reader(csvFile, delimiter=';', quotechar='|')
         for row in data:
             crewList.append(dict({'id': row[0],'qual_typ': row[1],'qual_subtype': row[2],'validfrom': row[3]}))         
@@ -36,7 +36,7 @@ def fixit(dc, *a, **k):
     # rate = -100
 
     format = "%d%b%Y %H:%M:%S:%f"
-    ae_tim = datetime(2021, 1, 1).strftime(format)
+    ae_tim = datetime(2022, 11, 1).strftime(format)
     tim = AbsTime(ae_tim[:15])
     print(tim)
  
@@ -52,7 +52,7 @@ def fixit(dc, *a, **k):
                                                             'validto': int(tim)}))
     return ops
  
-__version__ = 'SASINC0155169'
+__version__ = 'SASINC0238039'
 fixit.program = 'crew_qual.py (%s)' % __version__
  
 main()
