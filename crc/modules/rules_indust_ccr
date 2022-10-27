@@ -2143,6 +2143,7 @@ export %ind_min_freedays_in_cnx_with_VA_ALL_valid% =
 ** Agreement:
 **    FC 1:2 Mom 3, 1:11G.1
 **    CAU K06 L.1
+**    K22 FD - new weekend definition requires no check-in limitation (SKCMS-3156)
 */
 export rule ind_check_in_time_limit_for_wop_ALL =
   valid %ind_check_in_time_limit_for_wop_ALL_valid%;
@@ -2167,7 +2168,6 @@ export %ind_check_in_time_limit_for_wop_ALL_valid% =
   not crew.%is_leased_wop_start% and
   wop.%starts_in_pp% and
   wop.%is_on_duty% and
-  not wop.%is_qa_fd% and
   not (crew.%in_5_4_flex_group%(wop.%start_hb%) and not prev(wop(chain), wop.%is_vacation%)) and
   /* jastrom: removed since not work if wop preceded by empty days.
   (wop.%start_utc% - %r_comparative_check_out% < 24:00) and */
@@ -2194,109 +2194,80 @@ table check_in_time_limitations(Int ix) =
     %_r_comparative_check_out%,
     %_check_in_time_limit%,
     %_check_in_limitation_type%;
-  
-  /* Common */
-  -,       -,   1 -> crew.%in_variable_group_wop_start% and
-                     (%cabin_crew% or crew.%is_SKI%) and
-                     not crew.%has_agmt_group_qa_cc% and
-                     not crew.%has_agmt_group_snk_cc% and
-                     wop.%is_preceded_by_F4% and
-                     %ci_start_day_of_week% = 1,
-                     prev(wop(roster), wop.%end_utc%),
-                     freedays.%free_we_earliest_end%,
-                     "F4";
-  
-  /* Flight crew */
-  true, <>"SKI", 2 -> crew.%in_variable_group_wop_start%  and
-                      wop.%is_preceded_by_FW% and
-                      %ci_start_day_of_week% = 1,
-                      prev(wop(roster), wop.%end_utc%),
-                      freedays.%free_we_earliest_end%,
-                      "FW free weekend";
 
-  true, <>"SKI", 3 -> (crew.%in_variable_group_wop_start% /*or
-                      %FG_FC_checkin_mimics_VG%*/) and
+  /* Flight crew */
+  true,<>"SKI", 1 -> crew.%in_variable_group_wop_start% and
                      not training.%wop_is_in_school_period_min_7x24% and
                      %has_check_in_limitation_after_2_freedays%,
                      prev(wop(roster), wop.%end_utc%),
                      %ci_limit_after_2F%,
                      "2 freedays";
-  true,     - , 4 -> crew.%has_rotationsferie_contract_SKN_FD_at_date%(round_down(wop.%start_hb%, 24:00) - 14 * 24:00) and
+  true,     - , 2 -> crew.%has_rotationsferie_contract_SKN_FD_at_date%(round_down(wop.%start_hb%, 24:00) - 14 * 24:00) and
                      not first(trip(wop), trip.%is_compensation_day%) and
                      not first(duty(wop), duty.%is_privately_traded%) and
                      %_rotationsferie_ci_valid%,
                      void_abstime,
                      6:00,
                      "summer rotationsferie";
-  true,     - , 5 -> freedays.%prev_not_freedays_wop_was_vacation% and
+  true,     - , 3 -> freedays.%prev_not_freedays_wop_was_vacation% and
                      freedays.%vacation_days% >= 7,
                      prev(wop(roster), wop.%end_utc%) where(wop.%is_vacation%),
-		      07:00,
+                     07:00,
                      "vacation";
-  true,    -,   6 -> training.%wop_is_in_school_period_min_7x24%,
+  true,    -,   4 -> training.%wop_is_in_school_period_min_7x24%,
                      wop.%start_utc%,
                      06:00,
                      "training";
-  true,    -,   7 -> freedays.%previous_wop_is_isolated_FS%,
+  true,    -,   5 -> freedays.%previous_wop_is_isolated_FS%,
                      prev(wop(roster), wop.%end_utc%),
                      08:00,
                      "isolated FS";
-  true, <>"SKI", 8 -> crew.%in_variable_group_wop_start% and
-                      (wop.%is_preceded_by_F4% or
-                       %check_wop_preceded_by_activity_allowed_on_weekend_fcsh%) and
-                      %ci_start_day_of_week% = 1,
-                      prev(wop(roster), wop.%end_utc%),
-                      freedays.%free_we_earliest_end%,
-                      "weekend";
-  
-  /* Cabin crew - DK */
-  false, "SKD", 9 -> %has_check_in_limitation_after_2_freedays%,
-                     prev(wop(roster), wop.%end_utc%),
-                     08:00,
-                     "LH charter with 2 freedays";
 
-    false,    -, 11 ->  crew.%has_agmt_group_skn_cc%
-                     and first(leg(wop),leg.%is_standby_with_rest%) where (not leg.%is_rest%)
-                     and freedays.%prev_not_freedays_wop_was_vacation% and
-                     freedays.%vacation_days% >= 7
-                     and system_db_parameters.%skn_cc_oct2016_valid%(wop.%start_hb%),
-                     wop.%start_utc%,
-                     04:20,
-                     "vacation";
-
-    false,    -, 12 -> crew.%has_agmt_group_skn_cc%
-                     and freedays.%prev_not_freedays_wop_was_vacation% and
-                     freedays.%vacation_days% >= 7
-                     and system_db_parameters.%skn_cc_oct2016_valid%(wop.%start_hb%),
-                     wop.%start_utc%,
-                     06:00,
-                     "vacation";
-
-                   
-  false, "SKD", 13-> crew.%has_agmt_group_skd_cc%
-                     and first(leg(wop),leg.%is_standby_with_rest%) where (not leg.%is_rest%)
+  /* Cabin crew */
+  false,"SKD", 6 -> first(leg(wop),leg.%is_standby_with_rest%) where (not leg.%is_rest%)
                      and freedays.%prev_not_freedays_wop_was_vacation% and
                      freedays.%vacation_days% >= 7
                      and system_db_parameters.%skd_cc_cau_nov2016%(wop.%start_hb%),
                      wop.%start_utc%,
                      04:40,
                      "vacation"; 
-                     
-   false, "SKD", 14 -> crew.%has_agmt_group_skd_cc%
-                     and freedays.%prev_not_freedays_wop_was_vacation% and
+  false, "SKD", 7 -> freedays.%prev_not_freedays_wop_was_vacation% and
                      freedays.%vacation_days% >= 7
                      and system_db_parameters.%skd_cc_cau_nov2016%(wop.%start_hb%),
                      wop.%start_utc%,
                      06:00,
                      "vacation";
-
-   false, -, 15 -> default(crew.%has_agmt_group_sks_cc%
-                    and is_first(trip(wop))
+  false,   -,   8 -> crew.%in_variable_group_wop_start% and
+                     %cabin_crew% and
+                     not crew.%has_agmt_group_snk_cc% and
+                     wop.%is_preceded_by_F4% and
+                     %ci_start_day_of_week% = 1,
+                     prev(wop(roster), wop.%end_utc%),
+                     freedays.%free_we_earliest_end%,
+                     "F4";
+  false, "SKD", 9 -> %has_check_in_limitation_after_2_freedays%,
+                     prev(wop(roster), wop.%end_utc%),
+                     08:00,
+                     "LH charter with 2 freedays";
+  false,"SKN", 10 -> first(leg(wop),leg.%is_standby_with_rest%) where (not leg.%is_rest%)
+                     and freedays.%prev_not_freedays_wop_was_vacation% and
+                     freedays.%vacation_days% >= 7
+                     and system_db_parameters.%skn_cc_oct2016_valid%(wop.%start_hb%),
+                     wop.%start_utc%,
+                     04:20,
+                     "vacation";
+ false, "SKN", 11 -> freedays.%prev_not_freedays_wop_was_vacation% and
+                     freedays.%vacation_days% >= 7
+                     and system_db_parameters.%skn_cc_oct2016_valid%(wop.%start_hb%),
+                     wop.%start_utc%,
+                     06:00,
+                     "vacation";
+ false, "SKS", 12 -> default(is_first(trip(wop))
                          where (not trip.%is_rest%)
-                    and not first(trip(wop), trip.%is_rest%)
-                    and freedays.%prev_wop_is_vacation_with_no_freedays%
-                    and freedays.%vacation_days% >= 5
-                    and system_db_parameters.%scca_engagement_2019%(wop.%start_hb%),
+                         and not first(trip(wop), trip.%is_rest%)
+                         and freedays.%prev_wop_is_vacation_with_no_freedays%
+                         and freedays.%vacation_days% >= 5
+                         and system_db_parameters.%scca_engagement_2019%(wop.%start_hb%),
                     false),
                     wop.%start_utc%,
                     06:00,
@@ -2310,6 +2281,7 @@ export %check_in_time_limitations_max% = 20;
 ** For short-haul FC, check-in after F4 weekends must always be checked, but 
 ** weekends with other acceptable activities should only be checked if there is 
 ** no legal free weekend in the month.
+**    K22 FD -  new free weekend definition requires no check-in limitation
 */
 %check_wop_preceded_by_activity_allowed_on_weekend_fcsh% =
     let fw_in_period = freedays.%has_free_weekend_in_period_by_date%(trip.%start_month_start%);
@@ -2328,9 +2300,6 @@ export %check_in_time_limitations_max% = 20;
     and any(times(freedays.%free_we_interval_max_number_of_types%),
         (time_of_week(wop.%start_day%) <= freedays.%free_we_end_tow%(%times_index_0%)
         and freedays.%free_we_end_tow%(%times_index_0%) - time_of_week(wop.%start_day%) <= 24:00));
-
-%FG_FC_checkin_mimics_VG% =
-  crew.%is_sks%;
 
 /* Defined in child modules due to different values */
 %_ci_limitation_after_2F% = Bool;
@@ -2440,7 +2409,7 @@ end
 **
 ** Agreement:
 **    CAU check-out before F-days: J.1
-
+**    K22 FD - new weekend definition requires no check-out limitation (SKCMS-3156)
 */
 export rule ind_check_out_time_limit_for_wop_ALL =
   valid %ind_check_out_time_limit_for_wop_ALL_valid%;
@@ -2457,8 +2426,7 @@ export rule ind_check_out_time_limit_for_wop_ALL =
          value, limit);
   remark "(CCR) Coll: No late check out before days off",
   planner "The rule checks that the check out time for the last duty"
-          " before days off is earlier than the latest allowed."
-          " The rule is valid for FC and CC SKN & SKS.";
+          " before days off is earlier than the latest allowed.";
 end
 
 export %ind_check_out_time_limit_for_wop_ALL_valid% =
@@ -2506,55 +2474,40 @@ table check_out_time_limitations(Int ix) =
     %_check_out_time_limit%,
     %_check_out_limitation_type%;
   
-  /* Common */
-  -,       -,   1 -> crew.%in_variable_group_wop_end% and
-                     (%cabin_crew% or crew.%is_SKI%) and
-                     wop.%is_followed_by_F4% and not %F4_greenland_exception%,
-                     freedays.%free_we_latest_start%,
-                     "F4";
-  
   /* Flight crew */
-  true, <>"SKI", 2 -> crew.%in_variable_group_wop_end% and
-                      wop.%is_followed_by_FW%,
-                      freedays.%free_we_latest_start%,
-                      "FW free weekend";
-  true, <>"SKI", 3 -> crew.%in_variable_group_wop_end% and
+  true, <>"SKI", 1 -> crew.%in_variable_group_wop_end% and
                       not training.%wop_is_in_school_period_min_7x24% and
                       %has_check_out_limitation_before_2_freedays%,
                       %co_limit_before_2F%,
                       "2 freedays";
-  true,    -,   4 -> training.%wop_is_in_school_period_min_7x24%,
+  true,    -,   2 -> training.%wop_is_in_school_period_min_7x24%,
                      23:59,
                      "training";
-  true,    -,   5 -> freedays.%next_wop_is_isolated_FS%,
+  true,    -,   3 -> freedays.%next_wop_is_isolated_FS%,
                      22:00,
                      "isolated FS";
-  true, <> "SKI", 6 -> crew.%in_variable_group_wop_end% and
-                       (wop.%is_followed_by_F4% or wop.%is_followed_by_FW% or
-                        %check_wop_followed_by_activity_allowed_on_weekend_fcsh%),
-                       freedays.%free_we_latest_start%,
-                       "weekend";
 
-  /* Cabin crew - DK */
-  false, "SKD", 2 -> %next_wop_is_F7S%,
+  /* Cabin crew */
+  false, "SKD", 4 -> %next_wop_is_F7S%,
                      24:00,
                      "F7S";
-  
-  /* Cabin crew - SE */
-  false, "SKS", 2 -> %next_wop_is_F7S%,
+  false, "SKS", 5 -> %next_wop_is_F7S%,
                      23:59,
                      "F7S";
-  
-  false, -, 7 -> default(crew.%has_agmt_group_sks_cc%
-                  and crew.%in_variable_group_at_date%(wop.%start_hb%)
-                  and is_last(trip(wop))
-                  and freedays.%next_not_freedays_wop_is_vacation%
-                  and wop.%freedays% = freedays.%min_before_VA%
-                  and freedays.%following_vacation_days% >= 5
-                  and system_db_parameters.%scca_engagement_2019%(wop.%start_hb%),
-                  false),
-                  18:00,
-                  "vacation";
+  false,    -, 6 -> crew.%in_variable_group_wop_end% and
+                    %cabin_crew% and
+                    wop.%is_followed_by_F4% and not %F4_greenland_exception%,
+                    freedays.%free_we_latest_start%,
+                    "F4";
+  false,"SKS", 7 -> default(crew.%in_variable_group_at_date%(wop.%start_hb%)
+                             and is_last(trip(wop))
+                             and freedays.%next_not_freedays_wop_is_vacation%
+                             and wop.%freedays% = freedays.%min_before_VA%
+                             and freedays.%following_vacation_days% >= 5
+                             and system_db_parameters.%scca_engagement_2019%(wop.%start_hb%),
+                    false),
+                    18:00,
+                    "vacation";
 
   /* Default */
   -, -, - -> false, 23:59, "UNKNOWN";
@@ -2564,6 +2517,7 @@ end
 ** For short-haul FC, check-out before F4 weekends must always be checked, but 
 ** weekends with other acceptable activities should only be checked if there is 
 ** no legal free weekend in the month.
+**    K22 FD -  new free weekend definition requires no check-out limitation
 */
 %check_wop_followed_by_activity_allowed_on_weekend_fcsh% =
     let fw_in_period = freedays.%has_free_weekend_in_period_by_date%(trip.%start_month_start%);
