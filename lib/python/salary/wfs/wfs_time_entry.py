@@ -1602,7 +1602,7 @@ class TimeEntry(WFSReport):
 
     def _remove_saslink_sick(self, crew_id, duty_bag, duty_start_dt, saslink_sick):
         sick_hrs = []
-        start_dt = abs_to_datetime(duty_start_day) + timedelta(days=i)
+        start_dt = abs_to_datetime(duty_start_dt) + timedelta(days=0)
         start_dt_start_abs = AbsTime(start_dt.year, start_dt.month, start_dt.day, 0, 0)
         start_dt_end_abs = start_dt_start_abs + RelTime('24:00')
         prev_duty_hrs_before_sick = default_reltime(duty_bag.rescheduling.period_inf_prev_duty_time(start_dt_start_abs,start_dt_end_abs))
