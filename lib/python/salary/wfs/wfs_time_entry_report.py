@@ -1070,12 +1070,12 @@ class TimeEntryReport(WFSReport):
                 day1_hrs = RelTime('24:00') - start_time
                 day2_hrs = end_dttime
 
-        if self.is_weekend(start_dt):
+        if self.is_weekend(start_dt) or duty_bag.report_roster.is_public_holiday_link(duty_start_day):
             paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND', crew_id, country,rank)
         else:
             paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY', crew_id, country,rank)
 
-        if self.is_weekend(end_dt):
+        if self.is_weekend(end_dt) or duty_bag.report_roster.is_public_holiday_link(duty_end_day):
             paycode_end_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND', crew_id, country,rank)
         else:
             paycode_end_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY', crew_id, country,rank)
@@ -1092,7 +1092,7 @@ class TimeEntryReport(WFSReport):
         duty_start_day = duty_bag.duty.start_day()
         curr_abs = abs_to_datetime(duty_start_day)
 
-        if self.is_weekend(curr_abs):
+        if self.is_weekend(curr_abs) or duty_bag.report_roster.is_public_holiday_link(duty_start_day):
             paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND', crew_id, country,rank)
         else:
             paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY', crew_id, country,rank)       
@@ -1125,11 +1125,12 @@ class TimeEntryReport(WFSReport):
         '''function to check a day is weekday/weekend '''
         weekday_num = start.weekday()
         log.info('NORDLYS: Weekday Day Number {sd}'.format(sd=weekday_num))
-        if (weekday_num == 5 or weekday_num == 6 or 'report_roster.%%is_public_holiday_link%%(start)'):
-            log.debug('NORDLYS: Day is Sunday and Saturday or public holiday {day}'.format(day=weekday_num))
+        
+        if ((weekday_num <= 4 )):
+            log.debug('NORDLYS: Day is between Monday or Friday {day}'.format(day=weekday_num))
             return False
         else:
-            log.debug('NORDLYS: Day is between Monday or Firday {day}'.format(day=weekday_num))
+            log.debug('NORDLYS: Day is Sunday and Saturday or public holiday {day}'.format(day=weekday_num))
             return True
         return False
 
@@ -1146,14 +1147,14 @@ class TimeEntryReport(WFSReport):
         day1_hrs = RelTime(duty_bag.report_overtime.split_duty_starttime())
         day2_hrs = RelTime(duty_bag.report_overtime.split_duty_endtime())
   
-        if self.is_weekend(start_dt):
+        if self.is_weekend(start_dt) or duty_bag.report_roster.is_public_holiday_link(duty_start):
             paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND', crew_id, country,rank)
         else:
             paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY', crew_id, country,rank)
 
         if day1_hrs > RelTime('00:00'):
             if duty_start != duty_end:
-                if self.is_weekend(end_dt):
+                if self.is_weekend(end_dt) or duty_bag.report_roster.is_public_holiday_link(duty_end):
                     paycode_end_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND', crew_id, country,rank)
                 else:
                     paycode_end_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY', crew_id, country,rank)
