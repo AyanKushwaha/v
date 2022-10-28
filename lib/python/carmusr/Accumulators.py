@@ -26,7 +26,7 @@ from tm import TM
 
 
 ## Set this global for testgin/debugging, otherwise Accumulators will run as normal
-SELECTED_ACCUMULATORS = None
+SELECTED_ACCUMULATORS = "accumulators.a2lh_flights_sectors_daily_acc"]
 ## comment this out when done testing/debugging:
 # SELECTED_ACCUMULATORS = ["accumulators.nr_planned_p_days_skn_cc_acc", "accumulators.nr_planned_sb_ln_days_cc_acc"]
 

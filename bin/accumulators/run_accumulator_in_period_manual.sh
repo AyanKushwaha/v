@@ -6,8 +6,8 @@
 # with a specific accumulator in mind over a specified per
 #
 
-FROM="20200801"
-TO="20220302"
+FROM="20200707"
+TO="20220909"
 
 # Validation of dates
 FROM_DATE=$(date "+%Y%m%d" -d "$FROM")

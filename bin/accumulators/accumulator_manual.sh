@@ -128,7 +128,7 @@ XMLCONFIG=$CARMSYS/bin/xmlconfig
 : ${PLANPATH:="`$XMLCONFIG $CARMUSR/etc/config.xml data_model/plan_path | awk '{print $3}'`"}
 
 ACCUMULATOR="specific"
-SPECIFICACCUMULATOR="accumulators.sh_all_fc_flight_acc"
+SPECIFICACCUMULATOR="accumulators.a2lh_flights_sectors_daily_acc"
 
 echo "CARMUSR              : $CARMUSR"
 echo "PLANPATH             : $PLANPATH"
