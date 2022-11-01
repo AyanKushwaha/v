@@ -767,6 +767,72 @@ export rule qln_pm_mentor_CC =
   planner "PM: Crew should have POSITION+PMM qualification for PMM (Performance Managment Meeting as Mentor)";
 end
 
+/*
+SKS-532
+Rule: Rule for minimum 30 days (one month) spacing required between each sim session
+Desc: Studio Rule shall require that there must be a minimum 30-day-spacing between
+      2 LPC events or 2 OTS/OPC events or between 1 LPC and 1 OTS/OPC event.
+      This rule should work in JCR studio and during optimization.
+      This rule should work in JCT studio and during alert monitor.
+*/
+export rule min_x_days_required_between_each_sim_session =
+  valid roster.%check_rules% and
+        trip.%in_pp_extended% and
+        %trip_is_valid_sim_event% and
+        rule_exceptions.%rule_on%(trip.%start_UTC%);
+
+  %num_days_since_last_sim_event% >= %min_num_days_req_between_each_sim_session%;
+
+  startdate  = trip.%start_UTC%;
+  severity =  first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = trip.%failobject_start%;
+  failtext %failtext_min_x_days_required_between_each_sim_session%;
+  remark "Minimum X days required between each sim session",
+  planner "Minimum X days is required between 2 LPC events or 2 OTS/OPC events or between 1 LPC and 1 OTS/OPC event";
+end
+
+%min_num_days_req_between_each_sim_session% =
+    parameter 30
+    remark "Minimum number of days required between each sim session";
+
+%trip_is_valid_sim_event% =
+    trip.%is_lpc_opc_or_ots% and %any_leg_is_valid_sim_event%;
+
+%any_leg_is_valid_sim_event% =
+    any(leg(trip), leg.%is_lpc_opc_or_ots% and not %leg_is_sim_instr_or_assist_or_skilltest%);
+
+%leg_is_sim_instr_or_assist_or_skilltest% =
+    leg.%is_any_sim_instr% or leg.%is_forced_sim_assist% or leg.%is_sim_assist_landings% or leg.%is_skill_test%;
+
+%num_days_since_last_sim_event% =
+    ((%current_sim_event_date% - %last_sim_event_date%) / 24:00) - 1;
+
+%last_sim_event_date% =
+    default(prev(trip(roster), %last_leg_sim_event_date_in_trip%)
+            where(trip.%is_lpc_opc_or_ots%),
+            01jan1986);
+
+%last_leg_sim_event_date_in_trip% =
+    last(leg(trip), leg.%end_date%)
+    where(leg.%is_lpc_opc_or_ots% and not %leg_is_sim_instr_or_assist_or_skilltest%);
+
+%current_sim_event_date% =
+    first(leg(trip), leg.%start_date%)
+    where(leg.%is_lpc_opc_or_ots% and not %leg_is_sim_instr_or_assist_or_skilltest%);
+
+%last_leg_sim_event_rec_type% =
+    last(leg(trip), training.%leg_rec_type%)
+    where(leg.%is_lpc_opc_or_ots% and not %leg_is_sim_instr_or_assist_or_skilltest%);
+
+%current_sim_event_rec_type% =
+    first(leg(trip), training.%leg_rec_type%)
+    where(leg.%is_lpc_opc_or_ots% and not %leg_is_sim_instr_or_assist_or_skilltest%);
+
+%failtext_min_x_days_required_between_each_sim_session% =
+    rules.%failtext_int%(concat("Minimum ", format_int(%min_num_days_req_between_each_sim_session%, "%d"), " days space is required since last ", %last_leg_sim_event_rec_type%,
+                                " sim and current ", %current_sim_event_rec_type%, " sim"),
+                         %num_days_since_last_sim_event%, 
+                         %min_num_days_req_between_each_sim_session%);
 
 /* Cached expressions */
 %crew_is_pilot% = crew.%is_pilot%;
