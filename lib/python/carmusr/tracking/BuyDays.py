@@ -232,18 +232,39 @@ def buy_days_svs(crew_id, start_time, end_time, leg_type, comment="",time_hh_sby
                     current_row = next_row
             elif current_row.end_time >= end_time:
                 if is_type_bought_sby:
-                    time_hour_Sby = integer_to_reltime_hour(int(time_hh_Sby[0:2]))
-                    time_minute_Sby = integer_to_reltime_min(int(time_mm_Sby[3:]))
+                    temp_hour_sby = time_hh_Sby[0:2]
+                    if temp_hour_sby[1] == ':':
+                        temp_hour_sby = '0' +temp_hour_sby
+                    time_hour_Sby = integer_to_reltime_hour(int(temp_hour_sby[0:2]))
+                
+                    temp_min_sby = time_mm_Sby
+                    if temp_min_sby[-2] == ':':
+                        temp_min_sby = temp_min_sby[0:3] +  '0' +temp_min_sby[-1]
+                    time_minute_Sby = integer_to_reltime_min(int(temp_min_sby[3:]))
                     current_row.hours = time_hour_Sby
                     current_row.minutes = time_minute_Sby
                 elif is_type_bought_prod:
-                    time_hour_Prod = integer_to_reltime_hour(int(time_hh_Prod[0:2]))
-                    time_minute_Prod = integer_to_reltime_min(int(time_mm_Prod[3:]))
+                    temp_hour_prod = time_hh_Prod[0:2]
+                    if temp_hour_prod[1] == ':':
+                        temp_hour_prod = '0' +temp_hour_prod
+                    time_hour_Prod = integer_to_reltime_hour(int(temp_hour_prod[0:2]))
+                
+                    temp_min_prod = time_mm_Prod
+                    if temp_min_prod[-2] == ':':
+                        temp_min_prod = temp_min_prod[0:3] +  '0' +temp_min_prod[-1]
+                    time_minute_Prod = integer_to_reltime_min(int(temp_min_prod[3:]))
                     current_row.hours = time_hour_Prod
                     current_row.minutes = time_minute_Prod
                 else:
-                    time_HH_hour = integer_to_reltime_hour(int(time_HH[0:2]))
-                    time_MM_minute = integer_to_reltime_min(int(time_MM[3:]))
+                    temp_hour = time_HH[0:2]
+                    if temp_hour[1] == ':':
+                        temp_hour = '0' +temp_hour
+                    time_HH_hour = integer_to_reltime_hour(int(temp_hour[0:2]))
+                
+                    temp_min = time_MM
+                    if temp_min[-2] == ':':
+                        temp_min = temp_min[0:3] +  '0' +temp_min[-1]
+                    time_MM_minute = integer_to_reltime_min(int(temp_min[3:]))
                     current_row.hours = time_HH_hour
                     current_row.minutes = time_MM_minute
                 
@@ -252,13 +273,27 @@ def buy_days_svs(crew_id, start_time, end_time, leg_type, comment="",time_hh_sby
                 # Increase period
                 current_row.end_time = current_row.end_time.adddays(1)
                 if is_type_bought_sby:
-                    time_hour_Sby = integer_to_reltime_hour(int(time_hh_Sby[0:2]))
-                    time_minute_Sby = integer_to_reltime_min(int(time_mm_Sby[3:]))
+                    temp_hour_sby = time_hh_Sby[0:2]
+                    if temp_hour_sby[1] == ':':
+                        temp_hour_sby = '0' +temp_hour_sby
+                    time_hour_Sby = integer_to_reltime_hour(int(temp_hour_sby[0:2]))
+                
+                    temp_min_sby = time_mm_Sby
+                    if temp_min_sby[-2] == ':':
+                        temp_min_sby = temp_min_sby[0:3] +  '0' +temp_min_sby[-1]
+                    time_minute_Sby = integer_to_reltime_min(int(temp_min_sby[3:]))
                     current_row.hours = time_hour_Sby
                     current_row.minutes = time_minute_Sby
                 if is_type_bought_prod:
-                    time_hour_Prod = integer_to_reltime_hour(int(time_hh_Prod[0:2]))
-                    time_minute_Prod = integer_to_reltime_min(int(time_mm_Prod[3:]))
+                    temp_hour_prod = time_hh_Prod[0:2]
+                    if temp_hour_prod[1] == ':':
+                        temp_hour_prod = '0' +temp_hour_prod
+                    time_hour_Prod = integer_to_reltime_hour(int(temp_hour_prod[0:2]))
+                
+                    temp_min_prod = time_mm_Prod
+                    if temp_min_prod[-2] == ':':
+                        temp_min_prod = temp_min_prod[0:3] +  '0' +temp_min_prod[-1]
+                    time_minute_Prod = integer_to_reltime_min(int(temp_min_prod[3:]))
                     current_row.hours = time_hour_Prod
                     current_row.minutes = time_minute_Prod
             else:
@@ -279,20 +314,39 @@ def buy_days_svs(crew_id, start_time, end_time, leg_type, comment="",time_hh_sby
                 current_row.account_name = bought_duty
             current_row.end_time = start_time.adddays(1)
             if is_type_bought_sby:
-                time_hour_Sby = integer_to_reltime_hour(int(time_hh_Sby[0:2]))
-                time_minute_Sby = integer_to_reltime_min(int(time_mm_Sby[3:]))
-                print time_hour_Sby,type(time_hour_Sby)
-                print time_minute_Sby,type(time_minute_Sby)
+                temp_hour_sby = time_hh_Sby[0:2]
+                if temp_hour_sby[1] == ':':
+                    temp_hour_sby = '0' +temp_hour_sby
+                time_hour_Sby = integer_to_reltime_hour(int(temp_hour_sby[0:2]))
+                
+                temp_min_sby = time_mm_Sby
+                if temp_min_sby[-2] == ':':
+                    temp_min_sby = temp_min_sby[0:3] +  '0' +temp_min_sby[-1]
+                time_minute_Sby = integer_to_reltime_min(int(temp_min_sby[3:]))
                 current_row.hours = time_hour_Sby
                 current_row.minutes = time_minute_Sby
             if is_type_bought_prod:
-                time_hour_Prod = integer_to_reltime_hour(int(time_hh_Prod[0:2]))
-                time_minute_Prod = integer_to_reltime_min(int(time_mm_Prod[3:]))
+                temp_hour_prod = time_hh_Prod[0:2]
+                if temp_hour_prod[1] == ':':
+                    temp_hour_prod = '0' +temp_hour_prod
+                time_hour_Prod = integer_to_reltime_hour(int(temp_hour_prod[0:2]))
+                
+                temp_min_prod = time_mm_Prod
+                if temp_min_prod[-2] == ':':
+                    temp_min_prod = temp_min_prod[0:3] +  '0' +temp_min_prod[-1]
+                time_minute_Prod = integer_to_reltime_min(int(temp_min_prod[3:]))
                 current_row.hours = time_hour_Prod
                 current_row.minutes = time_minute_Prod
             if is_type_bought_duty:
-                time_HH_hour = integer_to_reltime_hour(int(time_HH[0:2]))
-                time_MM_minute = integer_to_reltime_min(int(time_MM[3:]))
+                temp_hour = time_HH[0:2]
+                if temp_hour[1] == ':':
+                    temp_hour = '0' +temp_hour
+                time_HH_hour = integer_to_reltime_hour(int(temp_hour[0:2]))
+                
+                temp_min = time_MM
+                if temp_min[-2] == ':':
+                    temp_min = temp_min[0:3] +  '0' +temp_min[-1]
+                time_MM_minute = integer_to_reltime_min(int(temp_min[3:]))
                 current_row.hours = time_HH_hour
                 current_row.minutes = time_MM_minute
 
