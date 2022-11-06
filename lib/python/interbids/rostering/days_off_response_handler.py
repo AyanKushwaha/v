@@ -522,7 +522,8 @@ class CreateDaysOffResponseHandler(GetAvailableDaysOffResponse):
                 limit_groups = list(self.get_request_groups(date))
                 print "Logging the day off request for the date: ", date
                 print "Logging the available dayoff quota days: ", available_days
-                print "Logging the crew group for limit: ", limit_groups
+                for limitgroup in limit_groups:
+                   print "Logging the limit_groups : ", limitgroup
                 if limit_groups == [] or available_days is None or available_days < 0:
                     msg = 'No quota available on day %s'%AbsDate.AbsDate(date)
                     if self._activity_e.id == F7S:
@@ -745,6 +746,7 @@ def get_awards(tm, crew_group, type, date):
 def get_limit(tm, crew_group, type, date):
     try:
         limit_row = tm.TM.table("roster_request_limit")[(crew_group, type.id, date)]
+        print "Logging the rows extracted from the database table roster_request_limit ", limit_row
         return limit_row.limit
     except modelserver.EntityNotFoundError:
         return None

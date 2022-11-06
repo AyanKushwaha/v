@@ -284,7 +284,7 @@ class RequestGroup(object):
         values = []
         for (validfrom, validto) in zip(dates, dates[1:]+[None]):
             for value in self.request_group_at_date(validfrom):
-                print "Logging the request groups infomation for crew - Valid from : ", validfrom , " valid to : ", validto , " value :  " , value
+                print "Logging the request groups infomation for crew - Valid from : ", validfrom , " valid to : ", validto , " value :  " , value.name
                 values.append((validfrom, validto, value))
         return values
 
