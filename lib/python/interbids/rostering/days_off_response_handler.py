@@ -1,4 +1,4 @@
-'''
+''''
 Created on Feb 22, 2012
 
 @author: pergr
@@ -165,6 +165,7 @@ class GetAvailableDaysOffResponse(response_module.Response):
             awarded = get_awards(tm, crew_group, self._activity_e, date)
 
             # print "%s request limit at %s: crewgroup=%s, limit=%s, awarded=%s"%(type.id, date, crew_group.name, limit, awarded)
+            print "Logging the date: " , date, " crewgroup: ", crew_group.name , " limit: " , limit , " awarded: " , awarded
             if limit is None:
                 continue
             if awarded is None:
@@ -519,6 +520,9 @@ class CreateDaysOffResponseHandler(GetAvailableDaysOffResponse):
             for date in time_range(self._activity_start_local, self._activity_end_local):
                 available_days = self.get_available_days(date)
                 limit_groups = list(self.get_request_groups(date))
+                print "Logging the day off request for the date: ", date
+                print "Logging the available dayoff quota days: ", available_days
+                print "Logging the crew group for limit: ", limit_groups
                 if limit_groups == [] or available_days is None or available_days < 0:
                     msg = 'No quota available on day %s'%AbsDate.AbsDate(date)
                     if self._activity_e.id == F7S:
@@ -783,6 +787,7 @@ def create_days_off(crew, daysoff_type, period_start, period_end, start, duratio
 def get_available_days_off(crew, daysoff_type, start, end):
     Cui.CuiReloadTable("roster_request_limit")
     Cui.CuiReloadTable("roster_request_awards")
+    print "Logging the crew and dayoff request details- crew: " , crew , " daysoff_type:  " , daysoff_type , " start: " , start ," end:", end
     response = GetAvailableDaysOffResponse(crew, daysoff_type, start, end)
     response.get_response()
     return response
