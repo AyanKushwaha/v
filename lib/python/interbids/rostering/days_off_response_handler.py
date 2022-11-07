@@ -673,10 +673,14 @@ class CreateDaysOffResponseHandler(GetAvailableDaysOffResponse):
             self._create_activity()
             # create account entry
             self._create_account_entry()
+            print("Logging the entry in the check_limit function")
             # check limit 
             self._check_limit()
+            print("Logging the exit in the check_limit function")
+            print("Logging the entry in the check_legality function")
             # check legality
             self._check_legality()
+            print("Logging the exit in the check_legality function")
             # create conflict to trigger save
             self._create_conflicts()      
             # set correct status
@@ -685,6 +689,7 @@ class CreateDaysOffResponseHandler(GetAvailableDaysOffResponse):
             self._create_crew_roster_request()
             # generate report
             self._generate_request_receipt_report()
+            print("creating the new days off in reply")
             # create the new days off in reply
             days_off_node = self.get_days_off_node()
             
@@ -695,6 +700,7 @@ class CreateDaysOffResponseHandler(GetAvailableDaysOffResponse):
             self._release_temporary_lock()
 
         except DaysOffRejectedError, err:
+            print("Logging the entry in to DaysOffRejectedError exception area")
             # well, something didn't want the activity
             self._errors.append(str(err))
             # Remove the lock
