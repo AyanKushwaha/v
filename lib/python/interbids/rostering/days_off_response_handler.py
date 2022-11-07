@@ -336,38 +336,43 @@ class CreateDaysOffResponseHandler(GetAvailableDaysOffResponse):
         rule_set_name = self.crew_rave_eval(self._crew_e.id, "rule_set_name")  
 
         days_off_type = self._activity_e.id
+
+        print "Logging the rule_set_name is " , rule_set_name
+        print "Logging the days_off_type ", days_off_type 
     
         for crew_bag in self.create_crew_bag(self._crew_e.id).iterators.chain_set():
             text = ''
             for f_bag, fail in crew_bag.rulefailures(where='interbids.%%check_days_off_bid_legality%%("%s")' %(days_off_type),
                                                      group=rave.group("interbids.request_rules_message")):
-                #print ("FAIL",
-                #       rule_set_name,
-                #       fail.rule.name(),
-                #       str(fail.startdate),
-                #       fail.failtext,
-                #       fail.rule.remark(),
-                #       fail.failobject,
-                #       fail.limitvalue,
-                #       fail.actualvalue,
-                #       fail.overshoot)
+                print ("FAIL",
+                       rule_set_name,
+                       fail.rule.name(),
+                       str(fail.startdate),
+                       fail.failtext,
+                       fail.rule.remark(),
+                       fail.failobject,
+                       fail.limitvalue,
+                       fail.actualvalue,
+                       fail.overshoot)
                 rulename = fail.rule.name().lower()
                 # use mapping for better error message
                 crew_failtext = f_bag.interbids.crew_readable_failtext(rulename)
                 limit_type = f_bag.interbids.crew_rule_limit_type(rulename)
+                print "Logging the limit_type", crew_failtext
+                print "Logging the limit_type", limit_type
                 limit_scale_factor = f_bag.interbids.crew_rule_limit_scale_factor(rulename)
+                print "Logging the limit_scale_factor", limit_scale_factor
 
                 if crew_failtext:
                     limitvalue = ('%.2f' % (float(fail.limitvalue or 0) / limit_scale_factor,)).rstrip('0').rstrip('.')
-
                     fail_actualvalue = fail.actualvalue
-
+                    print "Logging the fail_actualvalue", fail_actualvalue
                     # SKCMS-2001: Fix sign for compdays balance actual value
                     if rulename == 'rules_studio_ccr.sft_nr_comp_days_must_not_exceed_balance_all':
                         fail_actualvalue = -fail_actualvalue
 
                     actualvalue = ('%.2f' % (float(fail_actualvalue or 0) / limit_scale_factor,)).rstrip('0').rstrip('.')
-
+                    print "Logging the crew_failtext : ", crew_failtext ," limitvalue : ", limitvalue ,  " actualvalue: " , actualvalue 
                     if limit_type == "MAX":
                         text = "Rule violation: %s - Max limit is %s, request gives %s" % (crew_failtext, limitvalue, actualvalue)
                     elif limit_type == "MIN":
@@ -382,16 +387,16 @@ class CreateDaysOffResponseHandler(GetAvailableDaysOffResponse):
                 raise DaysOffRejectedError(text)
 
             for f_bag, fail in crew_bag.rulefailures(where='interbids.%%check_days_off_bid_legality%%("%s")' %(days_off_type)):
-                #print ("FAIL",
-                #       rule_set_name,
-                #       fail.rule.name(),
-                #       str(fail.startdate),
-                #       fail.failtext,
-                #       fail.rule.remark(),
-                #       fail.failobject,
-                #       fail.limitvalue,
-                #       fail.actualvalue,
-                #       fail.overshoot)
+                print ("FAIL",
+                       rule_set_name,
+                       fail.rule.name(),
+                       str(fail.startdate),
+                       fail.failtext,
+                       fail.rule.remark(),
+                       fail.failobject,
+                       fail.limitvalue,
+                       fail.actualvalue,
+                       fail.overshoot)
                 if days_off_type not in (FS, F7S, FW, FS1):  # Ignore illegal roster only for instant reply request types in IB
                     raise DaysOffRejectedError("Your request is in conflict with other planned activities and/or rules")
 
