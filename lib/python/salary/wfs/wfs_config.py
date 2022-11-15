@@ -62,8 +62,8 @@ PAYCODE_FROM_EVENT = {
             'F7_DK_CC'          :   'SAS_DK_CMS_F7S_CC',
             'CNLN_LAND_DAY_OFF_DK': 'SAS_DK_CNLN_LAND_DAY_OFF',
             'CNLN_LAND_DAY_OFF_NO': 'SAS_NO_CNLN_LAND_DAY_OFF',
-            'CNLN_SOLD_DK'      :   'SAS_DK_CNLN_SOLD_FDAY',
-            'CNLN_SOLD_NO'      :   'SAS_NO_CNLN_SOLD_FDAY',
+            'CNLN_SOLD_DK'      :   'SAS_DK_CNLN_SOLD_DAYOFF',
+            'CNLN_SOLD_NO'      :   'SAS_NO_CNLN_SOLD_DAYOFF',
             'CNLN_PROD_WEEKDAY_DK': 'SAS_DK_CNLN_PROD_WEEKDAY',
             'CNLN_PROD_WEEKEND_DK':   'SAS_DK_CNLN_PROD_WEEKEND_HOLIDAY',
             'CNLN_PROD_SICK_DK' :   'SAS_DK_CNLN_PROD_SICK',
@@ -134,9 +134,12 @@ EVENT_FROM_PAYCODE = {
             'SAS_DK_CNLN_LAND_DAY_OFF'     : 'CNLN_LAND_DAY_OFF',
             'SAS_NO_CNLN_LAND_DAY_OFF'      : 'CNLN_LAND_DAY_OFF',
             'SAS_DK_CNLN_SOLD_FDAY'         : 'SOLD',
+            'SAS_DK_CNLN_SOLD_DAYOFF'       : 'SOLD',
             'SAS_NO_CNLN_SOLD_FDAY'         : 'SOLD',
+            'SAS_NO_CNLN_SOLD_DAYOFF'       : 'SOLD',
             'SAS_DK_CNLN_Sold_Fhour_Duty_Co': 'SOLD',
             'SAS_DK_CNLN_Sold_FDay'         : 'SOLD',
+            'SAS_DK_CNLN_SOLD_DAYOFF'       : 'SOLD',
             'SAS_DK_CNLN_OT_50+'            : 'CNLN_OT_50_Plus',
             'SAS_DK_CNLN_PROD_WEEKDAY'      : 'CNLN_PROD_WEEKDAY',
             'SAS_DK_CNLN_PROD_WEEKEND_HOLIDAY': 'CNLN_PROD_WEEKEND', 
@@ -175,8 +178,8 @@ ACCOUNT_PAYCODES = (
     'SAS_SE_CMS_CC_VA_PERFORMED',
     'SAS_SE_CMS_FD_VA_PERFORMED',
     'SAS_SE_CMS_UNPAID_VACATION',
-    'SAS_DK_CNLN_SOLD_FDAY',
-    'SAS_NO_CNLN_SOLD_FDAY'
+    'SAS_DK_CNLN_SOLD_DAYOFF',
+    'SAS_NO_CNLN_SOLD_DAYOFF'
 )
 
 ROSTER_PAYCODES = (
