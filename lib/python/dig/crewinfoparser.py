@@ -55,10 +55,10 @@ class CrewPersonalInfo:
     #
     # Using a C type struct here is not a good option since we want to handle
     # UTF-8 encoded fields.
-    fieldstarts = [0, 8, 16, 24, 26, 66, 106, 146, 147, 159, 167, 170, 173, 174, 254]
-    fieldsizes  = [8, 8,  8,  2, 40, 40,  40,   1,  12,   8,   3,   3,   1,  80, 8]
+    fieldstarts = [0, 8, 16, 24, 26, 66, 106, 146, 147, 159, 167, 170, 173, 174, 254, 262, 264]
+    fieldsizes  = [8, 8,  8,  2, 40, 40,  40,   1,  12,   8,   3,   3,   1,  80, 8, 2, 40]
     # Kept for historical reasons to be able to calculate record size
-    format = "8s 8s 8s 2s 40s 40s 40s 1s 12s 8s 3s 3s 1s 80s 8s"
+    format = "8s 8s 8s 2s 40s 40s 40s 1s 12s 8s 3s 3s 1s 80s 8s 2s 40s"
 
     def __init__(self, f):
         # Each field which safely can be encoded in ASCII format (default for 'encode' method)
@@ -79,6 +79,8 @@ class CrewPersonalInfo:
         self.maritalstatus = f[12].encode()
         self.email = f[13].encode()
         self.retirementDate = validDate(f[14].encode())
+        self.birthCountry = f[15]
+        self.birthCity = f[16]
 
     def __str__(self):
         return "%s" % self.__dict__
@@ -725,6 +727,10 @@ class CrewRec(DbRec):
             else:
                 self.sex = "F"
         except: pass
+        try: self.bcountry = info.birthCountry
+        except: pass
+        try: self.bcity = info.birthCity
+        except: pass
         self.si = CrewDb.tag
         
     def getUnicodeDict(dbRec):
@@ -734,6 +740,8 @@ class CrewRec(DbRec):
                 'logname': xdecode(dbRec['logname']),
                 'birthday': dbRec['birthday'],
                 'sex': dbRec['sex'],
+                'bcountry': dbRec['bcountry'],
+                'bcity': dbRec['bcity'],
                 'si': dbRec['si']}
     getUnicodeDict = staticmethod(getUnicodeDict)
 
@@ -1237,6 +1245,8 @@ def xstr(ustr):
 #                                        DK: 1=ogift, 2=gift
 # E-mail address        CHAR(80)
 # Retirement date       CHAR(8)          CCYYMMDD
+# Birth County          CHAR(2)
+# Birth City            CHAR(40)
 #------------------------------------------------------------------------
 #
 # record type Address Info:
