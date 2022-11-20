@@ -515,6 +515,12 @@ class PersonalInfoParser(InfoParser):
 
             self.logger.debug("Updating crew with id=%s (%d records)" % (crewId, len(persRecs)))
 
+            if len(crewpers[crewId].lastValidRec.birthCountry) <  1 :
+                crewpers[crewId].lastValidRec.birthCountry = dbCrewMap.get(crewId, {})['bcountry']
+
+            if len(crewpers[crewId].lastValidRec.birthCity) < 1 :
+                crewpers[crewId].lastValidRec.birthCity = dbCrewMap.get(crewId, {})['bcity']
+
             # Update table crew with most recent information, only update if changed
             crewRec = CrewRec(crewpers[crewId].lastValidRec)
             if dbCrewMap.get(crewId, {}) != crewRec.__dict__:
