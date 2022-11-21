@@ -4,7 +4,7 @@ Feature: Introduce training attribute ETOPS LIFUS LC
 ###############
 Background:
     Given planning period from 01Sep2020 to 30Sep2020
-    Given Rostering_FC
+    Given Tracking
 @SCENARIO1
    Scenario: Check that 2 FP rank trainees in FP Position and instructor get correct code.
    Given a crew member with
@@ -34,7 +34,6 @@ Background:
    When I show "crew" in window 1
    Then rave "training.%leg_trainee_duty_code%" values shall be
        | leg | trip | roster | value |
-       | 1   | 1    | 1      |   E   |
        | 1   | 1    | 3      |   E   |
        | 2   | 1    | 1      |   E   |
        | 2   | 1    | 3      |   E   |
