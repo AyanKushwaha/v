@@ -631,28 +631,31 @@ export %has_matching_qual_pc%(Abstime date) =
     else if %last_leg_qual%(date) = "A5" then %has_PC_renewal_qual_A5%(date)
     else false;
 
+%crew_contract_group_safe_pp_start% =
+    default(model_crew.%congrouptype_find%(crew.%id%, fundamental.%pp_start%), "NA");
+
 table check_matching_qual_table(String type, Abstime date) =
-  model_crew.%congrouptype_find%(crew.%id%, fundamental.%pp_start%),%last_leg_qual%(date),%has_PC_renewal_qual_A2%(date),%has_PC_renewal_qual_A3%(date), %has_PC_renewal_qual_A5%(date) -> export %check_matching_pc_leg_qual%;
+  %crew_contract_group_safe_pp_start%, %last_leg_qual%(date),%has_PC_renewal_qual_A2%(date),%has_PC_renewal_qual_A3%(date), %has_PC_renewal_qual_A5%(date) -> export %check_matching_pc_leg_qual%;
   "MFF-A2A3","A2", False, True, -   ->  (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("PC","A5") = default
 (type,"")) or (concat("OPC","A5") = default(type,""));
   "MFF-A2A3","A3", True, False, -   ->  ("PC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("PC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
   "MFF-A2A5","A2", False, - , True  ->  (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("PC","A5") = default
 (type,"")) or (concat("OPC","A5") = default(type,""));
   "MFF-A2A5","A5", True, - ,  False ->  ("PC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,""));
-   - ,  - ,  -,  -, -               ->  void_bool;
+   - ,  - ,  -,  -, -               ->  False;
 end
 
 table recurrent_performed_qual_table(String type) =
-  model_crew.%congrouptype_find%(crew.%id%, fundamental.%pp_start%), trip.%qual%  -> export %recurrent_performed_qual_match%;
+  %crew_contract_group_safe_pp_start%, trip.%qual%  -> export %recurrent_performed_qual_match%;
   "MFF-A2A3","A2"  -> (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("PC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
   "MFF-A2A3","A3"  -> ("PC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("PC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
   "MFF-A2A5","A2"  -> (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("PC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
   "MFF-A2A5","A5"  -> ("PC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,""));
-   - ,  -          -> void_bool;
+   - ,  -          -> False;
 end
 
 table failtext_qual_table(String type, Abstime date) =
-  model_crew.%congrouptype_find%(crew.%id%, fundamental.%pp_start%), %recurrent_performed_check_failtext%(type, "A2", date) , %recurrent_performed_check_failtext%(type, "A3", date) , %recurrent_performed_check_failtext%(type, "A5", date) -> export %failtext_qual_match%;
+  %crew_contract_group_safe_pp_start%, %recurrent_performed_check_failtext%(type, "A2", date) , %recurrent_performed_check_failtext%(type, "A3", date) , %recurrent_performed_check_failtext%(type, "A5", date) -> export %failtext_qual_match%;
   "MFF-A2A3", False, False, -   -> "A2A3";
   "MFF-A2A3", True,  False, -   ->  "A3";
   "MFF-A2A3", False, True , -   ->  "A2";
@@ -2175,14 +2178,26 @@ export %crew_has_program_on_leg% =
       qual = %course_acqual%(date, ix);
   if attr <> "FAM FLT" and substr(attr,1,7) <> "ETOPS L" then
       %nr_acts_of_type_and_code_in_ival%(attr, qual, start, stop)
-  else if substr(attr,1,7) = "ETOPS L" then  /* Ugly fix for ETOPS LIFUS/LC: allow activities to be performed after course end */
-    %nr_acts_of_type_and_code_in_ival%("ETOPS LIFUS/LC", qual, start, %pp_end%) +
-    %nr_acts_of_type_and_code_in_ival%("ETOPS LIFUS", qual, start, %pp_end%) +
-    %nr_acts_of_type_and_code_in_ival%("ETOPS LC", qual, start, %pp_end%)
-  /*%nr_acts_of_type_and_code_in_ival%(attr, qual, start, stop + %max_days_between_lrp2_and_etops_lifus_lc% * 24:00)*/
+  else if substr(attr,1,7) = "ETOPS L" then  
+     if %first_a2nx_is_training_flight_after_date%(qual, start) then
+        /* Ugly fix for ETOPS LIFUS/LC: allow activities to be performed after course end */
+        %nr_acts_of_type_and_code_in_ival%("ETOPS LIFUS/LC", qual, start, %pp_end%) +
+        %nr_acts_of_type_and_code_in_ival%("ETOPS LIFUS", qual, start, %pp_end%) +
+        %nr_acts_of_type_and_code_in_ival%("ETOPS LC", qual, start, %pp_end%)
+        /*%nr_acts_of_type_and_code_in_ival%(attr, qual, start, stop + %max_days_between_lrp2_and_etops_lifus_lc% * 24:00)*/
+     else 0
   else /* Ugly fix for FAM FLT: allow activities to be performed after course end */
     %nr_acts_of_type_and_code_in_ival%(attr, qual, start, stop + %max_days_between_sim_and_fam_flt% * 24:00);
 
+/* 1st A2NX LH flight has any training attribute in pp */
+%first_a2nx_is_training_flight_after_date%(String qual, Abstime start) =
+  default(first(leg(roster), leg.%training_code_safe% <> "NONE")
+                 where (leg.%is_LH_with_NX_ac% and
+                        leg.%start_utc% >= start and
+                        leg.%start_utc% <= %pp_end% and
+                        leg.%is_active_flight% and
+                        leg.%qual% = qual), false);
+  
 /* This is for getting all rows touching an interval.
    The previous lookup can't be used since two courses can share index 
    (the ix column). /EkG */
