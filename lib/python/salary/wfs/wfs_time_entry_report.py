@@ -230,7 +230,7 @@ class TimeEntryReport(WFSReport):
                     if planning_group == "SVS":
                         num_of_flight = duty_bag.report_common.number_of_active_legs()
                         active_flight= duty_bag.duty.has_active_flight()
-                        stby_duties = duty_bag.duty.has_active_flight()
+                        stby_duties = duty_bag.standby.duty_is_standby_callout()
                         if num_of_flight > 0:
                             if active_flight or stby_duties:
                                 if duty_bag.duty_period.is_split():
