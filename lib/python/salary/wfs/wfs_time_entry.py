@@ -181,13 +181,16 @@ class TimeEntry(WFSReport):
         '''Reports duty hrs for split duty for link crew'''
         duty_start = duty_bag.duty_period.start_day_hb()
         duty_end = duty_bag.duty_period.end_day_hb()
+        month_end = duty_bag.report_overtime.month_end_date()
 
         country = country_from_id(crew_id, duty_start)
         start_dt = abs_to_datetime(duty_start)
         end_dt = abs_to_datetime(duty_end)
+
         split_found = True
         day1_hrs = RelTime(duty_bag.report_overtime.split_duty_starttime())
         day2_hrs = RelTime(duty_bag.report_overtime.split_duty_endtime())
+        day3_hrs = RelTime(duty_bag.report_overtime.split_duty_endt())
 
         if self.is_weekend(start_dt) or duty_bag.report_roster.is_public_holiday_link(duty_start):
             paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND', crew_id, country,rank)
@@ -201,8 +204,12 @@ class TimeEntry(WFSReport):
                 else:
                     paycode_end_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY', crew_id, country,rank)
 
-                first_day_hrs = RelTime('24:00') - day1_hrs
-                second_day_hrs = day2_hrs
+                if duty_start != month_end:
+                    first_day_hrs = RelTime('24:00') - day1_hrs
+                    second_day_hrs = day2_hrs
+                else:
+                    first_day_hrs = day3_hrs - day1_hrs
+                    second_day_hrs = day2_hrs
                 data_split = [(duty_start,first_day_hrs,paycode_start_day),(duty_end,second_day_hrs,paycode_end_day)]
                 log.debug("NORDLYS: Split hrs are {0}".format(data_split))
             else:
@@ -379,8 +386,11 @@ class TimeEntry(WFSReport):
                     planning_group = planninggroup_from_id(crew_id, duty_start_day)
                     log.info('NORDLYS: planning group {z} '.format(z = planning_group))
                     if planning_group == "SVS":
-                        if 'report_common.%%number_of_active_legs%%' > 0:   
-                            if 'duty.%%has_active_flight%%' or 'standby.%%duty_is_standby_callout%%':
+                        num_of_flight = duty_bag.report_common.number_of_active_legs()
+                        active_flight= duty_bag.duty.has_active_flight()
+                        stby_duties = duty_bag.standby.duty_is_standby_callout()
+                        if num_of_flight > 0:
+                            if active_flight or stby_duties:
                                 if duty_bag.duty_period.is_split():
                                     if duty_bag.duty_period.start_day_hb() < self.start:
                                         continue
