@@ -872,7 +872,7 @@ export %trip_index% =
 set apis_countries = "US", "MX", "GB", "CN", "JP", "TH", "AE", "RU", "TR", "CA";
 set apis_countries_dk = "US", "MX", "GB", "CN", "JP", "TH", "AE", "RU", "TR", "DK", "CA";
 set apis_countries_no = "US", "MX", "GB", "CN", "JP", "TH", "AE", "RU", "TR", "DK", "CA", "NO";
-
+set apis_countries_ie = "US", "MX", "GB", "CN", "JP", "TH", "AE", "RU", "TR", "DK", "CA", "NO", "IE";
 
 /*******************************************************************************
  * Leg definitions
@@ -984,7 +984,8 @@ export %is_apis% =
   leg.%is_flight_duty%
   and ((%end_country% in apis_countries or %start_country% in apis_countries or %leg_has_any_flyover%)
         or %is_denmark_non_schengen%
-        or %is_norway_non_schengen%)
+        or %is_norway_non_schengen%
+        or %is_ireland_non_EU%)
   and %valid_russia%;
 
 export %is_norway_non_schengen% =
@@ -993,6 +994,20 @@ export %is_norway_non_schengen% =
 
 export %is_denmark_non_schengen% =
   (%start_country% = "DK" and not %arrival_is_schengen%)  or (%end_country% = "DK" and not %departure_is_schengen%);
+
+export %is_ireland_non_EU% =
+  %end_country% = "IE" and %departure_is_non_EU%;
+
+export %departure_is_non_EU% =
+  ((%start_country% in non_EU_schengen) or not %departure_is_schengen%) and %start_country% not in non_schengen_EU;
+
+export set non_EU_schengen = 
+  "NO", "CH", "LI", "IS"
+  remark "Non EU schengen countries";
+
+export set non_schengen_EU =
+  "BG", "RO", "HR", "CY", "IE", "GB"
+  remark "Non schengen EU countries";
 
 /* APIS to Russia valid from 1 Dec 2013 */
 /* terjeda: Is this function necessary any more?  Depreciate? */
@@ -1485,7 +1500,7 @@ set long_haul_airports = "DBX", "GRU";
    abs(%end_time_zone% - 1:00) > 3:00 or
    %block_time_scheduled% > 8:00) and
   not (%start_country% = "GL" or %end_country% = "GL");
-
+ 
    /* Agreement: CAU A. Definitions */
 export %is_long_haul_SKD% =
   (abs(%start_time_zone% - 1:00) > 2:00 or abs(%end_time_zone% - 1:00) > 2:00 or
@@ -2403,13 +2418,25 @@ export %flight_per_diem% =
   else
       %_flight_per_diem%;
 
+/*count number of legs in a trip */
+%num_of_leg_in_trip% = count(leg(trip));
+
+/*Checking if there is only ASB in complete trip */
+%is_single_sby_entitled_to_perdiem%=
+  if %num_of_leg_in_trip% = 1 and %is_standby_at_airport% and
+  %end_UTC% - %activity_scheduled_start_time_utc% > 04:00 then 
+  true
+  else 
+  false;
+
+/* Changed the condition for not including ASB if it is first activity of a trip followed by other production. It was requested in SKPROJ-524*/
 %_is_sby_entitled_to_per_diem% =
-  %is_standby_at_airport% and
-  (not %is_last_in_duty% or ((%is_SKN% or %is_SKS% or %is_SKD%) and %cabin_crew%));
+  (%is_standby_at_airport% and not %is_first_in_duty% and 
+  ((%is_SKN% or %is_SKS% or %is_SKD%) and (%flight_crew% or %cabin_crew%))) or %is_single_sby_entitled_to_perdiem%;
 
 %_is_waiting_entitled_to_per_diem% =
-  %is_waiting% and
-  (not %is_last_in_duty% or ((%is_SKN% or %is_SKS% or %is_SKD%) and %cabin_crew%));
+  %is_waiting% and not %is_first_in_duty% and 
+  ((%is_SKN% or %is_SKS% or %is_SKD%) and (%flight_crew% or %cabin_crew%));
 
 /* Course per diem definition */
 export %course_per_diem% =
@@ -2484,7 +2511,31 @@ export %per_diem_check_in% =
   else if %is_simulator% and %is_passive_plus% and
           prev(leg(trip), is_first(leg(trip)) and %is_deadhead%) then
     %check_in%
-   else 1:00;
+  else if %fdp__FD_NO_without_ASB% then
+    %checkin_base_time_diff%
+  else if %check_flight_LH_NO_CC_FD% then
+    1:30
+    else 1:00;
+
+export %checkin_base_time_diff% = %activity_scheduled_start_time_utc% - %ci_start_utc%;
+/*checking Flight duty for NO without standby Airport */
+export %fdp__FD_NO_without_ASB% = 
+if any(leg(trip), %is_standby_at_airport%) then 
+false
+else if %is_skn% and  fundamental.%main_cat% = "F" then
+true
+else
+false;
+
+/*checking longhaul Flight for NO for CC and FD */
+export %check_flight_LH_NO_CC_FD% = 
+if %is_skn% then
+  if %is_long_haul% then
+    true
+  else
+    false
+else
+false;   
 
 export %per_diem_check_out% =
   if %is_standby_at_airport% or %is_waiting% then
@@ -2869,6 +2920,7 @@ table standby_duty_time =
   true ,      "C"  , false , "SKD" -> if %_standby_start_to_ci% > 4:00 then %_standby_start_to_ci% else 0:00;
   true ,      "C"  , false , "SKS" -> if %time% > 4:00 then %_standby_start_to_ci% else %_standby_end_to_ci%;
   true ,      "C"  , false , "SKN" -> %_standby_start_to_ci%;
+  true ,      "C"  , false , "SVS" -> %_standby_start_to_ci%;
   true ,      "C"  , false , "SKJ" -> %time%;
   true ,      "C"  , false , "SKK" -> %time%;
  -    ,      -    , -     , -     -> 0:00;

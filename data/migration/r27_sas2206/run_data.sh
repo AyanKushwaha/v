@@ -35,6 +35,8 @@ echo " - Processing migration tasks"
 # Example:
 # echo "  * SKCMS-1234: Some description"
 # python $CARMUSR/data/migration/$RELEASE/skcms-1234.py 2>&1 | tee $LOG_DIR/skcms-1234.log
+echo "  * SKCMS-2922: Splitting ETOPS LIFUS/LC"
+python $CARMUSR/data/migration/$RELEASE/skcms-2922.py 2>&1 | tee $LOG_DIR/skcms-2922.log
 
 echo "  * SKCMS-2975: Add LC AP-POS to table training_log_set"
 python $CARMUSR/data/migration/$RELEASE/skcms-2975.py 2>&1 | tee $LOG_DIR/skcms-2975.log

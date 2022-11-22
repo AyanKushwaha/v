@@ -1,4 +1,4 @@
-'''
+''''
 Created on Feb 22, 2012
 
 @author: pergr
@@ -165,6 +165,7 @@ class GetAvailableDaysOffResponse(response_module.Response):
             awarded = get_awards(tm, crew_group, self._activity_e, date)
 
             # print "%s request limit at %s: crewgroup=%s, limit=%s, awarded=%s"%(type.id, date, crew_group.name, limit, awarded)
+            print "Logging the date: " , date, " crewgroup: ", crew_group.name , " limit: " , limit , " awarded: " , awarded
             if limit is None:
                 continue
             if awarded is None:
@@ -335,38 +336,43 @@ class CreateDaysOffResponseHandler(GetAvailableDaysOffResponse):
         rule_set_name = self.crew_rave_eval(self._crew_e.id, "rule_set_name")  
 
         days_off_type = self._activity_e.id
+
+        print "Logging the rule_set_name is " , rule_set_name
+        print "Logging the days_off_type ", days_off_type 
     
         for crew_bag in self.create_crew_bag(self._crew_e.id).iterators.chain_set():
             text = ''
             for f_bag, fail in crew_bag.rulefailures(where='interbids.%%check_days_off_bid_legality%%("%s")' %(days_off_type),
                                                      group=rave.group("interbids.request_rules_message")):
-                #print ("FAIL",
-                #       rule_set_name,
-                #       fail.rule.name(),
-                #       str(fail.startdate),
-                #       fail.failtext,
-                #       fail.rule.remark(),
-                #       fail.failobject,
-                #       fail.limitvalue,
-                #       fail.actualvalue,
-                #       fail.overshoot)
+                print ("FAIL",
+                       rule_set_name,
+                       fail.rule.name(),
+                       str(fail.startdate),
+                       fail.failtext,
+                       fail.rule.remark(),
+                       fail.failobject,
+                       fail.limitvalue,
+                       fail.actualvalue,
+                       fail.overshoot)
                 rulename = fail.rule.name().lower()
                 # use mapping for better error message
                 crew_failtext = f_bag.interbids.crew_readable_failtext(rulename)
                 limit_type = f_bag.interbids.crew_rule_limit_type(rulename)
+                print "Logging the limit_type", crew_failtext
+                print "Logging the limit_type", limit_type
                 limit_scale_factor = f_bag.interbids.crew_rule_limit_scale_factor(rulename)
+                print "Logging the limit_scale_factor", limit_scale_factor
 
                 if crew_failtext:
                     limitvalue = ('%.2f' % (float(fail.limitvalue or 0) / limit_scale_factor,)).rstrip('0').rstrip('.')
-
                     fail_actualvalue = fail.actualvalue
-
+                    print "Logging the fail_actualvalue", fail_actualvalue
                     # SKCMS-2001: Fix sign for compdays balance actual value
                     if rulename == 'rules_studio_ccr.sft_nr_comp_days_must_not_exceed_balance_all':
                         fail_actualvalue = -fail_actualvalue
 
                     actualvalue = ('%.2f' % (float(fail_actualvalue or 0) / limit_scale_factor,)).rstrip('0').rstrip('.')
-
+                    print "Logging the crew_failtext : ", crew_failtext ," limitvalue : ", limitvalue ,  " actualvalue: " , actualvalue 
                     if limit_type == "MAX":
                         text = "Rule violation: %s - Max limit is %s, request gives %s" % (crew_failtext, limitvalue, actualvalue)
                     elif limit_type == "MIN":
@@ -381,16 +387,16 @@ class CreateDaysOffResponseHandler(GetAvailableDaysOffResponse):
                 raise DaysOffRejectedError(text)
 
             for f_bag, fail in crew_bag.rulefailures(where='interbids.%%check_days_off_bid_legality%%("%s")' %(days_off_type)):
-                #print ("FAIL",
-                #       rule_set_name,
-                #       fail.rule.name(),
-                #       str(fail.startdate),
-                #       fail.failtext,
-                #       fail.rule.remark(),
-                #       fail.failobject,
-                #       fail.limitvalue,
-                #       fail.actualvalue,
-                #       fail.overshoot)
+                print ("FAIL",
+                       rule_set_name,
+                       fail.rule.name(),
+                       str(fail.startdate),
+                       fail.failtext,
+                       fail.rule.remark(),
+                       fail.failobject,
+                       fail.limitvalue,
+                       fail.actualvalue,
+                       fail.overshoot)
                 if days_off_type not in (FS, F7S, FW, FS1):  # Ignore illegal roster only for instant reply request types in IB
                     raise DaysOffRejectedError("Your request is in conflict with other planned activities and/or rules")
 
@@ -519,6 +525,10 @@ class CreateDaysOffResponseHandler(GetAvailableDaysOffResponse):
             for date in time_range(self._activity_start_local, self._activity_end_local):
                 available_days = self.get_available_days(date)
                 limit_groups = list(self.get_request_groups(date))
+                print "Logging the day off request for the date: ", date
+                print "Logging the available dayoff quota days: ", available_days
+                for limitgroup in limit_groups:
+                   print "Logging the limit_groups : ", limitgroup
                 if limit_groups == [] or available_days is None or available_days < 0:
                     msg = 'No quota available on day %s'%AbsDate.AbsDate(date)
                     if self._activity_e.id == F7S:
@@ -668,10 +678,14 @@ class CreateDaysOffResponseHandler(GetAvailableDaysOffResponse):
             self._create_activity()
             # create account entry
             self._create_account_entry()
+            print("Logging the entry in the check_limit function")
             # check limit 
             self._check_limit()
+            print("Logging the exit in the check_limit function")
+            print("Logging the entry in the check_legality function")
             # check legality
             self._check_legality()
+            print("Logging the exit in the check_legality function")
             # create conflict to trigger save
             self._create_conflicts()      
             # set correct status
@@ -680,6 +694,7 @@ class CreateDaysOffResponseHandler(GetAvailableDaysOffResponse):
             self._create_crew_roster_request()
             # generate report
             self._generate_request_receipt_report()
+            print("creating the new days off in reply")
             # create the new days off in reply
             days_off_node = self.get_days_off_node()
             
@@ -690,6 +705,7 @@ class CreateDaysOffResponseHandler(GetAvailableDaysOffResponse):
             self._release_temporary_lock()
 
         except DaysOffRejectedError, err:
+            print("Logging the entry in to DaysOffRejectedError exception area")
             # well, something didn't want the activity
             self._errors.append(str(err))
             # Remove the lock
@@ -741,6 +757,7 @@ def get_awards(tm, crew_group, type, date):
 def get_limit(tm, crew_group, type, date):
     try:
         limit_row = tm.TM.table("roster_request_limit")[(crew_group, type.id, date)]
+        print "Logging the rows extracted from the database table roster_request_limit ", limit_row
         return limit_row.limit
     except modelserver.EntityNotFoundError:
         return None
@@ -783,6 +800,7 @@ def create_days_off(crew, daysoff_type, period_start, period_end, start, duratio
 def get_available_days_off(crew, daysoff_type, start, end):
     Cui.CuiReloadTable("roster_request_limit")
     Cui.CuiReloadTable("roster_request_awards")
+    print "Logging the crew and dayoff request details- crew: " , crew , " daysoff_type:  " , daysoff_type , " start: " , start ," end:", end
     response = GetAvailableDaysOffResponse(crew, daysoff_type, start, end)
     response.get_response()
     return response
