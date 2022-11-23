@@ -29,7 +29,9 @@ import keywords;
 ** Most of the definitions below are just redefinitions of keywords.
 ** This is for improving caching and thus performance since keywords are never cached.
 */
-
+%crew_employment_table% =
+  parameter "crew_employment"
+  remark "ETAB: Crew employment data table (company, base, rank)";
 export %time_to_next_leg% =
   next(leg(chain), leg.%start_UTC%) - leg.%end_UTC%;
 
@@ -779,6 +781,14 @@ export %qual% =
       %qual_fc%
     else
       %qual_cc%);
+export %qual_new% =
+  if (%is_simulator% or %is_standby%) then
+    %sim_leg_qual%
+  else
+    (if %flight_crew% then
+      default(%qual_fc_new%("SK"),%qual_fc_new%("SVS"))
+    else
+      default(%qual_cc_new%("SK"),%qual_cc_new%("SVS")));
 
 /* check if given qualification code matches leg.%qual%; regarding codes 36 and 38 equal.
    The intention is that this code could serve as placerholder, for also other similar "quals".*/
@@ -805,6 +815,17 @@ table ac_type_mappings =
     ac_qual_fc, ac_qual_cc;
   -, -  ->  "---", "---";       /* "---" for un-defined aicraft type */
 end
+
+table ac_type_mappings_new(String aoc_new) =
+  %ac_type%, aoc_new ->
+    export String  %qual_fc_new%,
+    export String  %qual_cc_new%;
+  external %ac_type_mappings_table%;
+  ac_type, aoc ->
+    ac_qual_fc, ac_qual_cc;
+  -, -  ->  "---", "---";       /* "---" for un-defined aicraft type */
+end
+
 
 /* This lookup is for PGT Distribution report.
    Do not reuse unless sure. /EkG */
@@ -1192,10 +1213,52 @@ export %aoc% =
            employer keywords are not available in Matador. Only use for Studio
            functionality and reports. It is ok to code CCP legality however, since
            they are available in APC */
+table crew_employment_table(String id, Abstime lookuptime) =
+           id, lookuptime
+           -> export String %base_at_date_by_id%,
+              export String %station_at_date_by_id%,
+              export String %planning_group_at_date_by_id%;
+           external %crew_employment_table%;
+           crew, (validfrom, validto( -> base, station, planning_group;
+           -, - -> void_string, void_string, void_string;
+         end
+export %cabin_employer_from_base% =
+  let tmp_base = if %is_roster% then %base_at_date_by_id%(keywords.%crr_crew_id%, %now%) else homebase;
+  if aircraft_owner = "SK" then
+    if tmp_base = "CPH" then
+      if %is_long_haul_SKD% then "SK" else "SKD"
+    else if tmp_base = "OSL" or tmp_base = "SVG" or tmp_base = "TOS" or tmp_base = "TRD" or tmp_base = "BGO" then
+      if %is_long_haul_SKN% then "SK" else "SKN"
+    else if tmp_base = "STO" then
+      if %is_long_haul_SKS% then "SK" else "SKS"
+    else
+      "SK"
+  else if aircraft_owner = "RSS" then "SKS"
+  else if aircraft_owner = "RSN" then "SKN"
+  else if aircraft_owner = "RSD" then "SKD"
+  else aircraft_owner;
+
+export %cockpit_employer_from_base% =
+  let tmp_base = if %is_roster% then %base_at_date_by_id%(keywords.%crr_crew_id%, %now%) else homebase;
+  if aircraft_owner = "SK" then
+    if tmp_base = "CPH" then
+      if %is_long_haul_FC% then "SK" else "SKD"
+    else if tmp_base = "OSL" or tmp_base = "SVG" or tmp_base = "TOS" or tmp_base = "TRD" or tmp_base = "BGO" then
+      if %is_long_haul_FC% then "SK" else "SKN"
+    else if tmp_base = "STO" then
+      if %is_long_haul_FC% then "SK" else "SKS"
+    else
+      "SK"
+    else if aircraft_owner = "RSS" then "SKS"
+    else if aircraft_owner = "RSN" then "SKN"
+    else if aircraft_owner = "RSD" then "SKD"
+    else aircraft_owner;
+
+
 export %employer% =
     if %is_flight_duty% then
-        if %flight_crew% then cockpit_crew_employer
-        else cabin_crew_employer
+      if %flight_crew% then %cockpit_employer_from_base%
+      else %cabin_employer_from_base%
     else "";
 
 /* Leg employer region */
@@ -1233,32 +1296,32 @@ export %employer_planning_group% =
     else "";
 
 export %fd_employer% =
-    if cockpit_crew_employer in default_employer_set then cockpit_crew_employer
-    else if cockpit_crew_employer in ski_employer_set then "SKI"
-    else if cockpit_crew_employer in skn_employer_set then "SKN"
-    else if cockpit_crew_employer in sks_employer_set then "SKS"
-    else if cockpit_crew_employer in skd_employer_set or
-            cockpit_crew_employer in qa_employer_set then "SKD"
-    else if cockpit_crew_employer in svs_employer_set then "SVS"
+    if %employer% in default_employer_set then %employer%
+    else if %employer% in ski_employer_set then "SKI"
+    else if %employer% in skn_employer_set then "SKN"
+    else if %employer% in sks_employer_set then "SKS"
+    else if %employer% in skd_employer_set or
+            %employer% in qa_employer_set then "SKD"
+    else if %employer% in svs_employer_set then "SVS"
     else "";
 
 export %fd_employer_is_SAS% =
-    cockpit_crew_employer in default_employer_set or
-    cockpit_crew_employer in ski_employer_set or
-    cockpit_crew_employer in skn_employer_set or
-    cockpit_crew_employer in sks_employer_set or
-    cockpit_crew_employer in skd_employer_set or
-    cockpit_crew_employer in qa_employer_set or
-    cockpit_crew_employer in svs_employer_set;
+    %employer%  in default_employer_set or
+    %employer% in ski_employer_set or
+    %employer% in skn_employer_set or
+    %employer% in sks_employer_set or
+    %employer% in skd_employer_set or
+    %employer% in qa_employer_set or
+    %employer% in svs_employer_set;
 
 export %cc_employer_is_SAS% =
-    cabin_crew_employer in default_employer_set or
-    cabin_crew_employer in ski_employer_set or
-    cabin_crew_employer in skn_employer_set or
-    cabin_crew_employer in sks_employer_set or
-    cabin_crew_employer in skd_employer_set or
-    cabin_crew_employer in qa_employer_set or
-    cabin_crew_employer in svs_employer_set;
+    %employer% in default_employer_set or
+    %employer% in ski_employer_set or
+    %employer% in skn_employer_set or
+    %employer% in sks_employer_set or
+    %employer% in skd_employer_set or
+    %employer% in qa_employer_set or
+    %employer% in svs_employer_set;
 
 /* Region of open time legs */
 export %region_open_time% =
@@ -2137,7 +2200,7 @@ export %pc_opc_intended_for_two_fc% =
 */
 
 %_pc_opc_intended_for_two_fc% =
-  default(%_two_fc_sim%(%qual%),  default(%_two_fc_sim%("*"), false)) or
+  default(%_two_fc_sim%(%qual_new%),  default(%_two_fc_sim%("*"), false)) or
   (leg.%has_sim_exception% and
    leg.%sim_comp_exc%(1) = 2);
 
