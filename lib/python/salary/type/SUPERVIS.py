@@ -42,6 +42,8 @@ class InstructorIterator(RaveIterator):
             'new_hire_follow_up_act': 'salary.%inst_new_hire_follow_up_act%',
             'cc_qa': 'salary.%inst_supernum_release%',
             'sim_instr_fixed': 'salary.%sim_instr_fixed%',
+            'etops_lifus_act': 'salary.%inst_etops_lifus_act%',
+            'etops_lc_act': 'salary.%inst_etops_lc_act%',
         }
         RaveIterator.__init__(self, iterator, fields)
 
@@ -52,7 +54,7 @@ class InstructorsAllowanceRun(GenericRun):
         articles = ['INST_LCI', 'INST_LCI_LH', 'INST_LIFUS_ACT', 'INST_PC_OPC',
                 'INST_PC_OPC_BD', 'INST_TYPE_RATING', 'INST_TYPE_RATING_BD',
                 'INST_CLASS', 'INST_CRM', 'INST_CC', 'INST_SKILL_TEST','INST_SIM', 'INST_SIM_SKILL_BR','INST_NEW_HIRE','INST_CC_QA',
-                'SIM_INSTR_FIXED']
+                'SIM_INSTR_FIXED', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT']
         GenericRun.__init__(self, rundata, articles)
 
     def rosters(self):
@@ -84,7 +86,12 @@ class InstructorsAllowanceRun(GenericRun):
     def INST_LIFUS_ACT(self, rec):
         return self.times100(rec.lifus_act)
         #return self.hours100(rec.lifus_act)
-
+    
+    def INST_ETOPS_LIFUS_ACT(self, rec):
+        return self.times100(rec.etops_lifus_act)
+    def INST_ETOPS_LC_ACT(self, rec):
+        return self.times100(rec.etops_lc_act)
+    
     def INST_PC_OPC(self, rec):
         return self.hours100(rec.pc_opc)
 
@@ -153,7 +160,7 @@ class S3(InstructorsAllowanceRun):
     def __init__(self, rundata, articles=[]):
         articles = ['INST_CLASS', 'INST_LCI', 'INST_CC', 'INST_CRM', 'INST_LCI_LH',
             'INST_LIFUS_ACT', 'INST_NEW_HIRE', 'INST_SIM', 'INST_SIM_SKILL_BR', 'INST_SKILL_TEST',
-            'SIM_INSTR_FIXED']
+            'SIM_INSTR_FIXED', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT']
         InstructorsAllowanceRun.__init__(self, rundata, articles)
 
         # self.accumulated_rosters will likely become an iterator later.

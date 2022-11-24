@@ -63,7 +63,8 @@ class ECSupervisionDetails(SASReport):
                 'new_hire_follow_up_act': 'salary.%inst_new_hire_follow_up_act%',
                 'supernum_release': 'salary.%inst_supernum_release%',
                 'instr_extra_compensation': 'salary.%sim_instr_fixed%',
-
+                'etops_lifus_act': 'salary.%inst_etops_lifus_act%',
+                'etops_lc_act': 'salary.%inst_etops_lc_act%',
             })
 
         li = RaveIterator(RaveIterator.iter('iterators.leg_set', where='salary.%leg_in_period%'), {
@@ -159,7 +160,7 @@ class ECSupervisionDetails(SASReport):
 
     def get_type(self, t):
         try:
-            type = ('', 'A/C, LIFUS', 'PC/OPC', 'T/R', 'CLASSROOM', 'LCI SH', 'CRM', 'CC', 'SKILL-Test', 'SIM', 'LCI LH', 'New Hire Follow Up','Supernum, Release')[int(str(t)[-2:])]
+            type = ('', 'A/C, LIFUS', 'PC/OPC', 'T/R', 'CLASSROOM', 'LCI SH', 'CRM', 'CC', 'SKILL-Test', 'SIM', 'LCI LH', 'New Hire Follow Up','Supernum, Release','ETOPS LC','ETOPS LIFUS')[int(str(t)[-2:])]
             return type
         except:
             return '?'
@@ -178,6 +179,8 @@ class ECSupervisionDetails(SASReport):
             prt.Row('CC (hours)', RI(crew.cc)),
             prt.Row('New Hire Follow Up (days)',RI(crew.new_hire_follow_up_act)),
             prt.Row('Supernum, Release (weeks)',RI(crew.supernum_release)),
+            prt.Row('ETOPS LIFUS',RI(crew.etops_lifus_act)),
+            prt.Row('ETOPS LC',RI(crew.etops_lc_act)),
             ))
 
 
