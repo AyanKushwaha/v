@@ -138,6 +138,7 @@ EVENT_FROM_PAYCODE = {
             'SAS_NO_CNLN_SOLD_FDAY'         : 'SOLD',
             'SAS_NO_CNLN_SOLD_DAYOFF'       : 'SOLD',
             'SAS_DK_CNLN_Sold_Fhour_Duty_Co': 'SOLD',
+            'SAS_DK_CNLN_Sold_FDay'         : 'SOLD',
             'SAS_DK_CNLN_OT_50+'            : 'CNLN_OT_50_Plus',
             'SAS_DK_CNLN_PROD_WEEKDAY'      : 'CNLN_PROD_WEEKDAY',
             'SAS_DK_CNLN_PROD_WEEKEND_HOLIDAY': 'CNLN_PROD_WEEKEND', 
