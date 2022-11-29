@@ -241,7 +241,8 @@ class CrewUserFilterHandler(FilterHandler):
         for crew_id, cache in self.crew_cache.items():
             crew = self.crew[crew_id]
             retired_intervals = cache.get(_RETIRED,[])
-            emp_period = cache.get(_EMPL_TMP,[])
+            emp_period_tmp = cache.get(_EMPL_TMP,[])
+            emp_period = sorted(emp_period_tmp, reverse=True)
             if not retired_intervals:
                 if  crew.retirementdate is None:
                     continue #No update needed
