@@ -160,6 +160,7 @@ class TimeEntryReport(WFSReport):
                         log.info('NORDLYS: Skipping F3 or F7 roster events on {dt}'.format(dt=duty_start_day))
                         continue
 
+
                     if crew_info_changes_in_period:
                         # Whenever crew information has changed within the period we need to update 
                         # the information included in reports. This needs to be checked on each duty
