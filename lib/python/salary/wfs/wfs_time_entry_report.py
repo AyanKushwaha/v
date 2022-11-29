@@ -159,8 +159,6 @@ class TimeEntryReport(WFSReport):
                         # Skip any F7 or F3 duties from roster being reported
                         log.info('NORDLYS: Skipping F3 or F7 roster events on {dt}'.format(dt=duty_start_day))
                         continue
-
-
                     if crew_info_changes_in_period:
                         # Whenever crew information has changed within the period we need to update 
                         # the information included in reports. This needs to be checked on each duty
@@ -168,11 +166,20 @@ class TimeEntryReport(WFSReport):
                         extperkey, country, rank = self._update_crew_info(crew_id, duty_start_day)
 
                     # to pick only temp crew hrs 
+                    log.info('NORDLYS:end_month_before {end_month}'.format(end_month=self.end))
+                    end_month = abs_to_datetime(self.end)
+                    end_month_now = datetime(end_month.year, end_month.month, 1) + relativedelta(months=2, days=-1)
+                    month = end_month_now.month
+                    year = end_month_now.year
+                    day= end_month_now.day
+                    end_month_now_abs = AbsTime(year, month, day, 23, 59)
+                    log.info('NORDLYS:END_MONTH_ABSTIME{end_month_now}'.format(end_month_now=end_month_now))
+                    log.info('NORDLAYS:end month now {end_month_now_abs}'.format(end_month_now_abs=end_month_now_abs))
                     
                     if duty_bag.crew.is_temporary_at_date(duty_start_day): 
                         
                         temp_contract_changes_in_period = duty_bag.crew.is_temporary_at_date(duty_start_day) <> duty_bag.crew.is_temporary_at_date(self.end)
-                        crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start, self.end)
+                        crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start, end_month_now_abs)
         
                         if temp_contract_changes_in_period:
                             if not duty_bag.crew.is_temporary_at_date(duty_start_day):
