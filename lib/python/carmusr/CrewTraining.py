@@ -543,7 +543,14 @@ class LandingTable(TempTable):
             ec = EC(TM.getConnStr(), TM.getSchemaStr())
             for row in ec.accumulator_time.search(ecSearch):
                 try:
-                    (typ, code) = LANDING_DICT[row.name]
+                    if row.name == 'accumulators.last_flown_a320_lh':
+                        typ = 'FLOWN'
+                        code = 'A320 LH'
+                    elif row.name == 'accumulators.last_landing_a320_lh':
+                        typ = 'LANDING'
+                        code = 'A320 LH'
+                    else:
+                        (typ, code) = LANDING_DICT[row.name]
                     key = (typ, code, row.tim)
                     self.createRow(key, False, typ)
                 except KeyError:
@@ -562,15 +569,17 @@ class LandingTable(TempTable):
             "recency.%leg_qualifies_for_recency%",
             "leg.%ac_family%",
             "leg.%end_UTC%",
+            "leg.%is_LH_with_NX_ac%",
             )
         legs, = crew_object.eval(leg_expr)
-        for (ix, landing, acfam, tim) in legs:
+        for (ix, landing, acfam, tim,isLHNX) in legs:
             # First we add a simple FLOWN row, true for all active legs
-            key = ("FLOWN", acfam, tim)
+            temp = "A320 LH" if isLHNX else acfam   
+            key = ("FLOWN", temp, tim)
             self.createRow(key, True, "FLOWN")
             # Next we add the landings
             if landing:
-                key = ("LANDING", acfam, tim)
+                key = ("LANDING", temp, tim)
                 self.createRow(key, True, "LANDING")
         
     def createRow(self, key, onroster, grp):
