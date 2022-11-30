@@ -89,165 +89,6 @@ class TimeEntry(WFSReport):
     '''
 
     '''
-    Link Flight Duty Function Start
-    '''
-    def _calculate_before_sick_hrs_link(self,duty_bag):
-        '''reports illness hrs for link crew.'''
-        rec = []
-        duty_start_day = duty_bag.duty.start_day()
-        duty_end_day = duty_bag.duty.end_day()
-
-        days = abs(abs_to_datetime(duty_end_day) - abs_to_datetime(duty_start_day)).days
-        sick_hrs = RelTime('24:00')
-        for i in range(days+1):
-            data_day = duty_start_day.adddays(i)
-
-            data = (data_day,sick_hrs)
-
-            rec.append(data)
-				
-        return rec
-
-    def _mid_hours_link(self, duty_bag, crew_id, country, rank):
-        '''Reports splitted duty hrs/paycode/day in case of mid night spanning'''
-        duty_start_day = duty_bag.duty.start_day()
-        duty_end_day = duty_bag.duty.end_day()
-        checkin_post_stby = RelTime(duty_bag.report_overtime.checkin_post_sb())
-        start_dt = abs_to_datetime(duty_start_day)
-        end_dt = abs_to_datetime(duty_end_day)
-        start_time = RelTime(duty_bag.report_overtime.duty_starttime())
-        end_dttime = RelTime(duty_bag.report_overtime.duty_endtime())
-        day1_hrs = RelTime('0:00')
-        day2_hrs = RelTime('0:00')
-        if start_time > RelTime('0:00'):
-            if 'report_overtime.%%stand_callout_at_start%%':
-                day1_hrs = RelTime('24:00') - checkin_post_stby 
-                day2_hrs = end_dttime
-            else: 
-                day1_hrs = RelTime('24:00') - start_time
-                day2_hrs = end_dttime
-
-        if self.is_weekend(start_dt) or duty_bag.report_roster.is_public_holiday_link(duty_start_day):
-            paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND', crew_id, country,rank)
-        else:
-            paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY', crew_id, country,rank)
-
-        if self.is_weekend(end_dt) or duty_bag.report_roster.is_public_holiday_link(duty_end_day):
-            paycode_end_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND', crew_id, country,rank)
-        else:
-            paycode_end_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY', crew_id, country,rank)
-
-        mid_night_data = None
-        if day1_hrs != RelTime('0:00') and day2_hrs != RelTime('0:00'):
-            mid_night_data = [(duty_start_day,day1_hrs,paycode_start_day),(duty_end_day,day2_hrs,paycode_end_day)]
-
-        return mid_night_data
-		
-    def _non_mid_hours_link(self, duty_bag, crew_id, country, rank):
-        '''Reports duty hrs/paycode/day when duty is ending on same day for link crew'''
-        link_hrs_list = []
-        duty_start_day = duty_bag.duty.start_day()
-        curr_abs = abs_to_datetime(duty_start_day)
-
-        if self.is_weekend(curr_abs) or duty_bag.report_roster.is_public_holiday_link(duty_start_day):
-            paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND', crew_id, country,rank)
-        else:
-            paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY', crew_id, country,rank)       
-
-        active_hours = RelTime(duty_bag.report_overtime.active_duty_hrs())
-
-        link_hrs_list.append((duty_start_day, active_hours,paycode_start_day))
-		
-        return link_hrs_list
-
-    def _combine_duty_hours(self, day_hours_link):
-        '''Reports combined duty hrs for same day and same paycode in day_hours_link'''
-        updated = []
-        updated_dates = []
-        for record in day_hours_link:
-            if record[0] in updated_dates:
-                for index, value in enumerate(updated):
-                    if value[0] == record[0]:
-                        active_hours = value[1] + record[1]
-                        log.debug("NORDLYS: {0} First: {1}, Second: {2}".format(active_hours, value[1], record[1]))
-                        updated[index] = (record[0], active_hours, record[2])
-                        break
-            else:
-                updated.append(record)
-                updated_dates.append(record[0])    
-        return updated
-
-    def _split_hrs_link(self,duty_bag, crew_id, country,rank,split_found):
-        '''Reports duty hrs for split duty for link crew'''
-        duty_start = duty_bag.duty_period.start_day_hb()
-        duty_end = duty_bag.duty_period.end_day_hb()
-        month_end = duty_bag.report_overtime.month_end_date()
-
-        country = country_from_id(crew_id, duty_start)
-        start_dt = abs_to_datetime(duty_start)
-        end_dt = abs_to_datetime(duty_end)
-        checkin_post_stby = RelTime(duty_bag.report_overtime.checkin_post_sb())
-        stby_start = duty_bag.report_overtime.stand_callout_at_start()
-
-        split_found = True
-        day1_hrs = RelTime(duty_bag.report_overtime.split_duty_starttime())
-        day2_hrs = RelTime(duty_bag.report_overtime.split_duty_endtime())
-        day3_hrs = RelTime(duty_bag.report_overtime.split_duty_endt())
-
-        if self.is_weekend(start_dt) or duty_bag.report_roster.is_public_holiday_link(duty_start):
-            paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND', crew_id, country,rank)
-        else:
-            paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY', crew_id, country,rank)
-
-        if day1_hrs > RelTime('00:00'):
-            if duty_start != duty_end:
-                if self.is_weekend(end_dt) or duty_bag.report_roster.is_public_holiday_link(duty_end):
-                    paycode_end_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND', crew_id, country,rank)
-                else:
-                    paycode_end_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY', crew_id, country,rank)
-
-                if stby_start:
-                    if duty_start != month_end:
-                        first_day_hrs = RelTime('24:00') - checkin_post_stby
-                        second_day_hrs = day2_hrs
-                    else:
-                        first_day_hrs = day3_hrs - checkin_post_stby
-                        second_day_hrs = day2_hrs
-                else:
-                    if duty_start != month_end:
-                        first_day_hrs = RelTime('24:00') - day1_hrs
-                        second_day_hrs = day2_hrs
-                    else:
-                        first_day_hrs = day3_hrs - day1_hrs
-                        second_day_hrs = day2_hrs
-                data_split = [(duty_start,first_day_hrs,paycode_start_day),(duty_end,second_day_hrs,paycode_end_day)]
-                log.debug("NORDLYS: Split hrs are {0}".format(data_split))
-            else:
-                if stby_start:
-                    final_hrs = day2_hrs - checkin_post_stby
-                else:
-                    final_hrs = day2_hrs - day1_hrs
-                data_split = [(duty_start,final_hrs,paycode_start_day)]
-                log.debug("NORDLYS: Split hrs are {0}".format(data_split))
-
-        return data_split,split_found
-
-
-    def is_weekend(self,start):
-        '''function to check a day is weekday/weekend '''
-        weekday_num = start.weekday()
-        
-        log.info('NORDLYS: Weekday Day Number {sd}'.format(sd=weekday_num))
-        
-        if ((weekday_num <= 4 )):
-            log.debug('NORDLYS: Day is between Monday or Friday {day}'.format(day=weekday_num))
-            return False
-        else:
-            log.debug('NORDLYS: Day is Sunday and Saturday or public holiday {day}'.format(day=weekday_num))
-            return True
-        return False
-
-    '''
     Main data extraction START
     '''
     def _roster_events(self, crew_id):
@@ -1837,7 +1678,163 @@ class TimeEntry(WFSReport):
     Cache functions END
     '''
      
+    '''
+    Link Flight Duty Function Start
+    '''
+    def _calculate_before_sick_hrs_link(self,duty_bag):
+        '''reports illness hrs for link crew.'''
+        rec = []
+        duty_start_day = duty_bag.duty.start_day()
+        duty_end_day = duty_bag.duty.end_day()
 
+        days = abs(abs_to_datetime(duty_end_day) - abs_to_datetime(duty_start_day)).days
+        sick_hrs = RelTime('24:00')
+        for i in range(days+1):
+            data_day = duty_start_day.adddays(i)
+
+            data = (data_day,sick_hrs)
+
+            rec.append(data)
+				
+        return rec
+
+    def _mid_hours_link(self, duty_bag, crew_id, country, rank):
+        '''Reports splitted duty hrs/paycode/day in case of mid night spanning'''
+        duty_start_day = duty_bag.duty.start_day()
+        duty_end_day = duty_bag.duty.end_day()
+        checkin_post_stby = RelTime(duty_bag.report_overtime.checkin_post_sb())
+        stby_start = duty_bag.report_overtime.stand_callout_at_start()
+        start_dt = abs_to_datetime(duty_start_day)
+        end_dt = abs_to_datetime(duty_end_day)
+        start_time = RelTime(duty_bag.report_overtime.duty_starttime())
+        end_dttime = RelTime(duty_bag.report_overtime.duty_endtime())
+        day1_hrs = RelTime('0:00')
+        day2_hrs = RelTime('0:00')
+        if start_time > RelTime('0:00'):
+            if stby_start:
+                day1_hrs = RelTime('24:00') - checkin_post_stby
+                day2_hrs = end_dttime
+            else: 
+                day1_hrs = RelTime('24:00') - start_time
+                day2_hrs = end_dttime
+
+        if self.is_weekend(start_dt) or duty_bag.report_roster.is_public_holiday_link(duty_start_day):
+            paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND', crew_id, country,rank)
+        else:
+            paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY', crew_id, country,rank)
+
+        if self.is_weekend(end_dt) or duty_bag.report_roster.is_public_holiday_link(duty_end_day):
+            paycode_end_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND', crew_id, country,rank)
+        else:
+            paycode_end_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY', crew_id, country,rank)
+
+        mid_night_data = None
+        if day1_hrs != RelTime('0:00') and day2_hrs != RelTime('0:00'):
+            mid_night_data = [(duty_start_day,day1_hrs,paycode_start_day),(duty_end_day,day2_hrs,paycode_end_day)]
+
+        return mid_night_data
+		
+
+    def _non_mid_hours_link(self, duty_bag, crew_id, country, rank):
+        '''Reports duty hrs/paycode/day when duty is ending on same day for link crew'''
+        link_hrs_list = []
+        duty_start_day = duty_bag.duty.start_day()
+        curr_abs = abs_to_datetime(duty_start_day)
+
+        if self.is_weekend(curr_abs) or duty_bag.report_roster.is_public_holiday_link(duty_start_day):
+            paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND', crew_id, country,rank)
+        else:
+            paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY', crew_id, country,rank)       
+
+        active_hours = RelTime(duty_bag.report_overtime.active_duty_hrs())
+
+        link_hrs_list.append((duty_start_day, active_hours,paycode_start_day))
+		
+        return link_hrs_list
+		
+	
+    def _combine_duty_hours(self, day_hours_link):
+        '''Reports combined duty hrs for same day and same paycode in day_hours_link'''
+        updated = []
+        updated_dates = []
+        for record in day_hours_link:
+            if record[0] in updated_dates:
+                for index, value in enumerate(updated):
+                    if value[0] == record[0]:
+                        active_hours = value[1] + record[1]
+                        log.debug("NORDLYS: {0} First: {1}, Second: {2}".format(active_hours, value[1], record[1]))
+                        updated[index] = (record[0], active_hours, record[2])
+                        break
+            else:
+                updated.append(record)
+                updated_dates.append(record[0])    
+        return updated
+
+    def _split_hrs_link(self,duty_bag, crew_id, country,rank,split_found):
+        '''Reports duty hrs for split duty for link crew'''
+        duty_start = duty_bag.duty_period.start_day_hb()
+        duty_end = duty_bag.duty_period.end_day_hb()
+        checkin_post_stby = RelTime(duty_bag.report_overtime.checkin_post_sb())
+        stby_start = duty_bag.report_overtime.stand_callout_at_start()
+
+        country = country_from_id(crew_id, duty_start)
+        start_dt = abs_to_datetime(duty_start)
+        end_dt = abs_to_datetime(duty_end)
+        
+        split_found = True
+        day1_hrs = RelTime(duty_bag.report_overtime.split_duty_starttime())
+        day2_hrs = RelTime(duty_bag.report_overtime.split_duty_endtime())
+
+        if self.is_weekend(start_dt) or duty_bag.report_roster.is_public_holiday_link(duty_start):
+            paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND', crew_id, country,rank)
+        else:
+            paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY', crew_id, country,rank)
+
+        if day1_hrs > RelTime('00:00'):
+            if duty_start != duty_end:
+                if self.is_weekend(end_dt) or duty_bag.report_roster.is_public_holiday_link(duty_end):
+                    paycode_end_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND', crew_id, country,rank)
+                else:
+                    paycode_end_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY', crew_id, country,rank)
+
+                if stby_start:
+                    first_day_hrs = RelTime('24:00') - checkin_post_stby
+                    second_day_hrs = day2_hrs                    
+                else:
+                    first_day_hrs = RelTime('24:00') - day1_hrs
+                    second_day_hrs = day2_hrs
+
+                data_split = [(duty_start,first_day_hrs,paycode_start_day),(duty_end,second_day_hrs,paycode_end_day)]
+                log.debug("NORDLYS: Split hrs are {0}".format(data_split))
+            else:
+                if stby_start:
+                    final_hrs = day2_hrs - checkin_post_stby
+                else:
+                    final_hrs = day2_hrs - day1_hrs
+                data_split = [(duty_start,final_hrs,paycode_start_day)]
+                log.debug("NORDLYS: Split hrs are {0}".format(data_split))
+
+        return data_split,split_found
+
+
+    def is_weekend(self,start):
+        '''function to check a day is weekday/weekend '''
+        weekday_num = start.weekday()
+        
+        log.info('NORDLYS: Weekday Day Number {sd}'.format(sd=weekday_num))
+        
+        if ((weekday_num <= 4 )):
+            log.debug('NORDLYS: Day is between Monday or Friday {day}'.format(day=weekday_num))
+            return False
+        else:
+            log.debug('NORDLYS: Day is Sunday and Saturday or public holiday {day}'.format(day=weekday_num))
+            return True
+        return False
+
+    '''
+    Link Flight Duty Function End
+    '''
+		
 '''
 Class used for doing reruns from existing runid in salary_wfs table. 
 Derived from TimeEntry class and overrides the generate function 

@@ -1142,7 +1142,6 @@ class TimeEntryReport(WFSReport):
         '''Reports duty hrs for split duty for link crew'''
         duty_start = duty_bag.duty_period.start_day_hb()
         duty_end = duty_bag.duty_period.end_day_hb()
-        month_end = duty_bag.report_overtime.month_end_date()
         checkin_post_stby = RelTime(duty_bag.report_overtime.checkin_post_sb())
         stby_start = duty_bag.report_overtime.stand_callout_at_start()
 
@@ -1153,8 +1152,7 @@ class TimeEntryReport(WFSReport):
         split_found = True
         day1_hrs = RelTime(duty_bag.report_overtime.split_duty_starttime())
         day2_hrs = RelTime(duty_bag.report_overtime.split_duty_endtime())
-        day3_hrs = RelTime(duty_bag.report_overtime.split_duty_endt())
-  
+        
         if self.is_weekend(start_dt) or duty_bag.report_roster.is_public_holiday_link(duty_start):
             paycode_start_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKEND', crew_id, country,rank)
         else:
@@ -1167,19 +1165,12 @@ class TimeEntryReport(WFSReport):
                 else:
                     paycode_end_day = self.paycode_handler.paycode_from_event('CNLN_PROD_WEEKDAY', crew_id, country,rank)
                 if stby_start:
-                    if duty_start != month_end:
-                        first_day_hrs = RelTime('24:00') - checkin_post_stby
-                        second_day_hrs = day2_hrs
-                    else:
-                        first_day_hrs = day3_hrs - checkin_post_stby
-                        second_day_hrs = day2_hrs
+                    first_day_hrs = RelTime('24:00') - checkin_post_stby
+                    second_day_hrs = day2_hrs                    
                 else:
-                    if duty_start != month_end:
-                        first_day_hrs = RelTime('24:00') - day1_hrs
-                        second_day_hrs = day2_hrs
-                    else:
-                        first_day_hrs = day3_hrs - day1_hrs
-                        second_day_hrs = day2_hrs
+                    first_day_hrs = RelTime('24:00') - day1_hrs
+                    second_day_hrs = day2_hrs
+                    
                 data_split = [(duty_start,first_day_hrs,paycode_start_day),(duty_end,second_day_hrs,paycode_end_day)]
                 log.debug("NORDLYS: Split hrs are {0}".format(data_split))
             else:
