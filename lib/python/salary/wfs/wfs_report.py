@@ -91,7 +91,7 @@ class WFSReport():
                 if extperkey == crew_id:
                     # Try converting crew_id as extperkey to actual crew_id
                     crew_id = convert_extperkey_to_crew_id(crew_id, self.start)
-                if crew_has_retired_at_date(crew_id, curr_date):
+                if crew_has_retired_at_date(crew_id, self.start):
                     log.info('NORDLYS: Skipping retired crew {c} on {d}'.format(c=crew_id, d = curr_date))
                     continue
                 if crew_excluded(crew_id, curr_date):
@@ -101,8 +101,8 @@ class WFSReport():
                 crew_ids.append(crew_id)
         else:
             for crew_id in crew_ids:
-                if crew_has_retired_at_date(crew_id, curr_date):
-                    log.info('NORDLYS: Skipping retired crew {c} on {d}'.format(c=crew_id, d = curr_date))
+                if crew_has_retired_at_date(crew_id, self.start):
+                    log.info('NORDLYS: Skipping retired crew {c} on {d}'.format(c=crew_id, d = self.start))
                     crew_ids.remove(crew_id)
                 if crew_excluded(crew_id, curr_date):
                     log.info('NORDLYS: Skipping the excluded SAS Link crew {c}'.format(c=crew_id))
