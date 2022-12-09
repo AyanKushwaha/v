@@ -1253,7 +1253,7 @@ class CrewEmployment(CrewInfoTempTable, ExtraValidations):
         return ""
 
 # --> Prohibited Tab Classes <-- #
-class ProhibitedCrew(CrewInfoTempTable):
+class ProhibitedCrew(CrewInfoTempTable, ExtraValidations):
     # This class contains the temporary table used to display the information
     # of the "Prohibited" tab
 
