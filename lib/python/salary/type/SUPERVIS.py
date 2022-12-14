@@ -86,12 +86,12 @@ class InstructorsAllowanceRun(GenericRun):
     def INST_LIFUS_ACT(self, rec):
         return self.times100(rec.lifus_act)
         #return self.hours100(rec.lifus_act)
-
+    
     def INST_ETOPS_LIFUS_ACT(self, rec):
         return self.times100(rec.etops_lifus_act)
-
     def INST_ETOPS_LC_ACT(self, rec):
         return self.times100(rec.etops_lc_act)
+    
 
     def INST_PC_OPC(self, rec):
         return self.hours100(rec.pc_opc)

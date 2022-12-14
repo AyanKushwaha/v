@@ -65,7 +65,6 @@ class ECSupervisionDetails(SASReport):
                 'instr_extra_compensation': 'salary.%sim_instr_fixed%',
                 'etops_lifus_act': 'salary.%inst_etops_lifus_act%',
                 'etops_lc_act': 'salary.%inst_etops_lc_act%',
-
             })
 
         li = RaveIterator(RaveIterator.iter('iterators.leg_set', where='salary.%leg_in_period%'), {
