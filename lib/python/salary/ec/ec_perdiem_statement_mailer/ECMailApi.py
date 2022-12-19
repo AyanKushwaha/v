@@ -667,7 +667,7 @@ class CrewStatementEmailer(MessageHandlerBase):
         subject = self.subjects
         body = self.bodies
         cid = path.split("/")[-1]
-        previous_mon = datetime.now() - timedelta(days=31)
+        previous_mon = datetime.now().replace(day=1) - timedelta(days=1)
         date = previous_mon.strftime("%b%Y")
         if "{date}" in body: body = body.replace("{date}",  date)
         if "{date}" in subject: subject = subject.replace("{date}", date)
@@ -685,7 +685,7 @@ class CrewStatementEmailer(MessageHandlerBase):
         mailer = SMTP(self.smtp, self.smtpPort)
         part.add_header('Content-Disposition', 'attachment; filename="ECPerDiemReport_%s_%s"' % (date, cid))
         msg.attach(part)
-       print("   email  %s" % cid)
+        print("   email  %s" % cid)
         try:
             isMailSent = mailer.sendmail(self.defaultFrom, to, msg.as_string())
         except Exception as e:
