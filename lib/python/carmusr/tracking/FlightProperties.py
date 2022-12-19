@@ -106,9 +106,9 @@ class FlightProperties(Cfh.Box):
         self.raveValuesDict["IATA_CODE"] = Cui.CuiCrcEvalString(Cui.gpc_info,
                 self.currentArea, "object", "leg.%ac_type%")
         self.raveValuesDict["COC_EMP"] = Cui.CuiCrcEvalString(Cui.gpc_info,
-                self.currentArea, "object", "cockpit_crew_employer")
+                self.currentArea, "object", "leg.%employer%")
         self.raveValuesDict["CAB_EMP"] = Cui.CuiCrcEvalString(Cui.gpc_info,
-                self.currentArea, "object", "cabin_crew_employer")
+                self.currentArea, "object", "leg.%employer%")
         self.raveValuesDict["AC_OWNER"] = Cui.CuiCrcEvalString(Cui.gpc_info,
                 self.currentArea, "object", "leg.%aircraft_owner%")
         self.raveValuesDict["LEG_NUMBER"] = str(Cui.CuiCrcEvalInt(Cui.gpc_info,

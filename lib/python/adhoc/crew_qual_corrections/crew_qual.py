@@ -36,7 +36,7 @@ def fixit(dc, *a, **k):
     # rate = -100
 
     format = "%d%b%Y %H:%M:%S:%f"
-    ae_tim = datetime(2021, 1, 1).strftime(format)
+    ae_tim = datetime(2022, 11, 1).strftime(format)
     tim = AbsTime(ae_tim[:15])
     print(tim)
  
@@ -52,7 +52,7 @@ def fixit(dc, *a, **k):
                                                             'validto': int(tim)}))
     return ops
  
-__version__ = 'SASINC0155169'
+__version__ = 'SASINC0238039'
 fixit.program = 'crew_qual.py (%s)' % __version__
  
 main()
