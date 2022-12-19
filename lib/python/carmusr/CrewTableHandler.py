@@ -45,7 +45,7 @@ except:
     pass
 
 MODULE = "CrewTableHandler:: "
-DOCUMENT_BLACKLIST = ['LC', 'PC', 'PCA3', 'PCA3A5', 'PCA4','PCA5','OPC', 'OPCA3', 'OPCA3A5', 'OPCA4','OPCA5', 'CRM', 'CRMC']
+DOCUMENT_BLACKLIST = ['LC', 'PC', 'PCA3', 'PCA3A5', 'PCA4', 'PCA5', 'OPC', 'OPCA3', 'OPCA3A5', 'OPCA4', 'OPCA5', 'CRM', 'CRMC', 'REC', 'PGT']
 
 ########################################################################
 #

@@ -38,12 +38,13 @@ from dig.DigJobQueue import DigJobQueue
 channel = 'manifest_manual'
 submitter = 'manifest_manual_jobs'
 
+# Will be filled in by end user the first time 'leg_apis_text()' is called.
+mail_address = None
+valid_countries = None
+
 # Will be filled in by 'get_valid_countries()'. Since this module is imported
 # before a rule set is loaded, we cannot fill in the info here.
 valid_countries = None
-
-# Will be filled in by end user the first time 'leg_apis_text()' is called.
-mail_address = None
 
 def append_fo_to_RU(c):
     "to know if 'RU' is flyover og dest/dep country"
@@ -233,6 +234,8 @@ def get_leg_info():
         'end_country': 'report_crewlists.%leg_end_country%',
         'is_apis': 'report_crewlists.%leg_is_apis%',
         'dk_nsch': 'report_crewlists.%leg_is_dk_nsch%',
+        'no_nsch': 'report_crewlists.%leg_is_no_nsch%',
+        'ie_neu': 'report_crewlists.%leg_is_ie_neu%',
         }, FCMEntry).eval(rave.selected(rave.Level.atom()))
 
 
@@ -265,8 +268,12 @@ def get_valid_countries(leg):
     """Return list of valid countries."""
     global valid_countries
     if valid_countries is None:
-        if leg.dk_nsch:
+        if leg.ie_neu:
+            valid_countries = rave.set('leg.apis_countries_ie').members()
+        elif leg.dk_nsch:
             valid_countries = rave.set('leg.apis_countries_dk').members()
+        elif leg.no_nsch:
+            valid_countries = rave.set('leg.apis_countries_no').members()
         else:
             valid_countries = rave.set('leg.apis_countries').members()
     return valid_countries

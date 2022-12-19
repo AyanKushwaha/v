@@ -31,6 +31,8 @@ class SupervisRosterManager:
             'crewid': 'crew.%id%',
             'empNo': 'crew.%employee_number%',
             'lifus_act': 'salary.%inst_lifus_act%',
+            'etops_lifus_act': 'salary.%inst_etops_lifus_act%',
+            'etops_lc_act': 'salary.%inst_etops_lc_act%',  
             'pc_opc': 'salary.%inst_pc_opc%',
             'pc_opc_bd': 'salary.%inst_pc_opc_bd%',
             'type_rating': 'salary.%inst_type_rating%',

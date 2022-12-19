@@ -35,13 +35,26 @@ echo " - Processing migration tasks"
 # Example:
 # echo "  * SKCMS-1234: Some description"
 # python $CARMUSR/data/migration/$RELEASE/skcms-1234.py 2>&1 | tee $LOG_DIR/skcms-1234.log
+echo "  * SKCMS-2922: Splitting ETOPS LIFUS/LC"
+python $CARMUSR/data/migration/$RELEASE/skcms-2922.py 2>&1 | tee $LOG_DIR/skcms-2922.log
 
+echo "  * SKCMS-2975: Add LC AP-POS to table training_log_set"
+python $CARMUSR/data/migration/$RELEASE/skcms-2975.py 2>&1 | tee $LOG_DIR/skcms-2975.log
+
+
+echo "  * SKCMS-2774: TE: Overtime Pay for checkout on day off for Link crew"
+python $CARMUSR/data/migration/$RELEASE/skcms-2774.py 2>&1 | tee $LOG_DIR/skcms-2774.log
+
+echo "  * SKCMS-3022: Link Salary addition for flight duty hours"
+python $CARMUSR/data/migration/$RELEASE/skcms-3022.py 2>&1 | tee $LOG_DIR/skcms-3022.log
 
 
 # Uncomment this in case dave filters shall be modified, remember to update JIRA number
 #echo "  * SKCMS-XXXX: Importing crc/etable/dave_filter/*.etab into database"
 #$CARMUSR/bin/admin/setup/setup_filters.sh -c -d | tee -a $LOG_DIR/SKCMS-XXXX.log
 
+echo "  * SKCMS-2740: Alert gen Crash issue"
+python $CARMUSR/data/migration/$RELEASE/skcms-2740.py 2>&1 | tee $LOG_DIR/skcms-2740.log
 
 echo "********************************************"
 echo "Migration finished"

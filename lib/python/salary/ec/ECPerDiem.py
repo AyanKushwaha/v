@@ -354,8 +354,8 @@ class PerDiemTripManager:
         perDiemTrip.perDiemExtraEndTime = [AbsTime(endtime) for endtime in trip[TRIP_PER_DIEM_EXTRA_END_TIMES].split(',')]
         perDiemTrip.perDiemExtraCompensation = [int(compensation) / 100 for compensation in trip[TRIP_PER_DIEM_EXTRA_COMPENSATION].split(',')]
         perDiemTrip.perDiemExtraCurrency = trip[TRIP_PER_DIEM_EXTRA_CURRENCY].split(',')
-        perDiemTrip.perDiemExtraExchangeRate = [float(rate) for rate in trip[TRIP_PER_DIEM_EXTRA_EXCHANGE_RATE].split(',')]
-        perDiemTrip.perDiemExtraExchangeUnit = [int(unit) for unit in trip[TRIP_PER_DIEM_EXTRA_EXCHANGE_UNIT].split(',')]
+        perDiemTrip.perDiemExtraExchangeRate = [float(rate) if type(float(rate)) != str else 0 for rate in trip[TRIP_PER_DIEM_EXTRA_EXCHANGE_RATE].split(',')] if trip[TRIP_PER_DIEM_EXTRA_EXCHANGE_RATE] != "" else []
+        perDiemTrip.perDiemExtraExchangeUnit = [int(unit) for unit in trip[TRIP_PER_DIEM_EXTRA_EXCHANGE_UNIT].split(',')] if trip[TRIP_PER_DIEM_EXTRA_EXCHANGE_UNIT] != "" else []
         perDiemTrip.perDiemExtraType = trip[TRIP_PER_DIEM_EXTRA_TYPE].split(',')
 
         perDiemTrip.legs = []
@@ -402,7 +402,7 @@ class PerDiemTripManager:
                     float(leg[LEG_COMPENSATION_PER_DIEM])
                     / trip[TRIP_COMPENSATION_UNIT]) if leg[LEG_COMPENSATION_PER_DIEM] != None else 0
                 perDiemLeg.exchangeRate = (float(leg[LEG_EXCHANGE_RATE])
-                                           / leg[LEG_EXCHANGE_UNIT])
+                                           / leg[LEG_EXCHANGE_UNIT]) if leg[LEG_EXCHANGE_RATE] != None else 0
                 perDiemLeg.currency = leg[LEG_CURRENCY]
                 perDiemLeg.taxDeduct = leg[LEG_TAX_DEDUCT]
                 #Last leg of duty has per diem for the duty stop
@@ -424,7 +424,7 @@ class PerDiemTripManager:
                         perDiemLeg.allocatedPerDiem = leg[LEG_PER_DIEM_ALLOCATED] / (24.0 * 60.0) if leg[LEG_PER_DIEM_ALLOCATED] else 0
                     else:                        
                         perDiemLeg.allocatedPerDiem = (
-                        duty[DUTY_PER_DIEM_ALLOCATED] / 4.0)
+                        duty[DUTY_PER_DIEM_ALLOCATED] / 4.0) if duty[DUTY_PER_DIEM_ALLOCATED] else 0
 
                     perDiemLeg.perDiemStopTime = duty[DUTY_PER_DIEM_REST_TIME]
                     perDiemLeg.actualStopTime = duty[DUTY_ACTUAL_REST_TIME]
@@ -442,8 +442,8 @@ class PerDiemTripManager:
                             / trip[TRIP_COMPENSATION_UNIT])
                         perDiemLeg.mealReductionExchangeRate = (float(leg[LEG_MEAL_REDUCTION_EXCHANGE_RATE])
                             / leg[LEG_MEAL_REDUCTION_EXCHANGE_UNIT])
-                        print("perDiemLeg.mealReductionAmount = ", perDiemLeg.mealReductionAmount)
-                        print("perDiemLeg.mealReductionExchangeRate = ", perDiemLeg.mealReductionExchangeRate)
+                        #print("perDiemLeg.mealReductionAmount = ", perDiemLeg.mealReductionAmount)
+                        #print("perDiemLeg.mealReductionExchangeRate = ", perDiemLeg.mealReductionExchangeRate)
                 else:
                     perDiemLeg.mealReduction = leg[LEG_MEAL_REDUCTION]
                     perDiemLeg.mealReductionAmount = 0
@@ -546,7 +546,7 @@ class PerDiemRoster(DataClass):
         for trip in self.trips:
             total += trip.getMealReductionSumHomeCurrency()
         
-        print("PerdiemRoster.getMealReduction: ", total)
+        #print("PerdiemRoster.getMealReduction: ", total)
         return round(total / 100, 2)
 
     def getPerDiemForTaxDomesticNO(self):
@@ -707,7 +707,7 @@ class PerDiemTrip(DataClass):
         for leg in self.legs:
             sum += leg.getMealReductionHomeCurrency()
 
-        print("PerdiemTrip.getMealReductionSumHomeCurrency: ", sum)
+        #print("PerdiemTrip.getMealReductionSumHomeCurrency: ", sum)
         return round(sum, 2)
         
     def sumAllocatedPerDiem(self):
@@ -874,8 +874,8 @@ class PerDiemTrip(DataClass):
                     result += handleMultipleLegs(self.legs, lasti, i)
                     lasti = i
             result += handleMultipleLegs(self.legs, lasti, len(self.legs))
-            print result
-            print "END Per diem tax NO"
+            #print result
+            #print "END Per diem tax NO"
                 
         elif self.layoverTaxDeductNo: # 2A, 3: if at least 5:00 between 22-06 and stop, or covering all of 22-06
             #print "Is layover: "
@@ -978,8 +978,8 @@ class PerDiemTrip(DataClass):
             #print "Trip days=", self.getTripDaysTaxNorway()
             #print '  ' + '  \n'.join(map(lambda x: repr(x.__dict__), self.legs))
             result = handleMultipleLegs(self.legs, 0, len(self.legs))
-            print result
-            print "END Per diem tax NO"
+            #print result
+            #print "END Per diem tax NO"
                 
         elif self.layoverTaxDeductNo: # 2A, 3: if at least 5:00 between 22-06 and stop, or covering all of 22-06
             #print "Is layover: "
@@ -1186,8 +1186,8 @@ class PerDiemLeg(DataClass):
 
     # Converts meal reduction to 'home' currency
     def getMealReductionHomeCurrency(self):
-        print("PerdiemLeg.mealReductionAmount: ", self.mealReductionAmount)
-        print("PerdiemLeg.mealReductionExchangeRate: ", self.mealReductionExchangeRate)
+        #print("PerdiemLeg.mealReductionAmount: ", self.mealReductionAmount)
+        #print("PerdiemLeg.mealReductionExchangeRate: ", self.mealReductionExchangeRate)
         return round(
             self.mealReductionAmount * self.mealReductionExchangeRate, 2)
         

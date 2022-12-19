@@ -90,6 +90,11 @@ class AttributesForm(CFC.BasicCfhForm):
             label_height = added_rows+2
             
         availableAttributes = list(availableAttributes)
+        if "ETOPS LIFUS" in availableAttributes and "ETOPS LC" in availableAttributes:
+            el_index = availableAttributes.index("ETOPS LIFUS")
+            elc_index = availableAttributes.index("ETOPS LC")
+            availableAttributes[el_index+1], availableAttributes[elc_index] = availableAttributes[elc_index], availableAttributes[el_index+1]
+            Errlog.log(MODULE + "::AttributesForm: Atr List changed %s" %availableAttributes)
         if useDefault:
             availableAttributes.append(DEFAULT_VALUE)
             

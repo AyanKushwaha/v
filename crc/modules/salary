@@ -289,7 +289,7 @@ set inst_cc_codes =
   remark "Salary: Class room codes for CC Instructor allowance.";
 
 /* Line-Check and Initial Line-Check */
-set inst_lc_codes = "LC", "ILC", "ETOPS LIFUS/LC";
+set inst_lc_codes = "LC", "ILC";
 
 /* Line Flying Under Supervision, Zero Flight Time Training and T-flights */
 set inst_lifus_codes = "LIFUS", "X LIFUS", "ZFTT LIFUS", "T-FLIGHT";
@@ -310,12 +310,19 @@ enum inst_allowance =
   inst_allowance10 remark "LCI LH";
   inst_allowance11 remark "New Hire Follow Up";
   inst_allowance12 remark "Supernum, Release";
+  inst_allowance13 remark "ETOPS LC";
+  inst_allowance14 remark "ETOPS LIFUS";
   remark "Instructor's allowances";
 end
 
 export iterator instructor_start_day_set =
   partition(leg)
   by(%inst_allowance%, %inst_end_date%(%inst_allowance%));
+end
+
+export iterator instructor_start_day_set_etops_lifus_or_etops_lc =
+  partition(leg)
+  by(%inst_allowance_etops_lifus_or_etops_lc%, %inst_end_date%(%inst_allowance_etops_lifus_or_etops_lc%));
 end
 
 %inst_end_date%(inst_allowance allowance) =
@@ -327,6 +334,17 @@ end
   else
     leg.%end_date%;
 */
+
+export %inst_allowance_etops_lifus_or_etops_lc% = default(%_inst_allowance_etops_lifus_or_etops_lc%, inst_allowance00);
+
+%_inst_allowance_etops_lifus_or_etops_lc% = 
+    if %inst_acting_as_instructor% then
+        if (%inst_act_etops_lifus%) then
+            inst_allowance14
+        else if (%inst_act_etops_lc%) then
+            inst_allowance13
+        else inst_allowance00
+    else inst_allowance00;
 
 export %inst_allowance% = default(%_inst_allowance%, inst_allowance00);
 %_inst_allowance% =
@@ -352,6 +370,10 @@ export %inst_allowance% = default(%_inst_allowance%, inst_allowance00);
             inst_allowance10
     else if %inst_act_etops_lifus_lc% then
         inst_allowance10
+    else if (%inst_act_etops_lifus%) then
+        inst_allowance14
+    else if (%inst_act_etops_lc%) then
+        inst_allowance13
     else if %inst_act_crm% then
       inst_allowance06
     else if %inst_act_skill_test% then
@@ -437,6 +459,12 @@ export %inst_is_leg_instructor% =
 
 %inst_act_school_flight% =
   leg.%is_school_flight%;
+
+%inst_act_etops_lifus% = 
+  leg.%instructor_code_safe% = "ETOPS LIFUS";
+  
+%inst_act_etops_lc% = 
+  leg.%instructor_code_safe% = "ETOPS LC";
 
 %inst_act_pc_opc% =
   /* This means Y* and S* but not Z* */
@@ -535,13 +563,18 @@ export %inst_is_leg_instructor% =
 
 %inst_days_with_allowance%(abstime s, abstime e, inst_allowance allowance) =
   let sd = round_down(s, 24:00), ed = round_down(e, 24:00);
-  count(instructor_start_day_set where (%inst_end_date%(allowance) >= sd
+  count(instructor_start_day_set where (%inst_end_date%(allowance) > sd
     and %inst_end_date%(allowance) < ed and %inst_allowance% = allowance));
 
-%inst_legs_with_allowance%(abstime s, abstime e, inst_allowance allowance) = 
+%inst_days_with_allowance_etops_lifus_or_etops_lc%(abstime s, abstime e, inst_allowance allowance) =
   let sd = round_down(s, 24:00), ed = round_down(e, 24:00);
-  count(leg_set) where (leg.%end_date% >= sd
-    and leg.%end_date% < ed and %inst_allowance% = allowance);
+  count(instructor_start_day_set_etops_lifus_or_etops_lc where (%inst_end_date%(allowance) >= sd
+    and %inst_end_date%(allowance) < ed and %inst_allowance_etops_lifus_or_etops_lc% = allowance));
+
+%inst_legs_with_allowance%(abstime s, abstime e, inst_allowance allowance) = 
+  let sd = s - 48:00, sn = round_down(sd, 24:00), en = round_up(e, 24:00);
+  count(leg_set) where (leg.%start_date% > sn and leg.%end_date% <= en and
+   %inst_allowance% = allowance);
 
 /* These are used by the salary job */
 export %inst_has_any_allowance% =
@@ -554,6 +587,18 @@ export %inst_lifus_act% =
        0
     else
       %inst_lifus_act_days_for_overnight_lh_legs%(%salary_month_start%,%salary_month_end%));
+
+/* Python: INST_ETOPS_LC_ACT */
+export %inst_etops_lc_act% =
+    %inst_etops_lc_training_in_period%(%salary_month_start%, %salary_month_end%);
+
+/* Python: INST_ETOPS_LIFUS_ACT */
+export %inst_etops_lifus_act% =
+    %inst_etops_lifus_training_in_period%(%salary_month_start%, %salary_month_end%) +
+    (if %is_SKN% then
+       0
+    else
+      %inst_etops_lifus_act_days_for_overnight_lh_legs%(%salary_month_start%,%salary_month_end%));
 
 
 /* SKCMS-666 */
@@ -570,9 +615,34 @@ export %inst_lifus_act% =
                         and round_down(leg.%start_hb%,24:00)<>round_down(leg.%end_hb%,24:00)
 ));
 
+%inst_etops_lc_act_days_for_overnight_lh_legs%(Abstime st,Abstime et) =
+  count( leg(roster) where(     leg.%end_utc% >= st
+                        and leg.%end_utc% < et
+                        /*and leg.%is_long_haul% */
+                        and ( %inst_act_etops_lc%)
+                        and round_down(leg.%start_hb%,24:00)<>round_down(leg.%end_hb%,24:00)
+));
+
+%inst_etops_lifus_act_days_for_overnight_lh_legs%(Abstime st,Abstime et) =
+  count( leg(roster) where(     leg.%end_utc% >= st
+                        and leg.%end_utc% < et
+                        /*and leg.%is_long_haul% */
+                        and ( %inst_act_etops_lifus%)
+                        and round_down(leg.%start_hb%,24:00)<>round_down(leg.%end_hb%,24:00)
+));
+
 %inst_lifus_or_ac_training_in_period%(abstime s, abstime e) =
   /* %inst_hours_with_allowance%(s, e, inst_allowance01);*/
   %inst_days_with_allowance%(s, e, inst_allowance01);
+
+%inst_etops_lifus_training_in_period%(abstime s, abstime e) =
+  /* %inst_hours_with_allowance%(s, e, inst_allowance01);*/
+  %inst_days_with_allowance_etops_lifus_or_etops_lc%(s, e, inst_allowance14);
+  
+%inst_etops_lc_training_in_period%(abstime s, abstime e) =
+  /* %inst_hours_with_allowance%(s, e, inst_allowance01);*/
+  %inst_days_with_allowance_etops_lifus_or_etops_lc%(s, e, inst_allowance13);
+
 
 /* Python:: INST_NEW_HIRE */
 export %inst_new_hire_follow_up_act% =
@@ -703,7 +773,7 @@ export %inst_lci_sh% =
 
 %inst_lci_in_period%(abstime s, abstime e, bool long_haul) =
     if long_haul then
-        if crew.%has_agmt_group_skis_fd% or crew.%has_agmt_group_skid_fd% or crew.%has_agmt_group_sks_fd% or crew.%has_agmt_group_skd_fd% then
+        if crew.%has_agmt_group_skis_fd% or crew.%has_agmt_group_skid_fd% or crew.%has_agmt_group_sks_fd% then
           %inst_legs_with_allowance%(s, e, inst_allowance10) / 2
         else
           %inst_days_with_allowance%(s, e, inst_allowance10)
