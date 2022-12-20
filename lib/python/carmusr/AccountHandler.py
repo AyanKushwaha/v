@@ -58,7 +58,7 @@ try:
 except:
     # Best guesses
     BOUGHT_ACCOUNT_NAME = 'BOUGHT'
-    BOUGHT_ACCOUNT_NAMES = ['BOUGHT', 'BOUGHT_BL', 'BOUGHT_COMP', 'BOUGHT_8', 'BOUGHT_COMP_F3S', 'BOUGHT_F3', 'BOUGHT_F3_2', 'BOUGHT_FORCED']
+    BOUGHT_ACCOUNT_NAMES = ['BOUGHT','BOUGHT_SBY','BOUGHT_PROD','BOUGHT_DUTY','BOUGHT_BL', 'BOUGHT_COMP', 'BOUGHT_8', 'BOUGHT_COMP_F3S', 'BOUGHT_F3', 'BOUGHT_F3_2', 'BOUGHT_FORCED']
 
 ##################################################################
 # Function for updating the publication status for transactions

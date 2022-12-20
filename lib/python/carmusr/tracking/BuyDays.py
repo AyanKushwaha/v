@@ -136,36 +136,40 @@ def buy_days(crew_id, start_time, end_time, leg_type, comment="", bought_day_typ
                 start_time = current_row.end_time
                 current_row = None
         else:  # Start in empty period!
-            current_row = TM.bought_days.create((crew, start_time))
-            current_row.day_type = row_day_type
-            if row_day_type[:2] == "BL" and not is_cabincrew:
-                current_row.account_name = "BOUGHT_BL"
-           # elif is_type_bought_comp:
-            #    current_row.account_name = bought_comp_account
-            elif is_type_bought_8:
-                current_row.account_name = bought_8_account
-            #elif is_type_bought_comp_f3s:
-             #   current_row.account_name = bought_comp_f3s_account
-            elif is_type_bought_f3:
-                current_row.account_name = bought_f3_account
-            elif is_type_bought_f3_2:
-                current_row.account_name = bought_f3_2_account
-            elif is_type_bought_forced:
-                current_row.account_name = bought_forced_account
-            elif is_type_bought_sby:
-                current_row.account_name = bought_sby
-            elif is_type_bought_prod:
-                current_row.account_name = bought_prod
-            elif is_type_bought_duty:
-                current_row.account_name = bought_duty
+            bought_days_svs_type = 'BOUGHT_PROD','BOUGHT_SBY','BOUGHT_DUTY'
+            if bought_day_type not in bought_days_svs_type:
+                current_row = TM.bought_days.create((crew, start_time))
+                current_row.day_type = row_day_type
+                if row_day_type[:2] == "BL" and not is_cabincrew:
+                    current_row.account_name = "BOUGHT_BL"
+            # elif is_type_bought_comp:
+                #    current_row.account_name = bought_comp_account
+                elif is_type_bought_8:
+                    current_row.account_name = bought_8_account
+                #elif is_type_bought_comp_f3s:
+                #   current_row.account_name = bought_comp_f3s_account
+                elif is_type_bought_f3:
+                    current_row.account_name = bought_f3_account
+                elif is_type_bought_f3_2:
+                    current_row.account_name = bought_f3_2_account
+                elif is_type_bought_forced:
+                    current_row.account_name = bought_forced_account
+                elif is_type_bought_sby:
+                    current_row.account_name = bought_sby
+                elif is_type_bought_prod:
+                    current_row.account_name = bought_prod
+                elif is_type_bought_duty:
+                    current_row.account_name = bought_duty
+                else:
+                    current_row.account_name = bought_account
+                current_row.end_time = start_time.adddays(1)
+                current_row.uname = uname
+                current_row.si = comment
+                finished = current_row is not None and \
+                current_row.end_time >= end_time and \
+                current_row.end_time not in periods_to_merge  # Don't forget to merge end if needed
             else:
-                current_row.account_name = bought_account
-            current_row.end_time = start_time.adddays(1)
-            current_row.uname = uname
-            current_row.si = comment
-        finished = current_row is not None and \
-            current_row.end_time >= end_time and \
-            current_row.end_time not in periods_to_merge  # Don't forget to merge end if needed
+                break
 
 def integer_to_reltime_hour(val):
     if val is None:
@@ -573,8 +577,7 @@ def markDaysAsBought(buy):
                 if comment == "":
                     try:
                         if is_svs:
-                            print "sby hh:",time_hh_sby,"sby mm:",time_mm_sby,
-                            comment, time_hh_sby,time_mm_sby,time_hh_prod,time_mm_prod,time_hh,time_mm,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, start_time, end_time, "Buy_Day_Form")()
+                            comment, time_hh_sby,time_mm_sby,time_hh_prod,time_mm_prod,time_hh,time_mm,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, start_time, end_time, "Buy_Day_Form")()     
                         else:
                             comment,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, start_time, end_time, "Buy_Day_Form")()
 
@@ -605,8 +608,10 @@ def markDaysAsBought(buy):
                         else:
                             buy_days_svs(crew_id, start, end, code, comment, time_hh_sby, time_mm_sby, time_hh_prod, time_mm_prod, time_hh, time_mm, bought_type, has_agmt_skd_cc, is_f3_valid)
                 
-                
+ 
                 buy_days(crew_id, start, end, code, comment, bought_type, has_agmt_skd_cc, is_f3_valid)
+
+ 
                 # Remove activity from roster
                 ActivityManipulation.deleteActivityInPeriod(crew_id, start, end, area=area)
                 no_change = False
@@ -620,8 +625,6 @@ def markDaysAsBought(buy):
                 if comment == "":
                     try:
                         if is_svs:
-                            print "sby hh 622:",time_hh_sby,"sby mm:",time_mm_sby,
-
                             comment,time_hh_sby,time_mm_sby,time_hh_prod,time_mm_prod,time_hh,time_mm,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, start_time, end_time, "Buy_Day_Form")()
                    
                     except CancelBuyDay:
@@ -633,7 +636,8 @@ def markDaysAsBought(buy):
                         "Not possible to buy day-off on duty.\n"
                         "The current assignment(s) do not permit this\n"
                         "type of operation.", title="No change")
-                    return 1
+                    buy_days_svs(crew_id, start, end, code, comment, time_hh_sby, time_mm_sby, time_hh_prod, time_mm_prod, time_hh, time_mm, bought_type, has_agmt_skd_cc, is_f3_valid)
+ 
                 else:
                     if is_svs:
                         if bought_type is "BOUGHT_DUTY" and time_hh is "" and  time_mm is "":
@@ -695,16 +699,16 @@ class BuyDayCommentForm(Cfh.Box):
                         min = str(row.minutes)
 
                     self.time_hh_sby = Cfh.String(self, "HH_sby", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 9)), 2, hr_sby[0:2])
-                    self.time_mm_sby = Cfh.String(self, "MM_sby",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 13)), 2, min_sby[3:])
+                    self.time_mm_sby = Cfh.String(self, "MM_sby",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 13)), 2, min_sby[2:])
                 
                     
                     self.time_hh_prod = Cfh.String(self, "HH_prod", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(4, 9)), 2, hr_prod[0:2])
-                    self.time_mm_prod = Cfh.String(self, "MM_prod",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(4, 13)), 2, min_prod[3:])
+                    self.time_mm_prod = Cfh.String(self, "MM_prod",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(4, 13)), 2, min_prod[2:])
                 
                     
 
                     self.time_hh = Cfh.String(self, "HH_duty", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(6, 9)), 2, hr[0:2])
-                    self.time_mm = Cfh.String(self, "MM_duty",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(6, 13)), 2, min[3:])
+                    self.time_mm = Cfh.String(self, "MM_duty",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(6, 13)), 2, min[2:])
                     change = False 
             if change:
                 self.time_hh_sby = Cfh.String(self, "HH_sby", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 9)), 2, " ")
