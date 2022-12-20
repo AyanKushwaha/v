@@ -458,21 +458,18 @@ class TimeEntry(WFSReport):
 
             wfs_corrected_data.append(rec)
             uniq_dates.add(i.work_day)
-<<<<<<< HEAD
             uniq_paycodes.add(i.wfs_paycode)
 
-=======
-        # if multiple records are present in table it will pick only max id record 
->>>>>>> main
-        for dt in uniq_dates:
-            for pc in uniq_paycodes:
-                mx_id = -1
-                for rec in wfs_corrected_data:
-                    if rec[4] == dt and rec[3] == pc:
-                        if rec[0] > mx_id:
-                            mx_id = rec[0]
-                            mx_rec = rec
-                final_wfs_corrected_data.append(mx_rec) 
+            # if multiple records are present in table it will pick only max id record 
+            for dt in uniq_dates:
+                for pc in uniq_paycodes:
+                    mx_id = -1
+                    for rec in wfs_corrected_data:
+                        if rec[4] == dt and rec[3] == pc:
+                            if rec[0] > mx_id:
+                                mx_id = rec[0]
+                                mx_rec = rec
+                    final_wfs_corrected_data.append(mx_rec) 
 
         for rec in final_wfs_corrected_data:
             corrected_rec = self._insert_or_update_record(rec[1], rec[2], rec[3], abs_to_datetime(rec[4]), rec[5], rec[6])
