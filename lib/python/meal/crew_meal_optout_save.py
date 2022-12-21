@@ -112,7 +112,10 @@ def main():
                             record_month =int(row['MONTH'])
                             record_year =int(row['YEAR'])
                             validfrom_date = AbsTime(AbsDate(record_year,record_month,1))
-                            validto_date = AbsTime(AbsDate(record_year,record_month+1,1))
+                            if record_month==12:
+                                validto_date = AbsTime(AbsDate(record_year+1,1,1))
+                            else:
+                                validto_date = AbsTime(AbsDate(record_year,record_month+1,1))
                             new_rec_month = TM.meal_opt_out.create((crew_id,record_month,record_year))
                             print "Saved meal_opt_out record for crew ={}".format(record_id) + str(new_rec_month) 
 
