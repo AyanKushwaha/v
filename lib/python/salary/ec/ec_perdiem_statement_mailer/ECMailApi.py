@@ -673,7 +673,7 @@ class CrewStatementEmailer(MessageHandlerBase):
         if "{date}" in subject: subject = subject.replace("{date}", date)
     
         msg = MIMEMultipart()
-        to = "%s@sas.%s" % (cid.split(".")[0], extsys.lower())
+        to = "%s@sas.dk" % cid.split(".")[0]
         msg['From'] = "%s <%s>" % (self.displayFrom, self.defaultFrom)
         msg['To'] = to
         msg['Date'] = formatdate(localtime=True)
