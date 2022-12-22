@@ -1381,6 +1381,11 @@ class TimeEntry(WFSReport):
                 return day1_rec,True
             else:
                 return day1_rec,False
+        else: #To handle the None when sometimes is_split is reaching to 3. This is not a valid case
+            log.info('NORDLYS: Remove last day of split duty {0}'.format(is_split))
+            return day1_rec,False
+
+
     
     def _send_data_contains_record(self, wfs_paycode, abs_dt, data):
         # data is formatted as described in format_row() function
