@@ -69,25 +69,14 @@ def buildHotelObject(booking):
 
     empno = rave.eval('rosterserver.%empno_by_id%(\"%s\")', str(booking['crew']))[1]
     db_hotel = next(TM.hotel.search('(id=%s)' % booking['hotelId']))
-    if any(TM.airport_hotel.search('(hotel=%s)' % booking['hotelId'])):
-        hotel_type = 'AIRPORT'
-    else:
-        hotel_type = 'CITY'
+    for phe in hotel.referers('preferred_hotel_exc','hotel'):
+        if phe.airport.id == airport and ce.crewrank.maincat == phe.maincat and ce.region == phe.region and phe.validfrom < now and phe.validto >= now:
+                if phe.airport_hotel:
+                    return "%s (airport hotel)" % hotel.id
+                else:
+                    break
+    return "%s (city hotel)" % hotel.id
     
-    return dict(
-            empno=empno,
-            hotel_id=booking['hotelId'],
-            name=db_hotel.name,
-            address=db_hotel.street,
-            hotel_type=hotel_type,
-            date_arrival=util.abs_time_to_str(booking['checkIn']),
-            date_depature=util.abs_time_to_str(booking['checkOut']),
-            nights = booking['nights'],
-            arr_flight_nr = booking['arrFlightNr'],
-            dep_flight_nr = booking['depFlightNr'],
-            )
-
-
 def showTestHotels():
     """
     Builds and shows all roster-data for passed-in or first selected crew.
