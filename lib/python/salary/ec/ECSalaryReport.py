@@ -399,10 +399,10 @@ class SupervisRun(ECGenericRun):
     def INST_ETOPS_LC_ACT(self, rec):
         return times100(rec.etops_lc_act)
 
-    def INST_PC_OPC(self, rec):
+    def INST_LPC_OPC_OTS(self, rec):
         return hours100(rec.pc_opc)
 
-    def INST_PC_OPC_BD(self, rec):
+    def INST_LPC_OPC_OTS_BD(self, rec):
         return times100(rec.pc_opc_bd)
 
     def INST_TYPE_RATING(self, rec):

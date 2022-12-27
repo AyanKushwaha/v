@@ -205,7 +205,7 @@ class TPMSRoutines():
             iicmeq_qual_code_type   = cd.doc.typ
 
             if cd.doc.typ == "REC":
-              if (cd.doc.subtype in ["OPCA3", "OPCA4","OPCA5", "OPCA3A5", "PCA3", "PCA4","PCA5", "PCA3A5"]):
+              if (cd.doc.subtype in ["OPCA3", "OPCA4", "OPCA5", "OPCA3A5", "OTSA3", "OTSA4", "OTSA5", "OTSA3A5", "LPCA3", "LPCA4", "LPCA5", "LPCA3A5"]):
                 tmp = cd.doc.subtype
                 tmp2=tmp.split("C")
                 iicmeq_qual_code = tmp2[0] + "C"

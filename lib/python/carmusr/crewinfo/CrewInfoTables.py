@@ -841,7 +841,7 @@ class CrewDocument(CrewInfoTempTable, ExtraValidations):
     '''
 
     TM_NAME = "crew_document"
-    DOCUMENT_BLACKLIST = ['LC', 'PC', 'PCA3', 'PCA3A5', 'PCA4', 'PCA5', 'OPC', 'OPCA3', 'OPCA3A5', 'OPCA4', 'OPCA5', 'CRM', 'CRMC', 'REC', 'PGT']
+    DOCUMENT_BLACKLIST = ['LC', 'LPC', 'LPCA3', 'LPCA3A5', 'LPCA4','LPCA5', 'OPC', 'OPCA3', 'OPCA3A5', 'OPCA4','OPCA5', 'OTS', 'OTSA3', 'OTSA3A5', 'OTSA4','OTSA5', 'CRM', 'CRMC' 'REC', 'PGT']
     
     def __init__(self, nowTime, crewId=None, tablePrefix="tmp_"):
 
@@ -976,8 +976,8 @@ class CrewDocument(CrewInfoTempTable, ExtraValidations):
 
 
     def docRequiresAcQual(self, row):
-        return ((row.doc.typ == 'REC' and row.doc.subtype in ['PC', 'OPC', 'LC']) or
-                (row.doc.typ == 'LICENCE' and row.doc.subtype == 'Temp PC'))
+        return ((row.doc.typ == 'REC' and row.doc.subtype in ['LPC', 'OPC', 'OTS', 'LC']) or
+                (row.doc.typ == 'LICENCE' and row.doc.subtype == 'Temp LPC'))
 
             
     def acQualValidation(self):
@@ -993,7 +993,7 @@ class CrewDocument(CrewInfoTempTable, ExtraValidations):
 
     def docRequiresDocNumber(self, row):
         return ((row.doc.typ in ('VISA', 'PASSPORT')) or
-                ((row.doc.typ == 'LICENCE') and (row.doc.subtype != 'Temp PC')))
+                ((row.doc.typ == 'LICENCE') and (row.doc.subtype != 'Temp LPC')))
 
 
     def docNumberValidation(self):
@@ -1008,13 +1008,12 @@ class CrewDocument(CrewInfoTempTable, ExtraValidations):
 
     def docRequiresIssuer(self, row):
         return ((row.doc.typ in ('VISA', 'PASSPORT')) or
-                ((row.doc.typ == 'LICENCE') and (row.doc.subtype != 'Temp PC')))
+                ((row.doc.typ == 'LICENCE') and (row.doc.subtype != 'Temp LPC')))
 
 
     def issuerValidation(self):
         tm = M.TableManager.instance()
         changed_rows = self.rowsToCheckValidity()
-        issuers = [row.id for row in TM.country]
 
         for row in changed_rows:
             if self.docRequiresIssuer(row) and not row.issuer in issuers:
@@ -1027,9 +1026,9 @@ class CrewDocument(CrewInfoTempTable, ExtraValidations):
         changed_rows = self.rowsToCheckValidity()
 
         for row in changed_rows:
-            if (row.doc.typ == 'LICENCE' and row.doc.subtype == 'Temp PC' and
+            if (row.doc.typ == 'LICENCE' and row.doc.subtype == 'Temp LPC' and
                 (row.validto - row.validfrom) > (61 * RelTime('24:00'))):
-                return 'Temp PC document starting at %s has too long validity period' % (row.validfrom)
+                return 'Temp LPC document starting at %s has too long validity period' % (row.validfrom)
         return None
 
 

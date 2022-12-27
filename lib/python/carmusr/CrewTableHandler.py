@@ -45,7 +45,7 @@ except:
     pass
 
 MODULE = "CrewTableHandler:: "
-DOCUMENT_BLACKLIST = ['LC', 'PC', 'PCA3', 'PCA3A5', 'PCA4', 'PCA5', 'OPC', 'OPCA3', 'OPCA3A5', 'OPCA4', 'OPCA5', 'CRM', 'CRMC', 'REC', 'PGT']
+DOCUMENT_BLACKLIST = ['LC', 'LPC', 'LPCA3', 'LPCA3A5', 'LPCA4','LPCA5','OPC', 'OPCA3', 'OPCA3A5', 'OPCA4','OPCA5', 'OTS', 'OTSA3', 'OTSA3A5', 'OTSA4','OTSA5', 'CRM', 'CRMC', 'REC', 'PGT']
 
 ########################################################################
 #
@@ -498,8 +498,8 @@ def _update_rec_one_crew(crew_id, area, today, verbose, extraction_date):
 def _extend_doc(crew_ref, validfrom, doc, validto, ac_qual, init, verbose):
     # TODO: This function should be removed when TPMS import has been activated (SKCMS-1194) and be replaced
     # TODO: with the function _extend_doc_with_tpms_import_activated
-    if doc == 'Temp PC':
-        print "_extend_doc, 'Temp PC'"
+    if doc == 'Temp LPC':
+        print "_extend_doc, 'Temp LPC'"
         doc_ref = TM.crew_document_set[("LICENCE", doc)]
     else:
         print "_extend_doc, 'REC'"
@@ -553,32 +553,32 @@ def _extend_doc(crew_ref, validfrom, doc, validto, ac_qual, init, verbose):
     if replace:
         rec_doc.validto = validfrom
     if create or replace:
-        if doc == 'Temp PC':
+        if doc == 'Temp LPC':
 
             document_exists = False
             for _ in TM.crew_document.search(
-                    "(&(crew.id=%s)(doc.typ=LICENCE)(doc.subtype=Temp PC)(validfrom=%s))" %(crew_ref.id, validfrom)):
+                    "(&(crew.id=%s)(doc.typ=LICENCE)(doc.subtype=Temp LPC)(validfrom=%s))" %(crew_ref.id, validfrom)):
                 document_exists = True
 
             if document_exists:
-                print "Temp PC document already existed, will not create a new one."
+                print "Temp LPC document already existed, will not create a new one."
             else:
                 # Check if record has previously existed,
                 # in that case it must have been deleted since it wasn't found in the previous search.
                 previous_document_found = carmusr.AuditTrail2.AuditTrail2().search(
                     'crew_document', {'crew': crew_ref.id,
                                       'doc_typ': 'LICENCE',
-                                      'doc_subtype': 'Temp PC',
+                                      'doc_subtype': 'Temp LPC',
                                       'validfrom': int(validfrom)})
                 if previous_document_found:
                     print "Document has been removed previously and will not be recreated."
                 else:
                     # Record has not been deleted previously and can be created
                     rec_doc = TM.crew_document.create(new_key)
-                    print "Created new Temp PC document for crew: ", crew_ref.id, new_key
+                    print "Created new Temp LPC document for crew: ", crew_ref.id, new_key
 
         else:
-            #Document not of type Temp PC
+            #Document not of type Temp LPC
             rec_doc = TM.crew_document.create(new_key)   
             print "Created new document ", new_key
         
@@ -591,8 +591,8 @@ def _extend_doc(crew_ref, validfrom, doc, validto, ac_qual, init, verbose):
                         
 def _extend_doc_with_tpms_import_activated(crew_ref, validfrom, doc, validto, ac_qual, init, verbose):
     # TODO: This function should be used instead of _extend_doc when TPMS import has been activated (SKCMS-1194)
-    if doc != 'Temp PC':
-        return "REC will by ignored by default, none Temp PC will not be accepted. Ignoring %s" % doc
+    if doc != 'Temp LPC':
+        return "REC will by ignored by default, none Temp LPC will not be accepted. Ignoring %s" % doc
 
     validfrom_str = validfrom.ddmonyyyy(True)
     validto_str = validto.ddmonyyyy(True)
@@ -612,7 +612,7 @@ def _tag_leg_performed(leg_key, main_doc):
     This function is used to primarily to tag a leg so that CMS knows it has
     updated a document (by having the RECURRENT attribute).
     It also sets a value to indicate which document was primarily updated
-    (typically PC if more than one).
+    (typically LPC if more than one).
     """
     (crew_id, leg_type, leg_time, leg_code, adep) = leg_key
     attr_vals = {"str":main_doc}
