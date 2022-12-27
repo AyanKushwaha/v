@@ -62,7 +62,7 @@ for ac_qual in ('A330','A340','A350','A320','B737','F50','MD80','Q400','CRJ'):
 
 VERBOSE = False
 CREW_AREA = False
-EXCLUDE_CONDITION_TUPLE = ('OPC', 'PC', 'LC')
+EXCLUDE_CONDITION_TUPLE = ('OPC', 'OTS', 'LPC', 'LC')
 
 MAX_LENGTH_SI = None
 
@@ -1266,7 +1266,8 @@ class Document(TempTable):
         self.unsavedChanges = status
 
     def validateDocForModifiedRows(self, mod_rows):
-        DOCUMENT_BLACKLIST = ['LC', 'PC', 'PCA3', 'PCA3A5', 'PCA4', 'PCA5', 'OPC', 'OPCA3', 'OPCA3A5', 'OPCA4', 'OPCA5', 'CRM', 'CRMC', 'REC', 'PGT']
+        DOCUMENT_BLACKLIST = ['LC', 'LPC', 'LPCA3', 'LPCA3A5', 'LPCA4','LPCA5','OPC', 'OPCA3', 'OPCA3A5', 'OPCA4','OPCA5',
+                              'OTS', 'OTSA3', 'OTSA3A5', 'OTSA4','OTSA5','CRM', 'CRMC', 'REC', 'PGT']
         errorText = None
         if self is None or mod_rows is None:
             return errorText
@@ -1276,7 +1277,8 @@ class Document(TempTable):
         return errorText
 
     def save(self):
-        DOCUMENT_BLACKLIST = ['LC', 'PC', 'PCA3', 'PCA3A5', 'PCA4', 'PCA5', 'OPC', 'OPCA3', 'OPCA3A5', 'OPCA4', 'OPCA5', 'CRM', 'CRMC', 'REC', 'PGT'] # TODO move somewhere relevant
+        DOCUMENT_BLACKLIST = ['LC', 'LPC', 'LPCA3', 'LPCA3A5', 'LPCA4','LPCA5','OPC', 'OPCA3', 'OPCA3A5', 'OPCA4','OPCA5',
+                              'OTS', 'OTSA3', 'OTSA3A5', 'OTSA4','OTSA5','CRM', 'CRMC', 'REC', 'PGT'] # TODO move somewhere relevant
         global crewId
 
         (changes, mod_rows) = self.checkForChanges()
@@ -1377,7 +1379,7 @@ class Document(TempTable):
                     document.validto =  TimeUtil.inclDateToExclTime(tmpDoc.modvalidto)
                 
                     # Check ac qualification
-                    # if LC and longhaul crew or if PC/OPC and 737 crew:
+                    # if LC and longhaul crew or if LPC/OPC/OTS and 737 crew:
                     #   check that ac qual for sim type matches crew ac qual.
                 
                     ac_qual = ValidDocno.getDocno(tmpDoc.ac_qual)

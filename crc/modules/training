@@ -14,7 +14,7 @@
  * 5. Composition check
  * 6. Selects and Sorts
  * 7. Redefinitions of codes to display
- * 8. Logic for automatic PC/OPC assignment
+ * 8. Logic for automatic LPC/OPC/OTS assignment
  *
  *
  * Created by:
@@ -220,11 +220,13 @@ export %last_simulator_date_of_type%(String type, Abstime date, String ac_qual) 
 /* Simulators in general are not logged as their group code.
    In most cases this is ok, we will not find various INSTR duties, but since
    no legality is based on that it will be fine.
-   The exception is PC, which is calculated dynamically, and SIM ASSIST LANDINGS, 
-   which is any OPC/FFS/ASF tagged with attribute. /EKG 090225 */
-set sims_logged_different = "PC", "OPC", "ASF", "FFS";
+   The exception is LPC, which is calculated dynamically, and SIM ASSIST LANDINGS, 
+   which is any OPC/OTS/FFS/ASF tagged with attribute. /EKG 090225 */
+set sims_logged_different = "LPC", "OPC", "OTS", "ASF", "FFS";
 export %last_perf_date_for_act_of_type_for_ac_qual%(String type, String ac_qual, Abstime date) =
-    let checktype = if type = "PC" then "OPC" else type,
+    let checktype = if type = "LPC" then 
+        if fundamental.%use_link_tracking_ruleset% then "OPC" else "OTS"
+        else type,
         log_check_date = nmin(date,%pp_start%);
   default(%last_roster_date%(date, ac_qual, type, checktype),
           default(%last_log_date%(log_check_date, ac_qual, type),
@@ -232,7 +234,9 @@ export %last_perf_date_for_act_of_type_for_ac_qual%(String type, String ac_qual,
           );
 
 export %first_perf_date_for_act_of_type_for_ac_qual%(String type, String ac_qual, Abstime date) =
-    let checktype = if type = "PC" then "OPC" else type,
+    let checktype = if type = "LPC" then 
+        if fundamental.%use_link_tracking_ruleset% then "OPC" else "OTS"
+    else type,
         log_check_date = nmin(date,%pp_start%);
   default(%first_log_date%(log_check_date, ac_qual, type),
           default(%first_roster_date%(date, ac_qual, type, checktype),
@@ -240,7 +244,9 @@ export %first_perf_date_for_act_of_type_for_ac_qual%(String type, String ac_qual
           );
 
 export %last_perf_date_for_act_of_type_for_ac_qual_as_student%(String type, String ac_qual, Abstime date) =
-    let checktype = if type = "PC" then "OPC" else type,
+    let checktype = if type = "LPC" then 
+        if fundamental.%use_link_tracking_ruleset% then "OPC" else "OTS"
+        else type,
         log_check_date = nmin(date,%pp_start%);
   default(%last_roster_date_as_student%(date, ac_qual, type, checktype),
           default(%last_log_date_as_student%(log_check_date, ac_qual, type),
@@ -258,7 +264,7 @@ export %last_perf_date_for_act_of_type_for_ac_qual_as_student%(String type, Stri
    else
      if type="SIM ASSIST LANDINGS" then
        leg.%is_sim_assist_landings%
-     else if type="PC SKILL TEST" then
+     else if type="LPC SKILL TEST" then
        leg.%is_skill_test%
      else
        if checktype in sims_logged_different then
@@ -428,7 +434,7 @@ table recurrent_activity_fundamentals(String type, Abstime date) =
 end
 
 set recurrent_emg_training_set = "REC", "PGT";
-set recurrent_sim_training_set = "PC", "PCA3", "PCA3A5", "PCA4","PCA5","OPC", "OPCA3", "OPCA3A5", "OPCA4","OPCA5";
+set recurrent_sim_training_set = "LPC", "LPCA3", "LPCA3A5", "LPCA4","LPCA5","OPC", "OPCA3", "OPCA3A5", "OPCA4","OPCA5","OTS", "OTSA3", "OTSA3A5", "OTSA4","OTSA5";
 set recurrent_crm_training_set = "CRM";
 set recurrent_flight_training_set = "LC";
 set recurrent_crmc_training_set = "CRMC";
@@ -513,9 +519,14 @@ export %_recurrent_type_registered%(String rec_type, String ac_qual, Abstime dat
     if rec_type = "OPCA5" or rec_type = "OPCA3" then
         default(default((crew.%document_expiry_date_subtype%("REC", "OPCA3A5", ac_qual, date)), (crew.%document_expiry_date_subtype%("REC", rec_type, ac_qual, date))), 1Jan1986)
         
-    else if rec_type = "PCA5" or rec_type = "PCA3" then
-        default(default((crew.%document_expiry_date_subtype%("REC", "OPCA3A5", ac_qual, date)), (crew.%document_expiry_date_subtype%("REC", rec_type, ac_qual, date))), 1Jan1986)
+    else if rec_type = "OTSA5" or rec_type = "OTSA3" then
+        default(default((crew.%document_expiry_date_subtype%("REC", "OTSA3A5", ac_qual, date)), (crew.%document_expiry_date_subtype%("REC", rec_type, ac_qual, date))), 1Jan1986)
         
+    else if rec_type = "LPCA5" or rec_type = "LPCA3" then
+        if fundamental.%use_link_tracking_ruleset% then
+            default(default((crew.%document_expiry_date_subtype%("REC", "OPCA3A5", ac_qual, date)), (crew.%document_expiry_date_subtype%("REC", rec_type, ac_qual, date))), 1Jan1986)
+        else
+            default(default((crew.%document_expiry_date_subtype%("REC", "OTSA3A5", ac_qual, date)), (crew.%document_expiry_date_subtype%("REC", rec_type, ac_qual, date))), 1Jan1986)        
     else
         default(crew.%document_expiry_date_subtype%("REC", rec_type, ac_qual, date), 1Jan1986),
     doc_acqual = default(crew.%expiry_doc_alternating_ac_qual%("REC", rec_type, ac_qual, date), "-");
@@ -540,7 +551,7 @@ export %_recurrent_type_registered%(String rec_type, String ac_qual, Abstime dat
 /* LC is not generally a rec doc creator, but this variable is only called when
    crew lacks LC registration on current qual, and in that case it is.
    /EKG 081219
-   The same is true for PC CHANGE /EKG 090303 */
+   The same is true for LPC CHANGE /EKG 090303 */
    
 %planned_rec_doc_creator%(String type, String ac_qual, Abstime date) =
     let last_trip_start_day = default(last(trip(roster), trip.%start_day%)
@@ -549,7 +560,7 @@ export %_recurrent_type_registered%(String rec_type, String ac_qual, Abstime dat
                       (type = "PGT" and %trip_is_pgt_ref%) or
                       (type = "LC" and (trip.%is_ilc% or trip.%is_lc%) and (ac_qual = %any_ac_qual% or ac_qual = trip.%qual%)) or
                       (type = "CRMC" and %trip_creates_crmc%) or
-                      ((trip.%is_skill_test% or trip.%is_pc_change_month%) and
+                      ((trip.%is_skill_test% or trip.%is_lpc_change_month%) and
                        type in recurrent_sim_training_set))
     where (trip.%start_day% < last_trip_start_day)
     or
@@ -636,21 +647,21 @@ export %has_matching_qual_pc%(Abstime date) =
 
 table check_matching_qual_table(String type, Abstime date) =
   %crew_contract_group_safe_pp_start%, %last_leg_qual%(date),%has_PC_renewal_qual_A2%(date),%has_PC_renewal_qual_A3%(date), %has_PC_renewal_qual_A5%(date) -> export %check_matching_pc_leg_qual%;
-  "MFF-A2A3","A2", False, True, -   ->  (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("PC","A5") = default
+  "MFF-A2A3","A2", False, True, -   ->  (concat("LPC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("LPC","A5") = default
 (type,"")) or (concat("OPC","A5") = default(type,""));
-  "MFF-A2A3","A3", True, False, -   ->  ("PC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("PC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
-  "MFF-A2A5","A2", False, - , True  ->  (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("PC","A5") = default
+  "MFF-A2A3","A3", True, False, -   ->  ("LPC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("LPC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
+  "MFF-A2A5","A2", False, - , True  ->  (concat("LPC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("LPC","A5") = default
 (type,"")) or (concat("OPC","A5") = default(type,""));
-  "MFF-A2A5","A5", True, - ,  False ->  ("PC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,""));
+  "MFF-A2A5","A5", True, - ,  False ->  ("LPC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("LPC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,""));
    - ,  - ,  -,  -, -               ->  False;
 end
 
 table recurrent_performed_qual_table(String type) =
   %crew_contract_group_safe_pp_start%, trip.%qual%  -> export %recurrent_performed_qual_match%;
-  "MFF-A2A3","A2"  -> (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("PC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
-  "MFF-A2A3","A3"  -> ("PC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("PC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
-  "MFF-A2A5","A2"  -> (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("PC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
-  "MFF-A2A5","A5"  -> ("PC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("PC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,""));
+  "MFF-A2A3","A2"  -> (concat("LPC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("LPC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
+  "MFF-A2A3","A3"  -> ("LPC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("LPC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
+  "MFF-A2A5","A2"  -> (concat("LPC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,"")) or (concat("LPC","A5") = default(type,"")) or (concat("OPC","A5") = default(type,""));
+  "MFF-A2A5","A5"  -> ("LPC" = default(type,"")) or ("OPC" = default(type,"")) or (concat("LPC","A3") = default(type,"")) or (concat("OPC","A3") = default(type,""));
    - ,  -          -> False;
 end
 
@@ -732,8 +743,8 @@ export %first_recurrent_doc_expiry_date% =
 %first_recurrent_doc_expiry_date_pp_start% =
   %first_recurrent_doc_expiry_date_at_date%(%pp_start%);
 
-set rec_doc_per_qual = "LC", "PC", "OPC";
-set pcopc_doc_per_qual = "PCA3" ,"OPCA3" ,"PCA5" ,"OPCA5";
+set rec_doc_per_qual = "LC", "LPC", "OPC", "OTS";
+set pcopc_doc_per_qual = "LPCA3" ,"OPCA3" ,"LPCA5" ,"OPCA5";
 
 %first_recurrent_doc_expiry_date_at_date%(Abstime end_date) =
   default(
@@ -767,7 +778,7 @@ export %_recurrent_doc_expiry_date% =
       if crew.%is_MFF% then
         date > default(%recurrent_type_expiry_date_incl_performed_MFF%(
                          recurrent_group, trip.%qual%, date, false), 31dec2035)
-      else
+      elsedefault(%recurrent_type_performed_MFF%(ix, date), false)
         any(times(crew.%max_iter%("ACQUAL", date)),
           date > default(%recurrent_type_expiry_date_incl_performed%(
                          recurrent_group, crew.%qln%("ACQUAL", date, %times_index_0%), date, false), 31dec2035))
@@ -829,24 +840,25 @@ export %recurrent_type_performed_ix%(Int ix, Abstime date) =
 export %unperformed_recurrent_types%(Abstime date) =
   cat(times(%nr_recurrent_types%), %reqd_rec_desc%(%recurrent_activity_ix%(%times_index_0%,date), date), ", ")
   where (%is_unperformed_ix%(date) and
-         not %index_is_OPC_and_PC_required%(date));
+         not %index_is_OPC_or_OTS_and_LPC_required%(date));
 
 export %unperformed_recurrent_types_with_matching_ac_qual_str%(Abstime date) =
   cat(times(%nr_recurrent_types%),  %reqd_rec_desc%(%recurrent_activity_ix%(%times_index_0%,date), date), ",")
   where (%is_unperformed_ix%(date) and %check_matching_duty_qual%(%times_index_0%,date) and 
-         not %index_is_OPC_and_PC_required%(date));
+         not %index_is_OPC_or_OTS_and_LPC_required%(date));
 
 export %unperformed_recurrent_types_with_matching_qual%(Abstime date) =
   any(times(%nr_recurrent_types%), %check_matching_qual%(%times_index_0%,date))
   where (%is_unperformed_ix%(date) and
-         not %index_is_OPC_and_PC_required%(date));
+         not %index_is_OPC_or_OTS_and_LPC_required%(date));
 
 %check_matching_qual%(int ix, Abstime date) =
      let missed_trining = %reqd_rec_desc%(%recurrent_activity_ix%(ix,date), date);
     if ( missed_trining in rec_doc_per_qual) then
          concat("LC (", leg.%qual%, ")") = missed_trining or
-                concat("PC (", leg.%qual%, ")") = default(missed_trining,"") or
-                concat("OPC (", leg.%qual%, ")") = default(missed_trining,"")
+                concat("LPC (", leg.%qual%, ")") = default(missed_trining,"") or
+                concat("OPC (", leg.%qual%, ")") = default(missed_trining,"") or
+                concat("OTS (", leg.%qual%, ")") = default(missed_trining,"")
      else
           true;
           
@@ -856,16 +868,18 @@ export %unperformed_recurrent_types_with_matching_qual%(Abstime date) =
     
     /*
     concat("LC (", cat(leg(trip) where (locate(leg.%qual%, missed_trining) > 0), leg.%qual%), ")") = missed_trining or
-    concat("PC (", cat(leg(trip) where (locate(leg.%qual%, missed_trining) > 0), leg.%qual%), ")") = default(missed_trining,"") or
+    concat("LPC (", cat(leg(trip) where (locate(leg.%qual%, missed_trining) > 0), leg.%qual%), ")") = default(missed_trining,"") or
     concat("OPC (", cat(leg(trip) where (locate(leg.%qual%, missed_trining) > 0), leg.%qual%), ")") = default(missed_trining,"") or 
     concat("OPC", cat(leg(trip) where (locate(leg.%qual%, missed_trining) > 0), leg.%qual%)) = default(missed_trining,"") or
-    concat("PC", cat(leg(trip) where (locate(leg.%qual%, missed_trining) > 0), leg.%qual%)) = default(missed_trining,"");
+    concat("OTS (", cat(leg(trip) where (locate(leg.%qual%, missed_trining) > 0), leg.%qual%), ")") = default(missed_trining,"") or 
+    concat("OTS", cat(leg(trip) where (locate(leg.%qual%, missed_trining) > 0), leg.%qual%)) = default(missed_trining,"") or
+    concat("LPC", cat(leg(trip) where (locate(leg.%qual%, missed_trining) > 0), leg.%qual%)) = default(missed_trining,"");
     */
-%index_is_OPC_and_PC_required%(Abstime date) =
-    if %_recurrent_group%(%times_index_0%, date) = "OPC" then
+%index_is_OPC_or_OTS_and_LPC_required%(Abstime date) =
+    if %_recurrent_group%(%times_index_0%, date) = "OPCOTS"  then
         first(times(%nr_recurrent_types%), 
               %is_unperformed_ix%(date))
-        where(%_recurrent_group%(%times_index_0%, date) = "PC")
+        where(%_recurrent_group%(%times_index_0%, date) = "LPC")
     else
         false;
 
@@ -976,7 +990,8 @@ export %valid_matching_ac_qual%(Int ix, Abstime date) =
 
 %crew_has_A3A5_rec_doc%(Abstime date) =
   %recurrent_document_exists%("OPCA3A5", date) or
-  %recurrent_document_exists%("PCA3A5", date);
+  %recurrent_document_exists%("OTSA3A5", date) or
+  %recurrent_document_exists%("LPCA3A5", date);
 
 /*Changed definition of variable for SKCMS-2696, 
 as there could be other ways to acquire A5 qualification*/
@@ -1367,7 +1382,7 @@ end
   or %_recurrent_performed_by_training_log%(type,date,"", earliest_assignment_def);
 
 /* earliest_date, if supplied, should be used to only check assignment in 
-   "may have" interval. Only of use for PC/OPC. 1Jan1986 can be supplied to
+"may have" interval. Only of use for LPC/OPC/OTS. 1Jan1986 can be supplied to
    disable. */
 %_recurrent_performed_by_training_log%(String type,Abstime date, String code, Abstime earliest_date)=
     let rec_date = default(%last_recurrent_date_in_training_log%(type,code),1jan1986);
@@ -1382,32 +1397,41 @@ end
   %_recurrent_performed_by_training_log%(type, date, code, 1Jan1986);
     
 
-/* A PC always includes an OPC, and if crew is double qualified
- * (i.e. A3A4/3738) a PC on one type includes an OPC on all other types. */
+/* A LPC always includes an OPC/OTS, and if crew is double qualified
+ * (i.e. A3A4/3738) a LPC on one type includes an OPC/OTS on all other types. */
 %reqd_recurrent_sim%(String type) =
-  any(leg(duty), leg.%is_valid_sim% and leg.%is_pc_or_opc%) and
+  any(leg(duty), leg.%is_valid_sim% and leg.%is_lpc_opc_or_ots%) and
   %_correct_recurrent_sim%(type);
 
 export %other_ac_qual%(String qual) =
     if qual = "A3" then "A4" else "A3";
     
 table correct_recurrent_sim(String type) =
-    %duty_is_pc%, %duty_sim_type%, type -> %_correct_recurrent_sim%;
-    /* A PC on A3/A4 includes PC on same type and OPC on all others */
-    -, "PCA3", "PCA3" -> true;
-    -, "PCA3", "PCA3A5" -> true;
-    -, "PCA3", "OPCA3" -> true;
-    -, "PCA3", "OPCA3A5" -> true;
-    -, "PCA3", "OPCA4" -> true;
-    -, "PCA4", "PCA4" -> true;
-    -, "PCA4", "OPCA3" -> true;
-    -, "PCA4", "OPCA3A5" -> true;
-    -, "PCA4", "OPCA4" -> true;
-    -, "PCA5", "PCA3" -> true; /* Not sure if this is needed */
-    -, "PCA5", "PCA3A5" -> true;
-    -, "PCA5", "OPCA3" -> true; /* Not sure if this is needed */
-    -, "PCA5", "OPCA3A5" -> true;
-    -, "PCA5", "OPCA4" -> true;
+    %duty_is_lpc%, %duty_sim_type%, type -> %_correct_recurrent_sim%;
+    /* A LPC on A3/A4 includes LPC on same type and OPC/OTS on all others */
+    -, "LPCA3", "LPCA3" -> true;
+    -, "LPCA3", "LPCA3A5" -> true;
+    -, "LPCA3", "OPCA3" -> true;
+    -, "LPCA3", "OPCA3A5" -> true;
+    -, "LPCA3", "OPCA4" -> true;
+    -, "LPCA3", "OTSA3" -> true;
+    -, "LPCA3", "OTSA3A5" -> true;
+    -, "LPCA3", "OTSA4" -> true;
+    -, "LPCA4", "LPCA4" -> true;
+    -, "LPCA4", "OPCA3" -> true;
+    -, "LPCA4", "OPCA3A5" -> true;
+    -, "LPCA4", "OPCA4" -> true;
+    -, "LPCA4", "OTSA3" -> true;
+    -, "LPCA4", "OTSA3A5" -> true;
+    -, "LPCA4", "OTSA4" -> true;
+    -, "LPCA5", "LPCA3" -> true; /* Not sure if this is needed */
+    -, "LPCA5", "LPCA3A5" -> true;
+    -, "LPCA5", "OPCA3" -> true; /* Not sure if this is needed */
+    -, "LPCA5", "OPCA3A5" -> true;
+    -, "LPCA5", "OPCA4" -> true;
+    -, "LPCA5", "OTSA3" -> true; /* Not sure if this is needed */
+    -, "LPCA5", "OTSA3A5" -> true;
+    -, "LPCA5", "OTSA4" -> true;
     /* An OPC on A3/A4 includes an OPC on other type */
     -, "OPCA3", "OPCA3" -> true;
     -, "OPCA3", "OPCA3A5" -> true;
@@ -1418,19 +1442,21 @@ table correct_recurrent_sim(String type) =
     -, "OPCA5", "OPCA3" -> true; /* Not sure if this is needed */
     -, "OPCA5", "OPCA3A5" -> true;
     -, "OPCA5", "OPCA4" -> true;
-    /* A PC includes an OPC */
-    true, -, "PC" -> %check_qual%(type);
+    /* A LPC includes an OPC */
+    true, -, "LPC" -> %check_qual%(type);
     true, -, "OPC" -> true;
+    true, -, "OTS" -> true;
     /* An OPC is nothing more */
     false, -, "OPC" -> %check_qual%(type);
+    false, -, "OTS" -> %check_qual%(type);
     -, -, - -> false;
 end
 
 %check_qual%(string type) =
     let doc_qual = %recurrent_type_expiry_ac_qual%(type, %any_ac_qual%, duty.%end_hb%),
         sim_qual = duty.%first_sim_leg_qual%;
-    /* A Skill or PC change covers any PC/OPC need */
-    duty.%is_pc_change_month% or duty.%is_skill_test%
+    /* A Skill or LPC change covers any LPC/OPC/OTS need */
+    duty.%is_lpc_change_month% or duty.%is_skill_test%
     or
     /* In general the sim should have the qual as specified in document */
     (if parameters.%sim_pass_classic_req%(duty.%end_hb%) or
@@ -1441,107 +1467,119 @@ end
        true);
 
 %duty_sim_type% =
-  concat(if %duty_is_pc% 
-         then "PC" 
+  concat(if %duty_is_lpc% 
+         then "LPC" 
          else if %duty_is_opc% then "OPC"
+         else if %duty_is_ots% then "OTS"
          else duty.%group_code%, 
          duty.%first_sim_leg_qual%);
   
 export %sim_type% =
-  concat(if %trip_is_pc% 
-         then "PC" 
+  concat(if %trip_is_lpc% 
+         then "LPC" 
          else if %trip_is_opc% then "OPC"
+         else if %trip_is_ots% then "OTS"
          else trip.%group_code%, 
          trip.%first_sim_leg_qual%);
 
-/* PC/OPC trips will have an S*-code (OPC).
-   Assigned to crew in need of PC they should be converted to PC (Y*-code) */
-export %trip_is_pc% =
-    any(leg(trip), %leg_is_pc%);
+/* LPC/OPC/OTS trips will have an S*-code (OTS).
+   Assigned to crew in need of LPC they should be converted to LPC (Y*-code) */
+export %trip_is_lpc% =
+    any(leg(trip), %leg_is_lpc%);
 export %trip_is_opc% =
-    trip.%is_opc% and not %trip_is_pc%;
+    trip.%is_opc_ots% and not %trip_is_lpc% and fundamental.%use_link_tracking_ruleset%;
+export %trip_is_ots% =
+    trip.%is_opc_ots% and not %trip_is_lpc% and not fundamental.%use_link_tracking_ruleset%;
 
-export %duty_is_pc% =
-    any(leg(duty), %leg_is_pc%);
+export %duty_is_lpc% =
+    any(leg(duty), %leg_is_lpc%);
 export %duty_is_opc% =
-    duty.%is_opc% and not %duty_is_pc%;
+    duty.%is_opc_ots% and not %duty_is_lpc% and fundamental.%use_link_tracking_ruleset%;
+export %duty_is_ots% =
+    duty.%is_opc_ots% and not %duty_is_lpc% and not fundamental.%use_link_tracking_ruleset%; 
     
-export %leg_is_pc% =
-  leg.%is_pc_or_opc% and %leg_is_own_sim% and
+export %leg_is_lpc% =
+  leg.%is_lpc_opc_or_ots% and %leg_is_own_sim% and
   (not (leg.%is_forced_opc% or %assigned_as_assist_for_ac_qual%(leg.%qual%))) and
-  (leg.%is_pc% or
-   leg.%is_pc_change_month% or
-   leg.%is_forced_pc% or
+  (leg.%is_lpc% or
+   leg.%is_lpc_change_month% or
+   leg.%is_forced_lpc% or
    leg.%is_skill_test% or
-   leg.%is_performed_pc% or
-   %leg_is_opc_fulfilling_pc%);
+   leg.%is_performed_lpc% or
+   %leg_is_opc_or_ots_fulfilling_lpc%);
+
+export %leg_is_opc_or_ots% = 
+  leg.%is_lpc_opc_or_ots% and not %leg_is_lpc%;
 
 export %leg_is_opc% = 
-  leg.%is_pc_or_opc% and not %leg_is_pc%;
+  leg.%is_opc_ots% and not %leg_is_lpc% and fundamental.%use_link_tracking_ruleset%;
 
-export %leg_is_pc_opc_not_Z% =
-  (%leg_is_pc% and not leg.%is_skill_test%) or %leg_is_opc_not_Z%;
+export %leg_is_ots% =
+  leg.%is_opc_ots% and not %leg_is_lpc% and not fundamental.%use_link_tracking_ruleset%;
 
-export %leg_is_opc_not_Z% =
-  leg.%is_pc_or_opc% and not (%leg_is_pc% or leg.%is_skill_test%);
+export %leg_is_lpc_opc_or_ots_not_Z% =
+  (%leg_is_lpc% and not leg.%is_skill_test%) or %leg_is_opc_or_ots_not_Z%;
 
-%has_pc_in_interval%(Abstime s, Abstime e) =
-  any(leg(roster), %leg_is_pc%)
+export %leg_is_opc_or_ots_not_Z% =
+  leg.%is_lpc_opc_or_ots% and not (%leg_is_lpc% or leg.%is_skill_test%);
+
+%has_lpc_in_interval%(Abstime s, Abstime e) =
+  any(leg(roster), %leg_is_lpc%)
   where (leg.%start_hb%>=s and leg.%start_hb% < e);
 
-%has_pc_opc_not_Z_in_interval%(Abstime s, AbsTime e) =
-  any(leg(roster), %leg_is_pc_opc_not_Z%)
+%has_lpc_opc_or_ots_not_Z_in_interval%(Abstime s, AbsTime e) =
+  any(leg(roster), %leg_is_lpc_opc_or_ots_not_Z%)
   where (leg.%start_hb%>=s and leg.%start_hb% < e);
 
 /* These should not be exported. Valid is_pc/is_opc should include 
    "assigned_as_assist", but due to a circularity that can't be done directly.
    /EKG 080117 */
-%leg_is_opc_fulfilling_pc% =
-  default(leg.%is_opc% and
-          %crew_is_in_pc_period_leg%,
+%leg_is_opc_or_ots_fulfilling_lpc% =
+  default((leg.%is_opc_ots%) and
+          %crew_is_in_lpc_period_leg%,
           false);
 
-%crew_is_in_pc_period_leg% =
+%crew_is_in_lpc_period_leg% =
   let date = leg.%start_hb%,
       qual = leg.%qual%,
-      pc_month = if crew.%is_a3a4_qualified_at_date%(date) then
+      lpc_month = if crew.%is_a3a4_qualified_at_date%(date) then
                     /* This variable was built for assist calculation, but can
-                       be used here too since it's always a PC month for A3/A4
+                       be used here too since it's always a LPC month for A3/A4
                        crew. */
-                    %pc_opc_expiry_month_this_season%(date)
+                    %lpc_opc_or_ots_expiry_month_this_season%(date)
                  else
-                    %pc_month_for_ac_qual%(qual),
-      pc_expiry = %rec_expiry_fixed%(add_months(round_down_year(date), pc_month), date),
-      earliest_assignment = add_months(pc_expiry, -3);
-  /* First we make sure the leg has the correct qual to ever be considered PC */
-  %correct_qual_for_pc%(date, qual) and
-  /* Next we check that the leg is in the PC-period this season.
+                    %lpc_month_for_ac_qual%(qual),
+      lpc_expiry = %rec_expiry_fixed%(add_months(round_down_year(date), lpc_month), date),
+      earliest_assignment = add_months(lpc_expiry, -3);
+  /* First we make sure the leg has the correct qual to ever be considered LPC */
+  %correct_qual_for_lpc%(date, qual) and
+  /* Next we check that the leg is in the LPC-period this season.
      We need some magic to handle the case where the document already is 
      extended */
-  date < pc_expiry and 
-  date >= nmax(earliest_assignment, %recurrent_season_start%("PC", date));
+  date < lpc_expiry and 
+  date >= nmax(earliest_assignment, %recurrent_season_start%("LPC", date));
   
-%correct_qual_for_pc%(Abstime date, String qual) =
-  /* SKN double qualified: We check that the PC doc is on this qual */
+%correct_qual_for_lpc%(Abstime date, String qual) =
+  /* SKN double qualified: We check that the LPC doc is on this qual */
   if crew.%is_skn_double_qualified_at_date%(date)
   then (if parameters.%sim_pass_classic_req%(date) then
-         %recurrent_type_expiry_ac_qual%("PC", %any_ac_qual%, date) = qual
+         %recurrent_type_expiry_ac_qual%("LPC", %any_ac_qual%, date) = qual
        else
-         %recurrent_type_expiry_ac_qual%("PC", %any_ac_qual%, date) = "37" or
-         %recurrent_type_expiry_ac_qual%("PC", %any_ac_qual%, date) = "38")
-  /* SKI double qualified: We check that this seasons PC doc is on this qual */
+         %recurrent_type_expiry_ac_qual%("LPC", %any_ac_qual%, date) = "37" or
+         %recurrent_type_expiry_ac_qual%("LPC", %any_ac_qual%, date) = "38")
+  /* SKI double qualified: We check that this seasons LPC doc is on this qual */
   else if crew.%is_a3a4_qualified_at_date%(date) then
-    locate(qual, %ski_pc_qual_this_season%(date)) > 0
+    locate(qual, %ski_lpc_qual_this_season%(date)) > 0
   /* If crew is single qual it's assumed ok */
   else
     true;
     
-%ski_pc_qual_this_season%(Abstime date) =
-  let month = %pc_opc_expiry_month_this_season%(date);
-  if month = %pc_month_1% then
-    %pc_qual_1%
+%ski_lpc_qual_this_season%(Abstime date) =
+  let month = %lpc_opc_or_ots_expiry_month_this_season%(date);
+  if month = %lpc_month_1% then
+    %lpc_qual_1%
   else
-    %pc_qual_2%;
+    %lpc_qual_2%;
   
 /*
  * 3. Recurrent CRM training
@@ -1741,24 +1779,28 @@ export %rec_type% =
     if any(leg(duty), leg.%is_any_lc%) then "LC"
     else if duty.%is_pgt% then "PGT"
     else if duty.%has_cc_rec% or any(leg(duty), %leg_creates_rec%) then "REC"
-    else if duty.%is_pc_or_opc% and %duty_is_own_sim% then
-        concat(if %duty_is_pc% then "PC" else "OPC",
-               if crew.%is_long_haul_trip_start% and trip.%first_sim_leg_qual% in pc_opc_doc_quals then /* FIXME: This needs to be properly fixed for PC/OPC|A3/A3A5/A4 */
+    else if duty.%is_lpc_opc_or_ots% and %duty_is_own_sim% then
+        concat(if %duty_is_lpc% then "LPC"
+               else if %leg_is_opc% then "OPC"
+               else "OTS",
+               if crew.%is_long_haul_trip_start% and trip.%first_sim_leg_qual% in lpc_opc_doc_quals then /* FIXME: This needs to be properly fixed for LPC/OPC/OTS|A3/A3A5/A4 */
                     trip.%first_sim_leg_qual%
                else "")
     else if duty.%is_crm% then "CRM"
     else if duty.%is_crmc% then "CRMC"
     else "";
     
-set pc_opc_doc_quals = "A3", "A4","A5";
+set lpc_opc_doc_quals = "A3", "A4","A5";
 
 export %leg_rec_type% =
     if leg.%is_any_lc% then "LC"
     else if leg.%is_pgt% then "PGT"
     else if leg.%is_cc_rec% then "REC"
-    else if leg.%is_pc_or_opc% and %leg_is_own_sim% then
-        concat(if %leg_is_pc% then "PC" else "OPC",
-               if crew.%is_long_haul_leg_start% and leg.%qual% in pc_opc_doc_quals then /* FIXME: This needs to be properly fixed for PC/OPC|A3/A3A5/A4 */
+    else if leg.%is_lpc_opc_or_ots% and %leg_is_own_sim% then
+        concat(if %leg_is_lpc% then "LPC" 
+               else  if %leg_is_opc% then "OPC"
+               else "OTS",
+               if crew.%is_long_haul_leg_start% and leg.%qual% in lpc_opc_doc_quals then /* FIXME: This needs to be properly fixed for LPC/OPC/OTS|A3/A3A5/A4 */
                     leg.%qual%
                else "")
     else if leg.%is_crm% then "CRM"
@@ -1780,28 +1822,30 @@ table trip_rec_types_lookup=
     1 ->  any(leg(trip), leg.%is_any_lc%), "LC";
     2 ->  trip.%is_pgt% ,"PGT";
     3 ->  trip.%has_cc_rec%, "REC";
-    4 ->  %trip_is_pc_or_opc%  , %trip_pc_or_opc_rec_type% ;/* PC,PCA*, OPC, OPCA* */
+    4 ->  %trip_is_lpc_opc_or_ots%  , %trip_lpc_opc_or_ots_rec_type% ;/* LPC,PCA*, OPC, OPCA* */
     5 ->  trip.%is_crm% , "CRM";
     6 ->  trip.%is_crmc% , "CRMC";
     - -> void_bool, void_string;
 end
     
-%trip_is_pc_or_opc% = 
-    trip.%is_pc_or_opc% and 
+%trip_is_lpc_opc_or_ots% = 
+    trip.%is_lpc_opc_or_ots% and 
     not (trip.%is_sim_instr% or trip.%is_sim_instr_supervis% or trip.%is_sim_instr_ol% or trip.%is_sim_instr_supol%);
  
-export %trip_is_own_pc_opc% =
-    trip.%is_pc_or_opc% and 
+export %trip_is_own_lpc_opc_or_ots% =
+    trip.%is_lpc_opc_or_ots% and 
     not (trip.%is_sim_instr% or trip.%is_sim_instr_supervis% or trip.%is_sim_instr_ol% or trip.%is_sim_instr_supol%) and
     not %trip_is_sim_assist%;
 
-export %duty_is_own_pc_opc% =
-    duty.%is_pc_or_opc% and
+export %duty_is_own_lpc_opc_or_ots% =
+    duty.%is_lpc_opc_or_ots% and
     not (duty.%is_sim_instr% or duty.%is_sim_instr_supervis% or duty.%is_sim_instr_ol% or duty.%is_sim_instr_supol%) and
     not %duty_is_sim_assist%;
 
-%trip_pc_or_opc_rec_type% = 
-    concat(if %trip_is_pc% then "PC" else "OPC",
+%trip_lpc_opc_or_ots_rec_type% = 
+    concat(if %trip_is_lpc% then "LPC"
+           else if %trip_is_opc% then "OPC"
+           else "OTS",
            if crew.%is_long_haul_trip_start%
            then trip.%first_sim_leg_qual%
            else "");
@@ -1823,11 +1867,16 @@ export %recurrent_type_expiry_date%(String type, String ac_qual, Abstime date) =
              nmax(crew.%document_expiry_date_subtype%("REC", type, doc_ac_qual, date),crew.%document_expiry_date_subtype%("REC", "OPCA3A5", doc_ac_qual, date))
          else
              default(crew.%document_expiry_date_subtype%("REC", "OPCA3A5", doc_ac_qual, date), crew.%document_expiry_date_subtype%("REC", type, doc_ac_qual, date))
-      else if type = "PCA5" or type = "PCA3" then
-         if not void(crew.%document_expiry_date_subtype%("REC", "PCA3A5", doc_ac_qual, date)) and not void(crew.%document_expiry_date_subtype%("REC", type, doc_ac_qual, date)) then
-             nmax(crew.%document_expiry_date_subtype%("REC", type, doc_ac_qual, date),crew.%document_expiry_date_subtype%("REC", "PCA3A5", doc_ac_qual, date))
+      else if type = "OTSA5" or type = "OTSA3" then
+         if not void(crew.%document_expiry_date_subtype%("REC", "OTSA3A5", doc_ac_qual, date)) and not void(crew.%document_expiry_date_subtype%("REC", type, doc_ac_qual, date)) then
+             nmax(crew.%document_expiry_date_subtype%("REC", type, doc_ac_qual, date),crew.%document_expiry_date_subtype%("REC", "OTSA3A5", doc_ac_qual, date))
          else
-             default(crew.%document_expiry_date_subtype%("REC", "PCA3A5", doc_ac_qual, date), crew.%document_expiry_date_subtype%("REC", type, doc_ac_qual, date))
+             default(crew.%document_expiry_date_subtype%("REC", "OTSA3A5", doc_ac_qual, date), crew.%document_expiry_date_subtype%("REC", type, doc_ac_qual, date))
+      else if type = "LPCA5" or type = "LPCA3" then
+         if not void(crew.%document_expiry_date_subtype%("REC", "LPCA3A5", doc_ac_qual, date)) and not void(crew.%document_expiry_date_subtype%("REC", type, doc_ac_qual, date)) then
+             nmax(crew.%document_expiry_date_subtype%("REC", type, doc_ac_qual, date),crew.%document_expiry_date_subtype%("REC", "LPCA3A5", doc_ac_qual, date))
+         else
+             default(crew.%document_expiry_date_subtype%("REC", "LPCA3A5", doc_ac_qual, date), crew.%document_expiry_date_subtype%("REC", type, doc_ac_qual, date))
       else
         crew.%document_expiry_date_subtype%("REC", type, doc_ac_qual, date);
   if rec_qual = ""
@@ -1893,7 +1942,7 @@ export %recurrent_type_expiry_date_incl_performed_MFF%(String type, String ac_qu
   else
      expiry_date;
 
-set doc_per_qual = "PC","OPC","PCA3","OPCA3","PCA5","OPCA5";
+set doc_per_qual = "LPC","OPC","LPCA3","OPCA3","LPCA5","OPCA5";
     
 export %recurrent_type_performed_expiry_date_matching_type%(String type, String ac_qual, Abstime date, bool check_expiry) =
   let expiry_date = default(%recurrent_type_expiry_date%(type, ac_qual, date), %abstimemin%),
@@ -1928,13 +1977,14 @@ export %earliest_rec_fixed%(Abstime earliest_def, Abstime date) =
   else
     def;
 
-/* Type can be any of OPC, OPCA3, OPCA3A5, OPCA4, PC, PCA3, PCA3A5, PCA4, PGT, CRM, CRMC, LC, REC */
+/* Type can be any of OPC, OPCA3, OPCA3A5, OPCA4, OTS, OTSA3, OTSA3A5, OTSA4, LPC, LPCA3, LPCA3A5, LPCA4, PGT, CRM, CRMC, LC, REC */
 export %last_recurrent_performed_of_type%(String type, String ac_qual, Abstime date) =
   default(last(trip(roster), round_up_month(trip.%start_utc%))
           where ((trip.%is_ground_duty% or type = "LC") and
                  trip.%start_hb% < date and
                  (%trip_has_rectype%(type) or 
-                 %_opc_fullfilled_by_pc%(type)) and
+                 %_opc_fullfilled_by_lpc%(type) or
+                 %_ots_fullfilled_by_lpc%(type)) and
                  not %trip_is_sim_assist%
                  ), 
           default(%last_recurrent_date_in_training_log%(type, ac_qual), 1jan1986));
@@ -1949,7 +1999,7 @@ export %last_recurrent_performed_of_type_MFF%(String type, String ac_qual, Absti
                  ),
           default(%last_recurrent_date_in_training_log%(type, ac_qual), 1jan1986));
 
-/* This is a simplification. If there is a PC or OPC (A3/A4) of the wrong type
+/* This is a simplification. If there is a LPC or OPC/OTS (A3/A4) of the wrong type
    we wont catch this. I don't think it will happen. /EKG 081009 
    Initial linechecks are logged as ILC but creates an LC document, so we need
    to handle that too. /EKG 081211 
@@ -1970,10 +2020,10 @@ export %last_recurrent_performed_of_type_MFF%(String type, String ac_qual, Absti
 
 %_rec_creator_type_match%(String logtype, String type) =
   if type in recurrent_sim_training_set then
-    /* Look for skill test. PC CHANGE isn't logged, we need to look for all PC
+    /* Look for skill test. LPC CHANGE isn't logged, we need to look for all LPC
        This is not entirely correct, but will only generate faults in displayed
        future expiry dates */
-    logtype = "PC"
+    logtype = "LPC"
   else if type = "LC" then
     /* Look for LC/ILC */
     logtype = "ILC" or logtype = "LC"
@@ -2004,8 +2054,8 @@ export %last_recurrent_performed_of_type_MFF%(String type, String ac_qual, Absti
     /* For LC we need to handle 37/38 */
     rectype = "LC" and 
     (lookup = "37" and logcode = "38" or lookup = "38" and logcode = "37") or
-    /* For LC/PC/OPC we need to handle 36/38 */
-    (rectype = "LC" or rectype = "PC" or rectype = "OPC") and 
+    /* For LC/LPC/OPC/OTS we need to handle 36/38 */
+    (rectype = "LC" or rectype = "LPC" or rectype = "OPC" or rectype = "OTS") and 
     (lookup = "36" and logcode = "38" or lookup = "38" and logcode = "36");
    
 /* We check the log for activities not on the roster, but still not performed.
@@ -2019,37 +2069,48 @@ set rec_creating_courses = "CONVERSION REFRESHER B", "CONVERSION REFRESHER A", "
 
 %_rec_type_match%(String logtype, String lookup) =
     /* Special cases where some log types will be valid for other lookups */
-    (lookup = "OPC" and logtype = "PC") or
+    (lookup = "OPC" and logtype = "LPC") or
+    (lookup = "OTS" and logtype = "LPC") or
     (lookup = "REC" and logtype in rec_creating_courses) or
     (lookup = "LC" and logtype = "ILC") or
     /* Standard case, regular matching */
     lookup = logtype;
     
-/* We need to do this since we log PC/OPC without the A3/A4 /EKG 081009 */
+/* We need to do this since we log LPC/OPC/OTS without the A3/A4 /EKG 081009 */
 %_rec_type_fixed%(String type) =
-    if substr(type, 1, 2) = "PC" then "PC"
+    if substr(type, 1, 2) = "LPC" then "LPC"
     else if substr(type, 1, 3) = "OPC" then "OPC"
+    else if substr(type, 1, 3) = "OTS" then "OTS"
     else if substr(type, 1, 3) = "PGT" then "PGT"
     else type;
     
-%_opc_fullfilled_by_pc%(string opc_type) = 
+%_opc_fullfilled_by_lpc%(string opc_type) = 
     if substr(opc_type,1,3) <> "OPC" then false
-    else if opc_type = "OPC" then %trip_has_rectype%("PC")
+    else if opc_type = "OPC" then %trip_has_rectype%("LPC")
     else if opc_type = "OPCA3" or opc_type = "OPCA3A5" or opc_type = "OPCA4" or opc_type = "OPCA5"
-    then %trip_has_rectype%("PCA3") or %trip_has_rectype%("PCA4") or %trip_has_rectype%("PCA5")
-    else (trip.%is_pc_change_month% or 
+    then %trip_has_rectype%("LPCA3") or %trip_has_rectype%("LPCA4") or %trip_has_rectype%("LPCA5")
+    else (trip.%is_lpc_change_month% or 
           trip.%is_skill_test% or 
-          trip.%is_forced_pc%) ;
-    
+          trip.%is_forced_lpc%) ;
+
+%_ots_fullfilled_by_lpc%(string ots_type) = 
+    if substr(ots_type,1,3) <> "OTS" then false
+    else if ots_type = "OTS" then %trip_has_rectype%("LPC")
+    else if ots_type = "OTSA3" or ots_type = "OTSA3A5" or ots_type = "OTSA4" or ots_type = "OTSA5"
+    then %trip_has_rectype%("LPCA3") or %trip_has_rectype%("LPCA4") or %trip_has_rectype%("LPCA5")
+    else (trip.%is_lpc_change_month% or 
+          trip.%is_skill_test% or 
+          trip.%is_forced_lpc%);
+
 /* Double qualified SKI crew should alternate LC on A3/A4.
-   Double qualified SKN crew should alternate PC/OPC on 37/38.
+   Double qualified SKN crew should alternate LPC/OPC/OTS on 37/38.
    In general we make sure that crew performs recurrent on a valid acqual */
 export %recurrent_type_expiry_ac_qual%(String type, String doc_ac_qual, Abstime date) =
     if type in rec_types_with_acqual then
         default(crew.%expiry_doc_alternating_ac_qual%("REC", type, doc_ac_qual, date), "")
     else "";
 
-set rec_types_with_acqual = "LC", "PC", "OPC";
+set rec_types_with_acqual = "LC", "LPC", "OPC", "OTS";
 
 /****************************************************************
  * Section 3: Initial/Conversion/Transition training
@@ -2813,13 +2874,13 @@ table ground_type_match(String type) =
   "SIM INSTR SUPERVIS" -> duty.%is_sim_instr_supervis%;
   "SIM INSTR OL" -> duty.%is_sim_instr_ol%;
   "SIM INSTR SUPOL" -> duty.%is_sim_instr_supol%;
-  "SIM DEADHEAD" -> %pc_opc_deadhead%;
+  "SIM DEADHEAD" -> %lpc_opc_or_ots_deadhead%;
   &
   -     ->  type = duty.%group_code%;
 end
 
-export %pc_opc_deadhead% =
- duty.%is_sim_deadhead% and duty.%is_pc_or_opc% and %sim_duty_assigned_to_student%;
+export %lpc_opc_or_ots_deadhead% =
+ duty.%is_sim_deadhead% and duty.%is_lpc_opc_or_ots% and %sim_duty_assigned_to_student%;
 
 /* Support for CR 456 */
 %_nr_sim_instr_in_ival%(Abstime istart, Abstime iend) =
@@ -2920,8 +2981,8 @@ export %last_perf_date_for_act_of_type_as_student%(String type, Abstime date) =
   %last_logged_date_for_type%(type, %pp_start%));
 
 /* Last performed date for activity of type 
-   We can't look for PC in a correct way without going into circularity.
-   It will probably be ok since most things can check for PC or OPC.
+   We can't look for LPC in a correct way without going into circularity.
+   It will probably be ok since most things can check for LPC or OPC/OTS.
    We excluce forced assists and instructors for this lookup.
 */
 %_last_perf_date_for_act_of_type%(String type, Abstime date) =
@@ -3351,7 +3412,7 @@ table acceptable_companion(String main_cat, String type, String code, Abstime da
   /* Simulator types */
   "F", "Skill test", -, - -> crew.%is_tre_instr%(code, date), 
                           "TRE";
-  "F", "PC/OPC", -, -     -> crew.%is_tre_instr%(code, date) or
+  "F", "LPC/OPC/OTS", -, -     -> crew.%is_tre_instr%(code, date) or
                              crew.%is_sup_instr%(code, date) or
                              crew.%is_sfe_instr%(code, date) or
                              crew.%is_ol_instr_ac_qual%(code, date), 
@@ -3422,8 +3483,8 @@ export %sim_type_for_qual_check% =
     "Skill test"
   else if leg.%is_sim_instr_supervis% then
     "Supervision"
-  else if leg.%is_pc_or_opc% then 
-    "PC/OPC"
+  else if leg.%is_lpc_opc_or_ots% then 
+        "LPC/OPC/OTS"
   else if leg.%is_ffs% then
     %ffs_type_for_qual_check%
   else
@@ -3487,7 +3548,7 @@ set exclude_ranks_set = "FE", "FS", "FO", "FA", "FF";
 %must_have_in_period%(String type, String acqual, Abstime p_start, Abstime p_end) =
     let expiry_date = %recurrent_type_expiry_date_incl_performed%(type, %any_ac_qual%, p_end, true);
 
-    /* acqual is in general not used, but for 37/38 double qual crew PC should 
+    /* acqual is in general not used, but for 37/38 double qual crew LPC should
        be alternated between 37 and 38. 
        Checking expiry date at p_end is needed to check performed, and ok since
        the table lookup checks for date larger than validfrom (which typically
@@ -3548,38 +3609,46 @@ export %may_have_in_pp%(String type) =
  * Must haves... (cached)
  */
 /* Flight crew */
-%must_have_pc% = %must_have_in_pp%("PC");
+%must_have_lpc% = %must_have_in_pp%("LPC");
 %must_have_opc% = %must_have_in_pp%("OPC");
-%must_have_pc_opc% = %must_have_pc% or %must_have_opc%;
+%must_have_ots% = %must_have_in_pp%("OTS");
+%must_have_lpc_opc_or_ots% = %must_have_lpc% or %must_have_opc% or %must_have_ots%;
 
-%must_have_pca3% = %must_have_in_pp%("PCA3");
+%must_have_lpca3% = %must_have_in_pp%("LPCA3");
 %must_have_opca3% = %must_have_in_pp%("OPCA3");
-%must_have_pc_opc_a3% = %must_have_pca3% or %must_have_opca3%;
+%must_have_otsa3% = %must_have_in_pp%("OTSA3");
+%must_have_lpc_opc_or_ots_a3% = %must_have_lpca3% or %must_have_opca3% or %must_have_otsa3%;
 
-%must_have_pca4% = %must_have_in_pp%("PCA4");
+%must_have_lpca4% = %must_have_in_pp%("LPCA4");
 %must_have_opca4% = %must_have_in_pp%("OPCA4");
-%must_have_pc_opc_a4% = %must_have_pca4% or %must_have_opca4%;
+%must_have_otsa4% = %must_have_in_pp%("OTSA4");
+%must_have_lpc_opc_or_ots_a4% = %must_have_lpca4% or %must_have_opca4% or %must_have_otsa4%;
 
-%must_have_pca5% = %must_have_in_pp%("PCA5");
+
+%must_have_lpca5% = %must_have_in_pp%("LPCA5");
 %must_have_opca5% = %must_have_in_pp%("OPCA5");
-%must_have_pc_opc_a5% = %must_have_pca5% or %must_have_opca5%;
+%must_have_otsa5% = %must_have_in_pp%("OTSA5");
+%must_have_lpc_opc_or_ots_a5% = %must_have_lpca5% or %must_have_opca5% or %must_have_otsa5%;
 
-%must_have_pca3a5% = %must_have_in_pp%("PCA3A5");
+%must_have_lpca3a5% = %must_have_in_pp%("LPCA3A5");
 %must_have_opca3a5% = %must_have_in_pp%("OPCA3A5");
+%must_have_otsa3a5% = %must_have_in_pp%("OTSA3A5");
 
-%must_have_pc37% = %must_have_in_pp_w_acqual%("PC", "37");
+%must_have_lpc37% = %must_have_in_pp_w_acqual%("LPC", "37");
 %must_have_opc37% = %must_have_in_pp_w_acqual%("OPC", "37");
-%must_have_pc_opc_37% = %must_have_pc37% or %must_have_opc37%;
+%must_have_ots37% = %must_have_in_pp_w_acqual%("OTS", "37");
+%must_have_lpc_opc_or_ots_37% = %must_have_lpc37% or %must_have_opc37% or %must_have_ots37%;
 
-%must_have_pc38% = %must_have_in_pp_w_acqual%("PC", "38");
+%must_have_lpc38% = %must_have_in_pp_w_acqual%("LPC", "38");
 %must_have_opc38% = %must_have_in_pp_w_acqual%("OPC", "38");
-%must_have_pc_opc_38% = %must_have_pc38% or %must_have_opc38%;
+%must_have_ots38% = %must_have_in_pp_w_acqual%("OTS", "38");
+%must_have_lpc_opc_or_ots_38% = %must_have_lpc38% or %must_have_opc38% or %must_have_ots38%;
 
-export %must_have_pc_any% =
-  %must_have_pc% or
-  %must_have_pca3% or %must_have_pca4% or %must_have_pca5% or
-  %must_have_pc37% or %must_have_pc38%
-  or %must_have_pca3a5%;
+export %must_have_lpc_any% =
+  %must_have_lpc% or
+  %must_have_lpca3% or %must_have_lpca4% or %must_have_lpca5% or
+  %must_have_lpc37% or %must_have_lpc38%
+  or %must_have_lpca3a5%;
 
 export %must_have_opc_any% =
   %must_have_opc% or
@@ -3587,9 +3656,16 @@ export %must_have_opc_any% =
   %must_have_opc37% or %must_have_opc38%
   or %must_have_opca3a5%;
 
-%must_have_pc_opc_any% =
-  %must_have_pc_any% or
-  %must_have_opc_any%;
+export %must_have_ots_any% =
+  %must_have_ots% or
+  %must_have_otsa3% or %must_have_otsa4% or %must_have_otsa5% or
+  %must_have_ots37% or %must_have_ots38%
+  or %must_have_otsa3a5%;
+
+%must_have_lpc_opc_or_ots_any% =
+  %must_have_lpc_any% or
+  %must_have_opc_any% or
+  %must_have_ots_any%;
  
 %must_have_pgt% = %must_have_in_pp%("PGT");
 export %must_have_pgt_any% = %must_have_pgt%;
@@ -3629,45 +3705,55 @@ not %rec_date_exist% or
  * May haves... (cached)
  */
 /* Flight crew */
-%may_have_pc% = %may_have_in_pp%("PC");
+%may_have_lpc% = %may_have_in_pp%("LPC");
 %may_have_opc% = %may_have_in_pp%("OPC");
-%may_have_pc_opc% = %may_have_pc% or %may_have_opc%;
+%may_have_ots% = %may_have_in_pp%("OTS");
+%may_have_lpc_opc_or_ots% = %may_have_lpc% or %may_have_opc% or %may_have_ots%;
 
-%may_have_pca3% = %may_have_in_pp%("PCA3");
+%may_have_lpca3% = %may_have_in_pp%("LPCA3");
 %may_have_opca3% = %may_have_in_pp%("OPCA3");
-%may_have_pc_opc_a3% = 
-  %may_have_pca3% or 
-  (%may_have_opca3% and not %may_have_pca4%);
+%may_have_otsa3% = %may_have_in_pp%("OTSA3");
+%may_have_lpc_opc_or_ots_a3% = 
+  %may_have_lpca3% or 
+  (%may_have_opca3% and not %may_have_lpca4%) or
+  (%may_have_otsa3% and not %may_have_lpca4%);
 
-%may_have_pca4% = %may_have_in_pp%("PCA4");
+%may_have_lpca4% = %may_have_in_pp%("LPCA4");
 %may_have_opca4% = %may_have_in_pp%("OPCA4");
-%may_have_pc_opc_a4% = 
-  %may_have_pca4% or 
-  (%may_have_opca4% and not %may_have_pca3%);
+%may_have_otsa4% = %may_have_in_pp%("OTSA4");
+%may_have_lpc_opc_or_ots_a4% =
+  %may_have_lpca4% or 
+  (%may_have_opca4% and not %may_have_lpca3%) or
+  (%may_have_otsa4% and not %may_have_lpca3%);
 
-%may_have_pca5% = %may_have_in_pp%("PCA5");
+%may_have_lpca5% = %may_have_in_pp%("LPCA5");
 %may_have_opca5% = %may_have_in_pp%("OPCA5");
-%may_have_pc_opc_a5% = 
-  %may_have_pca5% or 
-  (%may_have_opca5% and not %may_have_pca3%);
+%may_have_otsa5% = %may_have_in_pp%("OTSA5");
+%may_have_lpc_opc_or_ots_a5% = 
+  %may_have_lpca5% or 
+  (%may_have_opca5% and not %may_have_lpca3%) or
+  (%may_have_otsa5% and not %may_have_lpca3%);
 
-%may_have_pca3a5% = %may_have_in_pp%("PCA3A5");
+%may_have_lpca3a5% = %may_have_in_pp%("LPCA3A5");
 %may_have_opca3a5% = %may_have_in_pp%("OPCA3A5");
-%may_have_pc_opc_a3a5% = %may_have_pca3a5% or %may_have_opca3a5%;
+%may_have_otsa3a5% = %may_have_in_pp%("OTSA3A5");
+%may_have_lpc_opc_or_ots_a3a5% = %may_have_lpca3a5% or %may_have_opca3a5% or %may_have_otsa3a5%;
 
-%may_have_pc37% = %may_have_in_pp_w_acqual%("PC", "37");
+%may_have_lpc37% = %may_have_in_pp_w_acqual%("LPC", "37");
 %may_have_opc37% = %may_have_in_pp_w_acqual%("OPC", "37");
-%may_have_pc_opc_37% = %may_have_pc37% or %may_have_opc37%;
+%may_have_ots37% = %may_have_in_pp_w_acqual%("OTS", "37");
+%may_have_lpc_opc_or_ots_37% = %may_have_lpc37% or %may_have_opc37% or %may_have_ots37%;
 
-%may_have_pc38% = %may_have_in_pp_w_acqual%("PC", "38");
+%may_have_lpc38% = %may_have_in_pp_w_acqual%("LPC", "38");
 %may_have_opc38% = %may_have_in_pp_w_acqual%("OPC", "38");
-%may_have_pc_opc_38% = %may_have_pc38% or %may_have_opc38%;
+%may_have_ots38% = %may_have_in_pp_w_acqual%("OTS", "38");
+%may_have_lpc_opc_or_ots_38% = %may_have_lpc38% or %may_have_opc38% or %may_have_ots38%;
 
-export %may_have_pc_any% =
-  %may_have_pc% or
-  %may_have_pca3% or %may_have_pca4% or %may_have_pca5% or
-  %may_have_pc37% or %may_have_pc38%
-  or %may_have_pca3a5%;
+export %may_have_lpc_any% =
+  %may_have_lpc% or
+  %may_have_lpca3% or %may_have_lpca4% or %may_have_lpca5% or
+  %may_have_lpc37% or %may_have_lpc38%
+  or %may_have_lpca3a5%;
 
 export %may_have_opc_any% =
   %may_have_opc% or
@@ -3675,11 +3761,17 @@ export %may_have_opc_any% =
   %may_have_opc37% or %may_have_opc38%
   or %may_have_opca3a5%;
 
-%may_have_pc_opc_any% =
-  %may_have_pc_opc% or
-  %may_have_pc_opc_a3% or %may_have_pc_opc_a4% or
-  %may_have_pc_opc_37% or %may_have_pc_opc_38%
-  or %may_have_pc_opc_a3a5%;
+export %may_have_ots_any% =
+  %may_have_ots% or
+  %may_have_otsa3% or %may_have_otsa4% or %may_have_otsa5% or
+  %may_have_ots37% or %may_have_ots38%
+  or %may_have_otsa3a5%;
+
+%may_have_lpc_opc_or_ots_any% =
+  %may_have_lpc_opc_or_ots% or
+  %may_have_lpc_opc_or_ots_a3% or %may_have_lpc_opc_or_ots_a4% or
+  %may_have_lpc_opc_or_ots_37% or %may_have_lpc_opc_or_ots_38%
+  or %may_have_lpc_opc_or_ots_a3a5%;
  
 %may_have_pgt% = %may_have_in_pp%("PGT");
 %may_have_pgt_any% = %may_have_pgt%;
@@ -3835,7 +3927,7 @@ export %consolidation_course_type% =
 
 export %consolidation_period_start_hb% = round_up(%utc2hb%(training.%latest_fam_flt_date%(%consolidation_ac_qual%)) + 0:01, 24:00);
 export %consolidation_period_end_hb% =
-  if %consider_asf_ast_pc_opc% then
+  if %consider_asf_ast_lpc_opc_or_ots% then
     %consolidation_period_end_150d_hb%
   else
     if %consider_fmst% then
@@ -3851,9 +3943,9 @@ export %consider_fmst% =
   %last_fmst_date_hb% > %consolidation_period_start_hb% and
   %nr_consolidation_sectors_before_fmst% >= %nr_consolidation_sectors_required_before_fmst%;
 
-export %consider_asf_ast_pc_opc% =
+export %consider_asf_ast_lpc_opc_or_ots% =
   %nr_consolidation_sectors_in_120d% < %nr_consolidation_sectors_required% and
-  %last_asf_ast_pc_opc_date_hb% > %consolidation_period_start_hb%;
+  %last_asf_ast_lpc_opc_or_ots_date_hb% > %consolidation_period_start_hb%;
 
 export %consolidation_period_end_90d_hb% =
   %consolidation_period_start_hb% + 90 * 24:00;
@@ -3865,10 +3957,11 @@ export %consolidation_period_end_150d_hb% =
 export %last_fmst_date_hb% =
     round_down(%utc2hb%(training.%last_perf_date_for_act_of_type%("FMST", %hb2utc%(%consolidation_period_end_120d_hb%))), 24:00);
 
-%last_asf_ast_pc_opc_date_hb% = nmax(%last_activity_for_date_hb%("ASF"),
+%last_asf_ast_lpc_opc_or_ots_date_hb% = nmax(%last_activity_for_date_hb%("ASF"),
                                      %last_activity_for_date_hb%("AST"),
-                                     nmax(%last_activity_for_date_hb%("PC"),
-                                          %last_activity_for_date_hb%("OPC")));
+                                     nmax(%last_activity_for_date_hb%("LPC"),
+                                          %last_activity_for_date_hb%("OPC"),
+                                          %last_activity_for_date_hb%("OTS")));
 
 %last_activity_for_date_hb%(String activity) =
     round_down(%utc2hb%(training.%last_perf_date_for_act_of_type_for_ac_qual%(activity, %consolidation_ac_qual%, %hb2utc%(%consolidation_period_end_150d_hb%))), 24:00);
@@ -4043,7 +4136,7 @@ export %pgt_month% = calendar.%month_number%(%pgt_date% - 24:00);
 /* ------------------ */
 
 /*
- * Unified PC/OPC lookup 
+ * Unified LPC/OPC/OTS lookup 
  */
  
 /* When checking if crew has the qual of the rec doc we check at pp_end,
@@ -4058,11 +4151,14 @@ export %pgt_month% = calendar.%month_number%(%pgt_date% - 24:00);
 %_has_qual%(String qual, abstime date) = 
     crew.%has_ac_qln%(date-24:00, qual);
 
-%non_ski_qual_pc% =
-  %recurrent_type_expiry_ac_qual%("PC", %active_ac_qual%, %pp_start%);
+%non_ski_qual_lpc% =
+  %recurrent_type_expiry_ac_qual%("LPC", %active_ac_qual%, %pp_start%);
   
 %non_ski_qual_opc% =
   %recurrent_type_expiry_ac_qual%("OPC", %active_ac_qual%, %pp_start%);
+
+%non_ski_qual_ots% =
+  %recurrent_type_expiry_ac_qual%("OTS", %active_ac_qual%, %pp_start%);
 
 export %lc_qual% = %recurrent_type_expiry_ac_qual%("LC", %lc_qual_ac_qual_selector%, %pp_start%);
 
@@ -4075,66 +4171,81 @@ export %lc_qual% = %recurrent_type_expiry_ac_qual%("LC", %lc_qual_ac_qual_select
   else
     %active_ac_qual%;
 
-table unified_pc_opc_lookup = 
+table unified_lpc_opc_ots_lookup = 
   crew.%is_pilot%,
   %has_qual%("A2",%pp_end%), 
   %has_qual%("A3",%pp_end%), 
   %has_qual%("A4",%pp_end%),
   %has_qual%("A5",%pp_end%) /* and %crew_has_A5_extras%(%pp_end%) */ ->
-                              Abstime %_pc_date_1%,
-                              Int %_pc_month_1%,
-                              export String %pc_qual_1%,
-                              export String %pc_code_1%,
+                              Abstime %_lpc_date_1%,
+                              Int %_lpc_month_1%,
+                              export String %lpc_qual_1%,
+                              export String %lpc_code_1%,
                               Abstime %_opc_date_1%,
                               Int %_opc_month_1%,
                               export String %opc_qual_1%,
-                              export String %opc_code_1%;
-  true,true,true,-,- ->       %pc_def_date%, calendar.%month_number%(%pc_def_date% - 24:00), "A2", "PC", 
-                              %opc_def_date%, calendar.%month_number%(%opc_def_date% - 24:00), "A2", "OPC";
-  true,false,true,-,false  -> %pc_a3_date%, calendar.%month_number%(%pc_a3_date% - 24:00), "A3", "PCA3", 
-                              %opc_a3_date%, calendar.%month_number%(%opc_a3_date% - 24:00), "A3", "OPCA3";
-  true,false,true,-,true      -> %pc_a3a5_date%, calendar.%month_number%(%pc_a3a5_date% - 24:00), "A3/A5", "PCA3A5", 
-                              %opc_a3a5_date%, calendar.%month_number%(%opc_a3a5_date% - 24:00), "A3/A5", "OPCA3A5";
+                              export String %opc_code_1%,
+                              Abstime %_ots_date_1%,
+                              Int %_ots_month_1%,
+                              export String %ots_qual_1%,
+                              export String %ots_code_1%;
+  true,true,true,-,- ->       %lpc_def_date%, calendar.%month_number%(%lpc_def_date% - 24:00), "A2", "LPC", 
+                              %opc_def_date%, calendar.%month_number%(%opc_def_date% - 24:00), "A2", "OPC",
+                              %ots_def_date%, calendar.%month_number%(%ots_def_date% - 24:00), "A2", "OTS";
+  true,false,true,-,false  -> %lpc_a3_date%, calendar.%month_number%(%lpc_a3_date% - 24:00), "A3", "LPCA3", 
+                              %opc_a3_date%, calendar.%month_number%(%opc_a3_date% - 24:00), "A3", "OPCA3",
+                              %ots_a3_date%, calendar.%month_number%(%ots_a3_date% - 24:00), "A3", "OTSA3";
+  true,false,true,-,true      -> %lpc_a3a5_date%, calendar.%month_number%(%lpc_a3a5_date% - 24:00), "A3/A5", "LPCA3A5", 
+                              %opc_a3a5_date%, calendar.%month_number%(%opc_a3a5_date% - 24:00), "A3/A5", "OPCA3A5",
+                              %ots_a3a5_date%, calendar.%month_number%(%ots_a3a5_date% - 24:00), "A3/A5", "OTSA3A5";
   
-  true,true,false,false,true    -> %pc_def_date%, calendar.%month_number%(%pc_def_date% - 24:00), "A2", "PC",
-                                %opc_def_date%, calendar.%month_number%(%opc_def_date% - 24:00), "A2", "OPC";
+  true,true,false,false,true    -> %lpc_def_date%, calendar.%month_number%(%lpc_def_date% - 24:00), "A2", "LPC",
+                                %opc_def_date%, calendar.%month_number%(%opc_def_date% - 24:00), "A2", "OPC",
+                                %ots_def_date%, calendar.%month_number%(%ots_def_date% - 24:00), "A2", "OTS";
 
-  true,false,false,false,true  -> %pc_a5_date%, calendar.%month_number%(%pc_a5_date% - 24:00), "A5", "PCA5", 
-                              %opc_a5_date%,calendar.%month_number%(%opc_a5_date% - 24:00),  "A5", "OPCA5";
+  true,false,false,false,true  -> %lpc_a5_date%, calendar.%month_number%(%lpc_a5_date% - 24:00), "A5", "LPCA5", 
+                              %opc_a5_date%,calendar.%month_number%(%opc_a5_date% - 24:00),  "A5", "OPCA5",
+                              %ots_a5_date%,calendar.%month_number%(%ots_a5_date% - 24:00),  "A5", "OTSA5";
   
-  true,false,false,true,false -> %pc_a4_date%, calendar.%month_number%(%pc_a4_date% - 24:00), "A4", "PCA4",
-                           %opc_a4_date%,calendar.%month_number%(%opc_a4_date% - 24:00), "A4", "OPCA4";
+  true,false,false,true,false -> %lpc_a4_date%, calendar.%month_number%(%lpc_a4_date% - 24:00), "A4", "LPCA4",
+                           %opc_a4_date%,calendar.%month_number%(%opc_a4_date% - 24:00), "A4", "OPCA4",
+                           %ots_a4_date%,calendar.%month_number%(%ots_a4_date% - 24:00), "A4", "OTSA4";
 
-  true,true,false,-,false   -> %pc_def_date%, calendar.%month_number%(%pc_def_date% - 24:00), "A2", "PC", 
-                              %opc_def_date%, calendar.%month_number%(%opc_def_date% - 24:00), "A2", "OPC";
+  true,true,false,-,false   -> %lpc_def_date%, calendar.%month_number%(%lpc_def_date% - 24:00), "A2", "LPC", 
+                              %opc_def_date%, calendar.%month_number%(%opc_def_date% - 24:00), "A2", "OPC",
+                              %ots_def_date%, calendar.%month_number%(%ots_def_date% - 24:00), "A2", "OTS";
  
-  true,false,false,false,false -> %pc_def_date%, calendar.%month_number%(%pc_def_date% - 24:00), %non_ski_qual_pc%, "PC", 
-                              %opc_def_date%, calendar.%month_number%(%opc_def_date% - 24:00), %non_ski_qual_opc%, "OPC";
-  false,-,-,-,-            -> void_abstime,void_int,void_string,void_string,void_abstime,void_int,void_string,void_string;
+  true,false,false,false,false -> %lpc_def_date%, calendar.%month_number%(%lpc_def_date% - 24:00), %non_ski_qual_lpc%, "LPC", 
+                              %opc_def_date%, calendar.%month_number%(%opc_def_date% - 24:00), %non_ski_qual_opc%, "OPC",
+                              %ots_def_date%, calendar.%month_number%(%ots_def_date% - 24:00), %non_ski_qual_ots%, "OTS";
+  false,-,-,-,-            -> void_abstime,void_int,void_string,void_string,
+                              void_abstime,void_int,void_string,void_string,
+                              void_abstime,void_int,void_string,void_string;
 end
 
-%map_pc_qual_to_ac_qual%(String pc_qual) =
-  if pc_qual = "A3/A5" then
+%map_lpc_qual_to_ac_qual%(String lpc_qual) =
+  if lpc_qual = "A3/A5" then
     "A5"
   else
-    pc_qual;
+    lpc_qual;
 
-%mapped_pc_qual_1% = %map_pc_qual_to_ac_qual%(%pc_qual_1%);
-%mapped_opc_qual_1% = %map_pc_qual_to_ac_qual%(%opc_qual_1%);
+%mapped_lpc_qual_1% = %map_lpc_qual_to_ac_qual%(%lpc_qual_1%);
+%mapped_opc_qual_1% = %map_lpc_qual_to_ac_qual%(%opc_qual_1%);
+%mapped_ots_qual_1% = %map_lpc_qual_to_ac_qual%(%ots_qual_1%);
 
-%pc_month_for_ac_qual%(String ac_qual) =
-  calendar.%month_number%(%pc_date_for_active_ac_qual%(ac_qual) - 24:00);
+%lpc_month_for_ac_qual%(String ac_qual) =
+  calendar.%month_number%(%lpc_date_for_active_ac_qual%(ac_qual) - 24:00);
 
-%pc_date_for_active_ac_qual%(String ac_qual) =
-  let pc_date = %pc_date_for_ac_qual%(ac_qual);
+%lpc_date_for_active_ac_qual%(String ac_qual) =
+  let lpc_date = %lpc_date_for_ac_qual%(ac_qual);
 
-  if %has_qual%(ac_qual, pc_date) then pc_date else void_abstime;
+  if %has_qual%(ac_qual, lpc_date) then lpc_date else void_abstime;
 
-export %pc_date_1% =
-    if %has_qual%(%mapped_pc_qual_1%,%_pc_date_1%) or %has_qual%("FF", %_pc_date_1%) then %_pc_date_1% else void_abstime;
+export %lpc_date_1% =
+    if %has_qual%(%mapped_lpc_qual_1%,%_lpc_date_1%) or %has_qual%("FF", %_lpc_date_1%) then %_lpc_date_1% else void_abstime;
     
-export %pc_month_1% =
-    if %has_qual%(%mapped_pc_qual_1%,%_pc_date_1%) or %has_qual%("FF", %_pc_date_1%) then %_pc_month_1% else void_int;
+export %lpc_month_1% =
+    if %has_qual%(%mapped_lpc_qual_1%,%_lpc_date_1%) or %has_qual%("FF", %_lpc_date_1%) then %_lpc_month_1% else void_int;
                          
 export %opc_date_1% =
     if %has_qual%(%mapped_opc_qual_1%,%_opc_date_1%) or %has_qual%("FF", %_opc_date_1%) then %_opc_date_1% else void_abstime;
@@ -4142,13 +4253,27 @@ export %opc_date_1% =
 export %opc_month_1% =
     if %has_qual%(%mapped_opc_qual_1%,%_opc_date_1%) or %has_qual%("FF", %_opc_date_1%) then %_opc_month_1% else void_int;
     
-export %expiry_month_pc_1% =
-  default(if void(%pc_date_1%) then
-            concat("(", %expiry_month_inclusive%(%_pc_date_1%), " ", %pc_qual_1%, ")")
+export %ots_date_1% =
+    if %has_qual%(%mapped_ots_qual_1%,%_opc_date_1%) or %has_qual%("FF", %_ots_date_1%) then %_ots_date_1% else void_abstime;
+    
+export %ots_month_1% =
+    if %has_qual%(%mapped_ots_qual_1%,%_ots_date_1%) or %has_qual%("FF", %_ots_date_1%) then %_ots_month_1% else void_int;
+
+export %opc_ots_date_1% =
+    nmax(%opc_date_1%, %ots_date_1%);
+
+export %opc_ots_month_1% =
+    nmax(%opc_month_1%, %ots_month_1%);
+
+export %expiry_month_lpc_1% =
+  default(if void(%lpc_date_1%) then
+            concat("(", %expiry_month_inclusive%(%_lpc_date_1%), " ", %lpc_qual_1%, ")")
           else
-            %expiry_month_inclusive%(%pc_date_1%),"-");
-export %expiry_month_pc_2% =
-  default(%expiry_month_inclusive%(%pc_date_2%),"-");
+            %expiry_month_inclusive%(%lpc_date_1%),"-");
+
+export %expiry_month_lpc_2% =
+  default(%expiry_month_inclusive%(%lpc_date_2%),"-");
+
 export %expiry_month_opc_1% =
   default(if void(%opc_date_1%) then
             concat("(", %expiry_month_inclusive%(%_opc_date_1%), " ", %opc_qual_1%, ")")
@@ -4156,6 +4281,15 @@ export %expiry_month_opc_1% =
             %expiry_month_inclusive%(%opc_date_1%),"-");
 export %expiry_month_opc_2% =
   default(%expiry_month_inclusive%(%opc_date_2%),"-");
+  
+export %expiry_month_ots_1% =
+  default(if void(%ots_date_1%) then
+            concat("(", %expiry_month_inclusive%(%_ots_date_1%), " ", %ots_qual_1%, ")")
+          else
+            %expiry_month_inclusive%(%ots_date_1%),"-");
+
+export %expiry_month_ots_2% =
+  default(%expiry_month_inclusive%(%ots_date_2%),"-");
 
 export %expiry_month_lc% =
                /* Handles the case where upcoming lc qual is "A3 or A4" */
@@ -4174,47 +4308,61 @@ export %rec_month_by_date%(Abstime date) =
   format_time(date-0:01, "%b");
   
 /* Only used for SKN */
-export %different_pc_opc_quals% =
-  %pc_qual_1% = "37" and %opc_qual_1% = "38"
+export %different_lpc_opc_or_ots_quals% =
+  %lpc_qual_1% = "37" and (%opc_qual_1% = "38" or %ots_qual_1% = "38")
   or
-  %pc_qual_1% = "38" and %opc_qual_1% = "37";
+  %lpc_qual_1% = "38" and (%opc_qual_1% = "37" or %ots_qual_1% = "37");
   
-table unified_pc_opc_lookup2 = 
+table unified_lpc_opc_ots_lookup2 = 
   crew.%is_double_qualified%, crew.%is_a2a3_qualified%,crew.%is_a3a5_qualified%,crew.%is_a2a5_qualified% -> 
-                         export Abstime %pc_date_2%,
-                         export Int %pc_month_2%,
-                         export String %pc_qual_2%,
-                         export String %pc_code_2%,
+                         export Abstime %lpc_date_2%,
+                         export Int %lpc_month_2%,
+                         export String %lpc_qual_2%,
+                         export String %lpc_code_2%,
                          export Abstime %opc_date_2%,
                          export Int %opc_month_2%,
                          export String %opc_qual_2%,
-                         export String %opc_code_2%;
-  true, false ,false,false       -> %pc_a4_date%, calendar.%month_number%(%pc_a4_date% - 24:00),"A4", "PCA4",
-                         %opc_a4_date%, calendar.%month_number%(%opc_a4_date% - 24:00),"A4", "OPCA4";
-  -, true  ,false,false           -> %pc_a3_date%, calendar.%month_number%(%pc_a3_date% - 24:00),"A3", "PCA3",
-                        %opc_a3_date%, calendar.%month_number%(%opc_a3_date% - 24:00),"A3", "OPCA3";
-  false,false,true,false ->%pc_a3a5_date%, calendar.%month_number%(%pc_a3a5_date% - 24:00),"A3/A5", "PCA3A5",
-                         %opc_a3a5_date%, calendar.%month_number%(%opc_a3a5_date% - 24:00),"A3/A5", "OPCA3A5";
+                         export String %opc_code_2%,
+                         export Abstime %ots_date_2%,
+                         export Int %ots_month_2%,
+                         export String %ots_qual_2%,
+                         export String %ots_code_2%;
+  true, false ,false,false       -> %lpc_a4_date%, calendar.%month_number%(%lpc_a4_date% - 24:00),"A4", "LPCA4",
+                         %opc_a4_date%, calendar.%month_number%(%opc_a4_date% - 24:00),"A4", "OPCA4",
+                         %ots_a4_date%, calendar.%month_number%(%ots_a4_date% - 24:00),"A4", "OTSA4";
+  -, true  ,false,false           -> %lpc_a3_date%, calendar.%month_number%(%lpc_a3_date% - 24:00),"A3", "LPCA3",
+                        %opc_a3_date%, calendar.%month_number%(%opc_a3_date% - 24:00),"A3", "OPCA3",
+                        %ots_a3_date%, calendar.%month_number%(%ots_a3_date% - 24:00),"A3", "OTSA3";
+  false,false,true,false ->%lpc_a3a5_date%, calendar.%month_number%(%lpc_a3a5_date% - 24:00),"A3/A5", "LPCA3A5",
+                         %opc_a3a5_date%, calendar.%month_number%(%opc_a3a5_date% - 24:00),"A3/A5", "OPCA3A5",
+                         %ots_a3a5_date%, calendar.%month_number%(%ots_a3a5_date% - 24:00),"A3/A5", "OTSA3A5";
 						 
-  -,false,false,true ->  %pc_a5_date%, calendar.%month_number%(%pc_a5_date% - 24:00),"A5", "PCA5",
-                          %opc_a5_date%, calendar.%month_number%(%opc_a5_date% - 24:00),"A5", "OPCA5";
-  -, -,-,-               -> void_abstime,void_int,void_string,void_string,void_abstime,void_int,void_string, void_string;
+  -,false,false,true ->  %lpc_a5_date%, calendar.%month_number%(%lpc_a5_date% - 24:00),"A5", "LPCA5",
+                          %opc_a5_date%, calendar.%month_number%(%opc_a5_date% - 24:00),"A5", "OPCA5",
+                          %ots_a5_date%, calendar.%month_number%(%ots_a5_date% - 24:00),"A5", "OTSA5";
+  -, -,-,-               -> void_abstime,void_int,void_string,void_string,
+                           void_abstime,void_int,void_string,void_string,
+                           void_abstime,void_int,void_string,void_string;
 end  
-export %pc_date_1_incl_perf%(Abstime date) =
-    %recurrent_type_expiry_date_incl_performed%(%pc_code_1%, %any_ac_qual%, date, false);
-export %pc_date_2_incl_perf%(Abstime date) =
-    %recurrent_type_expiry_date_incl_performed%(%pc_code_2%, %any_ac_qual%, date, false);
+export %lpc_date_1_incl_perf%(Abstime date) =
+    %recurrent_type_expiry_date_incl_performed%(%lpc_code_1%, %any_ac_qual%, date, false);
+export %lpc_date_2_incl_perf%(Abstime date) =
+    %recurrent_type_expiry_date_incl_performed%(%lpc_code_2%, %any_ac_qual%, date, false);
 export %opc_date_1_incl_perf%(Abstime date) =
     %recurrent_type_expiry_date_incl_performed%(%opc_code_1%, %any_ac_qual%, date, false);
 export %opc_date_2_incl_perf%(Abstime date) =
     %recurrent_type_expiry_date_incl_performed%(%opc_code_2%, %any_ac_qual%, date, false);
-    
-/* PC/OPC expiry dates for reports */
-export %pc_expiry_date% =
-  nmin(default(%recurrent_type_expiry_date%("PC", %any_ac_qual%, %rec_period_end%), 31Dec2099),
-       default(%recurrent_type_expiry_date%("PCA3", %any_ac_qual%, %rec_period_end%), 31Dec2099),
-       default(%recurrent_type_expiry_date%("PCA5", %any_ac_qual%, %rec_period_end%), 31Dec2099),
-       default(%recurrent_type_expiry_date%("PCA4", %any_ac_qual%, %rec_period_end%), 31Dec2099)) - 00:01;
+export %ots_date_1_incl_perf%(Abstime date) =
+    %recurrent_type_expiry_date_incl_performed%(%ots_code_1%, %any_ac_qual%, date, false);
+export %ots_date_2_incl_perf%(Abstime date) =
+    %recurrent_type_expiry_date_incl_performed%(%ots_code_2%, %any_ac_qual%, date, false);  
+ 
+/* LPC/OPC/OTS expiry dates for reports */
+export %lpc_expiry_date% =
+  nmin(default(%recurrent_type_expiry_date%("LPC", %any_ac_qual%, %rec_period_end%), 31Dec2099),
+       default(%recurrent_type_expiry_date%("LPCA3", %any_ac_qual%, %rec_period_end%), 31Dec2099),
+       default(%recurrent_type_expiry_date%("LPCA5", %any_ac_qual%, %rec_period_end%), 31Dec2099),
+       default(%recurrent_type_expiry_date%("LPCA4", %any_ac_qual%, %rec_period_end%), 31Dec2099)) - 00:01;
   
 export %opc_expiry_date% =
   nmin(default(%recurrent_type_expiry_date%("OPC", %any_ac_qual%, %rec_period_end%), 31Dec2099),
@@ -4222,11 +4370,17 @@ export %opc_expiry_date% =
        default(%recurrent_type_expiry_date%("OPCA5", %any_ac_qual%, %rec_period_end%), 31Dec2099),
        default(%recurrent_type_expiry_date%("OPCA4", %any_ac_qual%, %rec_period_end%), 31Dec2099)) - 00:01;
 
-export %pc_qual_expiry_date% =
-  if leg.%qual% = "A3" then default(%recurrent_type_expiry_date%("PCA3", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01
-  else if leg.%qual% = "A4" then default(%recurrent_type_expiry_date%("PCA4", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01
-  else if leg.%qual% = "A5" then default(%recurrent_type_expiry_date%("PCA5", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01
-  else default(%recurrent_type_expiry_date%("PC", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01;
+export %ots_expiry_date% =
+  nmin(default(%recurrent_type_expiry_date%("OTS", %any_ac_qual%, %rec_period_end%), 31Dec2099),
+       default(%recurrent_type_expiry_date%("OTSA3", %any_ac_qual%, %rec_period_end%), 31Dec2099),
+       default(%recurrent_type_expiry_date%("OTSA5", %any_ac_qual%, %rec_period_end%), 31Dec2099),
+       default(%recurrent_type_expiry_date%("OTSA4", %any_ac_qual%, %rec_period_end%), 31Dec2099)) - 00:01;
+
+export %lpc_qual_expiry_date% =
+  if leg.%qual% = "A3" then default(%recurrent_type_expiry_date%("LPCA3", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01
+  else if leg.%qual% = "A4" then default(%recurrent_type_expiry_date%("LPCA4", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01
+  else if leg.%qual% = "A5" then default(%recurrent_type_expiry_date%("LPCA5", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01
+  else default(%recurrent_type_expiry_date%("LPC", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01;
     
 export %opc_qual_expiry_date% =
   if leg.%qual% = "A3" then default(%recurrent_type_expiry_date%("OPCA3", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01
@@ -4234,79 +4388,97 @@ export %opc_qual_expiry_date% =
   else if leg.%qual% = "A5" then default(%recurrent_type_expiry_date%("OPCA5", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01
   else default(%recurrent_type_expiry_date%("OPC", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01;
 
+export %ots_qual_expiry_date% =
+  if leg.%qual% = "A3" then default(%recurrent_type_expiry_date%("OTSA3", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01
+  else if leg.%qual% = "A4" then default(%recurrent_type_expiry_date%("OTSA4", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01
+  else if leg.%qual% = "A5" then default(%recurrent_type_expiry_date%("OTSA5", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01
+  else default(%recurrent_type_expiry_date%("OTS", %any_ac_qual%, %rec_period_end%), 31Dec2099) - 00:01;
 
-/* PC/OPC is a valid lookup for all but A3/A4 qualified crew */
-%pc_def_date% =
-  %recurrent_type_expiry_date%("PC", %non_ski_qual_pc%, %now%);
+/* LPC/OPC/OTS is a valid lookup for all but A3/A4 qualified crew */
+%lpc_def_date% =
+  %recurrent_type_expiry_date%("LPC", %non_ski_qual_lpc%, %now%);
   
 %opc_def_date% =
   %recurrent_type_expiry_date%("OPC", %non_ski_qual_opc%, %now%);
 
-%pc_date_for_ac_qual%(String ac_qual) =
+%ots_def_date% =
+  %recurrent_type_expiry_date%("OTS", %non_ski_qual_ots%, %now%);
+
+%lpc_date_for_ac_qual%(String ac_qual) =
   if ac_qual = "A3" then
-    %recurrent_type_expiry_date%("PCA3", %any_ac_qual%, %now%)
+    %recurrent_type_expiry_date%("LPCA3", %any_ac_qual%, %now%)
   else if ac_qual = "A5" then
-    %recurrent_type_expiry_date%("PCA5", %any_ac_qual%, %now%)
+    %recurrent_type_expiry_date%("LPCA5", %any_ac_qual%, %now%)
   else
-    %recurrent_type_expiry_date%("PC", ac_qual, %now%);
+    %recurrent_type_expiry_date%("LPC", ac_qual, %now%);
 
-%pc_opc_def_date% =
-  nmin(%pc_def_date%, %opc_def_date%);
+%lpc_opc_or_ots_def_date% =
+  nmin(%lpc_def_date%, %opc_def_date%, %ots_def_date%);
 
-export %pc_a3_date% = 
-  default(%recurrent_type_expiry_date%("PCA3A5", %any_ac_qual%, %now%), %recurrent_type_expiry_date%("PCA3", %any_ac_qual%, %now%));
+export %lpc_a3_date% = 
+  default(%recurrent_type_expiry_date%("LPCA3A5", %any_ac_qual%, %now%), %recurrent_type_expiry_date%("LPCA3", %any_ac_qual%, %now%));
 export %opc_a3_date% = 
   default(%recurrent_type_expiry_date%("OPCA3A5", %any_ac_qual%, %now%), %recurrent_type_expiry_date%("OPCA3", %any_ac_qual%, %now%));
-export %pc_opc_a3_date% = nmin(%pc_a3_date%, %opc_a3_date%);
+export %ots_a3_date% = 
+  default(%recurrent_type_expiry_date%("OTSA3A5", %any_ac_qual%, %now%), %recurrent_type_expiry_date%("OTSA3", %any_ac_qual%, %now%));
+export %lpc_opc_ots_a3_date% = nmin(%lpc_a3_date%, %opc_a3_date%, %ots_a3_date%);
 
-export %pc_a5_date% = 
-  if not void(%recurrent_type_expiry_date%("PCA3A5", %any_ac_qual%, %now%)) and not void(%recurrent_type_expiry_date%("PCA5", %any_ac_qual%, %now%)) then
-    nmax(%recurrent_type_expiry_date%("PCA3A5", %any_ac_qual%, %now%), %recurrent_type_expiry_date%("PCA5", %any_ac_qual%, %now%))
+export %lpc_a5_date% = 
+  if not void(%recurrent_type_expiry_date%("LPCA3A5", %any_ac_qual%, %now%)) and not void(%recurrent_type_expiry_date%("LPCA5", %any_ac_qual%, %now%)) then
+    nmax(%recurrent_type_expiry_date%("LPCA3A5", %any_ac_qual%, %now%), %recurrent_type_expiry_date%("LPCA5", %any_ac_qual%, %now%))
   else
-    default(%recurrent_type_expiry_date%("PCA3A5", %any_ac_qual%, %now%), %recurrent_type_expiry_date%("PCA5", %any_ac_qual%, %now%));
+    default(%recurrent_type_expiry_date%("LPCA3A5", %any_ac_qual%, %now%), %recurrent_type_expiry_date%("LPCA5", %any_ac_qual%, %now%));
 export %opc_a5_date% = 
   if not void(%recurrent_type_expiry_date%("OPCA3A5", %any_ac_qual%, %now%)) and not void(%recurrent_type_expiry_date%("OPCA5", %any_ac_qual%, %now%)) then
     nmax(%recurrent_type_expiry_date%("OPCA3A5", %any_ac_qual%, %now%), %recurrent_type_expiry_date%("OPCA5", %any_ac_qual%, %now%))
   else
     default(%recurrent_type_expiry_date%("OPCA3A5", %any_ac_qual%, %now%), %recurrent_type_expiry_date%("OPCA5", %any_ac_qual%, %now%));
-export %pc_opc_a5_date% = nmin(%pc_a5_date%, %opc_a5_date%);
+export %ots_a5_date% = 
+  if not void(%recurrent_type_expiry_date%("OTSA3A5", %any_ac_qual%, %now%)) and not void(%recurrent_type_expiry_date%("OTSA5", %any_ac_qual%, %now%)) then
+    nmax(%recurrent_type_expiry_date%("OTSA3A5", %any_ac_qual%, %now%), %recurrent_type_expiry_date%("OTSA5", %any_ac_qual%, %now%))
+  else
+    default(%recurrent_type_expiry_date%("OTSA3A5", %any_ac_qual%, %now%), %recurrent_type_expiry_date%("OTSA5", %any_ac_qual%, %now%));
+export %pc_opc_ots_a5_date% = nmin(%lpc_a5_date%, %opc_a5_date%, %ots_a5_date%);
 
-export %pc_a3a5_date% = 
-  default(default(%recurrent_type_expiry_date%("PCA3A5", %any_ac_qual%, %now%), %recurrent_type_expiry_date%("PCA3A5", %any_ac_qual%, %pc_a3_date%)), %pc_a3_date%);
+export %lpc_a3a5_date% = 
+  default(default(%recurrent_type_expiry_date%("LPCA3A5", %any_ac_qual%, %now%), %recurrent_type_expiry_date%("LPCA3A5", %any_ac_qual%, %lpc_a3_date%)), %lpc_a3_date%);
 export %opc_a3a5_date% = 
   default(default(%recurrent_type_expiry_date%("OPCA3A5", %any_ac_qual%, %now%), %recurrent_type_expiry_date%("OPCA3A5", %any_ac_qual%, %opc_a3_date%)), %opc_a3_date%);
-
-export %pc_a4_date% = 
-  %recurrent_type_expiry_date%("PCA4", %any_ac_qual%, %now%);
+export %ots_a3a5_date% = 
+  default(default(%recurrent_type_expiry_date%("OTSA3A5", %any_ac_qual%, %now%), %recurrent_type_expiry_date%("OTSA3A5", %any_ac_qual%, %ots_a3_date%)), %ots_a3_date%);
+export %lpc_a4_date% = 
+  %recurrent_type_expiry_date%("LPCA4", %any_ac_qual%, %now%);
 export %opc_a4_date% = 
   %recurrent_type_expiry_date%("OPCA4", %any_ac_qual%, %now%);
-export %pc_opc_a4_date% = nmin(%pc_a4_date%, %opc_a4_date%);
+export %ots_a4_date% = 
+  %recurrent_type_expiry_date%("OTSA4", %any_ac_qual%, %now%);
+export %lpc_opc_ots_a4_date% = nmin(%lpc_a4_date%, %opc_a4_date%, %ots_a4_date%);
 
-export %pc_opc_match_at_date%(Abstime date) =
+export %lpc_opc_or_ots_match_at_date%(Abstime date) =
   not crew.%is_a3a4_qualified_at_date%(date) or
   not crew.%is_a3a5_qualified_at_date%(date) or
-  default(%_pc_dates_match%(date), false);
+  default(%_lpc_dates_match%(date), false);
 
-%_pc_dates_match%(Abstime date) =
-  let pca3 = %recurrent_type_expiry_date%("PCA3", %any_ac_qual%, date),
-      pca4 = %recurrent_type_expiry_date%("PCA4", %any_ac_qual%, date),
-      pca5 = %recurrent_type_expiry_date%("PCA5", %any_ac_qual%, date);
- pca3 = add_months(pca4, 6) or
- pca4 = add_months(pca3, 6) or
- pca3 = add_months(pca5, 6) or
- pca5 = add_months(pca3, 6);
+%_lpc_dates_match%(Abstime date) =
+  let lpca3 = %recurrent_type_expiry_date%("LPCA3", %any_ac_qual%, date),
+      lpca4 = %recurrent_type_expiry_date%("LPCA4", %any_ac_qual%, date),
+      lpca5 = %recurrent_type_expiry_date%("LPCA5", %any_ac_qual%, date);
+ lpca3 = add_months(lpca4, 6) or
+ lpca4 = add_months(lpca3, 6) or
+ lpca3 = add_months(lpca5, 6) or
+ lpca5 = add_months(lpca3, 6);
 
-export %pc_opc_match_pp_start% =
-  %pc_opc_match_at_date%(%pp_start%);
+export %lpc_opc_or_ots_match_pp_start% =
+  %lpc_opc_or_ots_match_at_date%(%pp_start%);
   
-export %pc_opc_match_pp_end% =
-  %pc_opc_match_at_date%(%select_pp_end%);
+export %lpc_opc_or_ots_match_pp_end% =
+  %lpc_opc_or_ots_match_at_date%(%select_pp_end%);
   
-export %pc_opc_match_in_pp% =
-  %pc_opc_match_pp_start% and %pc_opc_match_pp_end%;
+export %lpc_opc_or_ots_match_in_pp% =
+  %lpc_opc_or_ots_match_pp_start% and %lpc_opc_or_ots_match_pp_end%;
   
-export %pc_opc_match_trip_start% =
-  %pc_opc_match_at_date%(trip.%start_day%);
+export %lpc_opc_or_ots_match_trip_start% =
+  %lpc_opc_or_ots_match_at_date%(trip.%start_day%);
 
 %needs_ast% = 
   crew.%is_pilot% and
@@ -4407,13 +4579,13 @@ export %inst_on_simulator% =
    any(times(20), %is_conv_typerating_skill_test%(base_utils.%ti0%));
 
 %is_conv_typerating_skill_test%(Int idx) =
-    %pc_course_name%(idx) = "CONV TYPERATING";
+    %lpc_course_name%(idx) = "CONV TYPERATING";
 
-%pc_date%(Int idx) =
-    model_training.%training_log_time%(crew.%id%, %ast_period_begin_date%, %ast_period_end_date%, "PC SKILL TEST", idx);
+%lpc_date%(Int idx) =
+    model_training.%training_log_time%(crew.%id%, %ast_period_begin_date%, %ast_period_end_date%, "LPC SKILL TEST", idx);
 
-%pc_course_name%(Int idx) =
-    training.%course_name%(%pc_date%(idx));
+%lpc_course_name%(Int idx) =
+    training.%course_name%(%lpc_date%(idx));
 
 %has_skill_test_in_ast_period% =
     %has_conv_typerating_skill_test_in_roster% or
@@ -4496,8 +4668,8 @@ export %leg_code_redefined% =
   if %flight_crew% and %is_roster% then
     if leg.%is_sim_instr% and %crew_on_skill_test% then
       concat("Z", substr(leg.%code%, 2, length(leg.%code%)))
-    else if %leg_is_pc% then
-      concat(%_pc_letter%, substr(leg.%code%, 2, length(leg.%code%)))
+    else if %leg_is_lpc% then
+      concat(%_lpc_letter%, substr(leg.%code%, 2, length(leg.%code%)))
     else if leg.%is_pgt% then
       %pgt_code_full%
     else if %is_new_wt_code_leg% then
@@ -4516,7 +4688,7 @@ export %leg_code_redefined% =
     default(first(leg(duty),%leg_code_redefined%)
             , "");
     
-%_pc_letter% =
+%_lpc_letter% =
     if leg.%is_skill_test% then "Z"
     else "Y";
 
@@ -4530,19 +4702,19 @@ export %leg_ac_family% =
     leg.%ac_family%;
     
  /****************************************************************
- * Section 8: Logic for automatic PC/OPC assignment
+ * Section 8: Logic for automatic LPC/OPC/OTS assignment
  ***************************************************************/
 /*
- * PC/OPC fundamentals
+ * LPC/OPC/OTS fundamentals
  *   TYPE 1: 2x2 hours
  *     - Composition 1/1/0
  *     - FR flies in FP position (solved in module crew_pos_ccr)
- *     - FC lower on simulator must perform OPC
+ *     - FC lower on simulator must perform OPC/OTS
  *     - FC may only be assigned lower once every year
  *     - For B737/MD80/A320 only INSTRUCTOR, LCP or CP may fly as lower
  *   TYPE 2: 4 hours
  *     - Composition 1/1/0, but FP not allowed, a FC must be lower and seated in FP position
- *     - FC lower on simulator must perform OPC
+ *     - FC lower on simulator must perform OPC/OTS
  *     - FC may only be assigned lower once every year
  *   TYPE 3: 6 hours
  *     - Composition 2/0/0
@@ -4554,23 +4726,23 @@ export %leg_ac_family% =
  *  Variable crew_pos.%simulator_is_for_two_fc% copies some of this tables
  *  functionality. If you change here, make sure that variable is still valid.
  */
-%pc_opc_intended_for_two_fc% = leg.%pc_opc_intended_for_two_fc%;
-%min_reqd_crew_on_opc% = leg.%min_reqd_crew_on_opc%;
+%lpc_opc_or_ots_intended_for_two_fc% = leg.%lpc_opc_or_ots_intended_for_two_fc%;
+%min_reqd_crew_on_opc_or_ots% = leg.%min_reqd_crew_on_opc_or_ots%;
 
-%leg_has_max_pc_req% =
-  default(%min_reqd_crew_on_opc% > 0, false);
+%leg_has_max_lpc_req% =
+  default(%min_reqd_crew_on_opc_or_ots% > 0, false);
 
-export %trip_has_max_pc_req% =
-  any(leg(trip), %leg_has_max_pc_req%)
-  where (leg.%is_pc_or_opc%);
+export %trip_has_max_lpc_req% =
+  any(leg(trip), %leg_has_max_lpc_req%)
+  where (leg.%is_lpc_opc_or_ots%);
 
-export %trip_is_2x2h_opc% =
-  first(leg(trip), leg.%is_2x2h_opc%) 
-  where (leg.%is_pc_or_opc%);
+export %trip_is_2x2h_opc_or_ots% =
+  first(leg(trip), leg.%is_2x2h_opc_or_ots%) 
+  where (leg.%is_lpc_opc_or_ots%);
   
-export %pc_opc_trip_intended_for_two_fc% =
-    first(leg(trip), %pc_opc_intended_for_two_fc%)
-    where (leg.%is_pc_or_opc%);
+export %lpc_opc_or_ots_trip_intended_for_two_fc% =
+    first(leg(trip), %lpc_opc_or_ots_intended_for_two_fc%)
+    where (leg.%is_lpc_opc_or_ots%);
     
 export %reqd_crew_on_sim% =
   default(first(leg(trip), %reqd_crew_on_sim_leg%)
@@ -4582,14 +4754,16 @@ export %reqd_crew_on_sim_leg% =
   default(crew_pos.%sim_need_in_pos%(1) + crew_pos.%sim_need_in_pos%(2) + 
           crew_pos.%sim_need_in_pos%(3) + crew_pos.%sim_need_in_pos%(9), 0);
 
-export %nr_simulators_in_trip% = count(leg(trip)) where (leg.%is_pc_or_opc% or leg.%is_ast% or leg.%is_asf%);
-export %length_sim1% = first(leg(trip), leg.%time%) where (leg.%is_pc_or_opc% or leg.%is_ast% or leg.%is_asf%);
-export %length_sim2% = last(leg(trip), leg.%time%) where (leg.%is_pc_or_opc% or leg.%is_ast% or leg.%is_asf%);
+export %nr_simulators_in_trip% = count(leg(trip)) where (leg.%is_lpc_opc_or_ots% or leg.%is_ast% or leg.%is_asf%);
+export %length_sim1% = first(leg(trip), leg.%time%) where (leg.%is_lpc_opc_or_ots% or leg.%is_ast% or leg.%is_asf%);
+export %length_sim2% = last(leg(trip), leg.%time%) where (leg.%is_lpc_opc_or_ots% or leg.%is_ast% or leg.%is_asf%);
 
 export %last_logged_opc_perfomed_lower% =
   %last_logged_date_for_type_and_attr%("OPC", "LOWER", trip.%start_utc%) >
   %last_logged_date_for_type_and_attr%("OPC", "", trip.%start_utc%);
-
+export %last_logged_ots_perfomed_lower% =
+  %last_logged_date_for_type_and_attr%("OTS", "LOWER", trip.%start_utc%) >
+  %last_logged_date_for_type_and_attr%("OTS", "", trip.%start_utc%);
 /*
  * Assists
  * To be available for assist crew must have performed the seasons recurrent 
@@ -4597,7 +4771,7 @@ export %last_logged_opc_perfomed_lower% =
  * after recurrent season start, crew is available for assist.
  * FR shouldn't be assists
  * For A3/A4 crew qualification doesn't matter.
- * Simulators are only logged as PC/OPC, so it's a limitation if recurrent
+ * Simulators are only logged as LPC/OPC/OTS, so it's a limitation if recurrent
  * season starts ever become different for A3/A4 specific documents */
 export %may_be_assist%(Abstime date) = %may_be_assist_for_ac_qual%(date, %any_ac_qual%);
 %may_be_assist_for_ac_qual%(Abstime date, String ac_qual) =
@@ -4605,10 +4779,12 @@ export %may_be_assist%(Abstime date) = %may_be_assist_for_ac_qual%(date, %any_ac
     not crew.%has_restr_training_dct%(date) and
     %_may_be_assist%(date, ac_qual);
     
-%pc_opc_expiry_month_this_season%(Abstime date) =
-  let month1 = %pc_month_1%,
+%lpc_opc_or_ots_expiry_month_this_season%(Abstime date) =
+  let month1 = %lpc_month_1%,
       month2 = if crew.%is_a3a4_qualified_at_date%(date) or crew.%is_a3a5_qualified_at_date%(date) then
-                  %pc_month_2%
+                  %lpc_month_2%
+               else if %opc_month_1% = void_int then
+                  %ots_month_1%
                else
                   %opc_month_1%,
       season = if calendar.%month_number%(date) < 7 then 1 else 2;
@@ -4616,10 +4792,11 @@ export %may_be_assist%(Abstime date) = %may_be_assist_for_ac_qual%(date, %any_ac
   else month2;
   
 %_may_be_assist%(Abstime date, String ac_qual) =
-  let last_date = nmax(%last_perf_date_for_act_of_type_for_ac_qual%("PC", ac_qual, date),
-                       %last_perf_date_for_act_of_type_for_ac_qual%("OPC", ac_qual, date)),
-      season_start = %recurrent_season_start%("PC", date),
-      exp_month = %pc_opc_expiry_month_this_season%(date),
+  let last_date = nmax(%last_perf_date_for_act_of_type_for_ac_qual%("LPC", ac_qual, date),
+                       %last_perf_date_for_act_of_type_for_ac_qual%("OPC", ac_qual, date),
+                       %last_perf_date_for_act_of_type_for_ac_qual%("OTS", ac_qual, date)),
+      season_start = %recurrent_season_start%("LPC", date),
+      exp_month = %lpc_opc_or_ots_expiry_month_this_season%(date),,
       earliest_assignment = add_months(round_down_year(date), exp_month - 3);
   last_date >= season_start
   and
@@ -4639,13 +4816,14 @@ export %assigned_as_assist% = %assigned_as_assist_for_ac_qual%(leg.%sim_leg_qual
 %assigned_as_assist_for_ac_qual%(String ac_qual) =
   %sim_assigned_to_student% and
   (%leg_is_forced_sim_assist% or
-  default(%allow_assists_on_pc_opc_p% and
-          leg.%is_pc_or_opc% and
-          not (leg.%is_pc_change_month% or
-               leg.%is_forced_pc% or
+  default(%allow_assists_on_lpc_opc_or_ots_p% and
+          leg.%is_lpc_opc_or_ots% and
+          not (leg.%is_lpc_change_month% or
+               leg.%is_forced_lpc% or
                leg.%is_forced_opc% or
+               leg.%is_forced_ots% or
                leg.%is_skill_test% or
-               leg.%is_performed_pc% or
+               leg.%is_performed_lpc% or
                leg.%is_sim_instr% or
                leg.%is_sim_instr_supervis% or
                leg.%is_sim_instr_ol% or
@@ -4654,13 +4832,13 @@ export %assigned_as_assist% = %assigned_as_assist_for_ac_qual%(leg.%sim_leg_qual
 	       %may_be_assist_duty_start_for_ac_qual%(ac_qual),
           false));
   
-export %allow_assists_on_pc_opc_p% = 
-  parameter true 
-  remark "SIM: Allow using Assists on PC/OPC's";
+export %allow_assists_on_lpc_opc_or_ots_p% =
+  parameter true
+  remark "SIM: Allow using Assists on LPC/OPC/OTS's";
   
 %leg_is_forced_sim_assist% =
     leg.%is_forced_sim_assist% or 
-    not leg.%has_training_code% and leg.%is_pc_or_opc% and
+    not leg.%has_training_code% and leg.%is_lpc_opc_or_ots% and
     (%skn_wrong_qual_sim_assist% or
     %ski_wrong_qual_sim_assist%);
     
@@ -4669,11 +4847,11 @@ export %allow_assists_on_pc_opc_p% =
 %skn_wrong_qual_sim_assist% =
     if crew.%is_skn_double_qualified_at_date%(leg.%start_date%) and
        parameters.%sim_pass_classic_req%(leg.%start_date%) then
-        /* The sim is in the PC season, we check that qual is different */
-        if %pc_month_1%/7 = calendar.%month_number%(leg.%start_date%)/7 then
-            %skn_sim_assist_not_equal_quals%(leg.%qual%, %pc_qual_1%)
+        /* The sim is in the LPC season, we check that qual is different */
+        if %lpc_month_1%/7 = calendar.%month_number%(leg.%start_date%)/7 then
+            %skn_sim_assist_not_equal_quals%(leg.%qual%, %lpc_qual_1%)
         else
-            %skn_sim_assist_equal_quals%(leg.%qual%, %pc_qual_1%)
+            %skn_sim_assist_equal_quals%(leg.%qual%, %lpc_qual_1%)
     else
         false;
 
@@ -4689,8 +4867,8 @@ export %allow_assists_on_pc_opc_p% =
 
 %ski_wrong_qual_sim_assist% =
     if crew.%is_double_qualified_ski_trip_start% then
-        /* The sim is in the PCA3 season, we check that qual is A4 */
-        if %pc_month_1%/7 = calendar.%month_number%(leg.%start_date%)/7 then
+        /* The sim is in the LPCA3 season, we check that qual is A4 */
+        if %lpc_month_1%/7 = calendar.%month_number%(leg.%start_date%)/7 then
             leg.%qual% = "A5"
         else
             leg.%qual% = "A3"
@@ -4698,7 +4876,7 @@ export %allow_assists_on_pc_opc_p% =
         false;
 
 export %change_recurrent_date% = 
-  trip.%has_recurrent% and any(leg(trip), leg.%is_pc_change_month% or leg.%is_skill_test%);
+  trip.%has_recurrent% and any(leg(trip), leg.%is_lpc_change_month% or leg.%is_skill_test%);
   
 /* Legality should disregard certain activities that would otherwise, because 
    of their type, trigger recurrent period legality */
@@ -4706,9 +4884,10 @@ export %leg_is_invalid_for_rec_period_legality% =
   not (leg.%is_recurrent% or leg.%is_cc_rec% or leg.%is_lc%) or 
       %leg_creates_rec% or
       %leg_is_valid_pgt_refresher% or
-      leg.%is_pc_change_month% or 
-      leg.%is_forced_pc% or 
+      leg.%is_lpc_change_month% or 
+      leg.%is_forced_lpc% or 
       leg.%is_forced_opc% or
+      leg.%is_forced_ots% or
       leg.%is_skill_test% or
       leg.%is_sim_instr% or
       leg.%is_sim_instr_supervis% or
@@ -4716,8 +4895,8 @@ export %leg_is_invalid_for_rec_period_legality% =
       leg.%is_sim_instr_supol% or
       leg.%is_sim_supernum% or
       %assigned_as_assist% or
-      /* PC is calculated dynamically or tagged, so should be ok */
-      %leg_is_pc% or
+      /* LPC is calculated dynamically or tagged, so should be ok */
+      %leg_is_lpc% or
       leg.%is_ilc% or
       leg.%is_lc% and %crew_has_program_on_leg%;
   
@@ -5301,7 +5480,7 @@ export %crew_is_new_hire_mentor% =
     leg.%mentor_crewid_on_new_hire_follow_up% = crew.%id%, false);
 
 /***************************************************************************
-**  Web training before PC or OPC etc
+**  Web training before LPC or OPC/OTS etc
 ****************************************************************************/
 %last_wt_any_performed% =
   default(
@@ -5369,7 +5548,7 @@ export %web_trg_valid% =
 export %web_trg_needed% =
   if %pp_start%>= %wt_start_date% and %pp_start% < %wt_latest_date% then
     1
-  else if %has_pc_opc_not_Z_in_interval%(%pp_start%, round_up_month(%pp_start% + 0:01)) then
+  else if %has_lpc_opc_or_ots_not_Z_in_interval%(%pp_start%, round_up_month(%pp_start% + 0:01)) then
     1
   else 0;
 
@@ -5380,7 +5559,7 @@ export %is_any_wt_leg% =
     %is_a_wt_leg%(model_training.%wt_match_str%);
 
 export %is_new_wt_code_leg% =
-    system_db_parameters.%web_training_pc_22_valid%(leg.%start_UTC%) and
+    system_db_parameters.%web_training_lpc_22_valid%(leg.%start_UTC%) and
     %is_a_wt_leg%(model_training.%wt_newcodes_match_str%);
 
 export %wt_code_full% = 
@@ -5442,29 +5621,35 @@ export %web_trg_assigned% =
     1;
 
 export %wt_latest_date% =
-    nmin(%wt_pc_latest_date%, %wt_opc_latest_date%);
+    nmin(%wt_lpc_latest_date%, %wt_opc_latest_date%, %wt_ots_latest_date%);
 
 export %wt_latest_date_for_qual% =
-    nmin(%wt_pc_latest_date_for_qual%, %wt_opc_latest_date_for_qual%);
+    nmin(%wt_lpc_latest_date_for_qual%, %wt_opc_latest_date_for_qual%, %wt_ots_latest_date_for_qual%);
 
 
-%wt_pc_latest_date% =
+%wt_lpc_latest_date% =
   default(
-    round_up_month(leg.%pc_change_date%(%pp_start%, round_up_month(%pp_start% + 0:01))),
-    round_up_month(%pc_expiry_date%)
+    round_up_month(leg.%lpc_change_date%(%pp_start%, round_up_month(%pp_start% + 0:01))),
+    round_up_month(%lpc_expiry_date%)
   );
 
 %wt_opc_latest_date% =
     round_up_month(%opc_expiry_date%);
 
-%wt_pc_latest_date_for_qual% =
+%wt_ots_latest_date% =
+    round_up_month(%ots_expiry_date%);
+
+%wt_lpc_latest_date_for_qual% =
   default(
-    round_up_month(leg.%pc_change_date%(%pp_start%, round_up_month(%pp_start% + 0:01))),
-    round_up_month(%pc_qual_expiry_date%)
+    round_up_month(leg.%lpc_change_date%(%pp_start%, round_up_month(%pp_start% + 0:01))),
+    round_up_month(%lpc_qual_expiry_date%)
   );
 
 %wt_opc_latest_date_for_qual% =
     round_up_month(%opc_qual_expiry_date%);
+
+%wt_ots_latest_date_for_qual% =
+    round_up_month(%ots_qual_expiry_date%);
 
 export %wt_earliest_date% =
   nmax(add_months(%wt_latest_date%, -3), %wt_course_publish_date%(%wt_latest_date%));
@@ -5498,12 +5683,12 @@ export %wt_start_date% =
 
 export %wt_airbus_qual% =
   default(
-    crew.%has_airbus_qual_at_date%(%pc_expiry_date%),
+    crew.%has_airbus_qual_at_date%(%lpc_expiry_date%),
     false);
 
 export %wt_boeing_qual% =
   default(
-    crew.%has_boeing_qual_at_date%(%pc_expiry_date%),
+    crew.%has_boeing_qual_at_date%(%lpc_expiry_date%),
     false);
 
 /*
@@ -5511,9 +5696,9 @@ Bool argument 'spring_season' indicates if web training is spring season (true) 
 */
 export %wt_code% =
   if %pp_start% < %autumn_period_start% then
-    model_training.%wt_cod_by_type_and_season%(%wt_airbus_qual%, base_utils.%year_nr%(%pc_expiry_date%), true)
+    model_training.%wt_cod_by_type_and_season%(%wt_airbus_qual%, base_utils.%year_nr%(%lpc_expiry_date%), true)
   else
-    model_training.%wt_cod_by_type_and_season%(%wt_airbus_qual%, base_utils.%year_nr%(%pc_expiry_date%), false);
+    model_training.%wt_cod_by_type_and_season%(%wt_airbus_qual%, base_utils.%year_nr%(%lpc_expiry_date%), false);
 
 
 export %is_simulator_instructor% =  
@@ -5551,25 +5736,27 @@ export %simulator_duty_code% =
         "U"
     else "";
 
-export %PC_last_performed%(Abstime s, Abstime e) =
-   default(%PC_last_performed_in_roster%(s, e),
-           model_training.%last_training_log_type%(crew.%id%, s, e, "PC"));
+export %LPC_last_performed%(Abstime s, Abstime e) =
+   default(%LPC_last_performed_in_roster%(s, e),
+           model_training.%last_training_log_type%(crew.%id%, s, e, "LPC"));
 
-%PC_last_performed_in_roster%(Abstime s, Abstime e) =
-   last(leg(chain), leg.%start_hb%) where (%leg_is_pc% and leg.%start_hb% >= s and leg.%start_hb% <= e);
+%LPC_last_performed_in_roster%(Abstime s, Abstime e) =
+   last(leg(chain), leg.%start_hb%) where (%leg_is_lpc% and leg.%start_hb% >= s and leg.%start_hb% <= e);
 
-%PC_or_OPC_not_Z_last_performed_in_roster%(Abstime s, Abstime e) =
+%LPC_or_OPC_or_OTS_not_Z_last_performed_in_roster%(Abstime s, Abstime e) =
    last(leg(chain), leg.%start_hb%)
-   where (%leg_is_pc_opc_not_Z% and leg.%start_hb% >= s and leg.%start_hb% <= e);
+   where (%leg_is_lpc_opc_or_ots_not_Z% and leg.%start_hb% >= s and leg.%start_hb% <= e);
 
-%PC_or_OPC_not_Z_last_performed_ctl%(Abstime istart, Abstime iend) =
+%LPC_or_OPC_or_OTS_not_Z_last_performed_ctl%(Abstime istart, Abstime iend) =
   max(times(%ctl_rows%), %ctl_time_ival%(istart, iend, %times_index_0%))
-  where ((%ctl_type_ival%(istart, iend, %times_index_0%) = "PC" or %ctl_type_ival%(istart, iend, %times_index_0%) = "OPC") and
+  where ((%ctl_type_ival%(istart, iend, %times_index_0%) = "LPC" or
+          %ctl_type_ival%(istart, iend, %times_index_0%) = "OPC" or
+          %ctl_type_ival%(istart, iend, %times_index_0%) = "OTS") and
           substr( %ctl_code_ival%(istart, iend, %times_index_0%),1,1) <> "Z");
 
-export %PC_or_OPC_not_Z_last_performed%(Abstime s, Abstime e) =
-   default(default(%PC_or_OPC_not_Z_last_performed_in_roster%(s, e),
-           %PC_or_OPC_not_Z_last_performed_ctl%(s, e)), %abstimemin%);
+export %LPC_OPC_or_OTS_not_Z_last_performed%(Abstime s, Abstime e) =
+   default(default(%LPC_or_OPC_or_OTS_not_Z_last_performed_in_roster%(s, e),
+           %LPC_or_OPC_or_OTS_not_Z_last_performed_ctl%(s, e)), %abstimemin%);
 
 export %count_ZFTT_LIFUS_from_prev_month_start_to_pp_start_in_ctl% =
    model_training.%count_training_log_type%(crew.%id%, round_down_month(pp.%start_month% - 24:00), %pp_start%, "ZFTT LIFUS");
