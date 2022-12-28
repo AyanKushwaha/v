@@ -13,11 +13,11 @@ Feature: Tests that rules for recurrent training works with line checks for crew
         | region     | SKN    |
         Given crew member 1 has document "REC+CRM" from 02JAN1986 to 01JAN2035
         Given crew member 1 has document "REC+PGT" from 02JAN1986 to 01JAN2035
-        Given crew member 1 has document "REC+PCA3" from 02JAN1986 to 01JAN2035
+        Given crew member 1 has document "REC+LPCA3" from 02JAN1986 to 01JAN2035
         Given crew member 1 has document "REC+OPCA3" from 02JAN1986 to 01JAN2035
-        Given crew member 1 has document "REC+PCA3A5" from 02JAN1986 to 01JAN2035
+        Given crew member 1 has document "REC+LPCA3A5" from 02JAN1986 to 01JAN2035
         Given crew member 1 has document "REC+OPCA3A5" from 02JAN1986 to 01JAN2035
-        Given crew member 1 has document "REC+PCA4" from 02JAN1986 to 01JAN2035
+        Given crew member 1 has document "REC+LPCA4" from 02JAN1986 to 01JAN2035
         Given crew member 1 has document "REC+OPCA4" from 02JAN1986 to 01JAN2035
         Given crew member 1 has contract "V134-LH"
 

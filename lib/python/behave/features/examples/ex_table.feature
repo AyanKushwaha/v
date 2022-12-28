@@ -10,12 +10,12 @@ Feature: Example, data setup tables
     Given a crew member
 
     Given table activity_set is overridden with the following
-    | id  | grp | si                   | recurrent_typ |
-    | A41 | PC  | Test of extra line 1 |               |
+    | id  | grp  | si                   | recurrent_typ |
+    | A41 | LPC  | Test of extra line 1 |               |
 
     Given table activity_set additionally contains the following
-    | id  | grp | si                   | recurrent_typ |
-    | A42 | PC  | Test of extra line 2 |               |
+    | id  | grp  | si                   | recurrent_typ |
+    | A42 | LPC  | Test of extra line 2 |               |
 
     Given table crew_employment additionally contains the following
     | crew          | validfrom | validto   | carrier | company | base | crewrank | titlerank | si | region | civicstation | station | country | extperkey | planning_group |

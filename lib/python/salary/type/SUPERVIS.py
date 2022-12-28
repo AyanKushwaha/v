@@ -99,6 +99,7 @@ class InstructorsAllowanceRun(GenericRun):
     def INST_LPC_OPC_OTS_BD(self, rec):
         return self.times100(rec.lpc_opc_ots_bd)
 
+
     def INST_TYPE_RATING(self, rec):
         return self.hours100(rec.type_rating)
 

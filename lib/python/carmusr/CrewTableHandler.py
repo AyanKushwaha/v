@@ -47,6 +47,7 @@ except:
 MODULE = "CrewTableHandler:: "
 DOCUMENT_BLACKLIST = ['LC', 'LPC', 'LPCA3', 'LPCA3A5', 'LPCA4','LPCA5','OPC', 'OPCA3', 'OPCA3A5', 'OPCA4','OPCA5', 'OTS', 'OTSA3', 'OTSA3A5', 'OTSA4','OTSA5', 'CRM', 'CRMC', 'REC', 'PGT']
 
+
 ########################################################################
 #
 # Section 1: Functions related to updating crew_training_log

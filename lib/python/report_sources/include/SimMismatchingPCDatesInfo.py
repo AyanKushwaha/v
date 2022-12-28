@@ -1,6 +1,6 @@
 """
  
- Mismatching A3/A4 PC and OPC dates.
+ Mismatching A3/A4 LPC and OPC/OTS dates.
   
  Created:    June 2007
  By:         Peter Schulz, Jeppesen
@@ -14,7 +14,7 @@ from report_sources.include.SASReport import SASReport
 
 # constants =============================================================={{{1
 CONTEXT = 'default_context'
-TITLE = 'Sim Mismatching PC Dates Info'
+TITLE = 'Sim Mismatching LPC Dates Info'
 
 cellWidths = (250,50,50,50,50,100)
 #aligns = (LEFT,CENTER,CENTER,CENTER,CENTER,LEFT)
@@ -22,7 +22,7 @@ cellWidths = (250,50,50,50,50,100)
 class SimMismatchingPCDatesInfo(SASReport):
         
     def extraHeader(self):
-        headerItems = ('Crew','PCA3','OPCA4','PCA4','OPCA3','Notes')
+        headerItems = ('Crew','LPCA3','OPCA4','OTSA4','LPCA4','OPCA3','OTSA3','Notes')
         columnHeaders = Row(font=self.HEADERFONT, background=self.HEADERBGCOLOUR, border=None)
         items = zip(headerItems,cellWidths) #,aligns)
         for (item,itemwidth) in items:
@@ -35,10 +35,12 @@ class SimMismatchingPCDatesInfo(SASReport):
         roster_expr = R.foreach(
             R.iter('iterators.roster_set', where='report_ccr.%recurrent_type_mismatch_expiry_date%'),
             'report_common.%crew_string%',
-            'report_ccr.%pca3_month%',
+            'report_ccr.%lpca3_month%',
             'report_ccr.%opca4_month%',
-            'report_ccr.%pca4_month%',
-            'report_ccr.%opca3_month%'
+            'report_ccr.%otsa4_month%',
+            'report_ccr.%lpca4_month%',
+            'report_ccr.%opca3_month%',
+            'report_ccr.%otsa3_month%'
             )
         rosters, = R.eval(CONTEXT, roster_expr)
                 
@@ -48,9 +50,9 @@ class SimMismatchingPCDatesInfo(SASReport):
         header.add(self.extraHeader())
         self.setHeader(header)        
 
-        for (ix, crew_string, PCA3, OPCA4, PCA4, OPCA3) in rosters:
+        for (ix, crew_string, LPCA3, OPCA4, OTSA4, LPCA4, OPCA3,  OTSA3) in rosters:
             tmpRow = Row(border=None)
-            textItems = (crew_string, PCA3, OPCA4, PCA4, OPCA3, '')
+            textItems = (crew_string, LPCA3, OPCA4, OTSA4, LPCA4, OPCA3, OTSA3, '')
             items = zip(textItems, cellWidths) #, aligns)
             for (item, itemwidth) in items:
                 tmpRow.add(Text(item, width=itemwidth, border=None, padding=padding(1,3,1,4)))

@@ -1,4 +1,4 @@
-@tracking @planning @A350 @AST @PC @PCA3A5 @A5
+@tracking @planning @A350 @AST @LPC @PCA3A5 @A5
 Feature: Check that AST recurrents work.
   Background: Set up common data
     Given table ac_qual_map additionally contains the following
@@ -32,13 +32,13 @@ Feature: Check that AST recurrents work.
 
 
   @SCENARIO1
-  Scenario: Check that A5 crew with PC in roster after AST in training log within grace period is legal
+  Scenario: Check that A5 crew with LPC in roster after AST in training log within grace period is legal
     Given planning period from 1MAY2020 to 31MAY2020
     
     Given crew member 1 has qualification "ACQUAL+A5" from 1JAN2018 to 31DEC2035
     Given crew member 2 has qualification "ACQUAL+A5" from 1JAN2018 to 31DEC2035
 
-    Given crew member 1 has document "REC+PCA3A5" from 8FEB2019 to 1JUN2020
+    Given crew member 1 has document "REC+LPCA3A5" from 8FEB2019 to 1JUN2020
 
     Given table crew_training_log additionally contains the following
       | crew          | typ | code | tim       | attr          |
@@ -55,17 +55,17 @@ Feature: Check that AST recurrents work.
     When I show "crew" in window 1
     and I load rule set "Tracking"
 
-    Then the rule "rules_indust_ccr.ind_training_a5_crew_need_ast_in_pca3a5_grace_period" shall pass on leg 1 on trip 1 on roster 1
+    Then the rule "rules_indust_ccr.ind_training_a5_crew_need_ast_in_lpca3a5_grace_period" shall pass on leg 1 on trip 1 on roster 1
 
 
   @SCENARIO2
-  Scenario: Check that A5 crew with PC in roster after AST in training log before grace period is illegal
+  Scenario: Check that A5 crew with LPC in roster after AST in training log before grace period is illegal
     Given planning period from 1MAY2020 to 31MAY2020
     
     Given crew member 1 has qualification "ACQUAL+A5" from 1JAN2018 to 31DEC2035
     Given crew member 2 has qualification "ACQUAL+A5" from 1JAN2018 to 31DEC2035
 
-    Given crew member 1 has document "REC+PCA3A5" from 8FEB2019 to 1JUN2020
+    Given crew member 1 has document "REC+LPCA3A5" from 8FEB2019 to 1JUN2020
 
     Given table crew_training_log additionally contains the following
       | crew          | typ | code | tim       | attr          |
@@ -82,11 +82,11 @@ Feature: Check that AST recurrents work.
     When I show "crew" in window 1
     and I load rule set "Tracking"
 
-    Then the rule "rules_indust_ccr.ind_training_a5_crew_need_ast_in_pca3a5_grace_period" shall fail on leg 1 on trip 1 on roster 1
+    Then the rule "rules_indust_ccr.ind_training_a5_crew_need_ast_in_lpca3a5_grace_period" shall fail on leg 1 on trip 1 on roster 1
 
 
   @SCENARIO3
-  Scenario: Check that A5 crew with PC in roster after AST in roster within grace period is legal
+  Scenario: Check that A5 crew with LPC in roster after AST in roster within grace period is legal
     Given planning period from 1MAY2020 to 31MAY2020
     
     Given crew member 1 has qualification "ACQUAL+A5" from 1JAN2018 to 31DEC2035
@@ -111,17 +111,17 @@ Feature: Check that AST recurrents work.
     When I show "crew" in window 1
     and I load rule set "Tracking"
 
-    Then the rule "rules_indust_ccr.ind_training_a5_crew_need_ast_in_pca3a5_grace_period" shall pass on leg 1 on trip 2 on roster 1
+    Then the rule "rules_indust_ccr.ind_training_a5_crew_need_ast_in_lpca3a5_grace_period" shall pass on leg 1 on trip 2 on roster 1
 
 
   @SCENARIO4
-  Scenario: Check that A5 crew with PC in roster before AST in roster within grace period is illegal
+  Scenario: Check that A5 crew with LPC in roster before AST in roster within grace period is illegal
     Given planning period from 1MAY2020 to 31MAY2020
     
     Given crew member 1 has qualification "ACQUAL+A5" from 1JAN2018 to 31DEC2035
     Given crew member 2 has qualification "ACQUAL+A5" from 1JAN2018 to 31DEC2035
 
-    Given crew member 1 has document "REC+PCA3A5" from 8FEB2019 to 1JUN2020
+    Given crew member 1 has document "REC+LPCA3A5" from 8FEB2019 to 1JUN2020
 
     Given a trip with the following activities
       | act    | code | dep stn | arr stn | dep            | arr            |
@@ -140,4 +140,4 @@ Feature: Check that AST recurrents work.
     When I show "crew" in window 1
     and I load rule set "Tracking"
 
-    Then the rule "rules_indust_ccr.ind_training_a5_crew_need_ast_in_pca3a5_grace_period" shall fail on leg 1 on trip 1 on roster 1
+    Then the rule "rules_indust_ccr.ind_training_a5_crew_need_ast_in_lpca3a5_grace_period" shall fail on leg 1 on trip 1 on roster 1

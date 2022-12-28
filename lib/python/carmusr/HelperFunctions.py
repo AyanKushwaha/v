@@ -450,7 +450,7 @@ def fix_ctl():
         #print "%(crew)s %(typ)-30s %(code)-10s %(tim)d %(attr)-10.10s" % rec, op
         op(rec)
     
-    # Find all rows in fixed ctl that might be wrong, PC, OPC, SIM ASSIST
+    # Find all rows in fixed ctl that might be wrong, LPC, OPC, SIM ASSIST
     ec = EC(TM.getConnStr(), TM.getSchemaStr())
     rw = RW(ec)
 
@@ -458,7 +458,7 @@ def fix_ctl():
     inserted = {}
     updated = {}
 
-    ecSearch = "tim > %s AND typ IN ('PC', 'OPC', 'SIM ASSIST')" % int(AbsTime(2007, 1, 1, 0, 0))
+    ecSearch = "tim > %s AND typ IN ('LPC', 'OPC', 'OTS', 'SIM ASSIST')" % int(AbsTime(2007, 1, 1, 0, 0))
 
     for row in ec.crew_training_log.search(ecSearch):
         ctl_migr_data, = R.eval(
@@ -475,16 +475,19 @@ def fix_ctl():
             if attr == '':
                 attr = None
             D[typ] = (code, attr)
-            if typ == 'PC':
-                # If typ == 'PC' we will use that and skip the rest.
+            if typ == 'LPC':
+                # If typ == 'LPC' we will use that and skip the rest.
                 break
 
-        if 'PC' in D:
+        if 'LPC' in D:
             # First choice
-            typ = 'PC'
+            typ = 'LPC'
         elif 'OPC' in D:
             # Second choice
             typ = 'OPC'
+        elif 'OTS' in D:
+            # Second choice
+            typ = 'OTS'
         else:
             for typ in D:
                 # Take any other type
@@ -534,6 +537,24 @@ def fix_opc():
             
     Cui.CuiReloadTable('crew_document', 1)   
 
+# fix_opc ----------------------------------------------------------------{{{2
+def fix_ots():
+    from tm import TM
+    data, = R.eval("sp_crew",
+                   R.foreach("iterators.roster_set",
+                             "crew.%id%",
+                             "training.%missing_ots_doc%",
+                             "training.%new_ots_date%"))
+    print data
+    for (ix, crewid, ots_doc, ots_date) in data:
+        if ots_doc:
+            crew = TM.crew[(crewid,)]
+            doc = TM.crew_document_set[("REC",ots_doc)]
+            document = TM.crew_document[(crew, doc, AbsTime("1Jan1986"))]
+            print ix, " Crew %s will have %s moved from %s to %s" %(crewid, ots_doc, document.validto, ots_date)
+            document.validto = ots_date
+            
+    Cui.CuiReloadTable('crew_document', 1)   
 
 # modeline ==============================================================={{{1
 # vim: set fdm=marker:

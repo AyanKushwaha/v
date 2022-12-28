@@ -162,6 +162,7 @@ class ECSupervisionDetails(SASReport):
     def get_type(self, t):
         try:
             type = ('', 'A/C, LIFUS', 'LPC/OPC/OTS', 'T/R', 'CLASSROOM', 'LCI SH', 'CRM', 'CC', 'SKILL-Test', 'SIM', 'LCI LH', 'New Hire Follow Up','Supernum, Release','ETOPS LC','ETOPS LIFUS')[int(str(t)[-2:])]
+
             return type
         except:
             return '?'

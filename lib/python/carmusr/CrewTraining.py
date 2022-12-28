@@ -1268,6 +1268,7 @@ class Document(TempTable):
     def validateDocForModifiedRows(self, mod_rows):
         DOCUMENT_BLACKLIST = ['LC', 'LPC', 'LPCA3', 'LPCA3A5', 'LPCA4','LPCA5','OPC', 'OPCA3', 'OPCA3A5', 'OPCA4','OPCA5',
                               'OTS', 'OTSA3', 'OTSA3A5', 'OTSA4','OTSA5','CRM', 'CRMC', 'REC', 'PGT']
+
         errorText = None
         if self is None or mod_rows is None:
             return errorText
@@ -1279,6 +1280,7 @@ class Document(TempTable):
     def save(self):
         DOCUMENT_BLACKLIST = ['LC', 'LPC', 'LPCA3', 'LPCA3A5', 'LPCA4','LPCA5','OPC', 'OPCA3', 'OPCA3A5', 'OPCA4','OPCA5',
                               'OTS', 'OTSA3', 'OTSA3A5', 'OTSA4','OTSA5','CRM', 'CRMC', 'REC', 'PGT'] # TODO move somewhere relevant
+
         global crewId
 
         (changes, mod_rows) = self.checkForChanges()

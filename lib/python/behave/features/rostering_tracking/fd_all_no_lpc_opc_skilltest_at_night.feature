@@ -1,5 +1,5 @@
 @JCRT @TRAINING @ALL @FD @SKCMS-798
-Feature: Rule checks that PC/OPC and Skill test activitites are not performed during night (0000-0515)
+Feature: Rule checks that LPC/OPC and Skill test activitites are not performed during night (0000-0515)
 
   ##############################################################################
   # Notes:
@@ -27,12 +27,12 @@ Feature: Rule checks that PC/OPC and Skill test activitites are not performed du
     When I set parameter "fundamental.%start_para%" to "1JAN2019 00:00"
     When I set parameter "fundamental.%end_para%" to "3JAN2019 00:00"
 
-    Then rave "rules_indust_ccr.%trng_no_pc_opc_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
-    Then the rule "rules_indust_ccr.trng_no_pc_opc_skilltest_at_night_FC" shall pass on leg 1 on trip 1 on roster 1
+    Then rave "rules_indust_ccr.%trng_no_lpc_opc_or_ots_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
+    Then the rule "rules_indust_ccr.trng_no_lpc_opc_or_ots_skilltest_at_night_FC" shall pass on leg 1 on trip 1 on roster 1
 
   ##############################################################################
   @PASS_2
-  Scenario: Rule passes on PC ending before night
+  Scenario: Rule passes on LPC ending before night
     Given a crew member with homebase "STO"
 
     Given a trip with the following activities
@@ -46,8 +46,8 @@ Feature: Rule checks that PC/OPC and Skill test activitites are not performed du
     When I set parameter "fundamental.%start_para%" to "1JAN2019 00:00"
     When I set parameter "fundamental.%end_para%" to "3JAN2019 00:00"
 
-    Then rave "rules_indust_ccr.%trng_no_pc_opc_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
-    Then the rule "rules_indust_ccr.trng_no_pc_opc_skilltest_at_night_FC" shall pass on leg 1 on trip 1 on roster 1
+    Then rave "rules_indust_ccr.%trng_no_lpc_opc_or_ots_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
+    Then the rule "rules_indust_ccr.trng_no_lpc_opc_or_ots_skilltest_at_night_FC" shall pass on leg 1 on trip 1 on roster 1
 
   ##############################################################################
   @PASS_3
@@ -65,8 +65,8 @@ Feature: Rule checks that PC/OPC and Skill test activitites are not performed du
     When I set parameter "fundamental.%start_para%" to "1JAN2019 00:00"
     When I set parameter "fundamental.%end_para%" to "3JAN2019 00:00"
 
-    Then rave "rules_indust_ccr.%trng_no_pc_opc_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
-    Then the rule "rules_indust_ccr.trng_no_pc_opc_skilltest_at_night_FC" shall pass on leg 1 on trip 1 on roster 1
+    Then rave "rules_indust_ccr.%trng_no_lpc_opc_or_ots_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
+    Then the rule "rules_indust_ccr.trng_no_lpc_opc_or_ots_skilltest_at_night_FC" shall pass on leg 1 on trip 1 on roster 1
 
 
   ##############################################################################
@@ -86,8 +86,8 @@ Feature: Rule checks that PC/OPC and Skill test activitites are not performed du
     When I set parameter "fundamental.%start_para%" to "1JAN2019 00:00"
     When I set parameter "fundamental.%end_para%" to "3JAN2019 00:00"
 
-    Then rave "rules_indust_ccr.%trng_no_pc_opc_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
-    Then the rule "rules_indust_ccr.trng_no_pc_opc_skilltest_at_night_FC" shall pass on leg 1 on trip 1 on roster 1
+    Then rave "rules_indust_ccr.%trng_no_lpc_opc_or_ots_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
+    Then the rule "rules_indust_ccr.trng_no_lpc_opc_or_ots_skilltest_at_night_FC" shall pass on leg 1 on trip 1 on roster 1
     and rave "rules_indust_ccr.%activity_end_time%" shall be "02JAN2019 00:00" on leg 1 on trip 1 on roster 1
 
 
@@ -108,8 +108,8 @@ Feature: Rule checks that PC/OPC and Skill test activitites are not performed du
     When I set parameter "fundamental.%start_para%" to "1JAN2019 00:00"
     When I set parameter "fundamental.%end_para%" to "3JAN2019 00:00"
 
-    Then rave "rules_indust_ccr.%trng_no_pc_opc_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
-    Then the rule "rules_indust_ccr.trng_no_pc_opc_skilltest_at_night_FC" shall pass on leg 1 on trip 1 on roster 1
+    Then rave "rules_indust_ccr.%trng_no_lpc_opc_or_ots_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
+    Then the rule "rules_indust_ccr.trng_no_lpc_opc_or_ots_skilltest_at_night_FC" shall pass on leg 1 on trip 1 on roster 1
     and rave "rules_indust_ccr.%activity_start_time%" shall be "01JAN2019 05:15" on leg 1 on trip 1 on roster 1
 
 
@@ -129,12 +129,12 @@ Feature: Rule checks that PC/OPC and Skill test activitites are not performed du
     When I set parameter "fundamental.%start_para%" to "1JAN2019 00:00"
     When I set parameter "fundamental.%end_para%" to "3JAN2019 00:00"
 
-    Then rave "rules_indust_ccr.%trng_no_pc_opc_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
-    Then the rule "rules_indust_ccr.trng_no_pc_opc_skilltest_at_night_FC" shall fail on leg 1 on trip 1 on roster 1
+    Then rave "rules_indust_ccr.%trng_no_lpc_opc_or_ots_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
+    Then the rule "rules_indust_ccr.trng_no_lpc_opc_or_ots_skilltest_at_night_FC" shall fail on leg 1 on trip 1 on roster 1
 
   ##############################################################################
   @FAIL_2
-  Scenario: Rule fails on PC ending at night
+  Scenario: Rule fails on LPC ending at night
     Given a crew member with homebase "STO"
 
     Given a trip with the following activities
@@ -148,8 +148,8 @@ Feature: Rule checks that PC/OPC and Skill test activitites are not performed du
     When I set parameter "fundamental.%start_para%" to "1JAN2019 00:00"
     When I set parameter "fundamental.%end_para%" to "3JAN2019 00:00"
 
-    Then rave "rules_indust_ccr.%trng_no_pc_opc_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
-    Then the rule "rules_indust_ccr.trng_no_pc_opc_skilltest_at_night_FC" shall fail on leg 1 on trip 1 on roster 1
+    Then rave "rules_indust_ccr.%trng_no_lpc_opc_or_ots_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
+    Then the rule "rules_indust_ccr.trng_no_lpc_opc_or_ots_skilltest_at_night_FC" shall fail on leg 1 on trip 1 on roster 1
 
   ##############################################################################
   @FAIL_3
@@ -167,8 +167,8 @@ Feature: Rule checks that PC/OPC and Skill test activitites are not performed du
     When I set parameter "fundamental.%start_para%" to "1JAN2019 00:00"
     When I set parameter "fundamental.%end_para%" to "3JAN2019 00:00"
 
-    Then rave "rules_indust_ccr.%trng_no_pc_opc_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
-    Then the rule "rules_indust_ccr.trng_no_pc_opc_skilltest_at_night_FC" shall fail on leg 1 on trip 1 on roster 1
+    Then rave "rules_indust_ccr.%trng_no_lpc_opc_or_ots_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
+    Then the rule "rules_indust_ccr.trng_no_lpc_opc_or_ots_skilltest_at_night_FC" shall fail on leg 1 on trip 1 on roster 1
 
   ##############################################################################
   @FAIL_4
@@ -186,12 +186,12 @@ Feature: Rule checks that PC/OPC and Skill test activitites are not performed du
     When I set parameter "fundamental.%start_para%" to "1JAN2019 00:00"
     When I set parameter "fundamental.%end_para%" to "3JAN2019 00:00"
 
-    Then rave "rules_indust_ccr.%trng_no_pc_opc_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
-    Then the rule "rules_indust_ccr.trng_no_pc_opc_skilltest_at_night_FC" shall fail on leg 1 on trip 1 on roster 1
+    Then rave "rules_indust_ccr.%trng_no_lpc_opc_or_ots_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
+    Then the rule "rules_indust_ccr.trng_no_lpc_opc_or_ots_skilltest_at_night_FC" shall fail on leg 1 on trip 1 on roster 1
 
   ##############################################################################
   @FAIL_5
-  Scenario: Rule fails on PC with check-out at night
+  Scenario: Rule fails on LPC with check-out at night
     Given a crew member with homebase "STO"
 
     Given a trip with the following activities
@@ -205,12 +205,12 @@ Feature: Rule checks that PC/OPC and Skill test activitites are not performed du
     When I set parameter "fundamental.%start_para%" to "1JAN2019 00:00"
     When I set parameter "fundamental.%end_para%" to "3JAN2019 00:00"
 
-    Then rave "rules_indust_ccr.%trng_no_pc_opc_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
-    Then the rule "rules_indust_ccr.trng_no_pc_opc_skilltest_at_night_FC" shall fail on leg 1 on trip 1 on roster 1
+    Then rave "rules_indust_ccr.%trng_no_lpc_opc_or_ots_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
+    Then the rule "rules_indust_ccr.trng_no_lpc_opc_or_ots_skilltest_at_night_FC" shall fail on leg 1 on trip 1 on roster 1
     
     ##############################################################################
     @FAIL_6
-    Scenario: Rule fails on PC with check-out at night local time
+    Scenario: Rule fails on LPC with check-out at night local time
       Given a crew member with homebase "STO"
   
       Given a trip with the following activities
@@ -224,12 +224,12 @@ Feature: Rule checks that PC/OPC and Skill test activitites are not performed du
       When I set parameter "fundamental.%start_para%" to "1JAN2019 00:00"
       When I set parameter "fundamental.%end_para%" to "3JAN2019 00:00"
   
-      Then rave "rules_indust_ccr.%trng_no_pc_opc_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
-      Then the rule "rules_indust_ccr.trng_no_pc_opc_skilltest_at_night_FC" shall fail on leg 1 on trip 1 on roster 1
+      Then rave "rules_indust_ccr.%trng_no_lpc_opc_or_ots_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
+      Then the rule "rules_indust_ccr.trng_no_lpc_opc_or_ots_skilltest_at_night_FC" shall fail on leg 1 on trip 1 on roster 1
       
       ##############################################################################
       @FAIL_7
-      Scenario: Rule fails on PC with check-in at night local time
+      Scenario: Rule fails on LPC with check-in at night local time
         Given a crew member with homebase "STO"
     
         Given a trip with the following activities
@@ -243,8 +243,8 @@ Feature: Rule checks that PC/OPC and Skill test activitites are not performed du
         When I set parameter "fundamental.%start_para%" to "1JAN2019 00:00"
         When I set parameter "fundamental.%end_para%" to "3JAN2019 00:00"
     
-        Then rave "rules_indust_ccr.%trng_no_pc_opc_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
-        Then the rule "rules_indust_ccr.trng_no_pc_opc_skilltest_at_night_FC" shall fail on leg 1 on trip 1 on roster 1
+        Then rave "rules_indust_ccr.%trng_no_lpc_opc_or_ots_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
+        Then the rule "rules_indust_ccr.trng_no_lpc_opc_or_ots_skilltest_at_night_FC" shall fail on leg 1 on trip 1 on roster 1
         
         ##############################################################################
         @FAIL_8
@@ -262,8 +262,8 @@ Feature: Rule checks that PC/OPC and Skill test activitites are not performed du
           When I set parameter "fundamental.%start_para%" to "1JAN2019 00:00"
           When I set parameter "fundamental.%end_para%" to "3JAN2019 00:00"
       
-          Then rave "rules_indust_ccr.%trng_no_pc_opc_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
-          Then the rule "rules_indust_ccr.trng_no_pc_opc_skilltest_at_night_FC" shall fail on leg 1 on trip 1 on roster 1
+          Then rave "rules_indust_ccr.%trng_no_lpc_opc_or_ots_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
+          Then the rule "rules_indust_ccr.trng_no_lpc_opc_or_ots_skilltest_at_night_FC" shall fail on leg 1 on trip 1 on roster 1
           
         ##############################################################################
         @FAIL_9
@@ -281,7 +281,7 @@ Feature: Rule checks that PC/OPC and Skill test activitites are not performed du
           When I set parameter "fundamental.%start_para%" to "1JAN2019 00:00"
           When I set parameter "fundamental.%end_para%" to "3JAN2019 00:00"
       
-          Then rave "rules_indust_ccr.%trng_no_pc_opc_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
-          Then the rule "rules_indust_ccr.trng_no_pc_opc_skilltest_at_night_FC" shall fail on leg 1 on trip 1 on roster 1
+          Then rave "rules_indust_ccr.%trng_no_lpc_opc_or_ots_skilltest_at_night_valid%" shall be "True" on leg 1 on trip 1 on roster 1
+          Then the rule "rules_indust_ccr.trng_no_lpc_opc_or_ots_skilltest_at_night_FC" shall fail on leg 1 on trip 1 on roster 1
 
 

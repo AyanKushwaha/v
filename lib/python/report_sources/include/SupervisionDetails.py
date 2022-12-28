@@ -52,6 +52,7 @@ class SupervisionDetails(SASReport):
                 'lifus_act': 'salary.%inst_lifus_act%',
                 'lpc_opc_ots': 'salary.%inst_lpc_opc_or_ots%',
                 'lpc_opc_ots_bd': 'salary.%inst_lpc_opc_or_ots_bd%',,
+
                 'type_rating': 'salary.%inst_type_rating%',
                 'type_rating_bd': 'salary.%inst_type_rating_bd%',
                 'crm': 'salary.%inst_crm%',
@@ -162,6 +163,7 @@ class SupervisionDetails(SASReport):
     def get_type(self, t):
         try:
             type = ('', 'A/C, LIFUS', 'LPC/OPC/OTS', 'T/R', 'CLASSROOM', 'LCI SH', 'CRM', 'CC', 'SKILL-Test', 'SIM', 'LCI LH', 'New Hire Follow Up','Supernum, Release','ETOPS LC','ETOPS LIFUS')[int(str(t)[-2:])]
+
             return type
         except:
             return '?'

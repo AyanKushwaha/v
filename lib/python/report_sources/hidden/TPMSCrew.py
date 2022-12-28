@@ -211,6 +211,7 @@ class TPMSRoutines():
                 iicmeq_qual_code = tmp2[0] + "C"
                 iicmeq_act_group_name = tmp2[1]
               elif (cd.doc.subtype in ["CRM", "CRMC", "PGT", "REC"]):
+
                 iicmeq_qual_code = cd.doc.subtype
             elif cd.doc.typ == "MEDICAL" :
                 iicmeq_qual_code= "MED"
@@ -319,7 +320,7 @@ class TPMSRoutines():
                         iipili_remark,
                         iipili_staff_id,
                         iipili_to_date,]
-            if iipili_licence_type_code != "Temp PC" :
+            if iipili_licence_type_code != "Temp LPC" :
                 pilot_licence_data_rows.append(data_row)
 
         write_tab(f,fieldnames_tab_pilot_licence,pilot_licence_data_rows,'II_PilotLicense')

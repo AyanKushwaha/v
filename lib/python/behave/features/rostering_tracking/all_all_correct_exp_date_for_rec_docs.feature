@@ -122,8 +122,8 @@ Feature: Check that correct document end are shown in info window
 
     Given crew member 1 has document "REC+PGT" from 15DEC2018 to 15DEC2019
     Given crew member 1 has document "REC+PGT" from 16DEC2019 to 30DEC2020
-    Given crew member 1 has document "REC+PC" from 15DEC2018 to 15DEC2019 and has qualification "A2"
-    Given crew member 1 has document "REC+PC" from 16DEC2019 to 30DEC2020 and has qualification "A2"
+    Given crew member 1 has document "REC+LPC" from 15DEC2018 to 15DEC2019 and has qualification "A2"
+    Given crew member 1 has document "REC+LPC" from 16DEC2019 to 30DEC2020 and has qualification "A2"
     Given crew member 1 has document "REC+OPC" from 15DEC2018 to 15DEC2019 and has qualification "A2"
     Given crew member 1 has document "REC+OPC" from 16DEC2019 to 30DEC2020 and has qualification "A2"
     Given crew member 1 has document "REC+LC" from 15DEC2018 to 15DEC2019 and has qualification "A2"
@@ -136,7 +136,7 @@ Feature: Check that correct document end are shown in info window
     When I set parameter "fundamental.%use_now_debug%" to "TRUE"
     When I set parameter "fundamental.%now_debug%" to "10DEC2019 00:00"
     Then rave "crg_info.%training_row1%" shall be "PGT: Dec19 CRM: Dec19" on roster 1
-    and rave "crg_info.%training_row2%" shall be " PC: Dec19" on roster 1
+    and rave "crg_info.%training_row2%" shall be " LPC: Dec19" on roster 1
     and rave "crg_info.%training_row3%" shall be "OPC: Dec19" on roster 1
     and rave "crg_info.%training_row4%" shall be " LC: Dec19 " on roster 1
 
@@ -147,8 +147,8 @@ Feature: Check that correct document end are shown in info window
 
     Given crew member 1 has document "REC+PGT" from 15DEC2018 to 15DEC2019
     Given crew member 1 has document "REC+PGT" from 16DEC2019 to 30DEC2020
-    Given crew member 1 has document "REC+PC" from 15DEC2018 to 15DEC2019 and has qualification "A2"
-    Given crew member 1 has document "REC+PC" from 16DEC2019 to 30DEC2020 and has qualification "A2"
+    Given crew member 1 has document "REC+LPC" from 15DEC2018 to 15DEC2019 and has qualification "A2"
+    Given crew member 1 has document "REC+LPC" from 16DEC2019 to 30DEC2020 and has qualification "A2"
     Given crew member 1 has document "REC+OPC" from 15DEC2018 to 15DEC2019 and has qualification "A2"
     Given crew member 1 has document "REC+OPC" from 16DEC2019 to 30DEC2020 and has qualification "A2"
     Given crew member 1 has document "REC+LC" from 15DEC2018 to 15DEC2019 and has qualification "A2"
@@ -161,7 +161,7 @@ Feature: Check that correct document end are shown in info window
     When I set parameter "fundamental.%use_now_debug%" to "TRUE"
     When I set parameter "fundamental.%now_debug%" to "16DEC2019 00:01"
     Then rave "crg_info.%training_row1%" shall be "PGT: Dec20 CRM: Dec20" on roster 1
-    and rave "crg_info.%training_row2%" shall be " PC: Dec20" on roster 1
+    and rave "crg_info.%training_row2%" shall be " LPC: Dec20" on roster 1
     and rave "crg_info.%training_row3%" shall be "OPC: Dec20" on roster 1
     and rave "crg_info.%training_row4%" shall be " LC: Dec20 " on roster 1
 
@@ -172,8 +172,8 @@ Feature: Check that correct document end are shown in info window
 
     Given crew member 1 has document "REC+PGT" from 15DEC2018 to 15DEC2019
     Given crew member 1 has document "REC+PGT" from 16DEC2019 to 30DEC2020
-    Given crew member 1 has document "REC+PC" from 15DEC2018 to 15DEC2019 and has qualification "A2"
-    Given crew member 1 has document "REC+PC" from 16DEC2019 to 30DEC2020 and has qualification "A2"
+    Given crew member 1 has document "REC+LPC" from 15DEC2018 to 15DEC2019 and has qualification "A2"
+    Given crew member 1 has document "REC+LPC" from 16DEC2019 to 30DEC2020 and has qualification "A2"
     Given crew member 1 has document "REC+OPC" from 15DEC2018 to 15DEC2019 and has qualification "A2"
     Given crew member 1 has document "REC+OPC" from 16DEC2019 to 30DEC2020 and has qualification "A2"
     Given crew member 1 has document "REC+LC" from 15DEC2018 to 15DEC2019 and has qualification "A2"
@@ -187,6 +187,6 @@ Feature: Check that correct document end are shown in info window
     When I set parameter "fundamental.%now_debug%" to "16DEC2019 00:01"
     Then rave "base_product.%is_rostering%" shall be "True" on roster 1
     and rave "crg_info.%training_row1%" shall be "PGT: Dec20 CRM: Dec20" on roster 1
-    and rave "crg_info.%training_row2%" shall be " PC: Dec20" on roster 1
+    and rave "crg_info.%training_row2%" shall be " LPC: Dec20" on roster 1
     and rave "crg_info.%training_row3%" shall be "OPC: Dec20" on roster 1
     and rave "crg_info.%training_row4%" shall be " LC: Dec20 " on roster 1

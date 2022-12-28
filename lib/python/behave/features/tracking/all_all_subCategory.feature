@@ -1,4 +1,4 @@
-Feature: Test PC and OPC
+Feature: Test LPC and OPC
 
    Background:
      Given Tracking

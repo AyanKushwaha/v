@@ -1,4 +1,4 @@
-Feature: MFF pilots needing PC or OPC are assigned in pos A (assist)
+Feature: MFF pilots needing LPC or OPC are assigned in pos A (assist)
 Background: Set up for Tracking
 
 Given Tracking

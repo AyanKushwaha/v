@@ -124,8 +124,8 @@ export %ground_log_type% =
                      "SIM ASSIST LANDINGS"
                 else if training.%assigned_as_assist% then
                      "SIM ASSIST"
-                else if training.%leg_is_pc% or training.%leg_is_opc% then
-                     %_pc_opc_str%
+                else if training.%leg_is_lpc% or training.%leg_is_opc% or training.%leg_is_ots% then
+                     %_lpc_opc_or_ots_str%
                 else if leg.%is_ast% then
                      "AST"
                 else if leg.%is_asf% then
@@ -155,21 +155,25 @@ export %ground_log_type% =
         else
              void_string;
 
-%_pc_opc_str% =
+%_lpc_opc_or_ots_str% =
     if system_db_parameters.%new_training_codes_17_FD_valid%(leg.%start_utc%) then
-        if training.%leg_is_pc% and leg.%is_skill_test% then
-            concat("PC ", default(attributes.%leg_training_code%, " VOID"))
-        else if training.%leg_is_pc% then
-            %_leg_training_code_unless_void_or_TESTRUN%("PC")
+        if training.%leg_is_lpc% and leg.%is_skill_test% then
+            concat("LPC ", default(attributes.%leg_training_code%, " VOID"))
+        else if training.%leg_is_lpc% then
+            %_leg_training_code_unless_void_or_TESTRUN%("LPC")
         else if training.%leg_is_opc% then
             %_leg_training_code_unless_void_or_TESTRUN%("OPC")
+        else if training.%leg_is_ots% then
+            %_leg_training_code_unless_void_or_TESTRUN%("OTS")
         else "problemPC1"
     else
-        if training.%leg_is_pc% then
+        if training.%leg_is_lpc% then
             /* This includes Z (Skill test) */
-            "PC"
+            "LPC"
         else if training.%leg_is_opc% then
             "OPC"
+        else if training.%leg_is_ots% then
+            "OTS"
         else
             "problemPC2";
 
@@ -299,7 +303,7 @@ export %leg_type2% =
     else if leg.%is_release% and 
         qualification.%leg_extends_restricted_airport%(false) then "RELEASE AIRPORT"
     else if (crew.%is_sks% or crew.%is_skd%) and %is_first_sim_leg% and 
-            training.%pc_opc_deadhead% then "SIM DEADHEAD"
+            training.%lpc_opc_or_ots_deadhead% then "SIM DEADHEAD"
     else if crew.%is_pilot% and qualification.%restricted_airport_is_extended%(false) then
         "FLIGHT AIRPORT"
     else void_string;
@@ -325,7 +329,7 @@ export %_airport_qual_ac_qual_code% =
 
 export %leg_attr% =
   if (trip.%is_ground_duty% and
-      training.%trip_is_opc% and
+      (training.%trip_is_opc% or training.%trip_is_opc%) and
       crew_pos.%trip_lower_rank%) then 
      "LOWER"
   else if leg.%is_fam_flt% then
@@ -436,7 +440,7 @@ end
         leg.%is_flight_duty% and is_first(leg(trip)) where (leg.%is_any_lc%)
     else if (%new_REC% or training.%leg_is_rehearsal%) then
         true
-    else if (leg.%is_pc_or_opc% and leg.%is_valid_sim% or
+    else if (leg.%is_lpc_opc_or_ots% and leg.%is_valid_sim% or
              leg.%is_pgt% or leg.%is_crm% or leg.%is_crmc% or leg.%is_cc_rec_cx7%) then
         leg.%is_ground_duty_leg%
     else false;
@@ -481,11 +485,11 @@ export %rec_not_yet_tpms%(Abstime d) =
 
 /* OPC is special. 
    - When creating new documents the initial validto is in 6 months.
-   - When doing an OPC validto is extended 1 year.
-   - When doing a PC we only check validto */
-%leg_opc_extension%(String type) =
+   - When doing an OPC/OTS validto is extended 1 year.
+   - When doing a LPC we only check validto */
+%leg_opc_or_ots_extension%(String type) =
     if %crew_qual_check%(type, %leg_date%) then
-    add_months(if %new_PC_OPC% then 
+    add_months(if %new_LPC_OPC_or_OTS% then 
                  %leg_month% 
                else 
                  %leg_old_expiry%(training.%rec_type%), 
@@ -533,9 +537,9 @@ set types_not_extending_after_expiry = "CRM", "CRMC";
     type <> "REC" or trip.%start_day% < add_months(%leg_old_expiry%("REC"), 12);
 
 
-/* For SKN SH PC/OPC the PC is always performed on the same type, and the OPC on 
-   the other. This variable is used to find the acqual on the OPC doc when
-   performing a PC. */
+/* For SKN SH LPC/OPC/OTS the LPC is always performed on the same type, and the OPC/OTS on 
+   the other. This variable is used to find the acqual on the OPC/OTS doc when
+   performing a LPC. */
 %special_rec_qual% =
     if crew.%is_skn_double_qualified_at_date%(trip.%start_hb%)
     then if parameters.%sim_pass_classic_req%(trip.%start_hb%)
@@ -551,7 +555,7 @@ set types_not_extending_after_expiry = "CRM", "CRMC";
     else leg.%qual%;
 
 %new_doc% =
-    (leg.%is_pc_or_opc% and %new_PC_OPC%)
+    (leg.%is_lpc_opc_or_ots% and %new_LPC_OPC_or_OTS%)
     or
     (leg.%is_pgt% and training.%trip_is_pgt_ref%)
     or
@@ -562,13 +566,13 @@ set types_not_extending_after_expiry = "CRM", "CRMC";
     or
     (%new_REC% and default(%leg_old_expiry%(%rec_type%) < %leg_date%, true));
     
-%new_PC_OPC% = (leg.%is_pc_change_month% or leg.%is_skill_test%);
+%new_LPC_OPC_or_OTS% = (leg.%is_lpc_change_month% or leg.%is_skill_test%);
     
 /* It is only allowed to move a REC document for CC if the activity is any
    of CRA, CRB, or RECREF */
 %new_REC% = training.%leg_creates_rec%;
 
-/* SASCMS-3410.  Only create a "Temp PC" licence on completion of a Z Skill
+/* SASCMS-3410.  Only create a "Temp LPC" licence on completion of a Z Skill
    activity */
 
 %leg_temp_licence_extension% = leg.%start_date% + (56 * 24:00);
@@ -577,7 +581,7 @@ set types_not_extending_after_expiry = "CRM", "CRMC";
     default(substr(training.%leg_code_redefined%, 1, 1), "") = "Z";
 
 table rec_doc_extension_table(Int i) =
-    training.%rec_type%, %is_for_temp_licence%, i ->
+    training.%rec_type%, %is_for_temp_licence%, fundamental.%use_link_tracking_ruleset%, i ->
     %leg_doc%,
     %leg_doc_validto%,
     %leg_doc_acqual%,
@@ -585,48 +589,58 @@ table rec_doc_extension_table(Int i) =
     /*******************************************
      * Flight crew 
      *******************************************/
-    "CRM", -, 1      -> "CRM",   %leg_recurrent_extension_no_move%, "", false;
+    "CRM", -, -, 1       -> "CRM",   %leg_recurrent_extension_no_move%, "", false;
 
-    "CRMC", -, 1     -> "CRMC",   %leg_recurrent_extension_no_move%, "", false;
+    "CRMC", -, -, 1      -> "CRMC",   %leg_recurrent_extension_no_move%, "", false;
     
-    "PGT", -, 1      -> "PGT",   %leg_recurrent_extension%("PGT", %new_doc%), "", %new_doc%;
+    "PGT", -, -, 1       -> "PGT",   %leg_recurrent_extension%("PGT", %new_doc%), "", %new_doc%;
     
-    "LC",  -, 1      -> "LC",    %leg_recurrent_extension%("LC", %new_doc%), leg.%qual%, %new_doc%;
+    "LC",  -, -, 1       -> "LC",    %leg_recurrent_extension%("LC", %new_doc%), leg.%qual%, %new_doc%;
         
-    "PC",  -, 1      -> "PC",    %leg_recurrent_extension%("PC", %new_doc%), %special_rec_qual2%, %new_doc%;
-    "PC",  -, 2      -> "OPC",   %leg_opc_extension%("OPC"), %special_rec_qual%, %new_doc%;
-	"PC",  true, 3   -> "Temp PC", %leg_temp_licence_extension%, leg.%qual%, %new_doc%;
+    "LPC",  -, -, 1      -> "LPC",    %leg_recurrent_extension%("LPC", %new_doc%), %special_rec_qual2%, %new_doc%;
+    "LPC",  -, true, 2      -> "OPC",   %leg_opc_or_ots_extension%("OPC"), %special_rec_qual%, %new_doc%;
+	"LPC",  -, false, 2      -> "OTS",   %leg_opc_or_ots_extension%("OTS"), %special_rec_qual%, %new_doc%;
+    "LPC", true, -, 3   -> "Temp LPC", %leg_temp_licence_extension%, leg.%qual%, %new_doc%;
     
-    "PCA3",  -, 1    -> "PCA3",  %leg_recurrent_extension%("PCA3", %new_doc%), "", %new_doc%;
-    "PCA3", -, 2     -> "OPCA3", %leg_opc_extension%("OPCA3"), "", %new_doc%;
-    "PCA3", -, 3     -> "OPCA4", %leg_opc_extension%("OPCA4"), "", leg.%is_skill_test%;
-	"PCA3", true, 4  -> "Temp PC", %leg_temp_licence_extension%, leg.%qual%, %new_doc%;
+    "LPCA3", -, -, 1    -> "LPCA3",  %leg_recurrent_extension%("LPCA3", %new_doc%), "", %new_doc%;
+    "LPCA3", -, true, 2     -> "OPCA3", %leg_opc_or_ots_extension%("OPCA3"), "", %new_doc%;
+    "LPCA3", -, true,3     -> "OPCA4", %leg_opc_or_ots_extension%("OPCA4"), "", leg.%is_skill_test%;
+	"LPCA3", -, false, 2     -> "OTSA3", %leg_opc_or_ots_extension%("OTSA3"), "", %new_doc%;
+    "LPCA3", -, false, 3     -> "OTSA4", %leg_opc_or_ots_extension%("OTSA4"), "", leg.%is_skill_test%;
+    "LPCA3", true, -, 4  -> "Temp LPC", %leg_temp_licence_extension%, leg.%qual%, %new_doc%;
     
-    "PCA4", -, 1     -> "PCA4",  %leg_recurrent_extension%("PCA4", %new_doc%), "", %new_doc%;
-    "PCA4", -, 3     -> "OPCA3", %leg_opc_extension%("OPCA3"), "", leg.%is_skill_test%;
-    "PCA4", -, 2     -> "OPCA4", %leg_opc_extension%("OPCA4"), "", %new_doc%;
-	"PCA4", true, 4  -> "Temp PC", %leg_temp_licence_extension%, leg.%qual%, %new_doc%;
+    "LPCA4", -, -, 1     -> "LPCA4",  %leg_recurrent_extension%("LPCA4", %new_doc%), "", %new_doc%;
+    "LPCA4", -, true, 3     -> "OPCA3", %leg_opc_or_ots_extension%("OPCA3"), "", leg.%is_skill_test%;
+    "LPCA4", -, true, 2     -> "OPCA4", %leg_opc_or_ots_extension%("OPCA4"), "", %new_doc%;
+	"LPCA4", -, false, 3     -> "OTSA3", %leg_opc_or_ots_extension%("OTSA3"), "", leg.%is_skill_test%;
+    "LPCA4", -, false, 2     -> "OTSA4", %leg_opc_or_ots_extension%("OTSA4"), "", %new_doc%;
+    "LPCA4", true, -, 4  -> "Temp LPC", %leg_temp_licence_extension%, leg.%qual%, %new_doc%;
     
-    "OPC", -, 1      -> "OPC",   %leg_recurrent_extension_no_move%, leg.%qual%, false;
+    "OPC", -, -, 1      -> "OPC",   %leg_recurrent_extension_no_move%, leg.%qual%, false;
+    "OTS", -, -, 1      -> "OTS",   %leg_recurrent_extension_no_move%, leg.%qual%, false;
     
-    "OPCA3", -, 1    -> "OPCA3", %leg_recurrent_extension_no_move%, "", false;
-    "OPCA3", -, 2    -> "OPCA4", %leg_opc_extension%("OPCA4"), "", false;
+    "OPCA3", -, -, 1    -> "OPCA3", %leg_recurrent_extension_no_move%, "", false;
+    "OPCA3", -, -, 2    -> "OPCA4", %leg_opc_or_ots_extension%("OPCA4"), "", false;
+    "OTSA3", -, -, 1    -> "OTSA3", %leg_recurrent_extension_no_move%, "", false;
+    "OTSA3", -, -, 2    -> "OTSA4", %leg_opc_or_ots_extension%("OTSA4"), "", false;
     
-    "OPCA4", -, 2    -> "OPCA3", %leg_opc_extension%("OPCA3"), "", false;
-    "OPCA4", -, 1    -> "OPCA4", %leg_recurrent_extension_no_move%, "", false;
+    "OPCA4", -, -, 2    -> "OPCA3", %leg_opc_or_ots_extension%("OPCA3"), "", false;
+    "OPCA4", -, -, 1    -> "OPCA4", %leg_recurrent_extension_no_move%, "", false;
+    "OTSA4", -, -, 2    -> "OTSA3", %leg_opc_or_ots_extension%("OTSA3"), "", false;
+    "OTSA4", -, -, 1    -> "OTSA4", %leg_recurrent_extension_no_move%, "", false;
     
     /*******************************************
      * Cabin crew 
      *******************************************/
-    "REC", -, 1      -> "REC", %leg_recurrent_extension%("REC", %new_rec%), "", %new_doc%;
+    "REC", -, -, 1      -> "REC", %leg_recurrent_extension%("REC", %new_rec%), "", %new_doc%;
     
-    -, -, -          -> void_string, void_abstime, void_string, void_bool;
+    -, -, -, -          -> void_string, void_abstime, void_string, void_bool;
 end
 
 %_leg_doc_ix%(Int ix) =
     %leg_doc%(ix);
 %_leg_doc_validto_ix%(Int ix) =
-    if %_leg_doc_ix%(ix)="Temp PC" or %rec_not_yet_tpms%(leg.%start_hb%) then
+    if %_leg_doc_ix%(ix)="Temp LPC" or %rec_not_yet_tpms%(leg.%start_hb%) then
         %leg_doc_validto%(ix)
     else 
         void_abstime; /* updated from tpms instead */

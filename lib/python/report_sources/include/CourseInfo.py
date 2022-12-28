@@ -3,7 +3,7 @@
  
  Sim Dated Info
 
- Lists all OPC and AST activities in the planning period, using
+ Lists all OPC/OTS and AST activities in the planning period, using
  a weekly view.
 
  Created:    August 2007

@@ -22,8 +22,9 @@ import utils.table_cache as C
 class CheckRecurrent:
     def __init__(self):
         self._crew_emp_cache = C.DaveTableCache('crew_employment',['crew'], {'region':re.compile(r'SKN')})
-        self._check_map = {'PC':self._check_PC,
+        self._check_map = {'LPC':self._check_LPC,
                            'OPC':self._check_OPC,
+                           'OTS':self._check_OTS,
                            'PGT':self._check_PGT,
                            'CRM':self._check_NORMAL,
                            'LC':self._check_NORMAL,
@@ -67,7 +68,7 @@ class CheckRecurrent:
                     
         return []
     
-    def _check_PC(self, doc_list=[], log_list=[]):
+    def _check_LPC(self, doc_list=[], log_list=[]):
         
         for doc in doc_list:
             logs = []
@@ -90,12 +91,27 @@ class CheckRecurrent:
                 logs += self._get_logs_for_acqual(log_list, 'A4')
                 logs += self._get_logs_for_acqual(log_list, 'A5')
                 logs += self._get_logs_for_acqual(log_list, 'A3')
-                # PCA3 gives both OPCA3 and OPCA4
+                # LPCA3 gives both OPCA3/OTSA3 and OPCA4/OTSA4
             else:
                 logs = log_list
             
             
             self._check_opc_doc_vs_log(doc, logs)
+        return []
+
+    def _check_OTS(self, doc_list=[], log_list=[]):
+        for doc in doc_list:    
+            logs = []
+            if 'A3' in doc.doc.subtype.upper() or 'A4' in doc.doc.subtype.upper() or 'A5' in doc.doc.subtype.upper():
+                logs += self._get_logs_for_acqual(log_list, 'A4')
+                logs += self._get_logs_for_acqual(log_list, 'A5')
+                logs += self._get_logs_for_acqual(log_list, 'A3')
+                # LPCA3 gives both OPCA3/OTSA3 and OPCA4/OTSA4
+            else:
+                logs = log_list
+            
+            
+            self._check_ots_doc_vs_log(doc, logs)
         return []
     
     def _check_NORMAL(self, doc_list=[], log_list=[]):
@@ -146,7 +162,7 @@ class CheckRecurrent:
         doc.validto = new_valid_to
             
     def _check_opc_doc_vs_log(self, doc, logs):
-        # special handling of OPC
+        # special handling of OPC/OTS
         global crew_doc_cache
 
         
@@ -161,7 +177,7 @@ class CheckRecurrent:
             doc.validto = self._error_validto
             return
         
-        pc_docs = crew_doc_cache.get(str(doc.getRefI('crew')),
+        lpc_docs = crew_doc_cache.get(str(doc.getRefI('crew')),
                                      filter={'doc':re.compile(r'REC\+%s'%doc.doc.subtype.replace("O",""))})
 
         
@@ -179,14 +195,57 @@ class CheckRecurrent:
         if new_opc_date.addmonths(-6, AbsTime.PREV_VALID_DAY) < last_valid_log.tim:
             new_opc_date = new_opc_date.addmonths(6, AbsTime.PREV_VALID_DAY)
             print "new_opc_date", new_opc_date
-        for pc_doc in pc_docs:
-            if new_opc_date == pc_doc.validto:
-                print 'New OPC validto %s is covered\nby PC validto %s'%(new_opc_date, pc_doc.validto)
+        for lpc_doc in lpc_docs:
+            if new_opc_date == lpc_doc.validto:
+                print 'New OPC validto %s is covered\nby LPC validto %s'%(new_opc_date, lpc_doc.validto)
                 new_opc_date = new_opc_date.addmonths(6,AbsTime.PREV_VALID_DAY)
         print "Log:\n%s at %s\nwill set new valid to for doc:\n%s valid to %s\nto:\n%s"%\
               (str(last_valid_log.typ)+':'+str(last_valid_log.code),
                str(last_valid_log.tim),str(doc.doc.subtype),str(doc.validto),str(new_opc_date))
         doc.validto = new_opc_date
+
+    def _check_ots_doc_vs_log(self, doc, logs):
+        # special handling of OPC/OTS
+        global crew_doc_cache
+
+        
+        
+        doc_validto_year_start = AbsTime.AbsTime(doc.validto.split()[0],1,1,0,0)
+        check_time = max(doc_validto_year_start,
+                         doc.validto.addmonths(-3,AbsTime.PREV_VALID_DAY))
+        
+        if not logs:
+            print "No recurrent activity found for doc:\n%s valid to %s\n"%\
+                  (str(doc.doc.subtype),str(doc.validto))
+            doc.validto = self._error_validto
+            return
+        
+        lpc_docs = crew_doc_cache.get(str(doc.getRefI('crew')),
+                                     filter={'doc':re.compile(r'REC\+%s'%doc.doc.subtype.replace("O",""))})
+
+        
+        new_ots_date = AbsTime.AbsTime(doc.validto).addmonths(-60,AbsTime.PREV_VALID_DAY)
+        logs.sort(CheckRecurrent._sort_tim)
+        last_valid_log = logs[-1]
+
+
+        while new_ots_date <= last_valid_log.tim or \
+                  last_valid_log.tim > max(AbsTime.AbsTime(new_ots_date.split()[0],1,1,0,0),
+                                           new_ots_date.addmonths(-3,AbsTime.PREV_VALID_DAY)):
+            new_ots_date = new_ots_date.addmonths(6, AbsTime.PREV_VALID_DAY)
+            print "new_ots_date", new_ots_date
+        # Check for 1jan issues etc.
+        if new_ots_date.addmonths(-6, AbsTime.PREV_VALID_DAY) < last_valid_log.tim:
+            new_ots_date = new_ots_date.addmonths(6, AbsTime.PREV_VALID_DAY)
+            print "new_ots_date", new_ots_date
+        for lpc_doc in lpc_docs:
+            if new_ots_date == lpc_doc.validto:
+                print 'New OTS validto %s is covered\nby LPC validto %s'%(new_ots_date, lpc_doc.validto)
+                new_ots_date = new_ots_date.addmonths(6,AbsTime.PREV_VALID_DAY)
+        print "Log:\n%s at %s\nwill set new valid to for doc:\n%s valid to %s\nto:\n%s"%\
+              (str(last_valid_log.typ)+':'+str(last_valid_log.code),
+               str(last_valid_log.tim),str(doc.doc.subtype),str(doc.validto),str(new_ots_date))
+        doc.validto = new_ots_date
         
     def _crew_is_norwegian_at_time(self, crew_id, time):
         skn_emp_list = self._crew_emp_cache.get(crew_id, default=[])
@@ -224,8 +283,9 @@ def check_recurrent_documents():
     """
     checker = CheckRecurrent()
     # Documents and filter expressions
-    documents = {'PC'    :{'doc':re.compile(r'REC\+PC.*') , 'typ':re.compile(r'PC')},
-                 'OPC'   :{'doc':re.compile(r'REC\+OPC.*'), 'typ':re.compile(r'.*PC')},
+    documents = {'LPC'   :{'doc':re.compile(r'REC\+LPC.*') , 'typ':re.compile(r'LPC')},
+                 'OPC'   :{'doc':re.compile(r'REC\+OPC.*'), 'typ':re.compile(r'.*LPC')},
+                 'OTS'   :{'doc':re.compile(r'REC\+OTS.*'), 'typ':re.compile(r'.*LPC')},
                  'PGT'   :{'doc':re.compile(r'REC\+PGT.*'), 'typ':re.compile(r'SAFETY RECURR/PGT')},
                  'CRM'   :{'doc':re.compile(r'REC\+CRM')  , 'typ':re.compile(r'CRM')},
                  'LC'    :{'doc':re.compile(r'REC\+LC')   , 'typ':re.compile(r'LINE CHECK')},
@@ -318,35 +378,48 @@ def check_recurrent_documents():
 ##     crewList, = R.eval("sp_crew",
 ##                        R.foreach(R.iter('iterators.roster_set',
 ##                                         where='fundamental.%is_roster%'),
-##                                  'training.%create_opc_from_pc%',
+##                                  'training.%create_opc_or_ots_from_lpc%',
 ##                                  'training.%new_opc_date%',
 ##                                  'crew.%id%'))
 
 ##     print "crew: ", len(crewList)
-##     pc_doc = TM.crew_document_set[("REC","PC")]
+##     lpc_doc = TM.crew_document_set[("REC","LPC")]
 ##     opc_doc = TM.crew_document_set[("REC","OPC")]
-##     for (ix, create_opc, opc_date, crewid) in crewList:
+##     ots_doc = TM.crew_document_set[("REC","OTS")]
+##     for (ix, create_opc_ots, opc_date, ots_date, crewid) in crewList:
 ##         #print crewid, pgt_req, pgt_reg, pgtskn_req, pgtskn_reg
 ##         #if (pgtskn_req and not pgtskn_reg and pgt_reg and not pgt_req):
-##         if create_opc:
-##             crew = TM.crew[(crewid,)]
-##             #print crewid, pgt_req, pgt_reg, pgtskn_req, pgtskn_reg
-##             old_doc = TM.crew_document[(crew,
-##                                        pc_doc,
-##                                        tim)]
-##             new_doc = TM.crew_document.create((crew,
-##                                                opc_doc,
-##                                                tim))
-##             new_doc.validto = opc_date
+##         if create_opc_ots:
+##             if opc_date is not None:
+##                 crew = TM.crew[(crewid,)]
+##                 #print crewid, pgt_req, pgt_reg, pgtskn_req, pgtskn_reg
+##                 old_doc = TM.crew_document[(crew,
+##                                            lpc_doc,
+##                                            tim)]
+##                 new_doc = TM.crew_document.create((crew,
+##                                                    opc_doc,
+##                                                    tim))
+##                 new_doc.validto = opc_date
+##             else:
+##                 crew = TM.crew[(crewid,)]
+##                 #print crewid, pgt_req, pgt_reg, pgtskn_req, pgtskn_reg
+##                 old_doc = TM.crew_document[(crew,
+##                                            lpc_doc,
+##                                            tim)]
+##                 new_doc = TM.crew_document.create((crew,
+##                                                    ots_doc,
+##                                                    tim))
+##                 new_doc.validto = opc_date
+##
 ##             acq = old_doc.ac_qual
 ##             if acq == "37":
-##                 opc_acq = "38"
+##                 opc_ots_acq = "38"
 ##             else:
-##                 opc_acq = "37"
-##             new_doc.ac_qual = opc_acq
+##                 opc_ots_acq = "37"
+##             new_doc.ac_qual = opc_ots_acq
             
 ##             #print crewid
-##             #print pc_doc
+##             #print lpc_doc
 ##             #print new_doc
 ##             #old_doc.remove()
 ##     Cui.CuiReloadTable('crew_document', 1)

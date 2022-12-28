@@ -22,7 +22,9 @@ def main():
 
     source_folder = os.path.join(os.environ['CARMTMP'], 'ftp', 'in')
     backup_folder = os.path.join(os.environ['CARMTMP'], 'ftp', 'tpms_import_processed')
+
     DOCUMENT_WHITELIST = ['LC', 'LPC', 'OPC', 'OTS', 'CRM', 'CRMC', 'PGT', 'REC']
+
 
     if not os.path.exists(backup_folder):
         os.makedirs(backup_folder)
@@ -139,6 +141,7 @@ def main():
             R.iter("iterators.leg_set",
                    sort_by = 'leg.%start_utc%',
                    where = ('leg.%%end_date%% = %s' % str(exam_date), 'leg.%is_lpc_opc_or_ots% or leg.%is_crm% or leg.%is_crmc% or leg.%is_pgt% or leg.%is_rec%')), #TODO update criteria for PGT CRM etc.
+
             # These values are keys in the attr tables
             'training_log.%rec_leg_type%',
             'training_log.%rec_leg_time%',

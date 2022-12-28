@@ -390,11 +390,11 @@ class SupervisRun(ECGenericRun):
         return times100(rec.lifus_act)
         #return hours100(rec.lifus_act)
 
-    def INST_PC_OPC(self, rec):
-        return hours100(rec.pc_opc)
+    def INST_LPC_OPC_OTS(self, rec):
+        return hours100(rec.lpc_opc_ots)
 
-    def INST_PC_OPC_BD(self, rec):
-        return times100(rec.pc_opc_bd)
+    def INST_LPC_OPC_OTS_BD(self, rec):
+        return times100(rec.lpc_opc_ots_bd)
 
     def INST_TYPE_RATING(self, rec):
         return hours100(rec.type_rating)

@@ -400,6 +400,7 @@ class SupervisRun(ECGenericRun):
         return times100(rec.etops_lc_act)
 
     def INST_LPC_OPC_OTS(self, rec):
+
         return hours100(rec.pc_opc)
 
     def INST_LPC_OPC_OTS_BD(self, rec):
