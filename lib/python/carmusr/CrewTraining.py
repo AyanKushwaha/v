@@ -477,7 +477,7 @@ class TrainingLogTable(TempTable):
         except:
             Errlog.log("CrewTraining.py::TrainingLog::createRow: \
             Couldn't create entry with key = %s, onroster = %s" % (str(key), onroster))
-                            
+               
 class SystemTable(TempTable):
     """
     Temporary class for misc data
@@ -719,7 +719,6 @@ class Need(TempTable):
             if row.part == 1:
                 index = getAndIncreaseRunningNo(self)
                 need = self.create((str(index),))
-        
                 need.part = row.part
                 (attr, crs) = self.getTypAndCtype(row)
                 need.attribute = attr
@@ -733,14 +732,14 @@ class Need(TempTable):
                 need.acqual = row.acqual
                 need.completion = row.completion
                 need.si = row.si
-    
+
                 need.orgpart = row.part
                 need.orgattribute = attr
                 need.orgcourse = crs
                 need.orgcourse_subtype = row.course_subtype
                 need.orgvalidfrom = row.validfrom
                 need.orgsi = row.si
-                
+
     def createRow(self, validfrom, rowid):
         global NeedRowTable
         #if not utils.wave.STANDALONE:
@@ -879,7 +878,6 @@ class Need(TempTable):
                 merge_row.si = rowNeed.si
 
         searchStr_db = Need._table_search % crewId
-        
         # Finding duplicate rows ????
         for need in TM.crew_training_need.search(searchStr_db):
             (attribute, course) = Need.getTypAndCtypeValue(need)
@@ -887,7 +885,13 @@ class Need(TempTable):
             searchStr_tmp = (
                 '(&(course=%s)(part=%s)(attribute=%s)(validfrom=%s))' % (
                 course, need.part, attribute, need.validfrom))
-            
+            print('attribute',attribute)
+            print('################################\n\n')
+            if "ETOPS LIFUS/LC" in attribute:
+                print('********************\n\n\n\n')
+                el_index = attribute.index("ETOPS LIFUS/LC")
+                attribute = el_index
+                print('attribute',attribute)
             items = 0
             for row in TM.tmp_ctl_merge.search(searchStr_tmp):
                 items += 1
@@ -988,7 +992,7 @@ class NeedRow(TempTable):
     @staticmethod   
     def getValues(row):
         return (row.attribute, row.flights, row.maxdays, row.acqual, row.si)
-    
+
     @staticmethod   
     def getTyp(row):
         try:
