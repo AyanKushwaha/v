@@ -6,14 +6,11 @@
 
 """
 # Python imports
-from datetime import datetime
 from pprint import pformat, pprint
-import os
 
 # External CARMUSR imports
-import Cui
+
 import carmensystems.rave.api as rave
-from utils.selctx import SingleCrewFilter
 from tm import TM
 from dig.DigJobQueue import DigJobQueue
 
@@ -22,12 +19,11 @@ from dig.DigJobQueue import DigJobQueue
 import DataHandler as dh
 import hotel_transport.common.util as util
 
-# TMP
-import Errlog
 
 # CONSTANTS
 HOTEL_CHUNK_SIZE = 500  # Number of hotel updated at a time
 DELAY = 1.0  # Delay between each http request with chunk in seconds
+
 
 def prepareHotelMessages(bookings):
     """
@@ -52,10 +48,8 @@ def buildHotels(bookings):
 
     hotel_objects = list()
     for booking in bookings:
-        hotel_objects.append(
-            buildHotelObject(booking)
-        )
-    
+        hotel_objects.append(buildHotelObject(booking))
+
     return hotel_objects
 
 
@@ -67,21 +61,39 @@ def buildHotelObject(booking):
     :return: A dict containing specified hotel information
     """
 
-    empno = rave.eval('rosterserver.%empno_by_id%(\"%s\")', str(booking['crew']))[1]
-    db_hotel = next(TM.hotel.search('(id=%s)' % booking['hotelId']))
-    for phe in hotel.referers('preferred_hotel_exc','hotel'):
-        if phe.airport.id == airport and ce.crewrank.maincat == phe.maincat and ce.region == phe.region and phe.validfrom < now and phe.validto >= now:
-                if phe.airport_hotel:
-                    return "%s (airport hotel)" % hotel.id
-                else:
-                    break
-    return "%s (city hotel)" % hotel.id
-    
+    empno = rave.eval('rosterserver.%empno_by_id%("%s")', str(booking["crew"]))[1]
+    db_hotel = next(TM.hotel.search("(id=%s)" % booking["hotelId"]))
+    timeNow = rave.eval("fundamental.%now%")[0]
+    if any(
+        TM.preferred_hotel_exc.search(
+            "(&(hotel=%s)(validfrom<=%s)(validto>=%s)(airport_hotel=true))"
+            % (booking["hotelId"], timeNow, timeNow)
+        )
+    ):
+        hotel_type = "AIRPORT"
+    else:
+        hotel_type = "CITY"
+
+    return dict(
+        empno=empno,
+        hotel_id=booking["hotelId"],
+        name=db_hotel.name,
+        address=db_hotel.street,
+        hotel_type=hotel_type,
+        date_arrival=util.abs_time_to_str(booking["checkIn"]),
+        date_depature=util.abs_time_to_str(booking["checkOut"]),
+        nights=booking["nights"],
+        arr_flight_nr=booking["arrFlightNr"],
+        dep_flight_nr=booking["depFlightNr"],
+    )
+
+
 def showTestHotels():
     """
     Builds and shows all roster-data for passed-in or first selected crew.
     """
     import report_sources.report_server.rs_HotelBookingMq as test
+
     hotels = test.generate(dict())
     pprint(hotels)
     util.show_message(pformat(hotels), "Test hotels")
