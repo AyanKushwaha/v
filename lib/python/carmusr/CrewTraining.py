@@ -1068,7 +1068,10 @@ class NeedRow(TempTable):
         newNeedrow.part = part
         newNeedrow.orgpart = part
         newNeedrow.id = str(rowid)
-        
+        print('row part',newNeedrow.part)
+        print('orgpart',newNeedrow.orgpart)
+        print('row id',newNeedrow.id)
+        print('\n\n\n')
         return
 
     def checkForChanges(self):
@@ -1076,6 +1079,9 @@ class NeedRow(TempTable):
         if not self.unsavedChanges:
             # This means no rows have been added or removed
             (self.unsavedChanges, mod_rows) = findModifiedRows(self)
+            print('changes',mod_rows)
+            print('changes1',unsavedChanges)
+            print('changes2',self.unsavedChanges)
         return (self.unsavedChanges, mod_rows)
     
     def setUnsaved(self, status=True):
