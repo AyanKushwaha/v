@@ -545,14 +545,12 @@ class LandingTable(TempTable):
         try:
             ec = EC(TM.getConnStr(), TM.getSchemaStr())
             for row in ec.accumulator_time.search(ecSearch):
-                #print "row->",row
-                #pEnd, = R.eval('pp_end_time')
                 try:
                     if row.name == 'accumulators.last_flown_a320_lh':
                         typ = 'FLOWN'
                         code = 'A320 LH'
                         key = (typ, code, row.tim)
-                        key_list = str(row.tim)
+                        key_list = typ + str(row.tim)
                         if key_list not in l:
                             l.append(key_list)
                             self.createRow(key, False, typ)
@@ -561,7 +559,7 @@ class LandingTable(TempTable):
                         typ = 'LANDING'
                         code = 'A320 LH'
                         key = (typ, code, row.tim)
-                        key_list = str(row.tim)
+                        key_list = typ + str(row.tim)
                         if key_list not in l:
                             l.append(key_list)
                             self.createRow(key, False, typ)
@@ -582,21 +580,19 @@ class LandingTable(TempTable):
                 try:
                     (typ, code) = LANDING_DICT[row.name]
                     key = (typ, code, row.tim)
-                    key_list = str(row.tim)
+                    key_list = typ + str(row.tim)
                     if key_list not in l:
                         l.append(key_list)
                         self.createRow(key, False, typ)
                     else:
-                        print "duplicate entry found in row->",row.name
+                        pass
                        
     
                 except KeyError:
                     # This means the accumulator row wasn't of interest
                     continue        
             
-            #print "list",l 
-            print "count,",count 
-            print "list count" ,len(l)     
+                 
         finally:
             if ec:
                 ec.close()
@@ -613,29 +609,28 @@ class LandingTable(TempTable):
             "leg.%is_LH_with_NX_ac%",
             )
         legs, = crew_object.eval(leg_expr)
-        count2 = 0
+        
         for (ix, landing, acfam, tim,isLHNX) in legs:
             # First we add a simple FLOWN row, true for all active legs
             temp = "A320 LH" if isLHNX else acfam   
             key = ("FLOWN", temp, tim)
-            if str(tim) not in l:
-                l.append(str(tim))
+            key_list = 'FLOWN' + str(tim)
+            if key_list not in l:
+                l.append(key_list)
                 self.createRow(key, True, "FLOWN")
             else:
-                print "duplicate flown entry " ,"temp->",temp
-                count2+=1  
+                pass 
                 
             # Next we add the landings
             if landing:
                 key = ("LANDING", temp, tim)
-                if str(tim) not in l:
-                    l.append(str(tim))
+                key_list = 'LANDING' + str(tim)
+                if key_list not in l:
+                    l.append(key_list)
                     self.createRow(key, True, "LANDING")
                 else:
-                    print "duplicate landing entry"
-                    count2+=1
-        print "updated list count",len(l)
-        print "updated count",count2
+                    pass
+        
 
     def createRow(self, key, onroster, grp):
         landRow = None
