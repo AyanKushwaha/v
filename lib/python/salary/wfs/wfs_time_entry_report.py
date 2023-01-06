@@ -18,8 +18,8 @@ import modelserver
 from RelTime import RelTime
 from salary.wfs.wfs_report import WFSReport
 from salary.wfs.wfs_report import (abs_to_datetime, extperkey_from_id, country_from_id, 
-    getNextRecordId, getNextRunId, add_to_salary_wfs_t, rank_from_id, actual_rank_from_id, reltime_to_decimal, default_reltime,
-    integer_to_reltime, crew_info_changed_in_period, crew_has_retired_at_date,planninggroup_from_id)
+    getNextRecordId, getNextRunId, add_to_salary_wfs_t,  rank_from_id, actual_rank_from_id, reltime_to_decimal, default_reltime,
+    integer_to_reltime, crew_info_changed_in_period, crew_has_retired_at_date,planninggroup_from_id, end_month_extended)
 from salary.wfs.wfs_config import PaycodeHandler
 import time
 
@@ -102,7 +102,8 @@ class TimeEntryReport(WFSReport):
         monthly_ot = self._monthly_ot_template()
         valid_events = []
         calulated_tmp_hrs = []
-        crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start, self.end)
+        log.info('NORDLAYS:end month extended{end_month_extended_abs}'.format(end_month_extended_abs=end_month_extended(self.end)))
+        crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start, end_month_extended(self.end))
         
         non_mid_tmp_hrs = []
         mid_tmp_hrs = []
@@ -166,20 +167,12 @@ class TimeEntryReport(WFSReport):
                         extperkey, country, rank = self._update_crew_info(crew_id, duty_start_day)
 
                     # to pick only temp crew hrs 
-                    log.info('NORDLYS:end_month_before {end_month}'.format(end_month=self.end))
-                    end_month = abs_to_datetime(self.end)
-                    end_month_now = datetime(end_month.year, end_month.month, 1) + relativedelta(months=2, days=-1)
-                    month = end_month_now.month
-                    year = end_month_now.year
-                    day= end_month_now.day
-                    end_month_now_abs = AbsTime(year, month, day, 23, 59)
-                    log.info('NORDLYS:END_MONTH_ABSTIME{end_month_now}'.format(end_month_now=end_month_now))
-                    log.info('NORDLAYS:end month now {end_month_now_abs}'.format(end_month_now_abs=end_month_now_abs))
+                     
                     
                     if duty_bag.crew.is_temporary_at_date(duty_start_day): 
                         
                         temp_contract_changes_in_period = duty_bag.crew.is_temporary_at_date(duty_start_day) <> duty_bag.crew.is_temporary_at_date(self.end)
-                        crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start, end_month_now_abs)
+                        crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start,end_month_extended(self.end))
         
                         if temp_contract_changes_in_period:
                             if not duty_bag.crew.is_temporary_at_date(duty_start_day):

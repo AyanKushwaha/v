@@ -17,10 +17,10 @@ import os, stat
 from utils.selctx import SingleCrewFilter
 import modelserver
 from RelTime import RelTime
-from salary.wfs.wfs_report import WFSReport
+from salary.wfs.wfs_report import WFSReport 
 from salary.wfs.wfs_report import (abs_to_datetime, extperkey_from_id, country_from_id, 
     getNextRecordId, getNextRunId, add_to_salary_wfs_t, rank_from_id, actual_rank_from_id, reltime_to_decimal, default_reltime,
-    integer_to_reltime, crew_info_changed_in_period, crew_has_retired_at_date,planninggroup_from_id)
+    integer_to_reltime, crew_info_changed_in_period, crew_has_retired_at_date,planninggroup_from_id, end_month_extended)
 from salary.wfs.wfs_config import PaycodeHandler
 import time
 
@@ -236,7 +236,7 @@ class TimeEntry(WFSReport):
         monthly_ot = self._monthly_ot_template()
         valid_events = []
         calulated_tmp_hrs = []
-        crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start, self.end)
+        crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start, end_month_extended(self.end))
         
         # collects the data in diff list on the basis of type of duty 
         non_mid_tmp_hrs = []
@@ -310,7 +310,7 @@ class TimeEntry(WFSReport):
                     if duty_bag.crew.is_temporary_at_date(duty_start_day): 
                         
                         temp_contract_changes_in_period = duty_bag.crew.is_temporary_at_date(duty_start_day) <> duty_bag.crew.is_temporary_at_date(self.end)
-                        crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start, self.end)
+                        crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start, end_month_extended(self.end))
         
                         if temp_contract_changes_in_period:
                             if not duty_bag.crew.is_temporary_at_date(duty_start_day):
