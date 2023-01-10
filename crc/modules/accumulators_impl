@@ -699,6 +699,7 @@ export %last_flown%(String ac_fam, Abstime date) =
 table get_last_flown(String ac_fam, Abstime date) =
   ac_fam -> %get_last_flown%;
   "A320" -> last_flown_a320(date, false);
+  "A320 LH" -> last_flown_a320_LH(date, false);
   "A330" -> last_flown_a330(date, false);
   "A340" -> last_flown_a340(date, false);
   "A350" -> last_flown_a350(date, false);
@@ -720,6 +721,7 @@ export %next_flown%(String ac_fam, Abstime date) =
 table get_next_flown(String ac_fam, Abstime date) =
   ac_fam -> %get_next_flown%;
   "A320" -> last_flown_a320(date, true);
+  "A320 LH" -> last_flown_a320_LH(date, true);
   "A330" -> last_flown_a330(date, true);
   "A340" -> last_flown_a340(date, true);
   "A350" -> last_flown_a350(date, true);
@@ -746,9 +748,15 @@ end
                    leg.%end_UTC%)))))));
   
 %qual_last_flown%(String ac_fam) =
-  leg.%ac_family% = ac_fam
-  and leg.%is_active_flight%
-  and not leg.%returned_to_ramp%;
+  if ac_fam = "A320 LH" then
+      leg.%is_LH_with_NX_ac% and
+      leg.%is_active_flight%
+      and not leg.%returned_to_ramp%
+  
+  else
+    leg.%ac_family% = ac_fam
+    and leg.%is_active_flight%
+    and not leg.%returned_to_ramp%;
   
 %last_flown_this_ac_fam%(String ac_fam, Abstime date, Bool forward) =
   if forward then
@@ -757,6 +765,18 @@ end
   else
     last(leg(roster) where(leg.%end_UTC% < date and
       %qual_last_flown%(ac_fam)), leg.%end_UTC%);
+
+accumulator last_flown_a320_LH(Abstime date, Bool forward) =
+  %last_flown_this_ac_fam%("A320 LH", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_last_flown_filter%("A320 LH", date);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
 
 accumulator last_flown_a320(Abstime date, Bool forward) =
   %last_flown_this_ac_fam%("A320", date, forward);
@@ -769,6 +789,7 @@ accumulator last_flown_a320(Abstime date, Bool forward) =
 	else if %job_publication_p% then void_string
 	else crew.%id%;
 end
+
 
 accumulator last_flown_a330(Abstime date, Bool forward) =
   %last_flown_this_ac_fam%("A330", date, forward);
@@ -1214,6 +1235,7 @@ end
 table nr_active_sectors_in_period(String type, Abstime start, Abstime stop) =
   type   -> export %nr_active_sectors_in_period%;
   "A2"   -> a2_flights_sectors_daily_acc(start, stop);
+  "A2LH" -> a2lh_flights_sectors_daily_acc(start, stop);
   "38"   -> q38_flights_sectors_daily_acc(start, stop);
   "A3"   -> a3_flights_sectors_daily_acc(start, stop);
   "A5"   -> a5_flights_sectors_daily_acc(start, stop);
@@ -1258,6 +1280,23 @@ accumulator a2_flights_sectors_daily_acc(Abstime start, Abstime stop) =
 	else if %job_publication_p% then void_string
 	else crew.%id%;
 end
+
+/*
+** SKCMS-3037: Daily accumulator for A2LH flight sectors
+*/
+accumulator a2lh_flights_sectors_daily_acc(Abstime start, Abstime stop) =
+  %_nr_active_flights_in_period%(start, stop, "A2LH");
+  plan_start = %pp_start_month%;
+  plan_end   = %pp_end_month%;
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_next(Abstime this) = round_up(this + 0:01, 24:00);
+  acc_force_store(abstime t) = t=round_up_month(t);
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else crew.%id%;
+end
+
 
 /*
 ** SKCMS-2622: Daily cccumulators are created for record A3, A5 sectors
@@ -1625,6 +1664,7 @@ export %last_landing%(String ac_fam, Abstime date) =
 table get_last_landing(String ac_fam, Abstime date) =
   ac_fam -> %get_last_landing%;
   "A320" -> last_landing_a320(date, false);
+  "A320 LH" -> last_landing_a320_LH(date, false);
   "A330" -> last_landing_a330(date, false);
   "A340" -> last_landing_a340(date, false);
   "A350" -> last_landing_a350(date, false);
@@ -1651,7 +1691,10 @@ end
                                leg.%end_utc% <= %now%), leg.%end_UTC%))));
 
 %qual_landing%(String ac_fam) =
-  leg.%ac_family% = ac_fam and recency.%leg_qualifies_for_recency%;
+  if ac_fam = "A320 LH" then
+      recency.%leg_qualifies_for_recency% and leg.%is_LH_with_NX_ac%
+  else
+      leg.%ac_family% = ac_fam and recency.%leg_qualifies_for_recency%;
 
 accumulator last_landing_a320(Abstime date, Bool forward) =
   %last_landing_this_ac_fam%("A320", date, forward);
@@ -1660,6 +1703,18 @@ accumulator last_landing_a320(Abstime date, Bool forward) =
   acc_start  = %actual_acc_start%;
   acc_end    = %actual_acc_end%;
   acc_filter = %acc_landing_filter%("A320",date); 
+  key = if not %accumulator_mode% then crew.%id%
+	else if %job_publication_p% then void_string
+	else %flight_crew_id%;
+end
+
+accumulator last_landing_a320_LH(Abstime date, Bool forward) =
+  %last_landing_this_ac_fam%("A320 LH", date, forward);
+  plan_start = %pp_start%;
+  plan_end   = round_up_month(%pp_end%);
+  acc_start  = %actual_acc_start%;
+  acc_end    = %actual_acc_end%;
+  acc_filter = %acc_landing_filter%("A320 LH",date); 
   key = if not %accumulator_mode% then crew.%id%
 	else if %job_publication_p% then void_string
 	else %flight_crew_id%;
