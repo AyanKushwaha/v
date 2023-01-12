@@ -18,8 +18,8 @@ import modelserver
 from RelTime import RelTime
 from salary.wfs.wfs_report import WFSReport
 from salary.wfs.wfs_report import (abs_to_datetime, extperkey_from_id, country_from_id, 
-    getNextRecordId, getNextRunId, add_to_salary_wfs_t, rank_from_id, actual_rank_from_id, reltime_to_decimal, default_reltime,
-    integer_to_reltime, crew_info_changed_in_period, crew_has_retired_at_date,planninggroup_from_id)
+    getNextRecordId, getNextRunId, add_to_salary_wfs_t,  rank_from_id, actual_rank_from_id, reltime_to_decimal, default_reltime,
+    integer_to_reltime, crew_info_changed_in_period, crew_has_retired_at_date,planninggroup_from_id, end_month_extended)
 from salary.wfs.wfs_config import PaycodeHandler
 import time
 
@@ -102,7 +102,8 @@ class TimeEntryReport(WFSReport):
         monthly_ot = self._monthly_ot_template()
         valid_events = []
         calulated_tmp_hrs = []
-        crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start, self.end)
+        log.info('NORDLYS: End month to check the crew info has been changed is {end_month_extended_abs}'.format(end_month_extended_abs=end_month_extended(self.end)))
+        crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start, end_month_extended(self.end))
         
         non_mid_tmp_hrs = []
         mid_tmp_hrs = []
@@ -159,7 +160,6 @@ class TimeEntryReport(WFSReport):
                         # Skip any F7 or F3 duties from roster being reported
                         log.info('NORDLYS: Skipping F3 or F7 roster events on {dt}'.format(dt=duty_start_day))
                         continue
-
                     if crew_info_changes_in_period:
                         # Check if crew is retired on this duty date, It yes, Skip the retired crew
                         if crew_has_retired_at_date(crew_id, duty_start_day):
@@ -171,11 +171,12 @@ class TimeEntryReport(WFSReport):
                         extperkey, country, rank = self._update_crew_info(crew_id, duty_start_day)
 
                     # to pick only temp crew hrs 
+                     
                     
                     if duty_bag.crew.is_temporary_at_date(duty_start_day): 
                         
                         temp_contract_changes_in_period = duty_bag.crew.is_temporary_at_date(duty_start_day) <> duty_bag.crew.is_temporary_at_date(self.end)
-                        crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start, self.end)
+                        crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start,end_month_extended(self.end))
         
                         if temp_contract_changes_in_period:
                             if not duty_bag.crew.is_temporary_at_date(duty_start_day):

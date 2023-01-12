@@ -455,3 +455,11 @@ def crew_excluded(crew_id, curr_date):
     if extperkey_from_id(crew_id,curr_date) in crew_exclusion_list:
         return True
     return False
+def end_month_extended(e_month):
+    end_month = abs_to_datetime(e_month)
+    end_month_extended = datetime(end_month.year, end_month.month, 1) + relativedelta(months=2, days=-1)
+    month = end_month_extended.month
+    year = end_month_extended.year
+    day= end_month_extended.day
+    end_month_extended_abs = AbsTime(year, month, day, 0,0)
+    return end_month_extended_abs
