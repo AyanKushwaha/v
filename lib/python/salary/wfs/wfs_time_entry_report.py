@@ -102,7 +102,7 @@ class TimeEntryReport(WFSReport):
         monthly_ot = self._monthly_ot_template()
         valid_events = []
         calulated_tmp_hrs = []
-        log.info('NORDLAYS:end month extended{end_month_extended_abs}'.format(end_month_extended_abs=end_month_extended(self.end)))
+        log.info('NORDLYS: End month to check the crew info has been changed is {end_month_extended_abs}'.format(end_month_extended_abs=end_month_extended(self.end)))
         crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start, end_month_extended(self.end))
         
         non_mid_tmp_hrs = []
