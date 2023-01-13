@@ -354,7 +354,7 @@ class LMSQualReport:
                             ))                   
                         list_crew_basechange.append(crew)
                         break
-        # Fetching all qualification for the crew iwth base change
+        # Fetching all qualification for the crew with base change
         for rec in list_crew_basechange:
             crew = rec
             crew_qual_table = tm.table('crew_qualification')
@@ -362,7 +362,7 @@ class LMSQualReport:
             crew=crew,
             validto=curr_date
             ))
-            # checking for assignment qualification data 
+            # Creating assignment entries for all qualification belonging to a crew 
             for rec in assignment_data:
                 crew = rec.crew.id
                 qual = rec.qual.subtype
@@ -381,7 +381,7 @@ class LMSQualReport:
                     validto=validto
                     ))
 
-                # Create deassignment entries
+                # Create assignment entries
                 assignment_data = self._create_entries(crew, validfrom, validto, qual, None, "assignment_data")
                 self.assignment_writer.write(assignment_data)
 
