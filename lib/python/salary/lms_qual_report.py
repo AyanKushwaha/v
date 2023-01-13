@@ -386,7 +386,7 @@ class LMSQualReport:
                     validfrom=validfrom,
                     validto=validto
                     ))
-                # Create assignment entries for FD crew
+                # Create assignment entries
                 assignment_data = self._create_entries(crew, validfrom, validto, qual, None, "assignment_data")
                 self.assignment_writer.write(assignment_data)
 
