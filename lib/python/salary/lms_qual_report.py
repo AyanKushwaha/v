@@ -35,7 +35,7 @@ class LMSQualReport:
             'skipped_same_rank_count'   : 0,
             'skipped_upgrade_rank_count'    : 0,
             'skipped_degrade_rank_count'    : 0,
-            'base_change_count'    : 0
+            'emp_change_count'    : 0
         }
         if self.test:
             log.setLevel(logging.DEBUG)
@@ -55,7 +55,7 @@ class LMSQualReport:
 
         self._qualification_deltas(delta_date)
         self._crew_employment_deltas(delta_date)
-        self._crew_employment_base_change(delta_date)
+        self._crew_employment_change(delta_date)
         exec_end = time.time()
         exec_time = round(exec_end - exec_start, 2)
         self._info_dump(exec_time)
@@ -293,7 +293,7 @@ class LMSQualReport:
         # Skipped Same Rank count       : {skipped_srank}
         # Skipped Upgrade Rank count    : {skipped_urank}
         # Skipped Degrade Rank count    : {skipped_drank}
-        # Base Change Count             : {base_qual}
+        # Extperkey Change Count        : {emp_qual}
         # -----
         # Assignments created           : {assignment_rows}
         # Deassignments created         : {deassignment_rows}
@@ -311,7 +311,7 @@ class LMSQualReport:
             skipped_srank=self._stats['skipped_same_rank_count'],
             skipped_urank=self._stats['skipped_upgrade_rank_count']//2,
             skipped_drank=self._stats['skipped_degrade_rank_count']//2,
-            base_qual = self._stats['base_change_count'],
+            emp_qual = self._stats['emp_change_count'],
             assignment_rows=self.assignment_writer.row_count,
             deassignment_rows=self.deassignment_writer.row_count,
             exec_time=exec_time,
@@ -320,42 +320,48 @@ class LMSQualReport:
             released='True' if not self.test else 'False'       
         ))
        
-    def _crew_employment_base_change(self, curr_date):
-        
+    def _crew_employment_change(self, curr_date):
+
         crew_emp_table = tm.table('crew_employment')
         assignment_data = crew_emp_table.search("(validfrom={0})".format(curr_date))
-        deassignment_data = crew_emp_table.search("(validto<={0})".format(curr_date))
-
-        list_crew_basechange = []
-        # checking for assignment data from crew employment table 
+        list_crew_empchange = []
+        # Checking for extperkey change from crew employment table 
         for rec in assignment_data:
             crew = rec.crew.id
-            base = rec.base.id 
+            rank = rec.crewrank.id
+            extperkey = rec.extperkey 
             validfrom = rec.validfrom
             validto = rec.validto
-            log.info('Crew having validfrom data as today: {crew}'.format(crew=crew))
+            log.info('Crew having validfrom as today date: {crew}'.format(crew=crew))
             if is_retired(crew) or (extperkey_from_id(crew, today_in_abstime()) in test_crew_emp_no):
                 log.info('Skipping sending update for retired crew {crew}'.format(crew=crew))
                 continue
+           
+           # Search in crew_employment table is same crew exists with validto as either today or old date
+            deassignment_data = crew_emp_table.search('(&(crew={crew})(validto<={validto}))'.format(
+            crew=crew,
+            validto=curr_date
+            ))
             for rec_end in deassignment_data:
                 #If crew found in the crew_employment table having validto as either current date or less
                 if rec_end.crew.id == crew:
-                    if rec_end.base.id != base:
-                        self._stats['base_change_count'] += 1
+                    if rec_end.extperkey != extperkey:
+                        self._stats['emp_change_count'] += 1
                         log.info('''
-                        Crew {crew} - {base}
+                        Crew {crew} - Old Emp {oldextperkey} New Emp {newextperkey} 
                         Valid from {validfrom}
                         Valid to {validto}
                         '''.format(
                             crew=crew,
-                            base=base,
+                            oldextperkey=rec_end.extperkey,
+                            newextperkey=extperkey,
                             validfrom=validfrom,
                             validto=validto
                             ))                   
-                        list_crew_basechange.append(crew)
+                        list_crew_empchange.append(crew)
                         break
-        # Fetching all qualification for the crew with base change
-        for rec in list_crew_basechange:
+        # Fetching all qualification for the crew with employee number i.e. extperkey change
+        for rec in list_crew_empchange:
             crew = rec
             crew_qual_table = tm.table('crew_qualification')
             assignment_data = crew_qual_table.search('(&(crew={crew})(validto>={validto}))'.format(
@@ -380,8 +386,7 @@ class LMSQualReport:
                     validfrom=validfrom,
                     validto=validto
                     ))
-
-                # Create assignment entries
+                # Create assignment entries for FD crew
                 assignment_data = self._create_entries(crew, validfrom, validto, qual, None, "assignment_data")
                 self.assignment_writer.write(assignment_data)
 
