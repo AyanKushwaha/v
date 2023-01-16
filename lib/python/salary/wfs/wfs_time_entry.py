@@ -376,7 +376,7 @@ class TimeEntry(WFSReport):
                         chk_wfs_corrected = self._check_in_wfs_corrected(crew_id, extperkey, val['paycode'], val['dt'], None,val['days'])
                         if chk_wfs_corrected:
                             continue
-                        new_recs = self._latest_record(
+                        new_recs = self._insert_or_update_record(
                             crew_id,
                             extperkey,
                             val['paycode'],
@@ -388,7 +388,7 @@ class TimeEntry(WFSReport):
                         chk_wfs_corrected = self._check_in_wfs_corrected(crew_id, extperkey, val['paycode'], val['dt'], val['hrs'], None)
                         if chk_wfs_corrected:
                             continue
-                        new_recs = self._latest_record(
+                        new_recs = self._insert_or_update_record(
                             crew_id,
                             extperkey,
                             val['paycode'],
