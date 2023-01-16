@@ -268,7 +268,7 @@ class TimeEntryReport(WFSReport):
                                 sick_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_SICK', crew_id, country,rank)
                                 for val in sick_data_link:
                                     valid_events.append({'paycode':sick_paycode,
-                                                          'hrs':val[1],
+                                                          'days':val[1],
                                                           'dt':abs_to_datetime(val[0])})
                         
                         # Checkout on Day-off overtime 
@@ -358,17 +358,32 @@ class TimeEntryReport(WFSReport):
                     valid_events, monthly_ot, paycode
                     )
                 for val in valid_events:
-                    chk_wfs_corrected = self._check_in_wfs_corrected(crew_id, extperkey, val['paycode'], val['dt'], val['hrs'], None)
-                    if chk_wfs_corrected:
-                        continue
-                    new_recs = self._latest_record(
-                        crew_id,
-                        extperkey,
-                        val['paycode'],
-                        val['dt'],
-                        val['hrs'],
-                        None
-                        )
+                    sicklinkpaycodes = ('SAS_NO_CNLN_PROD_SICK','SAS_DK_CNLN_PROD_SICK')
+                    # Added this condition as for Link sick paycodes, days are to be reported
+                    if  val['paycode'] in  sicklinkpaycodes:
+                        chk_wfs_corrected = self._check_in_wfs_corrected(crew_id, extperkey, val['paycode'], val['dt'], None,val['days'])
+                        if chk_wfs_corrected:
+                            continue
+                        new_recs = self._latest_record(
+                            crew_id,
+                            extperkey,
+                            val['paycode'],
+                            val['dt'],
+                            None,
+                            val['days']
+                            )
+                    else: 
+                        chk_wfs_corrected = self._check_in_wfs_corrected(crew_id, extperkey, val['paycode'], val['dt'], val['hrs'], None)
+                        if chk_wfs_corrected:
+                            continue
+                        new_recs = self._insert_or_update_record(
+                            crew_id,
+                            extperkey,
+                            val['paycode'],
+                            val['dt'],
+                            val['hrs'],
+                            None
+                            )
                     data.extend(new_recs)
 
                 final_calulated_tmp_hrs = []
@@ -1044,7 +1059,7 @@ class TimeEntryReport(WFSReport):
         duty_end_day = duty_bag.duty.end_day()
 
         days = abs(abs_to_datetime(duty_end_day) - abs_to_datetime(duty_start_day)).days
-        sick_hrs = RelTime('24:00')
+        sick_hrs = 1
         for i in range(days+1):
             data_day = duty_start_day.adddays(i)
 
