@@ -263,7 +263,7 @@ class TimeEntryReport(WFSReport):
                             start_dt_end_abs = start_dt_start_abs + RelTime('24:00')
                             prev_duty_hrs_before_sick = duty_bag.rescheduling.period_inf_prev_duty_time(start_dt_start_abs,start_dt_end_abs)
                             if prev_duty_hrs_before_sick > RelTime('0:00'):
-                                sick_data_link = self._calculate_before_sick_hrs_link(duty_bag)
+                                sick_data_link = self._calculate_before_sick_days_link(duty_bag)
                                 log.info('NORDLYS:Link sick data {SICK_DATA}'.format(SICK_DATA=sick_data_link))
                                 sick_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_SICK', crew_id, country,rank)
                                 for val in sick_data_link:
@@ -1052,18 +1052,18 @@ class TimeEntryReport(WFSReport):
     Link Flight Duty Function Start
     '''
 
-    def _calculate_before_sick_hrs_link(self,duty_bag):
-        '''reports illness hrs for link crew.'''
+    def _calculate_before_sick_days_link(self,duty_bag):
+        '''reports illness days for link crew.'''
         rec = []
         duty_start_day = duty_bag.duty.start_day()
         duty_end_day = duty_bag.duty.end_day()
 
         days = abs(abs_to_datetime(duty_end_day) - abs_to_datetime(duty_start_day)).days
-        sick_hrs = 1
+        sick_days = 1
         for i in range(days+1):
             data_day = duty_start_day.adddays(i)
 
-            data = (data_day,sick_hrs)
+            data = (data_day,sick_days)
 
             rec.append(data)
 				
