@@ -2733,23 +2733,12 @@ let month_start = round_down_month(trip.%start_hb%),
 **    CAU K04 F.1.1.11
 **
 **    4eXNG 6.4.3.1
+**    K22 SKN CC - SKCMS-3232
 */
 /* CR404 */
 rule ind_max_bl_days_in_calendar_year_SKD_SKS_SKN =
   valid roster.%check_rules%
-    and crew.%is_homebase_scand%
-    /*
-    and (crew.%k4exng_cc_sp5_1_valid%(trip.%start_day%)
-    or  (crew.%is_SKD% and not crew.%is_temporary%)
-    or  crew.%is_SKS%
-    or  roster.%is_SKN_valid%(trip.%start_day%, trip.%end_day%))
-    and not (crew.%agmt_group_id% = "SNK_CC_AG" and
-             parameters.%k15_cc_valid%(trip.%start_hb%))
-    and not (crew.%has_agmt_group_nkf_cc% and
-             parameters.%nkf_bl_month_valid%(trip.%start_utc%))
-   */
-   and  not crew.%has_agmt_group_snk_cc%
-   and  not crew.%has_agmt_group_nkf_cc% /* SKCMS-1061 CBA 16*/
+   and crew.%is_homebase_scand%
    and  trip.%start_hb% >= %pp_start%
    and  trip.%is_last_blank_day_in_month_or_pp%
    and  not crew.%is_leased_trip_start%;
@@ -2763,11 +2752,17 @@ rule ind_max_bl_days_in_calendar_year_SKD_SKS_SKN =
   failtext(Int value, int limit) =
     rules.%failtext_int%("Coll: BL days in year", value, limit);
   remark "Coll: Max BL days in calendar year",
-  planner "Check that number of BL days in a calendar year doesn't exceed max "
-          "15 for 4ExNG.";
+  planner "Check that number of BL days in a calendar year doesn't exceed max limit";
 end
 
-%max_bl_days_in_calendar_year% = 15;
+%max_bl_days_in_calendar_year% = 
+    if crew.%has_agmt_group_skn_cc%
+        then default(system_db_parameters.%max_bl_year_skn_cc%(%pp_start%),10)
+    else if crew.%has_agmt_group_skd_cc%
+        then default(system_db_parameters.%max_bl_year_skd_cc%(%pp_start%),10)
+    else if crew.%has_agmt_group_sks_cc%
+        then default(system_db_parameters.%max_bl_year_sks_cc%(%pp_start%),10)
+    else 365; /*Other crew have no limit*/
 
 %bl_days_in_calendar_year% =
   accumulators.%blank_days_in_period%(round_down_year(trip.%end_day%),
@@ -2778,7 +2773,7 @@ end
 %bl_calendar_year_failobject% =
   first(trip(roster),trip.%failobject_start%)
   where (trip.%in_pp% and
-         %is_blank_day_cr404% and
+         trip.%is_blank_day% and
          %bl_days_in_calendar_year% > %max_bl_days_in_calendar_year%);
 
 /*
@@ -2808,14 +2803,6 @@ export rule ind_bl_not_allowed_resource_pool_CC =
   remark "(CCR) Coll: BL days not allowed for Resource Pool CC",
   planner "The rule checks that BL days are not assigned to Resource Pool CC";
 end
-
-/*****************************
- * Define blank day for CR404
- *****************************/
-%is_blank_day_cr404% =
-  if roster.%is_SKN_valid%(trip.%start_day%, trip.%end_day%) then
-     trip.%is_blank_day_BL%
-  else trip.%is_blank_day%;
 
 /****************************************************************
  * Section 6: SKBU Resource Pool rules
