@@ -662,19 +662,9 @@ end
 %is_duty_inf_long_haul% =
   any(duty(trip), rescheduling.%duty_inf_long_haul%);
 
-/*
-** 4ExNG CC: 6.4.3 Blank day
-**       FD: 6.2.7.4.2 Blank day
-*/
-
-rule resched_blank_day_ALL =
-  valid %resched_bl_valid%;
-  resched_bl_after_timeoff_earliest_check_in_ALL is legal;
-end
-
 %resched_bl_valid% =
-  (crew.%k4exng_cc_sp5_1_valid%(trip.%start_day%) or %flight_crew%) and
-  trip.%is_on_duty% and
+  (crew.%k4exng_cc_sp5_1_valid%(trip.%start_day%) or %flight_crew%)
+  and trip.%is_on_duty% and
   not crew.%is_leased_trip_start% and
   %trip_is_rescheduled_blank_day%;
 
@@ -690,25 +680,35 @@ end
 **   4ExNG CC: 6.4.3.2
 **   4ExNG FC: Pr�vetaftal omdisponering SH 3.
 **   4ExNG FC: 6.2.7.4.2
+**   K22 FD and SKN CC: excluded from rule SKCMS-3066/3232
 */
 
-rule (off) resched_bl_after_timeoff_earliest_check_in_ALL =
-  valid prev(trip(roster),trip.%is_off_duty%)
-    and not %trip_standby_callout_with_overnight_into_bl%
-    and not first(duty(trip), standby.%duty_is_airport_callout%)
-    and not first(duty(trip),rescheduling.%duty_inf_flag_had_sba%);
+rule resched_bl_after_timeoff_earliest_check_in_ALL =
+  valid %resched_bl_after_timeoff_earliest_check_in_valid%;
 
   trip.%start_hb% >= %earliest_check_in_resched_bl_after_timeoff%  +
     rule_exceptions.%overshoot_rel%(trip.%start_UTC%);
 
   startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_utc%,%duty_lh_region%));
   failobject = trip.%failobject_start%;
   failtext  "Coll: Earliest check-in when resched of BL-day after time-off";
   remark "(CCT) Resched: Earliest check-in when resched of BL-day after time-off",
   planner "The rule checks that when a BL-day preceded by time-off is"
           " rescheduled, then check-in is no earlier than 0600.";
 end
+
+%resched_bl_after_timeoff_earliest_check_in_valid% =
+    (crew.%k4exng_cc_sp5_1_valid%(trip.%start_day%)
+    or (system_db_parameters.%k22_fd_ci_limit_bl_after_f%(trip.%start_day%) and %flight_crew%))
+    and not crew.%has_agmt_group_skn_cc%
+    and trip.%is_on_duty% 
+    and not crew.%is_leased_trip_start% 
+    and %trip_is_rescheduled_blank_day%
+    and prev(trip(roster),trip.%is_off_duty%)
+    and not %trip_standby_callout_with_overnight_into_bl%
+    and not first(duty(trip), standby.%duty_is_airport_callout%)
+    and not first(duty(trip),rescheduling.%duty_inf_flag_had_sba%);
 
 %earliest_check_in_resched_bl_after_timeoff% =
     trip.%start_day% + 06:00;
@@ -723,7 +723,6 @@ end
         where (rescheduling.%dt_inf_any_flag%(rescheduling.%flag_blank%, duty.%start_utc%))
         while (is_first(duty(trip)) or not duty.%departs_from_homebase%)
         > this_duty_start);
-
 
 
 /*
