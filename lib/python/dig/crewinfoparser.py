@@ -746,8 +746,8 @@ class CrewRec(DbRec):
                 'logname': xdecode(dbRec['logname']),
                 'birthday': dbRec['birthday'],
                 'sex': dbRec['sex'],
-                'bcountry': dbRec['bcountry'],
-                'bcity': dbRec['bcity'],
+                'bcountry': xdecode(dbRec['bcountry']),
+                'bcity': xdecode(dbRec['bcity']),
                 'si': dbRec['si']}
     getUnicodeDict = staticmethod(getUnicodeDict)
 
