@@ -30,7 +30,7 @@ import os
 from smtplib import SMTP
 from carmensystems.basics.atfork.atfork import basics_fork, BASICS_ATFORK_NONE
 from carmensystems.dig.framework.handler import MessageHandlerBase, CallNextHandlerResult
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # constants and initialization ==========================================={{{1
 log = logging.getLogger('salary.ec.ec_perdiem_statement_mailer.ECMailApi')
@@ -667,7 +667,8 @@ class CrewStatementEmailer(MessageHandlerBase):
         subject = self.subjects
         body = self.bodies
         cid = path.split("/")[-1]
-        date = datetime.now().strftime("%b%Y")
+        previous_mon = datetime.now().replace(day=1) - timedelta(days=1)
+        date = previous_mon.strftime("%b%Y")
         if "{date}" in body: body = body.replace("{date}",  date)
         if "{date}" in subject: subject = subject.replace("{date}", date)
     
