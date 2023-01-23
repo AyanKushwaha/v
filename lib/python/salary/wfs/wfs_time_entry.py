@@ -162,11 +162,15 @@ class TimeEntry(WFSReport):
                         continue
 
                     if crew_info_changes_in_period:
+                        # Check if crew is retired on this duty date, It yes, Skip the retired crew
+                        if crew_has_retired_at_date(crew_id, duty_start_day):
+                            log.info('NORDLYS: Skipping retired crew {c} on {dt}'.format(c=crew_id, dt = duty_start_day))
+                            continue
                         # Whenever crew information has changed within the period we need to update 
                         # the information included in reports. This needs to be checked on each duty
                         # to catch the actual changed information
                         extperkey, country, rank = self._update_crew_info(crew_id, duty_start_day)
-                    
+
                     # to pick only temp crew hrs 
                     
                     if duty_bag.crew.is_temporary_at_date(duty_start_day): 
@@ -931,6 +935,10 @@ class TimeEntry(WFSReport):
             tnx_dt = dated_tnx['tnx_dt']
             days_off = dated_tnx['days_off']
             if crew_info_changed:
+                # Check if crew is retired on this date, It yes, Skip the retired crew
+                if crew_has_retired_at_date(crew_id, tnx_dt):
+                    log.info('NORDLYS: Skipping retired crew {c} on {dt}'.format(c=crew_id, dt = tnx_dt))
+                    continue
                 extperkey, country, rank = self._update_crew_info(crew_id, tnx_dt)
             log.debug('NORDLYS: Transaction on {account} for amount {d} on {dt}'.format(account=tnx.account.id, d = days_off, dt=tnx_dt))
             accountid = tnx.account.id
