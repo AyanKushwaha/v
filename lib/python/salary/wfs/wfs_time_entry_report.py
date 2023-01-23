@@ -263,12 +263,12 @@ class TimeEntryReport(WFSReport):
                             start_dt_end_abs = start_dt_start_abs + RelTime('24:00')
                             prev_duty_hrs_before_sick = duty_bag.rescheduling.period_inf_prev_duty_time(start_dt_start_abs,start_dt_end_abs)
                             if prev_duty_hrs_before_sick > RelTime('0:00'):
-                                sick_data_link = self._calculate_before_sick_hrs_link(duty_bag)
+                                sick_data_link = self._calculate_before_sick_days_link(duty_bag)
                                 log.info('NORDLYS:Link sick data {SICK_DATA}'.format(SICK_DATA=sick_data_link))
                                 sick_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_SICK', crew_id, country,rank)
                                 for val in sick_data_link:
                                     valid_events.append({'paycode':sick_paycode,
-                                                          'hrs':val[1],
+                                                          'days':val[1],
                                                           'dt':abs_to_datetime(val[0])})
                         
                         # Checkout on Day-off overtime 
@@ -358,17 +358,32 @@ class TimeEntryReport(WFSReport):
                     valid_events, monthly_ot, paycode
                     )
                 for val in valid_events:
-                    chk_wfs_corrected = self._check_in_wfs_corrected(crew_id, extperkey, val['paycode'], val['dt'], val['hrs'], None)
-                    if chk_wfs_corrected:
-                        continue
-                    new_recs = self._latest_record(
-                        crew_id,
-                        extperkey,
-                        val['paycode'],
-                        val['dt'],
-                        val['hrs'],
-                        None
-                        )
+                    sicklinkpaycodes = ('SAS_NO_CNLN_PROD_SICK','SAS_DK_CNLN_PROD_SICK')
+                    # Added this condition as for Link sick paycodes, days are to be reported
+                    if  val['paycode'] in  sicklinkpaycodes:
+                        chk_wfs_corrected = self._check_in_wfs_corrected(crew_id, extperkey, val['paycode'], val['dt'], None,val['days'])
+                        if chk_wfs_corrected:
+                            continue
+                        new_recs = self._latest_record(
+                            crew_id,
+                            extperkey,
+                            val['paycode'],
+                            val['dt'],
+                            None,
+                            val['days']
+                            )
+                    else: 
+                        chk_wfs_corrected = self._check_in_wfs_corrected(crew_id, extperkey, val['paycode'], val['dt'], val['hrs'], None)
+                        if chk_wfs_corrected:
+                            continue
+                        new_recs = self._latest_record(
+                            crew_id,
+                            extperkey,
+                            val['paycode'],
+                            val['dt'],
+                            val['hrs'],
+                            None
+                            )
                     data.extend(new_recs)
 
                 final_calulated_tmp_hrs = []
@@ -1037,18 +1052,18 @@ class TimeEntryReport(WFSReport):
     Link Flight Duty Function Start
     '''
 
-    def _calculate_before_sick_hrs_link(self,duty_bag):
-        '''reports illness hrs for link crew.'''
+    def _calculate_before_sick_days_link(self,duty_bag):
+        '''reports illness days for link crew.'''
         rec = []
         duty_start_day = duty_bag.duty.start_day()
         duty_end_day = duty_bag.duty.end_day()
 
         days = abs(abs_to_datetime(duty_end_day) - abs_to_datetime(duty_start_day)).days
-        sick_hrs = RelTime('24:00')
+        sick_days = 1
         for i in range(days+1):
             data_day = duty_start_day.adddays(i)
 
-            data = (data_day,sick_hrs)
+            data = (data_day,sick_days)
 
             rec.append(data)
 				
