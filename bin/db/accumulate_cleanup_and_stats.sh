@@ -47,9 +47,9 @@ echo "[$(date)] Cleanup schema regular" >> $logfile
 ${CARMUSR}/bin/db/cleanup_schema_regular.sh  
 echo "[$(date)] Claneup schema regular done" >> $logfile
 
-echo "[$(date)] Schema stats" >> $logfile
-${CARMUSR}/bin/cmsshell db schemastats | tee -a ${CARMTMP}/logfiles/cmd_gather_schema_stats.log
-echo "[$(date)] Schema stats done" >> $logfile
+#echo "[$(date)] Schema stats" >> $logfile
+#${CARMUSR}/bin/cmsshell db schemastats | tee -a ${CARMTMP}/logfiles/cmd_gather_schema_stats.log
+#echo "[$(date)] Schema stats done" >> $logfile
 
 
 echo "[$(date)] Script finished" >> $logfile
