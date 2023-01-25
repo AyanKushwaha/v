@@ -17,10 +17,10 @@ import os, stat
 from utils.selctx import SingleCrewFilter
 import modelserver
 from RelTime import RelTime
-from salary.wfs.wfs_report import WFSReport
+from salary.wfs.wfs_report import WFSReport 
 from salary.wfs.wfs_report import (abs_to_datetime, extperkey_from_id, country_from_id, 
     getNextRecordId, getNextRunId, add_to_salary_wfs_t, rank_from_id, actual_rank_from_id, reltime_to_decimal, default_reltime,
-    integer_to_reltime, crew_info_changed_in_period, crew_has_retired_at_date,planninggroup_from_id)
+    integer_to_reltime, crew_info_changed_in_period, crew_has_retired_at_date,planninggroup_from_id, end_month_extended)
 from salary.wfs.wfs_config import PaycodeHandler
 import time
 
@@ -97,7 +97,8 @@ class TimeEntry(WFSReport):
         monthly_ot = self._monthly_ot_template()
         valid_events = []
         calulated_tmp_hrs = []
-        crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start, self.end)
+        log.info('NORDLYS: End month to check the crew info has been changed is {end_month_extended_abs}'.format(end_month_extended_abs=end_month_extended(self.end)))
+        crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start, end_month_extended(self.end))
         
         # collects the data in diff list on the basis of type of duty 
         non_mid_tmp_hrs = []
@@ -161,17 +162,21 @@ class TimeEntry(WFSReport):
                         continue
 
                     if crew_info_changes_in_period:
+                        # Check if crew is retired on this duty date, It yes, Skip the retired crew
+                        if crew_has_retired_at_date(crew_id, duty_start_day):
+                            log.info('NORDLYS: Skipping retired crew {c} on {dt}'.format(c=crew_id, dt = duty_start_day))
+                            continue
                         # Whenever crew information has changed within the period we need to update 
                         # the information included in reports. This needs to be checked on each duty
                         # to catch the actual changed information
                         extperkey, country, rank = self._update_crew_info(crew_id, duty_start_day)
-                    
+
                     # to pick only temp crew hrs 
                     
                     if duty_bag.crew.is_temporary_at_date(duty_start_day): 
                         
                         temp_contract_changes_in_period = duty_bag.crew.is_temporary_at_date(duty_start_day) <> duty_bag.crew.is_temporary_at_date(self.end)
-                        crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start, self.end)
+                        crew_info_changes_in_period = crew_info_changed_in_period(crew_id, self.start, end_month_extended(self.end))
         
                         if temp_contract_changes_in_period:
                             if not duty_bag.crew.is_temporary_at_date(duty_start_day):
@@ -275,12 +280,12 @@ class TimeEntry(WFSReport):
                             start_dt_end_abs = start_dt_start_abs + RelTime('24:00')
                             prev_duty_hrs_before_sick = duty_bag.rescheduling.period_inf_prev_duty_time(start_dt_start_abs,start_dt_end_abs)
                             if prev_duty_hrs_before_sick > RelTime('0:00'):
-                                sick_data_link = self._calculate_before_sick_hrs_link(duty_bag)
+                                sick_data_link = self._calculate_before_sick_days_link(duty_bag)
                                 log.info('NORDLYS:Link sick data {SICK_DATA}'.format(SICK_DATA=sick_data_link))
                                 sick_paycode = self.paycode_handler.paycode_from_event('CNLN_PROD_SICK', crew_id, country,rank)
                                 for val in sick_data_link:
                                     valid_events.append({'paycode':sick_paycode,
-                                                          'hrs':val[1],
+                                                          'days':val[1],
                                                           'dt':abs_to_datetime(val[0])})
                             
                         # Checkout on Day-off overtime 
@@ -370,17 +375,32 @@ class TimeEntry(WFSReport):
                     valid_events, monthly_ot, paycode
                     )
                 for val in valid_events:
-                    chk_wfs_corrected = self._check_in_wfs_corrected(crew_id, extperkey, val['paycode'], val['dt'], val['hrs'], None)
-                    if chk_wfs_corrected:
-                        continue
-                    new_recs = self._insert_or_update_record(
-                        crew_id,
-                        extperkey,
-                        val['paycode'],
-                        val['dt'],
-                        val['hrs'],
-                        None
-                        )
+                    sicklinkpaycodes = ('SAS_NO_CNLN_PROD_SICK','SAS_DK_CNLN_PROD_SICK')
+                    # Added this condition as for Link sick paycodes, days are to be reported
+                    if  val['paycode'] in  sicklinkpaycodes:
+                        chk_wfs_corrected = self._check_in_wfs_corrected(crew_id, extperkey, val['paycode'], val['dt'], None,val['days'])
+                        if chk_wfs_corrected:
+                            continue
+                        new_recs = self._insert_or_update_record(
+                            crew_id,
+                            extperkey,
+                            val['paycode'],
+                            val['dt'],
+                            None,
+                            val['days']
+                            )
+                    else: 
+                        chk_wfs_corrected = self._check_in_wfs_corrected(crew_id, extperkey, val['paycode'], val['dt'], val['hrs'], None)
+                        if chk_wfs_corrected:
+                            continue
+                        new_recs = self._insert_or_update_record(
+                            crew_id,
+                            extperkey,
+                            val['paycode'],
+                            val['dt'],
+                            val['hrs'],
+                            None
+                            )
                     data.extend(new_recs)
 
                 final_calulated_tmp_hrs = []
@@ -915,6 +935,10 @@ class TimeEntry(WFSReport):
             tnx_dt = dated_tnx['tnx_dt']
             days_off = dated_tnx['days_off']
             if crew_info_changed:
+                # Check if crew is retired on this date, It yes, Skip the retired crew
+                if crew_has_retired_at_date(crew_id, tnx_dt):
+                    log.info('NORDLYS: Skipping retired crew {c} on {dt}'.format(c=crew_id, dt = tnx_dt))
+                    continue
                 extperkey, country, rank = self._update_crew_info(crew_id, tnx_dt)
             log.debug('NORDLYS: Transaction on {account} for amount {d} on {dt}'.format(account=tnx.account.id, d = days_off, dt=tnx_dt))
             accountid = tnx.account.id
@@ -1686,18 +1710,18 @@ class TimeEntry(WFSReport):
     '''
     Link Flight Duty Function Start
     '''
-    def _calculate_before_sick_hrs_link(self,duty_bag):
-        '''reports illness hrs for link crew.'''
+    def _calculate_before_sick_days_link(self,duty_bag):
+        '''reports illness days for link crew.'''
         rec = []
         duty_start_day = duty_bag.duty.start_day()
         duty_end_day = duty_bag.duty.end_day()
 
         days = abs(abs_to_datetime(duty_end_day) - abs_to_datetime(duty_start_day)).days
-        sick_hrs = RelTime('24:00')
+        sick_days = 1
         for i in range(days+1):
             data_day = duty_start_day.adddays(i)
 
-            data = (data_day,sick_hrs)
+            data = (data_day,sick_days)
 
             rec.append(data)
 				

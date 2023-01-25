@@ -91,9 +91,14 @@ class WFSReport():
                 if extperkey == crew_id:
                     # Try converting crew_id as extperkey to actual crew_id
                     crew_id = convert_extperkey_to_crew_id(crew_id, self.start)
-                if crew_has_retired_at_date(crew_id, self.start):
-                    log.info('NORDLYS: Skipping retired crew {c} on {d}'.format(c=crew_id, d = curr_date))
-                    continue
+                # This is placed here so that we should not skip the crew who is retired for some time
+                # during the report start date but they have valid contract in between the report run period
+                if crew_info_changed_in_period(crew_id, self.start, self.end):
+                    log.info('NORDLYS: Crew Info has been changed for crew {c} on {d}'.format(c=crew_id, d = self.start))
+                else:# If crew contract hasnt been changed in the report period, Skip the retired crew.
+                    if crew_has_retired_at_date(crew_id, self.start):
+                        log.info('NORDLYS: Skipping retired crew {c} on {d}'.format(c=crew_id, d = curr_date))
+                        continue
                 if crew_excluded(crew_id, curr_date):
                     log.info('NORDLYS: Skipping the excluded SAS Link crew {c}'.format(c=crew_id))
                     continue 
@@ -101,9 +106,14 @@ class WFSReport():
                 crew_ids.append(crew_id)
         else:
             for crew_id in crew_ids:
-                if crew_has_retired_at_date(crew_id, self.start):
-                    log.info('NORDLYS: Skipping retired crew {c} on {d}'.format(c=crew_id, d = self.start))
-                    crew_ids.remove(crew_id)
+                # This is placed here so that we should not skip the crew who is retired for some time
+                # during the report start date but they have valid contract in between the report run period
+                if crew_info_changed_in_period(crew_id, self.start, self.end):
+                    log.info('NORDLYS: Crew Info has been changed for crew {c} on {d}'.format(c=crew_id, d = self.start))
+                else:# If crew contract hasnt been changed in the report period, Skip the retired crew.
+                    if crew_has_retired_at_date(crew_id, self.start):
+                        log.info('NORDLYS: Skipping retired crew {c} on {d}'.format(c=crew_id, d = self.start))
+                        crew_ids.remove(crew_id)
                 if crew_excluded(crew_id, curr_date):
                     log.info('NORDLYS: Skipping the excluded SAS Link crew {c}'.format(c=crew_id))
                     crew_ids.remove(crew_id)
@@ -445,3 +455,11 @@ def crew_excluded(crew_id, curr_date):
     if extperkey_from_id(crew_id,curr_date) in crew_exclusion_list:
         return True
     return False
+def end_month_extended(e_month):
+    end_month = abs_to_datetime(e_month)
+    end_month_extended = datetime(end_month.year, end_month.month, 1) + relativedelta(months=2, days=-1)
+    month = end_month_extended.month
+    year = end_month_extended.year
+    day= end_month_extended.day
+    end_month_extended_abs = AbsTime(year, month, day, 0,0)
+    return end_month_extended_abs

@@ -225,6 +225,11 @@ export %r_valid_duty_time_7x24_hrs% = Bool;
 **  Resource constraint for CG for this rule is defined in cg_model
 **
 */
+%duty_time_in_7_days_start_day_ALL_logic% = 
+  if duty_time.%7_days_start_day% >=  %max_duty_time_in_7_days_fd_soft_limit% and 
+  duty_time.%7_days_start_day% < %max_duty_time_in_7_days%  then  
+                %max_duty_time_in_7_days_fd_soft_limit% 
+  else  %max_duty_time_in_7_days% ;
 
 export rule ind_max_duty_time_in_7_days_start_day_ALL =
   valid trip.%check_rules% and
@@ -233,9 +238,9 @@ export rule ind_max_duty_time_in_7_days_start_day_ALL =
         duty.%in_pp_extended% and
         duty_period.%is_on_duty% and
         duty_period.%is_last_duty_period_on_start_day% and
-        duty_period.%is_first_duty_in_duty_period%;
+        duty_period.%is_first_duty_in_duty_period% ;
 
-  duty_time.%7_days_start_day% <= %_max_duty_time_in_7_days% -
+  duty_time.%7_days_start_day% <= %duty_time_in_7_days_start_day_ALL_logic% -
                                   (if theme_prod.%is_flight_crew_training_7_days% then
                                      0:00 
                                    else
@@ -264,14 +269,21 @@ end
     where (leg.%start_UTC% <= end_7_days);
   
 %ind_max_duty_in_7_days_start_day_ALL_failtext%(Reltime value, Reltime limit) =
-  rules.%failtext_rel%(concat("Coll: Duty time in 7 days ",
+  let normal = duty_time.%7_days_start_day% >= %max_duty_time_in_7_days%,
+      soft_limit = duty_time.%7_days_start_day% >= %max_duty_time_in_7_days_fd_soft_limit% and duty_time.%7_days_start_day% < %max_duty_time_in_7_days% ,
+      normal_warning = if normal then "Coll: Duty time in 7 days " else "Soft: Duty time in 7 days generates overtime ",
+      new_limit = if normal 
+                  then %max_duty_time_in_7_days%
+                  else if soft_limit then %max_duty_time_in_7_days_fd_soft_limit% 
+                  else %max_duty_time_in_7_days%;
+  rules.%failtext_rel%(concat(normal_warning ,
                               format_time( duty_period.%last_7_days_start_day_start% +
                                           duty.%homebase_tz_corrector%,"%d%b"),
                               "-",
                               format_time( duty_period.%last_7_days_start_day_end% +
                                           duty.%homebase_tz_corrector% - 24:00,
                                           "%d%b")),
-                        value, limit);
+                        duty_time.%7_days_start_day%, new_limit);
 
 export %max_duty_time_in_7_days% =   
   theme_prod.%max_duty_time_in_7_days%;
@@ -293,6 +305,12 @@ export %_max_duty_time_in_7_days% =
 **   K22 FD 5.3 - SKCMS-3065
 */
 
+%duty_time_in_7_days_end_day_ALL_logic% = 
+  if duty_time.%7_days_end_day% >=  %max_duty_time_in_7_days_fd_soft_limit% and 
+  duty_time.%7_days_end_day% < %max_duty_time_in_7_days%  then  
+                %max_duty_time_in_7_days_fd_soft_limit% 
+  else  %max_duty_time_in_7_days% ;
+
 rule ind_max_duty_time_in_7_days_end_day_ALL =
   valid trip.%check_rules% and
         (crew.%k4exng_cc_sp5_1_valid%(duty.%start_day%) or
@@ -301,10 +319,9 @@ rule ind_max_duty_time_in_7_days_end_day_ALL =
         duty_period.%is_on_duty% and
         duty_period.%is_last_duty_period_on_start_day% and
         duty_period.%is_last_duty_in_duty_period% and
-        duty_time.%ends_on_day_after_start_hb%;
+        duty_time.%ends_on_day_after_start_hb% ;
 
-  duty_time.%7_days_end_day% <= %max_duty_time_in_7_days% +
-                rule_exceptions.%overshoot_rel_on_off%(duty.%start_UTC%);
+  duty_time.%7_days_end_day% <= %duty_time_in_7_days_end_day_ALL_logic% + rule_exceptions.%overshoot_rel_on_off%(duty.%start_UTC%) ;
 
   startdate = duty.%start_UTC%;
   severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
@@ -329,14 +346,24 @@ end
     where (leg.%start_utc% < end_7_days);
 
 %ind_max_duty_in_7_days_end_day_ALL_failtext%(Reltime value, Reltime limit) =
-  rules.%failtext_rel%(concat("Coll: Duty time in 7 days ",
+  let normal = duty_time.%7_days_end_day% >= %max_duty_time_in_7_days%,
+      soft_limit = duty_time.%7_days_end_day% >= %max_duty_time_in_7_days_fd_soft_limit% and duty_time.%7_days_end_day% < %max_duty_time_in_7_days% ,
+      normal_warning = if normal then "Coll: Duty time in 7 days " else "Soft: Duty time in 7 days generates overtime ",
+      new_limit = if normal 
+                  then %max_duty_time_in_7_days%
+                  else if soft_limit then %max_duty_time_in_7_days_fd_soft_limit% 
+                  else %max_duty_time_in_7_days%;
+  rules.%failtext_rel%(concat(normal_warning ,
                               format_time( duty_period.%last_7_days_start_day_start% +
                                           duty.%homebase_tz_corrector% + 24:00,
                                           "%d%b"),
                               "-",
                               format_time( duty_period.%last_7_days_start_day_end% + 
                                           duty.%homebase_tz_corrector%,"%d%b")),
-                       value, limit);
+                       duty_time.%7_days_end_day%, new_limit);
+%max_duty_time_in_7_days_fd_soft_limit% =
+  parameter 47:30
+  remark "Soft limit for max duty time in 7 days FD";      
 
 /*
 ** Rule: 
