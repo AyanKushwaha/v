@@ -13,8 +13,8 @@ log = logging.getLogger('ECSupervis')
 class SupervisRosterManager:
     
     def __init__(self, context, iterator):
-        # self.articles = ['INST_LCI', 'INST_LCI_LH', 'INST_LIFUS_ACT', 'INST_PC_OPC',
-        #                 'INST_PC_OPC_BD', 'INST_TYPE_RATING', 'INST_TYPE_RATING_BD',
+        # self.articles = ['INST_LCI', 'INST_LCI_LH', 'INST_LIFUS_ACT', 'INST_LPC_OPC_OTS',
+        #                 'INST_LPC_OPC_OTS_BD', 'INST_TYPE_RATING', 'INST_TYPE_RATING_BD',
         #                 'INST_CLASS', 'INST_CRM', 'INST_CC', 'INST_SKILL_TEST','INST_SIM', 
         #                 'INST_SIM_SKILL_BR','INST_NEW_HIRE','INST_CC_QA', 'SIM_INSTR_FIXED']
         # self.articles_se = ['INST_CLASS', 'INST_LCI', 'INST_CC', 'INST_CRM', 'INST_LCI_LH',
@@ -33,8 +33,9 @@ class SupervisRosterManager:
             'lifus_act': 'salary.%inst_lifus_act%',
             'etops_lifus_act': 'salary.%inst_etops_lifus_act%',
             'etops_lc_act': 'salary.%inst_etops_lc_act%',
-            'pc_opc': 'salary.%inst_pc_opc%',
-            'pc_opc_bd': 'salary.%inst_pc_opc_bd%',
+
+            'lpc_opc_ots': 'salary.%inst_lpc_opc_or_ots%',
+            'lpc_opc_ots_bd': 'salary.%inst_lpc_opc_or_ots_bd%',
             'type_rating': 'salary.%inst_type_rating%',
             'type_rating_bd': 'salary.%inst_type_rating_bd%',
             'crm': 'salary.%inst_crm%',

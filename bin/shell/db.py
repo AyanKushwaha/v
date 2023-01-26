@@ -117,7 +117,7 @@ def url():
     
 schema = url
 
-def _updateschema(logdir, doit, history):
+def _updateschema(logdir, doit, history, data_config_file):
     connect, schema = _config(useAdm=False, includeOracle=False, history=history)
     if not schema:
         print "\n### No %s schema specified in DB configuration file - migration skipped\n" %\
@@ -153,9 +153,15 @@ def _updateschema(logdir, doit, history):
 
         # Note: Support for migrating data is not implemented. Implement if/when needed.
         # See dave_model_migrator documentation regarding the option --data-config-file=FILE
-        cmd = os.path.expandvars(
-            "$CARMRUNNER dave_model_migrator -c oracle:%s -s %s -u sqlplus -d %s -f %s -o %s" %
-            (connect, schema, model_dirs, model_lst_files, logdir))
+        # data config file is used to define the additional steps during the migration
+        if data_config_file:
+            cmd = os.path.expandvars(
+                  "$CARMRUNNER dave_model_migrator -c oracle:%s -s %s -u sqlplus -d %s -f %s -o %s --data-config-file=%s" % 
+                  (connect, schema, model_dirs, model_lst_files, logdir, data_config_file))
+        else:
+            cmd = os.path.expandvars(
+                "$CARMRUNNER dave_model_migrator -c oracle:%s -s %s -u sqlplus -d %s -f %s -o %s" % 
+                (connect, schema, model_dirs, model_lst_files, logdir))
         print "\nExecuting %s\n" % cmd
         sys.stdout.flush()
         error_code = os.system(cmd)
@@ -286,7 +292,7 @@ def _updateschema(logdir, doit, history):
         os.mkdir(logdir)
 
     generate_sqls()
-    set_tablespace_on_created_indexes()
+    #set_tablespace_on_created_indexes()
     run_migration_sql("precheck_dave.sql", precheck=True)
     run_migration_sql("precheck.sql", precheck=True)
 
@@ -301,15 +307,17 @@ def _updateschema(logdir, doit, history):
     return migration_needed
 
 
-def updateschema(logdir="", doit=""):
+def updateschema(logdir="", doit="", data_config_file=""):
     """Updates the existing database schema with changes to the model.
     Practically this is a wrapper around dave_model_migrator.
     Both live and history schema is migrated (if defined in the etc/db/XXX.xml)
 
     Call like this for a dry run:
         db updateschema
+        db updateschema <data_config_file_path>
     Or like this to execute the migration
         db updateschema mylogdir doit
+        db updateschema mylogdir doit <data_config_file_path>
 
     Returns True (1) if migration is needed and False (0) if no migration is needed.
     Note that a migration is always performed when 'doit' is given, even if it wasn't needed
@@ -325,8 +333,8 @@ def updateschema(logdir="", doit=""):
         print "### DRY RUN"
 
     migration_needed = dict()
-    migration_needed[_config(history=False)[1]] = _updateschema(logdir=logdir, doit=doit, history=False)
-    migration_needed[_config(history=True)[1]] = _updateschema(logdir=logdir, doit=doit, history=True)
+    migration_needed[_config(history=False)[1]] = _updateschema(logdir=logdir, doit=doit, history=False, data_config_file=data_config_file)
+    migration_needed[_config(history=True)[1]] = _updateschema(logdir=logdir, doit=doit, history=True, data_config_file=data_config_file)
     any_migration_needed = any(migration_needed.values())
 
     if not doit:

@@ -307,13 +307,13 @@ class CIOReport(SASReport):
 
     def preliminary_ca1(self):
         """ You are preliminary C/A 1 on the following flights. """
-        pc = rv.PrelCA1(self.crewid)
-        if pc:
+        lpc = rv.PrelCA1(self.crewid)
+        if lpc:
             col = Column()
             col.add(H1("You are preliminary C/A 1 on the following flight(s)"))
             table = Column()
             col.add(Isolate(table))
-            for leg in pc:
+            for leg in lpc:
                 table.add(IndentedRow(
                     Column(AText(self._flight_id(leg.flight_name, leg.udor))),
                     Column(AText(leg.adep)),

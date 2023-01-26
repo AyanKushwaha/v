@@ -27,8 +27,8 @@ class InstructorIterator(RaveIterator):
             'crewid': 'crew.%id%',
             'empno': 'crew.%employee_number%',
             'lifus_act': 'salary.%inst_lifus_act%',
-            'pc_opc': 'salary.%inst_pc_opc%',
-            'pc_opc_bd': 'salary.%inst_pc_opc_bd%',
+            'lpc_opc': 'salary.%inst_lpc_opc_or_ots%',
+            'lpc_opc_ots_bd': 'salary.%inst_lpc_opc_or_ots_bd%',
             'type_rating': 'salary.%inst_type_rating%',
             'type_rating_bd': 'salary.%inst_type_rating_bd%',
             'crm': 'salary.%inst_crm%',
@@ -51,8 +51,8 @@ class InstructorIterator(RaveIterator):
 # InstructorsAllowanceRun ================================================{{{1
 class InstructorsAllowanceRun(GenericRun):
     def __init__(self, rundata, articles=[]):
-        articles = ['INST_LCI', 'INST_LCI_LH', 'INST_LIFUS_ACT', 'INST_PC_OPC',
-                'INST_PC_OPC_BD', 'INST_TYPE_RATING', 'INST_TYPE_RATING_BD',
+        articles = ['INST_LCI', 'INST_LCI_LH', 'INST_LIFUS_ACT', 'INST_LPC_OPC_OTS',
+                'INST_LPC_OPC_OTS_BD', 'INST_TYPE_RATING', 'INST_TYPE_RATING_BD',
                 'INST_CLASS', 'INST_CRM', 'INST_CC', 'INST_SKILL_TEST','INST_SIM', 'INST_SIM_SKILL_BR','INST_NEW_HIRE','INST_CC_QA',
                 'SIM_INSTR_FIXED', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT']
         GenericRun.__init__(self, rundata, articles)
@@ -93,11 +93,12 @@ class InstructorsAllowanceRun(GenericRun):
     def INST_ETOPS_LC_ACT(self, rec):
         return self.times100(rec.etops_lc_act)
 
-    def INST_PC_OPC(self, rec):
-        return self.hours100(rec.pc_opc)
+    def INST_LPC_OPC_OTS(self, rec):
+        return self.hours100(rec.lpc_opc_ots)
 
-    def INST_PC_OPC_BD(self, rec):
-        return self.times100(rec.pc_opc_bd)
+    def INST_LPC_OPC_OTS_BD(self, rec):
+        return self.times100(rec.lpc_opc_ots_bd)
+
 
     def INST_TYPE_RATING(self, rec):
         return self.hours100(rec.type_rating)

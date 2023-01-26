@@ -34,7 +34,7 @@ Feature: Test the rule rules_training_ccr.qln_min_sectors_in_max_days_recency_FC
 
     Given crew member 3 has qualification "ACQUAL+A3" from 28SEP2020 to 31DEC2035
     Given crew member 3 has qualification "ACQUAL+A5" from 11NOV1996 to 31DEC2035
-    Given crew member 3 has document "REC+PCA3A5" from 20DEC2020 to 1JUN2021
+    Given crew member 3 has document "REC+LPCA3A5" from 20DEC2020 to 1JUN2021
 
     Given table agreement_validity additionally contains the following
         | id                       | validfrom      | validto    |

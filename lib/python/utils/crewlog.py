@@ -519,7 +519,7 @@ class L1GTSimBlockHoursQuery(L1SimBlockHoursQuery):
             "cgd.task_udor = gt.udor",
             "cgd.task_id = gt.id",
             "gt.activity = aset.id",
-            "aset.grp in ('SIM', 'OPC', 'PC', 'AST', 'ASF', 'FFS')",
+            "aset.grp in ('SIM', 'OPC', 'OTS', 'LPC', 'AST', 'ASF', 'FFS')",
             # Maybe SIM will return too many activities SIM kan also be a PACT
         ]
         L.extend(HiLoFilter('gt.et', self.hi, self.lo))
@@ -546,7 +546,7 @@ class L1CASimBlockHoursQuery(L1SimBlockHoursQuery):
             "aset.deleted = 'N'",
             "aset.next_revid = 0",
             "ca.activity = aset.id",
-            "aset.grp in ('SIM', 'OPC', 'PC', 'AST', 'ASF', 'FFS')",
+            "aset.grp in ('SIM', 'OPC', 'OTS', 'LPC', 'AST', 'ASF', 'FFS')",
         ]
         L.extend(HiLoFilter('ca.et', self.hi, self.lo))
         L.extend(EqFilter("ca.crew", self.crew))

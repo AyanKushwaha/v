@@ -180,17 +180,17 @@ def setAttribute():
     
     leg_values = _getValues(leg_object, verbose)
 
-    (crewId, valid_leg, pc_opc, deadhead, old_attr, training_codes) = leg_values
+    (crewId, valid_leg, lpc_opc_ots, deadhead, old_attr, training_codes) = leg_values
 
     if not valid_leg:
-        err_mess = "Only valid on flights or PC/OPC, in the planning period"
+        err_mess = "Only valid on flights or LPC/OPC/OTS, in the planning period"
         cfhExtensions.show(err_mess)
         Errlog.log(FUNK + err_mess)
         return None
     
     # Show dialog
     rangeOption = True
-    if pc_opc:
+    if lpc_opc_ots:
         rangeOption = False
         
     attributes_form = FlightAttributesForm(
@@ -228,7 +228,7 @@ def setAttribute():
             crewId = None
         legs = _getLegs(obj, area, verbose=verbose)
 
-        _putData(legs, attribute, crewId, pc_opc)
+        _putData(legs, attribute, crewId, lpc_opc_ots)
                 
         
 #######################################################
@@ -246,18 +246,18 @@ def _getValues(leg_object, verbose=False):
     leg_vars = leg_object.eval('crew.%id%',
                                'crew.%is_pilot%',
                                'leg.%can_have_attribute%',
-                               'leg.%is_pc_or_opc%',
+                               'leg.%is_lpc_opc_or_ots%',
                                'leg.%is_deadhead%',
                                'leg.%training_code_safe%',
                                'leg.%starts_in_pp%'
                                )
-    (crewId, FC, valid, pc_opc, dh, attr, in_pp) = leg_vars
+    (crewId, FC, valid, lpc_opc_ots, dh, attr, in_pp) = leg_vars
 
     valid = valid and in_pp
     
     if FC:
-        if pc_opc:
-            set_var = 'attributes.pc_opc_codes'
+        if lpc_opc_ots:
+            set_var = 'attributes.lpc_opc_or_ots_codes'
         else:
             set_var = 'attributes.training_codes_fc'
     else:
@@ -270,7 +270,7 @@ def _getValues(leg_object, verbose=False):
         Errlog.log(FUNK + "crewId: %s, FC: %s, attr: %s" %(crewId, FC, attr))
         print leg_vars
     
-    return (crewId, valid, pc_opc, dh, attr, training_codes)
+    return (crewId, valid, lpc_opc_ots, dh, attr, training_codes)
                
 
 def _getLegs(object, area, verbose=False):
@@ -308,7 +308,7 @@ def _getLegs(object, area, verbose=False):
     return legs
 
 
-def _putData(legs, attribute, crewId, pc_opc):
+def _putData(legs, attribute, crewId, lpc_opc_ots):
     """
     Writes data to etable on file or database.
 
@@ -321,7 +321,7 @@ def _putData(legs, attribute, crewId, pc_opc):
             # We only write data when necessary.
             pass
         elif not valid:
-            # We only set attributes on valid legs (flight duties and PC/OPC).
+            # We only set attributes on valid legs (flight duties and LPC/OPC/OTS).
             pass
         else:
             # There are two cases where attributes should be set:
@@ -336,7 +336,7 @@ def _putData(legs, attribute, crewId, pc_opc):
                 # In both cases we need to remove the old attribute since only
                 # one training attribute per flight is supported
                 if old_attr != "NONE":
-                    if pc_opc:
+                    if lpc_opc_ots:
                         Attributes.RemoveCrewGroundDutyAttr(crewId,
                                                             udor, fd_uuid,
                                                             old_attr)
@@ -345,7 +345,7 @@ def _putData(legs, attribute, crewId, pc_opc):
                                                             udor, fd_uuid, adep,
                                                             old_attr)
                 if (attribute != "NONE"):
-                    if pc_opc:
+                    if lpc_opc_ots:
                         Attributes.SetCrewGroundDutyAttr(crewId,
                                                          udor, fd_uuid,
                                                          attribute,

@@ -3,7 +3,7 @@
  
  Sim Statistics
 
- Information about the number of crew with PC date or OPC month in each month
+ Information about the number of crew with LPC date or OPC/OTS month in each month
 
  Created:    June 2007
  By:         Peter, Jeppesen Systems AB
@@ -16,6 +16,7 @@ from carmensystems.publisher.api import *
 from report_sources.include.SASReport import SASReport
 from AbsDate import AbsDate
 from RelTime import RelTime
+from utils.rave import RaveEvaluator
 
 # constants =============================================================={{{1
 CONTEXT = 'default_context'
@@ -52,7 +53,7 @@ class SimStatistics(SASReport):
         tmpRow.add(Text(sum, border=border(left=0),align=RIGHT))
         return tmpRow
 
-    def sumRowPC(self, data1, data2, monthsInYear):
+    def sumRowLPC(self, data1, data2, monthsInYear):
         tmpRow = Row(border=border(top=0), font=Font(weight=BOLD))
         tmpRow.add(Text('Total', border=border(right=0)))
         sum1 = 0
@@ -97,36 +98,36 @@ class SimStatistics(SASReport):
         except:
             print "Error month"+str(month) + " " + rank
 
-    def createForDoubleQualCat(self, rank, opc_month1, opc_qual, pc_month1, pc_qual, data):
+    def createForDoubleQualCat(self, rank, opc_ots_month1, opc_ots_qual, lpc_month1, lpc_qual, data):
         try:
-            self.createForType(rank, opc_qual, "OPC", data)
-            self.createForType(rank, pc_qual, "PC", data)
-            month = opc_month1 - 1
-            self.createForMonth(rank, month, opc_qual, "OPC", data)
-            month = pc_month1 - 1
-            self.createForMonth(rank, month, pc_qual, "PC", data)
+            self.createForType(rank, opc_ots_qual, "OPC/OTS", data)
+            self.createForType(rank, lpc_qual, "LPC", data)
+            month = opc_ots_month1 - 1
+            self.createForMonth(rank, month, opc_ots_qual, "OPC", data)
+            month = lpc_month1 - 1
+            self.createForMonth(rank, month, lpc_qual, "LPC", data)
         except:
-            print "Error cat1" + rank + " " + str(opc_month1) + " " +  str(pc_month1) + " " + str(data)        
-    def createForCat(self, rank, opc_month1, pc_month1, qual, data):
+            print "Error cat1" + rank + " " + str(opc_ots_month1) + " " +  str(lpc_month1) + " " + str(data)        
+    def createForCat(self, rank, opc_ots_month1, lpc_month1, qual, data):
         try:
-            self.createForType(rank, qual, "OPC", data)
-            self.createForType(rank, qual, "PC", data)
-            month = opc_month1 - 1
-            self.createForMonth(rank, month, qual, "OPC", data)
-            month = pc_month1 - 1
-            self.createForMonth(rank, month, qual, "PC", data)
+            self.createForType(rank, qual, "OPC/OTS", data)
+            self.createForType(rank, qual, "LPC", data)
+            month = opc_ots_month1 - 1
+            self.createForMonth(rank, month, qual, "OPC/OTS", data)
+            month = lpc_month1 - 1
+            self.createForMonth(rank, month, qual, "LPC", data)
         except:
-            print "Error cat2" + rank + " " + str(opc_month1) + " " +  str(pc_month1) + " " + str(data)
+            print "Error cat2" + rank + " " + str(opc_ots_month1) + " " +  str(lpc_month1) + " " + str(data)
         
-    def createForOPCPC(self, rank, opc_month1, pc_month1, qual, data):
+    def createForOPCOTSLPC(self, rank, opc_ots_month1, lpc_month1, qual, data):
         try:
             self.createForType(rank, qual, "", data)
-            month = opc_month1 - 1
+            month = opc_ots_month1 - 1
             self.createForMonth(rank, month, qual, "", data)
-            month = pc_month1 - 1
+            month = lpc_month1 - 1
             self.createForMonth(rank, month, qual, "", data)
         except:
-            print "Error cat3" + rank + " " + str(opc_month1) + " " +  str(pc_month1) + " " + str(data)
+            print "Error cat3" + rank + " " + str(opc_ots_month1) + " " +  str(lpc_month1) + " " + str(data)
         
             
     def create(self, reportType):
@@ -156,14 +157,18 @@ class SimStatistics(SASReport):
             'report_common.%crew_string%',
             'report_common.%crew_rank%',
             'crew.%homebase%',
-            'training.%pc_month_1%',
+            'training.%lpc_month_1%',
             'training.%opc_month_1%',
             'training.%opc_month_2%',
-            'training.%pc_qual_1%',
+            'training.%ots_month_1%',
+            'training.%ots_month_2%',
+            'training.%lpc_qual_1%',
             'training.%opc_qual_1%',
             'training.%opc_qual_2%',
-            'training.%pc_month_2%',
-            'training.%pc_qual_2%',
+            'training.%ots_qual_1%',
+            'training.%ots_qual_2%',
+            'training.%lpc_month_2%',
+            'training.%lpc_qual_2%',
             'report_ccr.%recurrent_type_mismatch_expiry_date%',
             'crew.%is_double_qualified_new%',
             'crew.%is_crew_double_qualified%',
@@ -175,40 +180,48 @@ class SimStatistics(SASReport):
 
         data = dict()
         missmatch_data = dict()
-        pc_data = dict()
+        lpc_data = dict()
         num_crew_missing_document = 0
         # Loop over all the 'bags' that comes from the RAVE expression
         # and collect the data
-        for (ix,crewString,rank,base,pc_month1,opc_month1,opc_month2,pc_qual1,qual1,opc_qual2,pc_month2,qual2,missmatch, double_qual, double_LH, double_no, mff) in rosters:
+        for (ix,crewString,rank,base,lpc_month1,opc_month1,opc_month2,ots_month1,ots_month2,lpc_qual1,qual1,opc_qual2,ots_qual2,lpc_month2,qual2,missmatch, double_qual, double_LH, double_no, mff) in rosters:
             if missmatch:
                 temp = missmatch_data
             else:
                 temp = data
             # Qual other than A3 A4
             # A3/A4 qual
-            if (((qual1 == "A3" or qual1 == "A4" or qual1 == "A5" or qual1 == "A2") or (qual1 == "37" or qual1 == "38")) and qual2 == None and opc_month1 != None and pc_month1 != None):
-                self.createForCat(rank, opc_month1, pc_month1, qual1, temp)
-
-            elif (double_qual and opc_month1 != None and pc_month1 != None):
-                self.createForOPCPC(rank, opc_month1, pc_month1, "PC/OPC", temp)
+            if (((qual1 == "A3" or qual1 == "A4" or qual1 == "A5" or qual1 == "A2") or (qual1 == "37" or qual1 == "38")) and qual2 == None and (opc_month1 != None or ots_month1 != None) and lpc_month1 != None):
+                if RaveEvaluator.rEval('fundamental.%use_link_tracking_ruleset%') is True:
+                    self.createForCat(rank, opc_month1, lpc_month1, qual1, temp)
+                else:
+                    self.createForCat(rank, ots_month1, lpc_month1, qual1, temp)
+            elif (double_qual and (opc_month1 != None or ots_month1 != None) and lpc_month1 != None):
+                if RaveEvaluator.rEval('fundamental.%use_link_tracking_ruleset%') is True:
+                    self.createForOPCOTSLPC(rank, opc_month1, lpc_month1, "LPC/OPC", temp)
+                else:
+                    self.createForOPCOTSLPC(rank, ots_month1, lpc_month1, "LPC/OTS", temp)
                 try:
-                    i = pc_month1 - 1
-                    pc_data[rank] = pc_data.get(rank,dict())
-                    pc_data[rank][i] = pc_data[rank].get(i,0) + 1
+                    i = lpc_month1 - 1
+                    lpc_data[rank] = lpc_data.get(rank,dict())
+                    lpc_data[rank][i] = lpc_data[rank].get(i,0) + 1
                 except:
                     print "Error other" +str(i) + " " + rank
             #Dual qualified A3 A5 or 37 38
-            elif (double_no and pc_month1 != None and opc_month1 != None):
-                self.createForDoubleQualCat(rank, opc_month1, qual1, pc_month1, pc_qual1, data)
-            elif (double_LH and (pc_month1 != None and pc_month2 != None) or (opc_month1 != None and opc_month2 != None)):
-                if(pc_month1 != None and pc_month2 != None):
-                    qual = pc_qual1
-                    month = pc_month1 - 1
-                    self.createForQual(rank, month, qual, "PC", temp)
+            elif (double_no and lpc_month1 != None and (opc_month1 != None or ots_month1 != None)):
+                if RaveEvaluator.rEval('fundamental.%use_link_tracking_ruleset%') is True:
+                    self.createForDoubleQualCat(rank, opc_month1, qual1, lpc_month1, lpc_qual1, data)
+                else:
+                    self.createForDoubleQualCat(rank, ots_month1, qual1, lpc_month1, lpc_qual1, data)
+            elif (double_LH and (lpc_month1 != None and lpc_month2 != None) or (opc_month1 != None and opc_month2 != None) or (ots_month1 != None and ots_month2 != None)):
+                if(lpc_month1 != None and lpc_month2 != None):
+                    qual = lpc_qual1
+                    month = lpc_month1 - 1
+                    self.createForQual(rank, month, qual, "LPC", temp)
                     if (mff):
                         qual = qual2
-                        month = pc_month2 - 1
-                        self.createForQual(rank, month, qual, "PC", temp)
+                        month = lpc_month2 - 1
+                        self.createForQual(rank, month, qual, "LPC", temp)
                 if(opc_month1 != None and opc_month2 !=None):
                     qual = qual1
                     month = opc_month1 - 1
@@ -217,26 +230,34 @@ class SimStatistics(SASReport):
                         qual = opc_qual2
                         month = opc_month2 - 1
                         self.createForQual(rank, month, qual, "OPC", temp)
+                if(ots_month1 != None and opc_month2 !=None):
+                    qual = qual1
+                    month = ots_month1 - 1
+                    self.createForQual(rank, month, qual, "OTS", temp)
+                    if (mff):
+                        qual = ots_qual2
+                        month = ots_month2 - 1
+                        self.createForQual(rank, month, qual, "OTS", temp)
                 
 
             else:
                 num_crew_missing_document += 1    
         
-        self.createReportFor(data, missmatch_data, pc_data, objectReport, generalReport, num_crew_missing_document) 
+        self.createReportFor(data, missmatch_data, lpc_data, objectReport, generalReport, num_crew_missing_document) 
                              
         
-    def createReportFor(self, data, missmatch_data, pc_data, objectReport, generalReport, num_crew_missing_document):
+    def createReportFor(self, data, missmatch_data, lpc_data, objectReport, generalReport, num_crew_missing_document):
         # OPC months in year
         if objectReport:
             self.add(Row(Text(crewString, font=self.HEADERFONT)))
-        self.createReportForData(data, pc_data, generalReport)
+        self.createReportForData(data, lpc_data, generalReport)
         self.newpage()
-        self.createReportForData(missmatch_data, pc_data, generalReport)
+        self.createReportForData(missmatch_data, lpc_data, generalReport)
         self.add(Row(" "))
-        missingstr = str(num_crew_missing_document) + " crew is missing OPC/PC document"
+        missingstr = str(num_crew_missing_document) + " crew is missing OPC/OTS/LPC document"
         self.add(Row(Text(missingstr, align=RIGHT)))
         
-    def createReportForData(self, data, pc_data, generalReport):
+    def createReportForData(self, data, lpc_data, generalReport):
         monthsInYear = "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec" 
                ## basesInUse = []
 ##        for base in self.SAS_BASES:
@@ -255,43 +276,43 @@ class SimStatistics(SASReport):
                     ranks = []
                     dataBox = Column(border=border(left=0))
                     total = dict()
-                    pc_total = dict()
+                    lpc_total = dict()
                     #if ((base in data[ac_qual]) and (generalReport or base != "Summary")):
                     for rank in ranksInUse:
                         if (rank in data[month_qual][type] and rank != "Summary"):
-                            dataBox.add(self.createQualTypeRankRow(month_qual, type, rank, data, pc_data, ranks, total, pc_total))
+                            dataBox.add(self.createQualTypeRankRow(month_qual, type, rank, data, lpc_data, ranks, total, lpc_total))
                     rankBox.add(Row(
                         self.getTableHeader(ranks, vertical=True),
                         dataBox))
                     #rankBox.add(data[month_qual]["Summary"])
-                    if month_qual == "PC/OPC":
-                        rankBox.add(self.sumRowPC(total,pc_total,range(12)))
+                    if month_qual == "LPC/OPC/OTS":
+                        rankBox.add(self.sumRowPC(total,lpc_total,range(12)))
                     else:
                         rankBox.add(self.sumRow(total,range(12)))
                     self.add(Row(rankBox))
         else:
             self.add("No Sim Assignments")
         
-    def createQualTypeRankRow(self, month_qual, type, rank, data, pc_data, ranks, total, pc_total):
+    def createQualTypeRankRow(self, month_qual, type, rank, data, lpc_data, ranks, total, lpc_total):
         ranks.append(rank)
         currentRow = Row()
         sum = 0
-        if month_qual == "PC/OPC":
-            pc_sum = 0
+        if month_qual == "LPC/OPC/OTS":
+            lpc_sum = 0
             for i in range(12):
                 tmp = data[month_qual][type][rank].get(i,0)
-                pc = pc_data[rank].get(i,0)
+                lpc = lpc_data[rank].get(i,0)
                 if tmp > 0:
-                    tmpstr = str(tmp) + "(" + str(pc) + ")"
+                    tmpstr = str(tmp) + "(" + str(lpc) + ")"
                 else:
                     tmpstr = str(tmp)
                 total[i] = total.get(i,0)+tmp
-                pc_total[i] = pc_total.get(i,0)+pc
+                lpc_total[i] = lpc_total.get(i,0)+lpc
                 currentRow.add(Text(tmpstr, align=RIGHT))
                 sum += tmp
-                pc_sum += pc
+                lpc_sum += lpc
             if sum > 0:
-                sumstr = str(sum) + "(" + str(pc_sum) + ")"
+                sumstr = str(sum) + "(" + str(lpc_sum) + ")"
             else:
                 sumstr = str(sum) 
         else:

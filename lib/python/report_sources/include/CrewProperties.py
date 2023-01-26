@@ -111,7 +111,7 @@ class CrewProperties(SASReport):
     def rec_block(self, data):
         self.page.add(Row(Text("Recurrent documents", font = self.HEADERFONT)))
         
-        rec_order = ("PC","PCA3","PCA4","PCA5","PCA3A5","OPC","OPCA3","OPCA4","OPCA5","OPCA3A5"
+        rec_order = ("LPC","LPCA3","LPCA4","LPCA5","LPCA3A5","OPC","OPCA3","OPCA4","OPCA5","OPCA3A5","OTS","OTSA3","OTSA4","OTSA5","OTSA3A5"
                      "PGT", "LC", "CRM",
                      "REC")
         info_row = Row()
@@ -127,7 +127,7 @@ class CrewProperties(SASReport):
         # Basic setup
         SASReport.create(self, TITLE, headers=headers, usePlanningPeriod=True)
 
-        ctl_to_show = ("PC", "OPC", "CRM", "PGT", "LC", "ILC",
+        ctl_to_show = ("LPC", "OPC", "OTS", "CRM", "PGT", "LC", "ILC",
                        "REC", "REC CX", "AST", "ASF")
         basic_prop_expr = R.foreach(
             R.times('report_crew_properties.%basic_count%'),

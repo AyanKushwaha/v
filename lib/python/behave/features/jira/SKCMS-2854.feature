@@ -20,9 +20,9 @@ Feature: Tests that rules for recurrent training works with line checks for crew
     Given crew member 1 has document "REC+CRM" from 02JAN1986 to 01JAN2035
     Given crew member 1 has document "REC+LC" from 02JAN1986 to 01JAN2035 and has qualification "A2"
     Given crew member 1 has document "REC+PGT" from 02JAN2020 to 30NOV2021
-    Given crew member 1 has document "REC+PCA5" from 02JAN1986 to 01JAN2035
+    Given crew member 1 has document "REC+LPCA5" from 02JAN1986 to 01JAN2035
     Given crew member 1 has document "REC+OPCA5" from 02JAN1986 to 01JAN2035
-    Given crew member 1 has document "REC+PC" from 02JAN1986 to 01JAN2035 and has qualification "A2"
+    Given crew member 1 has document "REC+LPC" from 02JAN1986 to 01JAN2035 and has qualification "A2"
     Given crew member 1 has document "REC+OPC" from 02JAN1986 to 01JAN2035 and has qualification "A2"
     Given crew member 1 has qualification "ACQUAL+A2" from 1JAN2018 to 31DEC2035
     Given crew member 1 has contract "V134-LH"
@@ -44,9 +44,9 @@ Feature: Tests that rules for recurrent training works with line checks for crew
     Given crew member 1 has document "REC+CRM" from 02JAN1986 to 01JAN2035
     Given crew member 1 has document "REC+LC" from 02JAN1986 to 30NOV2021 and has qualification "A2"
     Given crew member 1 has document "REC+PGT" from 02JAN2020 to 30NOV2021
-    Given crew member 1 has document "REC+PCA5" from 02JAN1986 to 01JAN2035
+    Given crew member 1 has document "REC+LPCA5" from 02JAN1986 to 01JAN2035
     Given crew member 1 has document "REC+OPCA5" from 02JAN1986 to 01JAN2035
-    Given crew member 1 has document "REC+PC" from 02JAN1986 to 01JAN2035 and has qualification "A2"
+    Given crew member 1 has document "REC+LPC" from 02JAN1986 to 01JAN2035 and has qualification "A2"
     Given crew member 1 has document "REC+OPC" from 02JAN1986 to 01JAN2035 and has qualification "A2"
     Given crew member 1 has qualification "ACQUAL+A2" from 1JAN2018 to 31DEC2035
     Given crew member 1 has contract "V134-LH"
@@ -68,9 +68,9 @@ Feature: Tests that rules for recurrent training works with line checks for crew
     Given crew member 1 has document "REC+CRM" from 02JAN1986 to 30NOV2021
     Given crew member 1 has document "REC+LC" from 02JAN1986 to 30NOV2021 and has qualification "A2"
     Given crew member 1 has document "REC+PGT" from 02JAN2020 to 01JAN2035
-    Given crew member 1 has document "REC+PCA5" from 02JAN1986 to 01JAN2035
+    Given crew member 1 has document "REC+LPCA5" from 02JAN1986 to 01JAN2035
     Given crew member 1 has document "REC+OPCA5" from 02JAN1986 to 01JAN2035
-    Given crew member 1 has document "REC+PC" from 02JAN1986 to 01JAN2035 and has qualification "A2"
+    Given crew member 1 has document "REC+LPC" from 02JAN1986 to 01JAN2035 and has qualification "A2"
     Given crew member 1 has document "REC+OPC" from 02JAN1986 to 01JAN2035 and has qualification "A2"
     Given crew member 1 has qualification "ACQUAL+A2" from 1JAN2018 to 31DEC2035
     Given crew member 1 has contract "V134-LH"

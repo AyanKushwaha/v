@@ -297,7 +297,7 @@ Feature: Test min number of sectors after FAM FLT
       | 1      | 1    | 1-2 | pass  |
 
   @SCENARIO6
-  Scenario: Check that rule passes when crew has 8 A5 sectors within 90 days after FAM FLT followed by FMST and then 1 extra sector within 120 days after FAM FLT followed by PC and then 1 extra sector within 150 days
+  Scenario: Check that rule passes when crew has 8 A5 sectors within 90 days after FAM FLT followed by FMST and then 1 extra sector within 120 days after FAM FLT followed by LPC and then 1 extra sector within 150 days
 
     Given Tracking
 
@@ -309,7 +309,7 @@ Feature: Test min number of sectors after FAM FLT
       | crew member 1 | FAM FLT | A5   | 19MAY2019 10:22 |
       | crew member 1 | FAM FLT | A5   | 19MAY2019 12:22 |
       | crew member 1 | FMST    | FMST | 21AUG2019 11:00 |
-      | crew member 1 | PC      | Y5   | 18SEP2019 12:22 |
+      | crew member 1 | LPC     | Y5   | 18SEP2019 12:22 |
 
     Given table accumulator_int additionally contains the following
     | name                                       | acckey         | tim       | val |
@@ -429,7 +429,7 @@ Feature: Test min number of sectors after FAM FLT
 
     and rave "rules_training_ccr.%trng_min_active_sectors_after_ctr_flight_failtext%(9, 10)" values shall be
       | roster | trip | leg | value |
-      | 1      | 1    | 1-2 | ASF, AST or PC/OPC and remaining A5 sectors within 150 days after FAM flight 16Oct2019: 9[10] |
+      | 1      | 1    | 1-2 | ASF, AST or LPC/OPC/OTS and remaining A5 sectors within 150 days after FAM flight 16Oct2019: 9[10] |
 
     and the rule "rules_training_ccr.trng_max_days_between_fmst_and_cons_flt" legality shall be
       | roster | trip | leg | value |
@@ -478,7 +478,7 @@ Feature: Test min number of sectors after FAM FLT
 
     and rave "rules_training_ccr.%trng_min_active_sectors_after_ctr_flight_failtext%(9, 10)" values shall be
       | roster | trip | leg | value |
-      | 1      | 1    | 1-2 | ASF, AST or PC/OPC and remaining A5 sectors within 150 days after FAM flight 16Oct2019: 9[10] |
+      | 1      | 1    | 1-2 | ASF, AST or LPC/OPC/OTS and remaining A5 sectors within 150 days after FAM flight 16Oct2019: 9[10] |
 
     and the rule "rules_training_ccr.trng_max_days_between_fmst_and_cons_flt" legality shall be
       | roster | trip | leg | value |
@@ -677,7 +677,7 @@ Feature: Test min number of sectors after FAM FLT
 
     and rave "rules_training_ccr.%trng_min_active_sectors_after_ctr_flight_failtext%(9, 10)" values shall be
       | roster | trip | leg | value |
-      | 1      | 5    | 1-2 | OMA: Min A5 sectors within 90 days after FAM flight needs ASF, PC or OPC 17Aug2019: 9[10] |
+      | 1      | 5    | 1-2 | OMA: Min A5 sectors within 90 days after FAM flight needs ASF, LPC or OPC/OTS 17Aug2019: 9[10] |
 
     and the rule "rules_training_ccr.trng_max_days_between_fmst_and_cons_flt" legality shall be
       | roster | trip | leg | value |
@@ -726,7 +726,7 @@ Feature: Test min number of sectors after FAM FLT
 
     and rave "rules_training_ccr.%trng_min_active_sectors_after_ctr_flight_failtext%(9, 10)" values shall be
       | roster | trip | leg | value |
-      | 1      | 1    | 1-2 | ASF, AST or PC/OPC and remaining A5 sectors within 150 days after FAM flight 16Oct2019: 9[10] |
+      | 1      | 1    | 1-2 | ASF, AST or LPC/OPC/OTS and remaining A5 sectors within 150 days after FAM flight 16Oct2019: 9[10] |
 
     and the rule "rules_training_ccr.trng_max_days_between_fmst_and_cons_flt" legality shall be
       | roster | trip | leg | value |
@@ -774,7 +774,7 @@ Feature: Test min number of sectors after FAM FLT
 
     and rave "rules_training_ccr.%trng_min_active_sectors_after_ctr_flight_failtext%(9, 10)" values shall be
       | roster | trip | leg | value |
-      | 1      | 1    | 1-2 | ASF, AST or PC/OPC and remaining A5 sectors within 150 days after FAM flight 16Oct2019: 9[10] |
+      | 1      | 1    | 1-2 | ASF, AST or LPC/OPC/OTS and remaining A5 sectors within 150 days after FAM flight 16Oct2019: 9[10] |
 
     and the rule "rules_training_ccr.trng_max_days_between_fmst_and_cons_flt" legality shall be
       | roster | trip | leg | value |

@@ -13,9 +13,9 @@ Feature: Tests that rules for recurrent training works with line checks for crew
         | region     | SKN    |
         Given crew member 1 has document "REC+CRM" from 02JAN1986 to 01JAN2035
         Given crew member 1 has document "REC+PGT" from 02JAN1986 to 01JAN2035
-        Given crew member 1 has document "REC+PCA5" from 02JAN1986 to 01JAN2035
+        Given crew member 1 has document "REC+LPCA5" from 02JAN1986 to 01JAN2035
         Given crew member 1 has document "REC+OPCA5" from 02JAN1986 to 01JAN2035
-        Given crew member 1 has document "REC+PC" from 02JAN1986 to 01JAN2035 and has qualification "A2"
+        Given crew member 1 has document "REC+LPC" from 02JAN1986 to 01JAN2035 and has qualification "A2"
         Given crew member 1 has document "REC+OPC" from 02JAN1986 to 01JAN2035 and has qualification "A2"
         Given crew member 1 has contract "V134-LH"
 

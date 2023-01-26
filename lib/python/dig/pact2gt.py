@@ -26,12 +26,15 @@ These activities will lead to an attribute 'RECURRENT' with the following
 string values:
     Activity                value_str
 
-    (Y|Z)6.*                PCA3
+    (Y|Z)6.*                LPCA3
     S6.*                    OPCA3
-    (Y|Z)4.*                PCA4
+    S6.*                    OTSA3
+    (Y|Z)4.*                LPCA4
     S4*                     OPCA4
-    (Z|Y)[^6^4].*           PC
+    S4*                     OTSA4
+    (Z|Y)[^6^4].*           LPC
     S[^6^4].*               OPC
+    S[^6^4].*               OTS
 """
 
 # Notes: see usage notes last in this file.
@@ -47,6 +50,7 @@ import utils.spinner as spinner
 
 from optparse import OptionParser
 
+from utils.rave import RaveEvaluator
 from AbsTime import AbsTime
 from carmensystems.basics.uuid import uuid
 from utils.dutycd import rank2pos
@@ -227,8 +231,8 @@ class Crew(dict):
         rank = self.get_rank_at_date(ca['st'])
         if rank == "FC" and got_lower:
             return "FP"
-        if rank == "FR" and ca.is_pc_opc():
-            # Assign as FP if PC or OPC
+        if rank == "FR" and ca.is_lpc_opc_ots():
+            # Assign as FP if LPC or OPC/OTS
             return "FP"
         # The call to rank2pos will make sure that only valid positions are
         # returned, e.g. AA -> AH, FS -> FU
@@ -274,12 +278,12 @@ class CrewActivity(dict):
         return dbsearch(self.dc, 'crew_activity_attr', s)
 
     def short_name(self):
-        """Convert activities of group 'PC' or 'OPC', e.g.:
+        """Convert activities of group 'LPC', 'OPC' or 'OTS', e.g.:
         'Z43' to 'S4' (skill test)
-        'Y31' to 'S3' (PC)
-        'YE31' to 'S3' (PC)
+        'Y31' to 'S3' (LPC)
+        'YE31' to 'S3' (LPC)
         """
-        if self.grp in ('PC', 'OPC', 'AST', 'ASF', 'SIM'):
+        if self.grp in ('LPC', 'OPC', 'OTS', 'AST', 'ASF', 'SIM'):
             m = self.activity_regexp.match(self['activity'])
             if m:
                 main_grp, sub_grp, ac_type, time_slot = m.groups()
@@ -307,9 +311,12 @@ class CrewActivity(dict):
         if m:
             main_grp, sub_grp, ac_type, time_slot = m.groups()
             if main_grp in ('Z', 'Y'):
-                return {'4': 'PCA4', '6': 'PCA3'}.get(ac_type, 'PC')
+                return {'4': 'LPCA4', '6': 'LPCA3'}.get(ac_type, 'LPC')
             elif main_grp == 'S':
-                return {'4': 'OPCA4', '6': 'OPCA3'}.get(ac_type, 'OPC')
+                if RaveEvaluator.rEval('fundamental.%use_link_tracking_ruleset%') is True:
+                    return {'4': 'OPCA4', '6': 'OPCA3'}.get(ac_type, 'OPC')
+                else:
+                    return {'4': 'OTSA4', '6': 'OTSA3'}.get(ac_type, 'OTS')
             elif main_grp == 'E':
                 return 'PGT'
             elif main_grp == 'N':
@@ -327,7 +334,7 @@ class CrewActivity(dict):
         return self.__pc_attr
 
     def __get_pc_attr(self):
-        """Return 'PC FORCED' if latest document matches sim, else 'PC CHANGE'.
+        """Return 'LPC FORCED' if latest document matches sim, else 'LPC CHANGE'.
         Return None if no match."""
         m = self.activity_regexp.match(self['activity'])
         if m:
@@ -336,7 +343,7 @@ class CrewActivity(dict):
                 L = []
                 for doc in dbsearch(self.dc, 'crew_document', (
                         "crew = '%s' AND doc_typ = 'REC'"
-                        " AND doc_subtype like 'PC%%'") % self['crew']):
+                        " AND doc_subtype like 'LPC%%'") % self['crew']):
                     # Add tuple (validfrom, subtype)
                     L.append((doc['validfrom'], doc['validto'], doc['ac_qual']))
                 L.sort()
@@ -345,10 +352,10 @@ class CrewActivity(dict):
                         # latest a/c qual doc is same as simulator a/c type
                         if self['st'] - validto > 6 * 30 * 1440: # Approx 6mths
                             # Long period of inactivity
-                            return 'PC CHANGE'
-                        return 'PC FORCED'
+                            return 'LPC CHANGE'
+                        return 'LPC FORCED'
                     break
-                return 'PC CHANGE'
+                return 'LPC CHANGE'
 
     def is_tl(self):
         """Activities that should be assigned as 'TL'."""
@@ -361,11 +368,11 @@ class CrewActivity(dict):
         return ((self['activity'] in ('CX7', 'CX8'))
             or (self['activity'][:2] in ('NP', 'NS' , 'NW')))
 
-    def is_pc_opc(self):
-        return self.grp in ('PC', 'OPC')
+    def is_lpc_opc_ots(self):
+        return self.grp in ('LPC', 'OPC', 'OTS')
 
     def is_simulator(self):
-        return self.grp in ('PC', 'OPC', 'ASF', 'AST', 'FFS', 'SIM')
+        return self.grp in ('LPC', 'OPC', 'OTS', 'ASF', 'AST', 'FFS', 'SIM')
 
     def is_convertable(self):
         return self.is_pc_opc() or self.is_tl() or self.is_own_position()

@@ -309,7 +309,7 @@ def saveGeneralScenario(test_mode_params = None):
         "minimum_connect_pass",
         "new_hire_follow_up",
         "pattern_acts pattern_set",
-        "pc_opc_composition",
+        "lpc_opc_or_ots_composition",
         "per_diem_compensation",
         "pgt_need",
         "planning_group_set",

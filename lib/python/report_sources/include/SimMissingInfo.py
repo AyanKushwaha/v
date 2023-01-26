@@ -1,4 +1,4 @@
-"""
+ """
  $Header$
  
  PGT Missing Info
@@ -29,14 +29,14 @@ class SimMissingInfo(SASReport):
         # Basic setup
         SASReport.create(self, TITLE, orientation=PORTRAIT, usePlanningPeriod=True)
 
-        # Get the rosters that are missing PC
+        # Get the rosters that are missing LPC
         pc_expr = R.foreach(
             R.iter('iterators.roster_set', 
-                    where='report_ccr.%must_have_pc_any% and planning_area.%crew_is_in_planning_area%', 
+                    where='report_ccr.%must_have_lpc_any% and planning_area.%crew_is_in_planning_area%', 
                     sort_by='crew.%id%'),
             'report_common.crew_name',
             'report_common.employee_number',
-            'report_ccr.%pc_exp_date_show%')
+            'report_ccr.%lpc_exp_date_show%')
         
         # Get the rosters that are missing OPC
         opc_expr = R.foreach(
@@ -47,10 +47,20 @@ class SimMissingInfo(SASReport):
             'report_common.employee_number',
             'report_ccr.%opc_exp_date_show%')
         
+        # Get the rosters that are missing OTS
+        ots_expr = R.foreach(
+            R.iter('iterators.roster_set', 
+                    where='report_ccr.%must_have_ots_any% and planning_area.%crew_is_in_planning_area%', 
+                    sort_by='crew.%id%'),
+            'report_common.crew_name',
+            'report_common.employee_number',
+            'report_ccr.%ots_exp_date_show%')
+
               
         # Evaluate rave expression
-        pc_rosters, = R.eval(CONTEXT, pc_expr)
+        lpc_rosters, = R.eval(CONTEXT, pc_expr)
         opc_rosters, = R.eval(CONTEXT, opc_expr)
+        ots_rosters, = R.eval(CONTEXT, ots_expr)
 
         
         ##Print things in report
@@ -60,15 +70,21 @@ class SimMissingInfo(SASReport):
         
        
         crews = 0
-        # Print RAVE PC data in table      
-        for (ix, crew_string,emp_nr,exp_date) in pc_rosters:
-            self.add(Row(Column(emp_nr),Column(crew_string),Column("PC"),Column(exp_date)))
+        # Print RAVE LPC data in table      
+        for (ix, crew_string,emp_nr,exp_date) in lpc_rosters:
+            self.add(Row(Column(emp_nr),Column(crew_string),Column("LPC"),Column(exp_date)))
             crews += 1
             self.page0()
             
         # Print RAVE OPC data in table      
         for (ix, crew_string,emp_nr,exp_date) in opc_rosters:
             self.add(Row(Column(emp_nr),Column(crew_string),Column("OPC"),Column(exp_date)))
+            crews += 1
+            self.page0()
+
+        # Print RAVE OTS data in table      
+        for (ix, crew_string,emp_nr,exp_date) in ots_rosters:
+            self.add(Row(Column(emp_nr),Column(crew_string),Column("OTS"),Column(exp_date)))
             crews += 1
             self.page0()
 

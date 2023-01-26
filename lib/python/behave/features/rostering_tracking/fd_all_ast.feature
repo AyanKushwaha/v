@@ -172,8 +172,8 @@ Feature: Check that AST recurrents work.
       | 1    | CONV TYPERATING | ZFTT LIFUS | 1MAY2019   | 20MAY2019  | 4       | 0        | A3     |
     
     Given table crew_training_log additionally contains the following
-      | crew          | typ           | code | tim       | attr          |
-      | crew member 1 | PC SKILL TEST | Z6   | 17MAY2019 | crew member 2 |
+      | crew          | typ            | code | tim       | attr          |
+      | crew member 1 | LPC SKILL TEST | Z6   | 17MAY2019 | crew member 2 |
 
     When I show "crew" in window 1
     and I load rule set "Tracking"

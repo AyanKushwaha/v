@@ -182,14 +182,14 @@ class RosteringStatistics(SASReport):
                     constraints["8.%s %s" %(ix,full_name)] = tot_cost
                 
             # Leg constraints couldn't be implemented in a nice way in rave
-            if R.constraint('roster_constraints.soft_max_crew_on_pc').on():
+            if R.constraint('roster_constraints.soft_max_crew_on_lpc').on():
                 tot_cost, = R.eval(context,
-                                   'report_ccr.%cost_soft_max_crew_on_pc%',
+                                   'report_ccr.%cost_soft_max_crew_on_lpc%',
                                    )
                 global_constraint_cost += tot_cost
             else:
                 tot_cost = "-"
-            constraints["8.7 Soft: Max allowed crew on 2X2h PC"] = tot_cost
+            constraints["8.7 Soft: Max allowed crew on 2X2h LPC"] = tot_cost
                 
             if R.constraint('roster_constraints.sim_fully_assigned').on():
                 cost_of_sim, = R.eval(context,

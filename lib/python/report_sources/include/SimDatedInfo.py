@@ -3,7 +3,7 @@
  
  Sim Dated Info
 
- Lists all OPC and AST activities in the planning period, using
+ Lists all OPC/OTS and AST activities in the planning period, using
  a weekly view.
 
  Created:    August 2007
@@ -35,7 +35,7 @@ class SimDatedInfo(SASReport):
         if (len(simbase) < 2):
             #"Handles case when no base was given seems to be an error no time to handle now"
             return
-        # Slices: emp_or_comp, name, rank, pc1, pc2, crewbase, quals, code, pos, dutycode
+        # Slices: emp_or_comp, name, rank, lpc1, lpc2, crewbase, quals, code, pos, dutycode
 
         # 0: Instructors (modified in rave code)
         # 1: FC
@@ -52,14 +52,14 @@ class SimDatedInfo(SASReport):
             sim_ordered[pos] = []
         
         for simslice in slices:
-            (ix, emp_comp, name, rank, pc1, pc2, crewbase, quals, code, pos, dutycode, hasAttribute, attribute) = simslice
+            (ix, emp_comp, name, rank, lpc1, lpc2, crewbase, quals, code, pos, dutycode, hasAttribute, attribute) = simslice
             if pos not in positions:
                 # Silly way to handle when crew is assigned in bad position
                 pos = 9
                 name = "Bad position"
-                (name, rank, pc1, pc2, crewbase, quals, dutycode) = ("Bad position","-","-","-","-","-","-")
+                (name, rank, lpc1, lpc2, crewbase, quals, dutycode) = ("Bad position","-","-","-","-","-","-")
             try:
-                sim_ordered[pos].append((emp_comp, name, rank, pc1, pc2, crewbase, quals, code, pos, dutycode, hasAttribute, attribute))
+                sim_ordered[pos].append((emp_comp, name, rank, lpc1, lpc2, crewbase, quals, code, pos, dutycode, hasAttribute, attribute))
             except:
                 # This is too general, but we need to handle bad data
                 print "Problem with simslice: ",simslice
@@ -69,21 +69,21 @@ class SimDatedInfo(SASReport):
         simbox.add(Row(Text("%s %s %s" %(simcode, time, simbase), colour="#ffffff"), background="#000000"))
         for pos in positions:
             if pos < 10:
-                for (emp_comp, name, rank, pc1, pc2, crewbase, quals, code, pos, dutycode, hasAttribute, attribute) in sim_ordered[pos]:
+                for (emp_comp, name, rank, lpc1, lpc2, crewbase, quals, code, pos, dutycode, hasAttribute, attribute) in sim_ordered[pos]:
                     thiscrew = Column(border=border(bottom=1))
                     thiscrew.add(Text("%s %s %s" %(emp_comp, name, rank)))
                     if hasAttribute:
                         thiscrew.add(Text("%s" %(attribute)))
                     thiscrew.add(Text("%s %s %s" %(dutycode, crewbase, quals)))
-                    thiscrew.add(Text(pc1))
-                    if pc2:
-                        row4 = pc2
+                    thiscrew.add(Text(lpc1))
+                    if lpc2:
+                        row4 = lpc2
                     else:
                         row4 = " "
                     thiscrew.add(Text(row4))
                     simbox.add(Row(thiscrew))
             else:
-                for (emp_comp, name, rank, pc1, pc2, crewbase, quals, code, pos, dutycode, hasAttribute, attribute) in sim_ordered[pos]:
+                for (emp_comp, name, rank, lpc1, lpc2, crewbase, quals, code, pos, dutycode, hasAttribute, attribute) in sim_ordered[pos]:
                     if emp_comp:
                         unassigned = Column(border=border(bottom=1))
                         unassigned.add(Row(Text("Remaining: ")))
@@ -202,8 +202,8 @@ class SimDatedInfo(SASReport):
                                                  'report_common.%simulator_emp_or_comp%',
                                                  'report_common.%crew_surname%',
                                                  'report_common.%crew_rank%',
-                                                 'report_common.%pc_opc_str_1%',
-                                                 'report_common.%pc_opc_str_2%',
+                                                 'report_common.%lpc_opc_or_ots_str_1%',
+                                                 'report_common.%lpc_opc_or_ots_str_2%',
                                                  'report_common.%crew_homebase%',
                                                  'report_common.%ac_quals%',
                                                  # Assignment dependent info
