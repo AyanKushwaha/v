@@ -450,6 +450,12 @@ def planninggroup_from_id(crew_id, dt):
         )[0]
     return planninggroup
 
+def base_from_id(crew_id, dt):
+    crew_base= r.eval('model_crew.%base_at_date_by_id%("{crew_id}", {dt})'.format(
+        crew_id=crew_id, 
+        dt=dt)
+        )[0]
+    return crew_base
 
 def crew_excluded(crew_id, curr_date):
     if extperkey_from_id(crew_id,curr_date) in crew_exclusion_list:
