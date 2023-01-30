@@ -364,7 +364,7 @@ class LMSQualReport:
         for rec in list_crew_empchange:
             crew = rec
             crew_qual_table = tm.table('crew_qualification')
-            assignment_data = crew_qual_table.search('(&(crew={crew})(validto>={validto}))'.format(
+            assignment_data = crew_qual_table.search('(&(crew={crew})(validto>{validto}))'.format(
             crew=crew,
             validto=curr_date
             ))
@@ -374,21 +374,23 @@ class LMSQualReport:
                 qual = rec.qual.subtype
                 validfrom = rec.validfrom
                 validto = rec.validto
-                self._stats['total_delta_count'] += 1
-                self._stats['updated_qual_count'] += 1
-                log.info('''
-                Qualification for crew {crew} - {qual}
-                Valid from {validfrom}
-                Valid to {validto}
-                '''.format(
-                    crew=crew,
-                    qual=qual,
-                    validfrom=validfrom,
-                    validto=validto
-                    ))
-                # Create assignment entries
-                assignment_data = self._create_entries(crew, validfrom, validto, qual, None, "assignment_data")
-                self.assignment_writer.write(assignment_data)
+                # Check if crew qualification is applicable for interface
+                if self._applicable_qual(qual, crew):
+                    self._stats['total_delta_count'] += 1
+                    self._stats['updated_qual_count'] += 1
+                    log.info('''
+                    Qualification for crew {crew} - {qual}
+                    Valid from {validfrom}
+                    Valid to {validto}
+                    '''.format(
+                        crew=crew,
+                        qual=qual,
+                        validfrom=validfrom,
+                        validto=validto
+                        ))
+                    # Create assignment entries
+                    assignment_data = self._create_entries(crew, validfrom, validto, qual, None, "assignment_data")
+                    self.assignment_writer.write(assignment_data)
 
 
 class ReportWriter:
