@@ -233,10 +233,12 @@ class TimeEntryReport(WFSReport):
                     
                     planning_group = planninggroup_from_id(crew_id, duty_start_day)
                     if planning_group == "SVS":
+                        crew_base = base_from_id(crew_id, duty_start_day)
+                        is_pilot = duty_bag.crew.is_pilot()
                         num_of_flight = duty_bag.report_common.number_of_active_legs()
                         active_flight= duty_bag.duty.has_active_flight()
                         stby_duties = duty_bag.standby.duty_is_standby_callout()
-                        if num_of_flight > 0:
+                        if num_of_flight > 0 and crew_base != 'BGO' and is_pilot:
                             if active_flight or stby_duties:
                                 if duty_bag.duty_period.is_split():
                                     if duty_bag.duty_period.start_day_hb() < self.start:
@@ -262,7 +264,7 @@ class TimeEntryReport(WFSReport):
                                 total_duty_hrs_link.extend(final_link_hrs)
                                                                
                         duty_illness = duty_bag.report_overtime.is_on_duty_illness_link()
-                        if duty_illness and not duty_bag.duty.has_unfit_for_flight_star():
+                        if duty_illness and crew_base != 'BGO' and is_pilot and not duty_bag.duty.has_unfit_for_flight_star():
                             start_dt = abs_to_datetime(duty_start_day) + timedelta(days=0)
                             start_dt_start_abs = AbsTime(start_dt.year, start_dt.month, start_dt.day, 0, 0)
                             start_dt_end_abs = start_dt_start_abs + RelTime('24:00')
