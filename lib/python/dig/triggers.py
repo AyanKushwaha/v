@@ -414,6 +414,24 @@ class FlightScheduledTimeTrigger(FlightTimeTrigger):
             ])
         return self._services.getDaveConnector().runSearch(sSearch)
 
+# FlightScheduledTriggerSpc ============================================={{{2
+class FlightScheduledTriggerSpc(FlightTimeTrigger):
+    """Trigger n minutes before scheduled departure."""
+    def __init__(self, minutesBefore=None, outputClass=None, configFile=None,
+            destCountry=None, depCountry=None, name=None, includeDomestic="True"):
+        super(FlightScheduledTriggerSpc, self).__init__(minutesBefore,
+                ,outputClass=outputClass, configFile=configFile,
+                destCountry=destCountry, depCountry=depCountry, name=name, includeDomestic=includeDomestic)
+
+    def _getFlights(self, fromTime, toTime, destCountry=None):
+        """Use scheduled time (STD)."""
+        # Use off-block time if departure, in-block time if arrival.
+        sched_time = ('sibt', 'sobt')[bool(self._isDeparture)]
+        sSearch = DaveSearch('flight_leg', [
+                (sched_time, '>', '%d' % fromTime),
+                (sched_time, '<', '%d' % toTime),
+            ])
+        return self._services.getDaveConnector().runSearch(sSearch)
 
 # FlightActualTimeTrigger ================================================{{{2
 class FlightActualTimeTrigger(FlightTimeTrigger):
@@ -976,6 +994,69 @@ class CrewManifestRequestBuilderForArr:
         }
         request = reports.ReportRequest(self.__report, reportArgs, delta=True)
         return (request, reports.ReportRequestContentType(), None)         
+
+class CrewManifestRequestBuilderSpcNorway:
+    """
+    Generates report request string for departure and arrival flights for NO flights including LYR station
+    Crew Manifest NO
+    """
+
+    def __init__(self, destCountry=None, logger=None,
+            report='report_sources.report_server.rs_crew_manifest', fileName=None):
+        self.__destCountry = destCountry
+        self.__logger = logger
+        self.__report = report
+        self.__fileName = fileName
+
+    def makeReportRequest(self, flight):
+        # Prepare request for the new report handler
+        schema =os.environ['DB_SCHEMA']
+        url =os.environ['DB_URL']
+        dc = DaveConnector(url, schema)
+        list_dep_country = []
+        list_des_country = []
+        origsuffix = flight['origsuffix']
+        if origsuffix is None:
+            origsuffix = ''
+
+        flt_dep = str(flight['adep'])
+        flt_des = str(flight['ades'])
+        for entry in dbsearch(dc, 'airport', ' AND '.join((
+               "id = '%s'" % flt_dep,
+               "deleted = 'N'",
+               "next_revid = 0",
+           ))):
+           list_dep_country.append(entry['country'])
+
+        for entry in dbsearch(dc, 'airport', ' AND '.join((
+               "id = '%s'" % flt_des,
+               "deleted = 'N'",
+               "next_revid = 0",
+           ))):
+           list_des_country.append(entry['country'])
+
+        if (flt_dep == 'LYR' or flt_des == 'LYR') or not (self.__destCountry in list_dep_country and self.__destCountry in list_des_country) :
+            reportArgs = {
+                'fd': flight['fd'],
+                'origsuffix': origsuffix,
+                'udor': carmentime.fromCarmenTime(flight['udor']*1440).strftime("%Y%m%d"),
+                'adep': flight['adep'],
+                'country': self.__destCountry,
+                'fileName': self.__fileName,
+            }
+        else:
+            self.__report = 'report_sources.report_server.rs_crew_manifest_nonarr'
+            reportArgs = {
+                'fd': flight['fd'],
+                'origsuffix': origsuffix,
+                'udor': carmentime.fromCarmenTime(flight['udor']*1440).strftime("%Y%m%d"),
+                'adep': flight['adep'],
+                'country': self.__destCountry,
+                'fileName': "_API_for_flight_"  + flight['fd'].replace(" ", "_") + "_" + flight['adep'] + flight['ades'] + "_",
+        }
+        request = reports.ReportRequest(self.__report, reportArgs, delta=True)
+        return (request, reports.ReportRequestContentType(), None)
+
       
 
 # functions =============================================================={{{1
