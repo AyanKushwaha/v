@@ -321,7 +321,7 @@ class FlightTimeTrigger(MessageHandlerBase):
                     self._services.logger.debug("Excluded flight DK<->Schengen: aco %s, fd %sss, adep %s" % (f['aco'], f['fd'], f['adep']))
                     skip5 += 1
                     continue
-
+                    
             result.append(f)
         self._services.logger.info("Count %d, skip1(%s,%s) = %d, skip2 = %d, skip3 = %d, skip4 = %d skip5 = %d" % (len(result), destCountry, depCountry, skip1, skip2, skip3, skip4, skip5))
         return result
@@ -418,10 +418,38 @@ class FlightScheduledTimeTrigger(FlightTimeTrigger):
 class FlightScheduledTriggerSpc(FlightTimeTrigger):
     """Trigger n minutes before scheduled departure."""
     def __init__(self, minutesBefore=None, outputClass=None, configFile=None,
-            destCountry=None, depCountry=None, name=None, includeDomestic="True"):
-        super(FlightScheduledTriggerSpc, self).__init__(minutesBefore,
-                ,outputClass=outputClass, configFile=configFile,
-                destCountry=destCountry, depCountry=depCountry, name=name, includeDomestic=includeDomestic)
+            destCountry=None, depCountry=None, name=None):
+        super(FlightScheduledTriggerSpc, self).__init__(minutesBefore, outputClass=outputClass, configFile=configFile,
+                destCountry=destCountry, depCountry=depCountry, name=name)
+
+    def _filterFlights(self, flights, mbd, destCountry, depCountry, fromTime, toTime, exceptionHandle=None):
+        # Remove any flights already reported for the given trigger criteria.
+        # If destCountry or depCountry is specified, also remove flights with
+        # other dest/departure country.
+        # if onlyOperatedBySAS is specified, also remove flights with other employer, flight_leg.aco != "SK"
+        result = []
+        now = self._services.now()
+        skip1 = 0
+        skip2 = 0
+        skip3 = 0
+        for f in flights:
+            if destCountry or depCountry:
+                if not self._matchesDepartureOrDestinationCountries(f, destCountry, depCountry):
+                    skip1 += 1
+                    continue
+            if self._reportedFlightsContains(f, mbd):
+                self._services.logger.debug("Already reported flight: udor %s, fd %s, adep %s (%s minutes before %s)" % (
+                    self._makeFlightKey(f,mbd) + (self._dep_arr,)))
+                skip2 += 1
+                continue
+            if self._onlyOperatedBySAS == "True":
+                if ((not f['aco'] == "SK") and (not f['aco'] == "SVS")):
+                    self._services.logger.debug("Excluded flight not operated by SAS: aco %s, fd %sss, adep %s" % (f['aco'], f['fd'], f['adep']))
+                    skip3 += 1
+                    continue
+
+            result.append(f)
+        return result
 
     def _getFlights(self, fromTime, toTime, destCountry=None):
         """Use scheduled time (STD)."""
@@ -1013,29 +1041,15 @@ class CrewManifestRequestBuilderSpcNorway:
         schema =os.environ['DB_SCHEMA']
         url =os.environ['DB_URL']
         dc = DaveConnector(url, schema)
-        list_dep_country = []
-        list_des_country = []
         origsuffix = flight['origsuffix']
         if origsuffix is None:
             origsuffix = ''
 
         flt_dep = str(flight['adep'])
         flt_des = str(flight['ades'])
-        for entry in dbsearch(dc, 'airport', ' AND '.join((
-               "id = '%s'" % flt_dep,
-               "deleted = 'N'",
-               "next_revid = 0",
-           ))):
-           list_dep_country.append(entry['country'])
-
-        for entry in dbsearch(dc, 'airport', ' AND '.join((
-               "id = '%s'" % flt_des,
-               "deleted = 'N'",
-               "next_revid = 0",
-           ))):
-           list_des_country.append(entry['country'])
-
-        if (flt_dep == 'LYR' or flt_des == 'LYR') or not (self.__destCountry in list_dep_country and self.__destCountry in list_des_country) :
+  
+        if flt_dep == 'LYR' or flt_des == 'LYR':
+            self.__report = 'report_sources.report_server.rs_crew_manifest'
             reportArgs = {
                 'fd': flight['fd'],
                 'origsuffix': origsuffix,
