@@ -20,7 +20,7 @@ from RelTime import RelTime
 from salary.wfs.wfs_report import WFSReport 
 from salary.wfs.wfs_report import (abs_to_datetime, extperkey_from_id, country_from_id, 
     getNextRecordId, getNextRunId, add_to_salary_wfs_t, rank_from_id, actual_rank_from_id, reltime_to_decimal, default_reltime,
-    integer_to_reltime, crew_info_changed_in_period, crew_has_retired_at_date,planninggroup_from_id, end_month_extended)
+    integer_to_reltime, crew_info_changed_in_period, crew_has_retired_at_date,planninggroup_from_id, end_month_extended,crew_not_BGOFD)
 from salary.wfs.wfs_config import PaycodeHandler
 import time
 
@@ -241,16 +241,16 @@ class TimeEntry(WFSReport):
                     if monthly_ot[abs_to_datetime(duty_start_day).month]['val'] == None:
                         month = abs_to_datetime(duty_start_day).month
                         monthly_ot = self._distribute_monthly_ot(monthly_ot, month, duty_bag)
-                    
+
                     planning_group = planninggroup_from_id(crew_id, duty_start_day)
                     log.info('NORDLYS: planning group {z} '.format(z = planning_group))
                     if planning_group == "SVS":
-                        crew_base = base_from_id(crew_id, duty_start_day)
-                        is_pilot = duty_bag.crew.is_pilot()
+                        crew_valid_base_rank = crew_not_BGOFD(crew_id, duty_start_day)
                         num_of_flight = duty_bag.report_common.number_of_active_legs()
                         active_flight= duty_bag.duty.has_active_flight()
                         stby_duties = duty_bag.standby.duty_is_standby_callout()
-                        if num_of_flight > 0 and crew_base != 'BGO' and is_pilot:
+                        if num_of_flight > 0 and crew_valid_base_rank:
+                            log.info('NORDLYS: Crew is not BGO and FD {z} '.format(z = crew_valid_base_rank))
                             if active_flight or stby_duties:
                                 if duty_bag.duty_period.is_split():
                                     if duty_bag.duty_period.start_day_hb() < self.start:
@@ -276,7 +276,7 @@ class TimeEntry(WFSReport):
                                 total_duty_hrs_link.extend(final_link_hrs)
                                                                                
                         duty_illness = duty_bag.report_overtime.is_on_duty_illness_link()
-                        if duty_illness and crew_base != 'BGO' and is_pilot and not duty_bag.duty.has_unfit_for_flight_star():
+                        if duty_illness and crew_valid_base_rank and not duty_bag.duty.has_unfit_for_flight_star():
                             start_dt = abs_to_datetime(duty_start_day) + timedelta(days=0)
                             start_dt_start_abs = AbsTime(start_dt.year, start_dt.month, start_dt.day, 0, 0)
                             start_dt_end_abs = start_dt_start_abs + RelTime('24:00')
