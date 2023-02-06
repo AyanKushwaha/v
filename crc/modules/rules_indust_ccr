@@ -1036,7 +1036,6 @@ export %max_days_btw_freedays% =
  * Only short haul limit was found in the FC agreement. Neither was found for NKF. */
 export %max_days_btw_freedays_lh% = theme_prod.%max_days_btw_freedays_lh%;
 %max_days_btw_freedays_sh% =  theme_prod.%max_days_btw_freedays_lh%;
-%max_days_btw_freedays_qa_cc% =  theme_prod.%max_days_btw_freedays_lh%; 
 
 /*
 ** Rule: 
@@ -1204,91 +1203,6 @@ end
   not next(trip(roster), trip.%is_fs%) and
   (not trip.%is_pact% or
    next(trip(roster), trip.%is_off_duty% or trip.%is_standby_line% and (not trip.%is_pact%)));
-
-
-
-
-rule (on) ind_max_split_duty_in_wop_qa =
-    valid roster.%check_rules%
-         and (if fundamental.%flight_crew% then
-              parameters.%K15_qa_FD_feb16_valid%(wop.%start_UTC%) and
-                wop.%has_ac_employer_qa%
-               else
-              parameters.%K15_qa_cc_mar16_valid%(wop.%start_UTC%) and
-              crew.%has_agmt_group_qa_cc%)
-        and wop.%start_utc% >= %pp_start%
-        and wop.%start_utc% <= %pp_end%
-        and duty_period.%wop_has_split_duty%;
-	
-        duty_period.%wop_count_split_duties% <= %max_number_of_split_duties_in_wop_qa%+
-	    rule_exceptions.%overshoot_int%(wop.%start_UTC%);
-  	
-    startdate = wop.%start_UTC%;
-	severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%, %duty_lh_region%));
-	failobject = %ind_max_split_duty_in_wop_qa_failobject%;
-	failtext(Int value, Int limit) = 
-        rules.%failtext_int%("Coll: Max 2 split duties in wop", value, limit);
-	remark "(CCR) Coll: Max 2 split duties in wop",
-    planner "this rule is for Cimber CC and FD. It checks that there are"
-            "  max 2 split duties between free day periods."
-            " Agreement Cimber FD and CC 2014.";
-end	
- 
-%max_number_of_split_duties_in_wop_qa% = 2;
-
-%ind_max_split_duty_in_wop_qa_failobject% =
-first(duty(wop),duty.%failobject_start%)
-where  (duty_period.%is_split%
-   and duty_period.%is_first_duty_in_duty_period%
-   and duty.%start_utc% >= %_next_split_duty_in_wop%(%_next_split_duty_in_wop%(wop.%start_utc%)));
-
-%_next_split_duty_in_wop%(Abstime start) =
-first(duty(wop),duty.%start_utc%) where 
-(duty_period.%is_split% and 
-duty_period.%is_first_duty_in_duty_period% and 
-duty.%start_utc% > start);
-
-
-
-/* New Rules in K15 SKCMS-579
-/*
-** Rule: 
-**    Maximum daily duty- Daily duty is counted from CI to CO for qa crew.
-** 
-** Description:
-**    The rules checks that the max daily duty is not exceeded
-**                               
-*/
-export rule (on) ind_max_daily_duty_qa_ALL_r =
-  valid trip.%check_rules% 
-   and (duty_time.%crew_or_duty_qa_cc% or 
-       (fundamental.%flight_crew% and duty.%is_ac_employer_qa%))
-   and not duty_period.%is_split%
-   and duty.%in_pp_extended%
-   and duty.%is_on_duty%
-   and not duty.%is_compensation_day%
-   and not duty.%is_blank_day%
-   and not duty.%is_SI1%
-   and not duty.%is_bought%;
-
-        duty_period.%time% <= duty_time.%max_daily_duty_qa% + rule_exceptions.%overshoot_rel%(duty.%start_utc%);   
-  startdate  = duty.%start_UTC%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = duty.%failobject_end%;
-  failtext (Reltime value, Reltime limit) =    
-           rules.%failtext_rel%("Coll: Max daily duty for QA CC and pilots flying CJ", value, limit);
-  remark "Coll: Max daily duty qa CC and pilots flying CJ",
-  planner "This rule regualtes the max daily duty time for Cimber. Max 16 hours"
-          " including passive flights in the duty period. The 16 hour"
-          " restriction is not valid at split duty. agreement Cimber FD and"
-          " Cabin 2014";
-end
-
-
-
-
-
-
 
 /****************************************************************
  * Section 2: Block time rules
@@ -1511,7 +1425,7 @@ export %annual_block_hours_adjustment_p% =
 %ind_max_4P_followed_by_2F_per_month_valid_4P_wop% =
   base_product.%is_rostering% and
   roster.%check_rules% and
-  (crew.%has_agmt_group_skd% or crew.%has_agmt_group_skn% or crew.%has_agmt_group_sks%) and
+  crew.%has_agmt_group_sk% and
   crew.%in_variable_group%(wop.%end_utc%) and
   wop.%days% = 4 and
   all(duty(wop), duty.%is_on_duty% and
@@ -1807,14 +1721,8 @@ export %ind_min_freedays_after_duty_ALL_valid% =
     not %ind_min_lh_rest_days_after_second_valid% and
     %_ind_min_freedays_after_duty_ALL_valid%;
 
-
-/* SKCMS-787 moved all pilots flying CJ from the valid statement */
 %_ind_min_freedays_after_duty_ALL_valid% =
     roster.%check_rules% 
-and not crew.%has_agmt_group_qa_cc%
-and ( if duty.%is_qa_fd% then
-        not parameters.%K15_qa_FD_feb16_valid%(duty.%start_utc%)
-      else True)
 and freedays.%valid_freedays_after_duty%
 and not (crew.%is_skd% and crew.%is_temporary% and
          (not crew.%k4exng_cc_sp5_1_valid%(%pp_start%) or
@@ -1824,7 +1732,6 @@ and not (crew.%is_skd% and duty.%is_standby_line% and
 and not crew.%is_skk%
 and crew.%in_variable_group_duty_end%
 and not crew.%is_leased_duty_start%;
-
 
 %ind_min_freedays_after_duty_ALL_failobject% =
     default(
@@ -3026,13 +2933,12 @@ end
 **   regards to other superfreedays. 
 **   
 */
-export rule(off) ind_max_consecutive_fs_days = 
+export rule (off) ind_max_consecutive_fs_days = 
   valid roster.%check_rules% and
     not crew.%is_leased_duty_start% and
     duty.%is_fs% and
     %agreement_valid_4exng_fs_day_logic% and
-    (%flight_crew% and (crew.%is_SKD% or crew.%is_SKS% or crew.%is_SKN% or crew.%is_SKI%) or
-    %cabin_crew% and (crew.%is_SKD% or crew.%is_SKS% or crew.%is_SKN%)) and 
+    crew.%has_agmt_group_sk% and 
     crew.%in_variable_group_trip_start% and
     duty.%in_pp_extended% and
     rule_exceptions.%rule_on%(duty.%start_utc%);
@@ -3348,8 +3254,7 @@ end
 
 %check_FS_friends% = 
     if system_db_parameters.%IB6_valid%(duty.%start_UTC%) 
-        and not duty.%is_ac_employer_qa%
-    then any(leg(duty), not task.%is_fs_friends%(task.%code%))
+       then any(leg(duty), not task.%is_fs_friends%(task.%code%))
     else true;
 
 /* Redefined in rules_indust_ccr_cc for CC */
@@ -3554,10 +3459,6 @@ export %max_number_super_freedays_in_month% =
        crew.%is_short_haul%(duty.%start_month_start%) and
        (crew.%is_SKD% or crew.%is_SKN% or crew.%is_SKS%)
     then
-      if crew.%has_agmt_group_qa_fd% or duty.%is_ac_employer_qa%
-      then
-        3 /* QA-FD_AG and SK pilots flying CJ (only QA duties) */
-      else
         if crew.%has_agmt_group_skn_fd% then
             %_max_FS_SKN_FD_in_month%
         else
@@ -3582,181 +3483,6 @@ export %max_number_super_freedays_in_month% =
     1
   else
     0;
-
-/* Rule:
-**   Superfreedays in 6 months
-**
-** Description:
-**   This rule checks that the number of assigned super freedays 
-**   in 6 months (for CC: Jan-Jun, Jul-Dec), for FC: rolling). 
-**   are no more than max allowed
-**
-** 20141021 SKCMS-396 Modified so it checks max 6 FS days during any 6-calender-month-period
-**          overlapping the bid period for flight deck
-**
-**   4ExNG CC - rule no longer applies.
-*/
- 
-/*
-Old valid statement
-        not crew.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and
-        (crew.%is_SKD% or crew.%is_SKN% or (%flight_crew% and (crew.%is_SKS% or (%agreement_valid_4exng_fs_day_logic% and crew.%is_SKI%)))) and
-        crew.%in_variable_group_trip_start% and
-        duty.%in_pp_extended% and
-        %is_last_fs_day_in_month% and
-        not crew.%is_leased_duty_start%;
-
-*/
-
-export rule ind_max_fs_days_in_6_months =
-  valid roster.%check_rules% and
-        not system_db_parameters.%IB6_valid%(duty.%start_UTC%) and
-        not (%cabin_crew% and crew.%is_homebase_scand%) and
-        (crew.%is_SKD% or crew.%is_SKN% or (%flight_crew% and (crew.%is_SKS% or crew.%is_SKI%))) and
-        crew.%in_variable_group_trip_start% and
-        duty.%in_pp_extended% and
-        %is_last_fs_day_in_month% and
-        not crew.%is_leased_duty_start%;
-        
-  %max_number_of_fs_days_during_6_months_period_overlapping_bid_period% <= 
-  %max_number_fs_days_in_6_months% + 
-    rule_exceptions.%overshoot_int%(duty.%start_UTC%);
-  startdate  = duty.%start_UTC%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_max_fs_days_in_6_months_failobject%;
-  failtext(Int value, Int limit) =
-    rules.%failtext_int%("Coll: Max superfreedays in 6 months", value, limit);
-  remark "Coll: Max number of superfreedays in 6 months",
-  planner "Check that the number of assigned super freedays in "
-          " 6 months (Jan-Jun, Jul-Dec) are no more than allowed."
-          " For FD SH Request bid period is used instead of calendar"
-          " half years";
-end
-
-
-
-
-
-/* Rule:
-**   Superfreedays in 6 months
-**
-** Description:
-**   This rule checks that the number of assigned super freedays 
-**   in 6 months (for CC: Jan-Jun, Jul-Dec), for FC: rolling). 
-**   are no more than max allowed
-**
-** 20141021 SKCMS-396 Modified so it checks max 6 FS days during any 6-calendar-month-period
-**          overlapping the bid period for flight deck
-**
-**   4ExNG CC - rule no longer applies.
-**   20150909 Shall be activated when SKCMS-649 is activated. Then
-**          ind_max_fs_days_in_6_months can be removed
-*/
-/* Can be used when SKCMS-646 shall be used, i.e. when SKCMS-649 is introduced
-   Do not forget to delete the IB6_validity row 
-*/
-
-export rule ind_max_fs_days_in_6_months_SKCMS_646 =
-  valid roster.%check_rules% and
-        system_db_parameters.%IB6_valid%(duty.%start_UTC%) and
-        /* not crew.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and*/
-        (  duty.%is_ac_employer_qa% and crew.%is_pilot%
-           or crew.%has_agmt_group_qa_fd% ) and 
-        crew.%in_variable_group_trip_start% and
-        duty.%in_pp_extended% and
-        %is_last_fs_day_in_month% and
-        not crew.%is_leased_duty_start%;
-        
-  %max_number_of_fs_days_during_6_months_period_overlapping_bid_period% <= 
-  %max_number_fs_days_in_6_months% + 
-    rule_exceptions.%overshoot_int%(duty.%start_UTC%);
-  startdate  = duty.%start_UTC%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_max_fs_days_in_6_months_failobject%;
-  failtext(Int value, Int limit) =
-    rules.%failtext_int%("Coll: Max superfreedays in 6 months", value, limit);
-  remark "Coll: Max number of superfreedays in 6 months",
-  planner "Check that the number of assigned super freedays in "
-          " 6 months (Jan-Jun, Jul-Dec) are no more than allowed."
-          " For FD SH Request bid period is used instead of calendar"
-          " half years";
-end
-
-
-%ind_max_fs_days_in_6_months_failobject% =
-  let overshoot = default(rule_exceptions.%overshoot_int%(duty.%start_UTC%),0),
-      start     = %fs_6_months_start%;
-  default(prev(duty(chain), next(duty(chain),duty.%failobject_start%) where
-               (duty.%is_fs%)) where
-    (duty.%is_fs% and
-    freedays.%super_freedays_in_period_from_account%(start - 0:01,
-                                                     duty.%end_day%) <= 
-    %max_number_fs_days_in_6_months% + overshoot),
-    duty.%failobject_start%);
-
-%fs_6_months_start% =
-  if parameters.%is_request_bidding% and %flight_crew% and not crew.%is_SKI% then
-    %bid_period_start%(%now%)
-  else   
-    %_fs_6_months_start%;
- 
-%fs_6_months_end% =
- if parameters.%is_request_bidding% and %flight_crew% and not crew.%is_SKI% then
-    %bid_period_end%(%now%)
-  else 
-    %_fs_6_months_end%;
-
-    
-%_fs_6_months_start% =
-  if calendar.%month_number%(duty.%start_hb%) <= 6 then
-    round_down_year(duty.%start_hb%)
-  else
-    add_months(round_down_year(duty.%start_hb%), 6);
-    
-%_fs_6_months_end% =        
-  if calendar.%month_number%(duty.%start_hb%) <= 6 then
-    add_months(round_down_year(duty.%start_hb%), 6)
-  else
-    round_up_year(duty.%start_hb%);
-    
-%bid_period_start%(Abstime now_time) = 
-  let bid_window_start_month = round_down_month(now_time - 25*24:00);
-  add_months(bid_window_start_month, 3) + 5*24:00;
-  
-%bid_period_end%(Abstime now_time) =
-  add_months(%bid_period_start%(now_time), 6);
- 
-
-
-  
-  
-  
-  %max_number_fs_days_in_6_months% = 6;
-  
-  
-/**
-** Cashing fs_months_starts and Fs_months_end before calling loop
-**
-**/
-
-  %max_number_of_fs_days_during_6_months_period_overlapping_bid_period% =
-
-  let calendar_bid_period_start = round_down_month(%fs_6_months_start%),
-      calendar_bid_period_end =  round_down_month(%fs_6_months_end%);                    
-  max(times(11),%number_of_fs_days_in_one_6_months_period%(times_index(0),calendar_bid_period_start,calendar_bid_period_end));
-
-/*
-** Checks the number of fs_days in 6 months period. Shall be called
-** ffor all periods overlapping the bid period
-**
-**
-*/
-%number_of_fs_days_in_one_6_months_period%(Int period_number, Abstime periodstart, Abstime periodend)=
-  freedays.%super_freedays_in_period_from_account%(add_months(periodstart, period_number-6),
-                                                   add_months(periodend, period_number-6));
-
-
-
 
 /* Rule:
 **   Superfreedays in weekend must cover both Saturday and Sunday.
@@ -4428,28 +4154,6 @@ rule ind_min_freeday_per_month =
   planner "This rule checks that the number of scheduled FDC15 freedays"
           " exceeds the minimum amount of FDC15 freedays, according to"
           " crew contracts entitlements";
-end
-
-rule ind_min_freeday_per_twinmonth =
-   valid roster.%check_rules% and
-   not %is_tracking% and
-   parameters.%k15qa_feb16_valid%(trip.%start_month_start%) and
-   model_freedays.%is_last_twin_month%(trip.%start_month_start%) and
-   %last_valid_fdc_on_duty%;
-
-
-   freedays.%twin_month_fdc15_scheduled% (trip.%start_month_start%) >=
-      freedays.%twin_month_fdc15_entitled%(trip.%start_month_start%) - rule_exceptions.%overshoot_int%(trip.%start_month_start%);
-
-   startdate = trip.%start_hb%;
-   severity = 0;
-   failobject = trip.%failobject_start%;
-  failtext(Int value, Int limit) =
-    rules.%failtext_int%("Coll: Number of FDC15 freedays per twin month: ", value, limit);
-  remark "(CCR) Coll: Min number of FDC15 freedays in 2 month",
-  planner "This rule checks that the number of scheduled FDC15 freedays"
-          " satisfied the minimum amount of FDC15 freedays per month pair,"
-          " according to crew contracts entitlements";
 end
 
 export %fdc15_balance_pp_start% = 

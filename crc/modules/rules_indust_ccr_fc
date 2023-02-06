@@ -675,183 +675,6 @@ redefine %check_consecutive_nights% = true;
 redefine %max_night_duties% = 3;
 redefine %max_consecutive_night_duties% = 2;
 
-
-/*
-** Rule: 
-**    C/O last day must no be offset more than max +12hours, compared to C/I 
-**    first days.
-**
-** Description:
-**    Check that C/O time is less than 12 h after C/I time irrespecrtivly of 
-**    no of days in wop.
-**    Rule only valid in Rostering, not in tracking, correspding rule exists 
-**    in pairing
-**    Rule is only valid for SH FD
-**    Rule is only valid for flight duty, this includes SB and SIM duty like 
-**    PC/OPC.
-**    BL is counted as flight when inside a production block
-**    Rule is not valid when crew is on course, except flight duty like LIFUS.
-**
-** Agreement: SKCMS-494
-*/
-rule ind_min_offset_ci_co_vg_FC =
-  valid %ind_min_offset_ci_co_vg_FC_valid%;
-	%co_time_not_zero% <= %ci_time_at_co_day_plus_offset% + 
-                      rule_exceptions.%overshoot_rel%(trip.%start_utc%);
-
-  startdate = wop.%start_UTC%;
-  failobject = wop.%failobject_start%;
-  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failtext(Abstime val, Abstime limit) = 
-    rules.%failtext_abs%("CO too late, must be CI in for first wop + offset",val, limit);
-  remark "C/O of last leg in wop must be C/I of first leg in wop + offset",
-  planner "This rule is valid for SH FD when number of days in wop are the same or more than parameter %ci_co_offset_p%. "
-  "It is not valid if the WOP consists of SBYs only, or if the WOP ends with a SBY. "
-  "If the WOP ends with a SBY and the offset is exceeded, then a cost calculation is applied in stead.  (Stability: 3.24)"
-  "Time for C/O last day in wop, may not be offset more than given in parameter %ci_co_min_length_of_wop_p%, compared to C/I for first day in wop. "
-  "Flight, SIM (which are flight duties) and SB counts as flight days. BL counts as flight days when inside a flight block.";
-end
-
-/**
-** SKCMS-1033
-**/
-
-rule ind_min_offset_ci_co_fg_FC =
-    valid
-        %ind_min_offset_ci_co_fg_FC_valid%;
-
-        rules_indust_ccr.%time_of_day_wop_end_hb_not_zero% <= time_of_day(%first_wop_in_production_block_start_hb%) +
-                        %ci_co_offset_p% + rule_exceptions.%overshoot_rel%(wop.%start_hb%);
-
-  startdate = wop.%start_hb%;
-  failobject = wop.%failobject_start%;
-  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failtext(Reltime val, Reltime limit) = 
-    rules.%failtext_rel%("CO too late, must be CI in for first wop in production block + offset",val, limit);
-  remark "C/O of last leg in wop must be C/I of first leg in production block in wop + offset",
-  planner "This rule is valid for SH FD fixed group when number of days in wop are the same or more than parameter %ci_co_offset_p%. "
-  "It is not valid if the WOP consists of SBYs only, or if the WOP ends with a SBY. "
-  "If the WOP ends with a SBY and the offset is exceeded, then a cost calculation is applied in stead.  (Stability: 3.24)"
-  "Time for C/O last day in wop, may not be offset more than given in parameter %ci_co_min_length_of_wop_p%, compared to C/I for first day in wop. "
-  "Flight, SIM (which are flight duties) and SB counts as flight days. BL counts as flight days when inside a flight block.";
-
-end
-
-%days_from_ci_to_co% =
-  let d = round_down(wop.%end_hb%, 24:00),
-      e = if d=wop.%end_hb% then d-24:00 else d;
-  (e - round_down(%first_wop_in_production_block_start_hb%, 24:00))/24:00 +1;
-
-
-%ind_min_offset_ci_co_vg_FC_valid% =
-  not base_product.%is_tracking% 
-        and trip.%check_rules%
-	and crew.%in_variable_group%(wop.%start_hb%)
-        and is_first(trip(wop) where (trip.%has_flight_duty% or trip.%is_training% or trip.%is_meeting% or trip.%is_office_duty%))
-        and is_first(trip(wop))
-        and not wop.%is_standby% 
-        and not wop.%ends_with_standby%
-        and not wop.%ends_with_ground_duty% 
-        and not wop.%ends_with_simulator% 
-        and wop.%in_pp_extended%
-        and crew.%has_agmt_group_sk_sh_fd%
-        and not wop.%is_employer_qa%
-        and wop.%days% >= %ci_co_min_length_of_wop_p%
-        and not %wop_starts_or_ends_with_blank%
-        and %wop_consists_of_specified_activities%;
-  
-%ind_min_offset_ci_co_fg_FC_valid% =
-  not base_product.%is_tracking%
-    and roster.%check_rules%
-    and crew.%in_fixed_group%(wop.%start_hb%)
-    and crew.%has_agmt_group_sk_sh_fd%
-    and not wop.%is_employer_qa%
-    and wop.%in_pp_extended%
-    and %is_last_prod_wop_in_this_FG_production_block%
-    and not wop.%is_standby%
-    and not wop.%ends_with_standby%
-    and not wop.%ends_with_ground_duty%
-    and not wop.%ends_with_simulator%
-    and not wop.%ends_with_blank%
-    and not %first_wop_in_production_block_starts_with_blank%
-    and %days_from_ci_to_co% >= %ci_co_min_length_of_wop_p%
-    and %all_wop_in_proction_block_consists_of_specified_activities%;
-  
-export %first_wop_in_production_block_start_hb% = 
-    let actual_wop_start_hb = wop.%start_hb%;
-    first(wop(chain),wop.%start_hb%)
-                      where (wop.%start_hb%>=crew.%activity_block_start%(actual_wop_start_hb+0:01));
-
-                                    
-%all_wop_in_proction_block_consists_of_specified_activities% =
-    let bl_start = crew.%activity_block_start%(wop.%start_hb%),
-        bl_end = crew.%activity_block_end%(wop.%start_hb%)+24:00;
-    all(wop(chain),%wop_consists_of_specified_activities%)
-    where (wop.%start_hb% >= bl_start and wop.%end_hb% <= bl_end);
-                      
-%_first_wop_in_production_block_starts_with_blank%(Abstime start_date)=
-    first(leg(wop),leg.%is_blank_day%)
-              where (leg.%ci_start_hb% = start_date);
-
-export %first_wop_in_production_block_starts_with_blank% =
-   let start_date = %first_wop_in_production_block_start_hb%;
-   default(%_first_wop_in_production_block_starts_with_blank%(start_date), /* when single wop in prod block */
-           default(prev(wop(chain), %_first_wop_in_production_block_starts_with_blank%(start_date)), /* when last of two blocks in prod block */
-                False)); /* when more than 2 wops in prod block, should not occur */
- 
-export %is_last_prod_wop_in_this_FG_production_block% =
-   let next_on_duty_wop_start_hb = default( next(wop(chain),round_down(wop.%start_hb%, 24:00)) where(wop.%is_on_duty%), %END_OF_TIME%);
-   if crew.%in_production_block%(wop.%start_hb%) and wop.%is_on_duty% then
-      (crew.%last_date_in_prod_block%(wop.%end_hb%-0:01) = round_down(wop.%end_hb%, 24:00)) or
-      (crew.%last_date_in_prod_block%(wop.%end_hb%-0:01) < next_on_duty_wop_start_hb )
-   else
-      false;
-
-%wop_consists_of_specified_activities% =
-  if parameters.%K15_SKCMS_742_DEC15%(wop.%start_UTC%) then
-    %wop_consists_of_flt_duties_sim_bl_ground_and_sb%
-  else
-    %wop_consists_of_flt_duties_sim_bl_and_sb%;
-
-%wop_starts_or_ends_with_blank% = 
-(first(leg(wop),leg.%is_blank_day%)) or (last(leg(wop),leg.%is_blank_day%));
-
-%trip_consists_of_flt_duties_sim_bl_and_sb% =not (not trip.%has_only_flight_duty% and not trip.%is_blank_day% and not trip.%is_pc_or_opc% and not trip.%is_ast% and not trip.%is_asf%);
-
-/* trip.has_only_flight_duty uses leg.%is_considered_as_flight_duty% */
-%wop_consists_of_flt_duties_sim_bl_and_sb% =not any(trip(wop), not trip.%has_only_flight_duty% and not trip.%is_blank_day% and not trip.%is_pc_or_opc% and not trip.%is_ast% and not trip.%is_asf%);
-
-/* AFter K15 ground duties are added as well */
-%wop_consists_of_flt_duties_sim_bl_ground_and_sb% =not any(trip(wop), not trip.%has_only_flight_duty% and not trip.%is_blank_day% and not trip.%is_pc_or_opc% and not trip.%is_ast% and not trip.%is_asf% and not trip.%is_ground_duty%);
-
-
-
-redefine export %ci_time_at_co_day_plus_offset% = %co_time_not_zero% -time_of_day(%co_time_not_zero%) + time_of_day(%ci_time%) + %ci_co_offset_p%;
-                                  
-%_co_time_not_zero% =
-  last(trip(wop), trip.%end_hb%) where (trip.%has_flight_duty%);
-
-redefine export %co_time_not_zero% =
-  if time_of_day(%_co_time_not_zero%)=0:00 then %_co_time_not_zero% - 0:01
-  else %_co_time_not_zero%;
-
-%ci_time% = first(trip(wop),trip.%start_hb%) where (trip.%has_flight_duty% or trip.%is_training% or trip.%is_meeting% or trip.%is_office_duty%);
-
-
-/*
-  Calculates how much time the (12h) offset is exceeded by.
-  Used in roster_costs
-*/
-redefine export %wop_overshoot_12h_offset% =
-    let overshoot = %co_time_not_zero% - %ci_time_at_co_day_plus_offset%;
-    if overshoot > 0:00 then
-        overshoot
-    else
-        0:00;
-
-
-
-
 /*
 ** Rule:
 **    Max SubQ dutyhours in rolling 7 calendar days.
@@ -867,13 +690,13 @@ redefine export %wop_overshoot_12h_offset% =
 */
 
 rule ind_subq_duty_time_in_7x24_all =
-  valid roster.%check_rules% and
-        not %is_trip% and
-        not trip.%is_ski% and
-        not trip.%is_skd% and
-        not ((trip.%is_sks% or trip.%is_skn%) and %agreement_valid%("7x24_fd_sks", trip.%start_UTC%)) and
-        duty.%in_pp% and
-        duty_period.%is_on_duty%;
+  valid roster.%check_rules%
+        and %is_roster%
+        and not trip.%is_ski%
+        and not trip.%is_regarded_sk_sh_agmt%
+        and %agreement_valid%("7x24_fd_sks", trip.%start_UTC%)
+        and duty.%in_pp% 
+        and duty_period.%is_on_duty%;
         
   %duty_time_7x24% <= %max_duty_time_in_7x24% -
                               %p_buffer_max_duty_time_7x24% +
@@ -1172,7 +995,7 @@ redefine %r_valid_night_rest_surrounding_short_stop% =
 **    K11 FC SH SKD/SKN/SKS 6.1.8
 */
 
-rule ind_no_split_duty_after_trip_fc =
+rule ind_no_split_duty_at_homebase_fc =
   valid trip.%check_rules%
         and not trip.%is_ski%
         and duty.%arrives_at_homebase% 
@@ -1187,11 +1010,10 @@ rule ind_no_split_duty_after_trip_fc =
   startdate = trip.%end_utc%;
   severity =  first(leg(trip), %severity_filter_int%(leg.%start_utc%,%duty_lh_region%));
   failobject = next(trip(roster), trip.%failobject_start%);
-  failtext "Coll: Split duty - Not Allowed";
-  remark "Coll: No split duties after trip",
-  planner "The rule checks before K11 that no split duty according to OMA16 " 
-          " is scheduled for SKN FC, or after K11 that no split duty is"
-          " scheduled for SKD/SKN/SKS FC at homebase";
+  failtext "Coll: Split duty not allowed at homebase";
+  remark "Coll: No split duties at homebase",
+  planner "The rule checks that no split duty " 
+          " is scheduled for flight deck at homebase";
 end
   
 /****************************************************************
@@ -1695,9 +1517,7 @@ redefine %days_before% =
 %_days_before_va_or_loa% =
   if system_db_parameters.%IB6_valid%(duty.%start_UTC%) then 
     if %agreement_valid_4exng_fs_day_logic% then
-      if duty.%is_ac_employer_qa% then 5
-      else
-         	if %fs_unfriendly_days%(3,9) >= 6 then 6 else 0
+       if %fs_unfriendly_days%(3,9) >= 6 then 6 else 0
     else
       if crew.%is_ski% then 7 else 5
   else
@@ -2044,11 +1864,7 @@ end
  ***************************************************************/
 rule ind_max_split_duty_in_wop_FC =
     valid roster.%check_rules%
-        and parameters.%K15_jan16_valid%(wop.%start_utc%)   
-        and (crew.%has_agmt_group_skd_fd% or
-             crew.%has_agmt_group_sks_fd% or
-             crew.%has_agmt_group_skn_fd%)
-        and not wop.%has_ac_employer_qa%
+        and not crew.%has_agmt_group_ski_fd%
         and wop.%start_utc% >= %pp_start%
         and wop.%start_utc% <= %pp_end%
         and duty_period.%wop_has_split_duty%;
@@ -2064,10 +1880,22 @@ rule ind_max_split_duty_in_wop_FC =
     
 	remark "(CCR) Max number of split duites in a wop",
     planner "The rule check the number of split duties in a wop."
-            "  Applies to SKS-FD_AG, SKD-FD-AG and SKN-FD-AG";
+            "  Applies to all FD";
 end	
- 
-%max_number_of_split_duties_in_wop% = 1;
+
+%max_number_of_split_duties_in_wop% = 
+    if crew.%has_agmt_group_sk%
+    then %number_of_split_duties_in_wop_limit_sk%
+    else %number_of_split_duties_in_wop_limit_non_sk%;
+
+%number_of_split_duties_in_wop_limit_sk% = 
+    parameter 1
+    remark "Limit for split duties in same wop SK FD";
+
+%number_of_split_duties_in_wop_limit_non_sk% = 
+    parameter 2
+    remark "Limit for split duties in same wop non-SK FD";
+
 /*
 *********************************************************************
 ** Max production days rules for FD SKN 2011 (Can be removed in 2012)

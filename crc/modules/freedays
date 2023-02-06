@@ -747,7 +747,7 @@ export %min_required_in_1_month_by_month_startdate%(Abstime start_t, Abstime end
 
 export %_target_days_in_period_1_month_fcsh_k11%(Abstime start, Abstime stop) =
     let pt_factor = model_crew.%crew_contract_part_time_factor_at_date%(crew.%id%, start);
-    model_freedays.%fdc15_month_entitled_basic_fd_qa%(pt_factor, crew.%id%, start)
+    model_freedays.%fdc15_month_entitled_basic_fd%(pt_factor, crew.%id%, start)
     * %qual_days_in_period%(start, stop);
         
 /*
@@ -758,7 +758,7 @@ export %_target_days_in_period_1_month_fcsh_k11%(Abstime start, Abstime stop) =
 
 %target_days_in_period_1_month_fclh_k11%(Abstime start, Abstime stop) =
     let pt_factor = model_crew.%crew_contract_part_time_factor_at_date%(crew.%id%, start);
-    model_freedays.%fdc15_month_entitled_basic_fd_qa%(pt_factor, crew.%id%, start)
+    model_freedays.%fdc15_month_entitled_basic_fd%(pt_factor, crew.%id%, start)
     * %qual_days_in_period%(start, stop);
 
 %fd_vg_with_two_freeday_reduced_months_in_calendar_year% =
@@ -4319,7 +4319,7 @@ export %number_of_days_until_next_on_duty_wop% =
 
 /*
 ** Single freeday is allowed:
-** In case qa, always, if only oma16 rules fulfilled (2 local nights)
+** 
 ** In caes sk or skn_cc:
 **  1. for sk_fd sh ( cc se for some time, now withdrawn), 
 **  2. on saturday, or on red letter days (but not non holiday sundays)
@@ -4344,16 +4344,13 @@ export %number_of_days_until_next_on_duty_wop% =
 
 %is_qualifying_single_freeday% =
   let tm = duty.%end_hb_selection_possible_after%(duty.%duty_sel_freeday%) - round_up(duty.%end_hb%, 24:00);
-  if crew.%has_agmt_group_svs% and %freedays_after_duty% > 1 then "NO" /* SVS: catch >1 assigned freeday */
+  if crew.%has_agmt_group_fpu% and %freedays_after_duty% > 1 then "NO" /* SVS: catch >1 assigned freeday */
   else if not duty.%arrives_at_homebase% or prev(duty(roster), duty.%is_long_haul%) then "NO"
-  else if duty.%is_ac_employer_qa% then /* qa: two local nights required, not two days */
-      if tm>=30:00 and tm<48:00 then "OK" /* <30 = no local night, > 47:59: not single */
-      else "NO"
   else if not crew.%has_agmt_group_sk_sh_fd%
        and not (crew.%has_agmt_group_skn_cc% and system_db_parameters.%cba16_nov_valid%(wop.%start_day%))
-       and not crew.%has_agmt_group_svs% then
+       and not crew.%has_agmt_group_fpu% then
        "NO" /*"Agreement does not allow single freeday"*/
-  else if tm<24:00 or (not crew.%has_agmt_group_svs% and tm>=48:00) then
+  else if tm<24:00 or (not crew.%has_agmt_group_fpu% and tm>=48:00) then
        "NO" /* If the gap is too short or too long then not single day off.
                SVS: gap can be long */
   else %_is_qualifying_single_freeday_sk%;
@@ -5510,9 +5507,6 @@ export %f36_reduction_corr_diff%(AbsTime ivalstart, AbsTime ivalend) =
 ** calculation free day control as in K15 
 */
 
-%chain_has_ac_employer_qa% =
-  any(wop(chain), wop.%has_ac_employer_qa%);
-
 export %freedays_reducing_days%(Abstime s, Abstime e) =
   duty.%days_with_selection%(duty.%duty_sel_freedays_disqual%,s,e);
 
@@ -5597,64 +5591,77 @@ export %fdc15_month_entitled%(Abstime s, Abstime e, Int month_basic) =
 
 /* main table to decide type of calculations due to agreement */
 table crew_entitled(Abstime s, Abstime e) =
-	model_crew.%group_at_date%(crew.%id%, s), crew.%is_cabin%, crew.%flying_qa_ac_employer%(s),
+	model_crew.%group_at_date%(crew.%id%, s), crew.%is_cabin%,
         crew.%agmt_group_inv_enum%(s), crew.%is_temporary_at_date%(s) ->
-	  %_crew_fdc15_month_entitled%, 
-	  %_crew_fdc15_2_months_entitled%,
+	  %_crew_fdc15_month_entitled%,
           %_crew_fdc15_year_entitled%,
 	  %_crew_fdc15_possibly_scheduled%;
-	"V", False,  False,   3, - -> /* fd not flying cimber, SH DK */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
-                                      void_int,
+	"V", False,    3, - -> /* SKD FD */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
-        "V", False,  False,  15, - ->  /* fd not flying cimber, LH DK */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
-                                      void_int,
+    "V", False,   15, - ->  /* SKID FD */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
-	"V", False,  False,   5, - ->  /* fd not flying cimber, SH SE */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)), 
-                                      void_int,
+	"V", False,    5, - ->  /* SKS FD */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
-	"V", False,  False,  16, - ->  /* fd not flying cimber, LH SE */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)), 
-                                      void_int,
+	"V", False,   16, - ->  /* SKIS FD */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
-	"V", False,  False,   7, - ->  /* fd not flying cimber, SH NO */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)), 
-                                      void_int,
+	"V", False,    7, - ->  /* SKN FD */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
-	"V", False,  False,  17, - ->  /* fd not flying cimber, LH NO */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)), 
-                                      void_int,
+	"V", False,   17, - ->  /* SKIN FD */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
-	"V", False,  True,    -, - ->  /* fd flying cimber */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)), 
-                                      %fdc15_twin_months_entitled%(s, e, model_freedays.%fdc15_twin_entitled_basic_qa_by_crew% (crew.%id%, s)), 
+	"V", False,   20, - ->  /* SZS DK FD */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
-	"V", True,   -,   2, False ->  /* cc QA */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)), 
-                                      %fdc15_twin_months_entitled%(s, e, model_freedays.%fdc15_twin_entitled_basic_qa_by_crew% (crew.%id%, s)),
+	"V", False,   22, -     ->  /* SZS SE FD */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
-	"V", True,   -,  11, False ->  /* cc SNK */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)), 
-                                      void_int,
+	"V", False,   18, -     ->  /* SVS FD */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
-	"V", True,   -,  10, False ->  /* cc NKF */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)), 
-                                      void_int,
+	"V", False,    1, -     ->  /* FPU FD*/
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)), 
+	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
+	                              %days_freedays_possible%(s, e);
+	"V", True,    2, False ->  /* FPU CC */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
+	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
+	                              %days_freedays_possible%(s, e);
+	"V", True,    21, False ->  /* SZS DK CC */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
+	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
+	                              %days_freedays_possible%(s, e);
+	"V", True,    23, False ->  /* SZS SE CC */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
+	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
+	                              %days_freedays_possible%(s, e);
+	"V", True,    19, False ->  /* SVS CC */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
+	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
+	                              %days_freedays_possible%(s, e);
+	"V", True,    11, False ->  /* SNK CC */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
+	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
+	                              %days_freedays_possible%(s, e);
+	"V", True,   10, False ->  /* NKF CC */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
                                   
-	-,   -,      -,       -, - -> 0, void_int, 0, 0;
+	-,   -,       -,   -    -> 0, 0, 0;
 end
 
 
@@ -5706,13 +5713,6 @@ export %crew_year_target%(Abstime per_s, Abstime per_e) =
     where (not void(model_crew.%crew_chg_agreement_from%(crew.%id%, %times_index_0%, per_s, per_e)))
   else 0;
 
- 
-/* planning month contribution for yearly freeday entitlement for Cimber, based on part time and disqualifying activitites. Called from accumulators */
-export %crew_2_months_entitled%(Abstime per_s, Abstime per_e) = 
-  if model_freedays.%fdc_valid%(crew.%id%, per_s, per_e) then
-    sum(times(model_crew.%crew_chg_agm_max_index%), %_crew_fdc15_2_months_entitled%(model_crew.%crew_chg_agreement_from%(crew.%id%, %times_index_0%, per_s, per_e),model_crew.%crew_chg_agreement_to%(crew.%id%, %times_index_0%, per_s, per_e))) 
-    where (not void(model_crew.%crew_chg_agreement_from%(crew.%id%, %times_index_0%, per_s, per_e)))
-  else 0;
 /*   TODO: remove */
 export %acc_fdc15_year_target_per_month%(Abstime month_start) =
   accumulators.%fdc15_nr_acc_entitled_freedays%(month_start); 
@@ -5730,24 +5730,6 @@ export %acc_fdc15_balance%(Abstime month_start) =
 
 export %fdc15_month_margin%(Abstime month_start, Int balance) = 
   model_freedays.%fdc15_months_remaining%(crew.%id%, month_start) * parameters.%fdc15_endyear_margin%;
-
-/*
-export %is_last_twin_month%(Abstime month_start) =
-  model_freedays.%fdc_month_nr%(month_start) mod 2 = 0;
-*/
-
-export %twin_month_fdc15_entitled%(Abstime month_start) =
-  if model_freedays.%is_last_twin_month%(month_start) then 
-    accumulators.%fdc15_nr_acc_entitled_freedays_qa_2_months%(add_months(month_start,-1), round_up_month(month_start+0:01))
-  else 
-    accumulators.%fdc15_nr_acc_entitled_freedays_qa_2_months%(month_start,round_up_month(month_start+0:01) );
-
-export %twin_month_fdc15_scheduled%(Abstime month_start) =
-  if model_freedays.%is_last_twin_month%(month_start) then
-    accumulators.%fdc15_nr_twin_possibly_scheduled_freedays%(add_months(month_start,-1),round_up_month(month_start+0:01))
-  else
-    accumulators.%fdc15_nr_twin_possibly_scheduled_freedays%(month_start, round_up_month(month_start+0:01));
-
 
 %_fdc15_sbl_contribution%(Abstime per_s, Abstime per_e) =
   let s = wop.%start_day%,

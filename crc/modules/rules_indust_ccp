@@ -782,9 +782,8 @@ rule ind_max_active_legs_in_FDP_with_extension_ALL =
         duty.%in_pp_extended% and
         duty.%is_short_haul% and
         duty_period.%is_on_duty% and
-        oma16.%is_extended_fdp% and
-        not (trip.%is_ac_employer_qa% and %cabin_crew% and parameters.%K15_qa_cc_mar16_valid%(trip.%start_day%)) /* SKCMS-581 */
-        and not (trip.%is_ac_employer_qa% and %flight_crew% and parameters.%k15qa_feb16_valid%(trip.%start_day%)) /* SKCMS-581 */; 
+        oma16.%is_extended_fdp%;
+
   %nr_of_active_legs_in_duty% <=
         %ind_max_active_legs_in_fdp_with_extension% +
                 rule_exceptions.%overshoot_int%(duty.%start_UTC%);
@@ -826,45 +825,38 @@ end
   
 
 
-/* New Rules in K15 SKCMS-582
+/* 
 /*
 ** Rule: 
 **    Checks the number of split duties in a trip.
-**    Valid for CC QA and FD QA  
+**    Valid for non SK crew
 **                               
 */
 
-
-rule (on) ind_max_split_duty_in_trip_qa =
+rule (on) ind_max_split_duty_in_trip_non_sk =
     valid trip.%check_rules%
-         and (if fundamental.%flight_crew% then
-                parameters.%K15_qa_FD_feb16_valid%(trip.%start_UTC%) and
-                trip.%is_ac_employer_qa%
-              else
-                 parameters.%K15_qa_cc_mar16_valid%(trip.%start_UTC%) and
-                 trip.%is_ac_employer_qa%)
-        and trip.%start_utc% >= %pp_start%
-        and trip.%start_utc% <= %pp_end%
-        and duty_period.%trip_has_split_duty%;
+          and (not trip.%is_regarded_sk_sh_agmt%
+          or trip.%is_named_fpu%)
+          and trip.%start_utc% >= %pp_start%
+          and trip.%start_utc% <= %pp_end%
+          and duty_period.%trip_has_split_duty%;
 	
-        duty_period.%trip_count_split_duties% <= %max_number_of_split_duties_in_trip_qa% +
+        duty_period.%trip_count_split_duties% <= %max_number_of_split_duties_in_trip_non_sk% +
 	    rule_exceptions.%overshoot_int%(trip.%start_UTC%);
   	
     startdate = trip.%start_UTC%;
 	severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%, %duty_lh_region%));
-	failobject =  %ind_max_split_duty_in_trip_qa_failobject%;
+	failobject =  %ind_max_split_duty_in_trip_non_sk_failobject%;
 	failtext(Int value, Int limit) = 
-        rules.%failtext_int%("Coll: Max 2 split duties in trip", value, limit);
-	remark "(CCP) Coll: Max 2 split duties in trip",
-    planner "this rule is for Cimber CC and FD. It checks that there are"
-            "  max 2 split duties in a trip"
-            " Agreement Cimber FD and CC 2014.";
+        rules.%failtext_int%("Coll: non SK Max 2 split duties in trip", value, limit);
+	remark "(CCP) Coll: Non SK max 1 split duties in trip",
+    planner "This rule is for non SK, or for trips named FPU."
+            "It checks that there are max ampunt of split duties in a trip";
 end	
  
-%max_number_of_split_duties_in_trip_qa% = 2;
+%max_number_of_split_duties_in_trip_non_sk% = 1;
 
-
-%ind_max_split_duty_in_trip_qa_failobject% =
+%ind_max_split_duty_in_trip_non_sk_failobject% =
 first(duty(trip),duty.%failobject_start%)
 where (duty_period.%is_split%
    and duty_period.%is_first_duty_in_duty_period%

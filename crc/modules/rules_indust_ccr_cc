@@ -62,7 +62,6 @@ export rule ind_max_duty_time_in_calendar_month_FC_SKN_SKL_SKS =
   valid roster.%check_rules%
    and %r_valid_duty_time_calendar_month%
    and  wop.%start_hb% >= %pp_start%
-   and not crew.%has_agmt_group_qa_cc%
    and  wop.%is_last_on_duty_in_month%
    and (crew.%is_SKS% and
          (crew.%k4exng_cc_sp5_1_valid%(wop.%start_month_start%) or
@@ -117,8 +116,6 @@ end
 **
 **    OMA and 4ExNG interpretations
 **
-**
-**
 */
 export rule ind_max_duty_time_in_calendar_month_pt_cc_parttime_SKS_monthly_parttime_SKD =
   valid %ind_max_duty_time_in_calendar_month_pt_cc_parttime_SKS_monthly_parttime_SKD_valid%
@@ -142,14 +139,10 @@ end
 
 redefine export %ind_max_duty_time_in_calendar_month_pt_cc_parttime_SKS_monthly_parttime_SKD_valid% =
     roster.%check_rules%
-    and not crew.%has_agmt_group_snk_cc%
-    and not crew.%has_agmt_group_nkf_cc%
-    and not crew.%has_agmt_group_qa_cc%
-    and (crew.%part_time_factor_at_date%(%_specific_date%) < 100
-         and crew.%is_SKS%
-         and (crew.%in_variable_group_wop_start% or
-         crew.%is_legal_pt_wop_start%)) or
-         (crew.%is_SKD% and crew.%is_crew_monthly_parttime_at_date%(wop.%start_utc%));
+    and (crew.%has_agmt_group_sks_cc%
+         and crew.%part_time_factor_at_date%(%_specific_date%) < 100
+         and (crew.%in_variable_group_wop_start% or crew.%is_legal_pt_wop_start%))
+    or (crew.%has_agmt_group_skd_cc% and crew.%is_crew_monthly_parttime_at_date%(wop.%start_utc%));
 
 %_specific_date% =
   let pp_month_start = round_down_month(wop.%start_utc%),
@@ -2188,7 +2181,6 @@ rule ind_min_rest_after_4_or_3_prod_days =
    valid roster.%check_rules% and
         not (freedays.%freedays_after_duty% = 1) and
         %_k_valid_and_crew_origin% and
-        not crew.%has_agmt_group_qa_cc% and /* SKSCMS-787 */
         crew.%is_short_haul_wop_start% and
         (wop.%in_pp% or %_next_duty_in_pp%) and
         %wop_day_limit% and
@@ -2214,11 +2206,11 @@ end
 
 export %_k_valid_and_crew_origin% = 
    ((parameters.%k11_skn_cc_valid%(duty.%start_hb%) and
-     crew.%is_skn%) or
+     crew.%has_agmt_group_skn_cc%) or
      (parameters.%k12_skd_cc_sp4_3_valid%(duty.%start_hb%) and
-     crew.%is_skd%) or
+     crew.%has_agmt_group_skd_cc%) or
      (parameters.%k12_sks_cc_sp4_4_valid%(duty.%start_hb%) and
-     crew.%is_sks%));
+     crew.%has_agmt_group_sks_cc%));
 
 export %_k4exng_and_not_lh% =
    ((crew.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and
@@ -2228,7 +2220,7 @@ export %_k4exng_and_not_lh% =
 
 %wop_day_limit% =
   if base_product.%is_rostering% or
-     (crew.%is_skn% and parameters.%k20_skn_cc_planned_rest_after_3_prod_days%(duty.%start_hb%)) then
+     (crew.%has_agmt_group_skn_cc% and parameters.%k20_skn_cc_planned_rest_after_3_prod_days%(duty.%start_hb%)) then
     (freedays.%wop_days% = 3 or freedays.%wop_days% = 4)
   else
     freedays.%wop_days% = 4;
@@ -3460,44 +3452,5 @@ end
 
 /* ************************************************************************* */
 
-
-
-
-export rule FX_to_be_added_manually =
-    valid %_FX_to_be_added_manually_valid%;
-
-    %_FX_to_be_added_manually_limit_exceeded_by% = 0:00;
-
-    startdate = duty.%start_UTC%;
-    failobject = duty.%failobject_start%;
-    failtext (Reltime value, Reltime limit) =
-        rules.%failtext_rel%("FX to be added manually (OT limit exceeded)", value, limit);
-    remark "FX to be added manually when overtime limit for QA CC (03:00) is exceeded.";
-end
-
-%_FX_to_be_added_manually_valid% =
-    crew.%has_agmt_group_qa_cc%
-    and (duty.%is_flight_duty% or duty.%is_deadhead% or duty.%is_ground_duty%)
-    and duty.%check_out_after_midnight%
-    /* only get FX day if overtime goes into freeday. */
-    and duty.%is_followed_by_freeday%;
-
-%_FX_to_be_added_manually_limit_exceeded_by% =
-    let
-          CO = time_of_day(duty.%end_hb%),
-          OT_exceed = CO - 03:00;
-
-          if OT_exceed > 0:00 then
-                OT_exceed
-          else
-                0:00;
-
-
-
-
-
-
-
-/********************
 /* end of file */
 

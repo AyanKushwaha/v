@@ -58,8 +58,7 @@ rule sby_max_duration_standby_ALL =
         duty.%has_standby% and
         not crew.%is_leased_duty_start% and
         not ( duty.%has_standby_at_hotel% and
-              (crew.%has_agmt_group_snk_cc_at_date%(duty.%start_UTC%) or
-               crew.%has_agmt_group_nkf_cc_at_date%(duty.%start_UTC%)) );
+              (crew.%has_agmt_group_skn_cc_at_date%(duty.%start_UTC%)) );
 	
 	%standby_duration_duty% <= %maximum_standby_duration_duty% + 
 				   rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
@@ -78,40 +77,17 @@ end
 
 %standby_duration_duty% =
   sum(leg(duty), %standby_time%) 
-    where (
-        if %is_Cimber% then
-            leg.%is_standby_at_home%
-        else
-            leg.%is_standby% and
-            (%cabin_crew% or
-                not (leg.%is_standby_at_airport%))
-     );
+    where (leg.%is_standby% and
+            (%cabin_crew% or not (leg.%is_standby_at_airport%)));
 
 /* redefined in inherited modules */
 %standby_time% = 
   leg.%time%;
 
-
-%is_Cimber% =
-     %is_QA_CC% or (%is_Danish_FD% and %is_CJ%);
-
-%is_QA_CC% =
-    default(crew.%has_agmt_group_qa_CC%, false);
-
-%is_Danish_FD% =
-    default(crew.%has_agmt_group_qa_FD%, false) or default(crew.%has_agmt_group_skd_fd%, false);
-
-%is_CJ% =
-    %is_CJ_at_date%(leg.%start_UTC%);
-
-%is_CJ_at_date%(Abstime date) =
-    crew.%has_ac_qln%(date, "CJ");
-
 %maximum_standby_duration_duty% =
-    if %is_Cimber% then
-        16:00
-    else
-        10:00;
+    if crew.%has_agmt_group_sk%
+        then 10:00
+    else 18:00; /*fpu does not have a limit for just standby duties, but good to match the duty limit of 18h for stb+fligth duty here*/
 
 /*
 ** Rule:
@@ -236,18 +212,14 @@ end
             (fundamental.%flight_crew% or crew.%is_SKD%))) and
     not crew.%is_leased_wop_start%;
 
-
 %_4exng_region% =
     if crew.%k4exng_cc_sp5_1_valid%(wop.%start_UTC%) then
-        default(crew.%region%, default(leg.%homebase_region%, "all"))
+        default(crew.%agmt_group_id_region_group%, default(leg.%homebase_region%, "all"))
     else
         crew.%region%;
 
 %max_days_in_standby_block% =
-    if %is_QA_CC% or (%is_Danish_FD% and %is_CJ_at_date%(wop.%start_UTC%)) then
-        7
-    else
-        %_max_days_in_standby_block%;
+    %_max_days_in_standby_block%;
 
 table standby_block_size_limit =
   fundamental.%cabin_crew%,
@@ -259,7 +231,8 @@ table standby_block_size_limit =
   true,  true,  "SKD", - -> 25;
   true,  true,  "SKN", - -> 25;
   true,  true,  "SKS", - -> 28;
-  false, false, -, - -> 6;
+  -   ,  -   ,  "FPU", - -> 14;
+ false, false,<>"FPU",  - -> 6;
 &
     -,     -,     -,     -     -> 500;
 end
