@@ -19,7 +19,7 @@ from RelTime import RelTime
 from salary.wfs.wfs_report import WFSReport
 from salary.wfs.wfs_report import (abs_to_datetime, extperkey_from_id, country_from_id, 
     getNextRecordId, getNextRunId, add_to_salary_wfs_t,  rank_from_id, actual_rank_from_id, reltime_to_decimal, default_reltime,
-    integer_to_reltime, crew_info_changed_in_period, crew_has_retired_at_date,planninggroup_from_id, end_month_extended)
+    integer_to_reltime, crew_info_changed_in_period, crew_has_retired_at_date,company_from_id, end_month_extended)
 from salary.wfs.wfs_config import PaycodeHandler
 import time
 
@@ -231,8 +231,9 @@ class TimeEntryReport(WFSReport):
                         month = abs_to_datetime(duty_start_day).month
                         monthly_ot = self._distribute_monthly_ot(monthly_ot, month, duty_bag)
                     
-                    planning_group = planninggroup_from_id(crew_id, duty_start_day)
-                    if planning_group == "SVS":
+                    crew_company = company_from_id(crew_id, duty_start_day)
+                    log.info('NORDLYS: Crew company {z} '.format(z = crew_company))
+                    if crew_company == "SVS":
                         num_of_flight = duty_bag.report_common.number_of_active_legs()
                         active_flight= duty_bag.duty.has_active_flight()
                         stby_duties = duty_bag.standby.duty_is_standby_callout()
@@ -905,7 +906,7 @@ class TimeEntryReport(WFSReport):
         rank = rank_from_id(crew_id, curr_date)
         
         crew_info_changed = crew_info_changed_in_period(crew_id, self.start, self.end)
-        planning_group = planninggroup_from_id(crew_id, curr_date)
+        crew_company = company_from_id(crew_id, curr_date)
 
         try:
             transactions = self.cached_account_data[crew_id]
@@ -926,7 +927,7 @@ class TimeEntryReport(WFSReport):
                 extperkey, country, rank = self._update_crew_info(crew_id, tnx_dt)
             log.debug('NORDLYS: Transaction on {account} for amount {d} on {dt}'.format(account=tnx.account.id, d = days_off, dt=tnx_dt))
             accountid = tnx.account.id
-            if planning_group == 'SVS' and tnx.account.id == 'SOLD':
+            if crew_company == 'SVS' and tnx.account.id == 'SOLD':
                 accountid = 'CNLN_SOLD'
             wfs_paycode = self.paycode_handler.paycode_from_event(accountid, crew_id, country, rank)
             log.debug('NORDLYS: wfs_paycode {0} mapped from account {1}'.format(wfs_paycode, tnx.account.id))
