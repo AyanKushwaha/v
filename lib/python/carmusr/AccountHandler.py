@@ -16,7 +16,6 @@
 #
 # David Lennartsson, Jeppesen 2007-02-28
 #
-
 import Cui
 import AbsTime
 import RelTime
@@ -25,11 +24,15 @@ import utils.Names as Names
 import carmensystems.rave.api as R
 import time
 import carmusr.HelperFunctions as HF
-
-
-
+#import datetime
 import application
 from salary.reasoncodes import REASONCODES
+
+#from datetime import datetime
+#from time import strftime, time, localtime
+#from AbsTime import AbsTime
+
+
 
 ### This functionality only works while on DB-plans
 try:
@@ -54,6 +57,9 @@ try:
         "bought_days.%bought_f3_account_name%",
         "bought_days.%bought_f3_2_account_name%",
         "bought_days.%co_on_f_account_name%",
+        "bought_days.%bought_sby_account_name%",
+        "bought_days.%bought_prod_account_name%",
+        "bought_days.%bought_duty_account_name%",
     )]
 except:
     # Best guesses
@@ -455,7 +461,6 @@ def updateAccountsForCrewInWindow(crewid_list, account_list, currentArea=Cui.Cui
         crew_object = _get_crew_object(crew_id)
         unbooked_where_expr = "compdays.%leg_has_online_transaction_unbooked%"
         leg_where_expr = 'compdays.%leg_affects_accounts% <> ""'
-
         unbooked_eval_expr = R.foreach(
             R.iter('iterators.leg_set', where=unbooked_where_expr),
             R.foreach(
@@ -551,23 +556,40 @@ def _check_unbooked_bought_periods(crew_list, ppstart, ppend, entry_info, accoun
     code updates account matching bought periods
     """
     migration_date, = R.eval('default_context', 'compdays.%account_migration_date%')
-    bought_period_cache = []
 
+    bought_period_cache = []
     bought_periods_to_check = []
+
     for crew_id in crew_list:
         try:
             crew = TM.crew[(crew_id,)]
-            for bought_period in crew.referers('bought_days', 'crew'):
-                # Check period and migration date, migration date is a safe check!
-                if bought_period.start_time < migration_date or \
-                       not (bought_period.start_time <= ppend and bought_period.end_time >= ppstart):
-                    continue
-                bought_periods_to_check.append(bought_period)
+            is_svs = 'crew.%has_agmt_group_svs%'
+            ##crew_id= crew.id
+            ##curr_date = AbsTime(datetime.now().strftime('%d%b%Y'))
+            ##print "## date1:", curr_date
+            ##crew_company = R.eval('model_crew.%company_at_date_by_id%("{crew_id}", {dt})'.format(
+            ##    crew_id=crew_id, 
+            ##    dt=curr_date)
+            ##    )[0]
+            if is_svs:
+                for bought_period in crew.referers('bought_days_svs', 'crew'):
+                    # Check period and migration date, migration date is a safe check!
+                    if bought_period.start_time < migration_date or \
+                        not (bought_period.start_time <= ppend and bought_period.end_time >= ppstart):
+                        continue
+                    bought_periods_to_check.append(bought_period)         
+            else:
+                for bought_period in crew.referers('bought_days', 'crew'):
+                    # Check period and migration date, migration date is a safe check!
+                    if bought_period.start_time < migration_date or \
+                        not (bought_period.start_time <= ppend and bought_period.end_time >= ppstart):
+                        continue
+                    bought_periods_to_check.append(bought_period)
+            
         except EntityNotFoundError:
             Errlog.log("AccountHandler.py:: Warning: " +
                        "Table bought_day has reference to no-existing" +
                        " crew id:%s" % str(bought_period.getRefI('crew')))
-    
     for bought_period in bought_periods_to_check:
         crew_id = bought_period.crew.id
         # Check if already booked
@@ -622,6 +644,7 @@ def _create_activity_account_entry_from_bought_period(bought_period,
     """
     Bought account activities still affecte their accounts
     """
+
     affect_account_info = _bought_period_account_effect(bought_period,account)
     
     entry={'crew':bought_period.crew.id,
@@ -644,7 +667,6 @@ def _create_bought_account_entry_from_bought_period(bought_period, published, no
     """
     Create BOUGHT(_BL) account entry from bought period
     """
-
     source, = R.eval('default_context',
                      'compdays.%%bought_day_source%%("%s")'%bought_period.day_type)
     account = bought_period.account_name
