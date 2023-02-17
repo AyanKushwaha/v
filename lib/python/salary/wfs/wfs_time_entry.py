@@ -243,7 +243,6 @@ class TimeEntry(WFSReport):
                         monthly_ot = self._distribute_monthly_ot(monthly_ot, month, duty_bag)
                     
                     crew_company = company_from_id(crew_id, duty_start_day)
-                    log.info('NORDLYS: Crew company {z} '.format(z = crew_company))
                     if crew_company == "SVS":
                         num_of_flight = duty_bag.report_common.number_of_active_legs()
                         active_flight= duty_bag.duty.has_active_flight()
