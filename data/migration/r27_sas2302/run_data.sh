@@ -50,3 +50,4 @@ echo "Migration finished"
 echo "  Check for eventual problems in:"
 echo "  $LOG_DIR"
 echo "********************************************"
+
