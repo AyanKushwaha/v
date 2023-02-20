@@ -54,11 +54,12 @@ try:
         "bought_days.%bought_f3_account_name%",
         "bought_days.%bought_f3_2_account_name%",
         "bought_days.%co_on_f_account_name%",
+        "bought_days.%bought_pr_account_name%",
     )]
 except:
     # Best guesses
     BOUGHT_ACCOUNT_NAME = 'BOUGHT'
-    BOUGHT_ACCOUNT_NAMES = ['BOUGHT', 'BOUGHT_BL', 'BOUGHT_COMP', 'BOUGHT_8', 'BOUGHT_COMP_F3S', 'BOUGHT_F3', 'BOUGHT_F3_2', 'BOUGHT_FORCED']
+    BOUGHT_ACCOUNT_NAMES = ['BOUGHT', 'BOUGHT_BL', 'BOUGHT_COMP', 'BOUGHT_8', 'BOUGHT_COMP_F3S', 'BOUGHT_F3', 'BOUGHT_F3_2', 'BOUGHT_FORCED', 'BOUGHT_PR']
 
 ##################################################################
 # Function for updating the publication status for transactions
@@ -181,7 +182,7 @@ F35 = "F35"
 F36 = "F36"
 F38 = "F38"
 F89 = "F89"
-
+PR = "PR"
 PRE = "PRE"
 CCR = "CCR"
 CCT = "CCT"
@@ -281,6 +282,12 @@ REMOVE_LOOKUP_MAP = {
     (y, n, F89): n,
     (n, y, F89): y,
     (n, n, F89): y,
+
+    # For PR
+    (y, y, PR): y,
+    (y, n, PR): n,
+    (n, y, PR): y,
+    (n, n, PR): y,
 }
 
 
