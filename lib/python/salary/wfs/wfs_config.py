@@ -69,7 +69,10 @@ PAYCODE_FROM_EVENT = {
             'CNLN_PROD_SICK_DK' :   'SAS_DK_CNLN_PROD_SICK',
             'CNLN_PROD_WEEKDAY_NO': 'SAS_NO_CNLN_PROD_WEEKDAY',
             'CNLN_PROD_WEEKEND_NO':   'SAS_NO_CNLN_PROD_WEEKEND_HOLIDAY',
-            'CNLN_PROD_SICK_NO' :   'SAS_NO_CNLN_PROD_SICK'
+            'CNLN_PROD_SICK_NO' :   'SAS_NO_CNLN_PROD_SICK',
+            'PR_SE_FC' : 'SAS_SE_ABS_PR_LOA_D',
+            'PR_NO_FC' : 'SAS_NO_ABS_PR_LOA_D',
+            'PR_DK_FC' : 'SAS_DK_ABS_PR_LOA_D'
         }
 
 EVENT_FROM_PAYCODE = {
@@ -300,6 +303,8 @@ class PaycodeHandler:
         elif event_type in ('F7',):
             rank = '_{r}'.format(r=rank) if country in ('NO', 'DK', 'SE') else ''
             return PAYCODE_FROM_EVENT['{e}_{c}{r}'.format(e=event_type, c=country, r=rank)]
+        elif (event_type =='PR' and rank == 'FC'):
+            return PAYCODE_FROM_EVENT['{e}_{c}_{r}'.format(e=event_type, c=country, r=rank)]
         else:
             return ''
 
