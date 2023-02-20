@@ -64,11 +64,6 @@ def get_overlap(start1, end1, start2, end2):
 def buy_days(crew_id, start_time, end_time, leg_type, comment="", bought_day_type="", has_agmt_skd_cc=False, is_valid=False):
 
     bought_account, bought_8_account,bought_forced_account = ACCOUNTS
-    bought_sby, bought_prod, bought_duty = ACCOUNTS_SVS
-    
-    is_type_bought_sby = bought_day_type == bought_sby
-    is_type_bought_prod = bought_day_type == bought_prod
-    is_type_bought_duty = bought_day_type == bought_duty
 
     #############################################################
     # This is a "conversion table" for SKD CC to be used once the validity agreement is fullfilled.
@@ -137,40 +132,30 @@ def buy_days(crew_id, start_time, end_time, leg_type, comment="", bought_day_typ
                 start_time = current_row.end_time
                 current_row = None
         else:  # Start in empty period!
-            bought_days_svs_type = 'BOUGHT_PROD','BOUGHT_SBY','BOUGHT_DUTY'
-            if bought_day_type not in bought_days_svs_type:
-                current_row = TM.bought_days.create((crew, start_time))
-                current_row.day_type = row_day_type
-                if row_day_type[:2] == "BL" and not is_cabincrew:
-                    current_row.account_name = "BOUGHT_BL"
+            current_row = TM.bought_days.create((crew, start_time))
+            current_row.day_type = row_day_type
+            if row_day_type[:2] == "BL" and not is_cabincrew:
+                current_row.account_name = "BOUGHT_BL"
             # elif is_type_bought_comp:
-                #    current_row.account_name = bought_comp_account
-                elif is_type_bought_8:
-                    current_row.account_name = bought_8_account
-                #elif is_type_bought_comp_f3s:
+                #   current_row.account_name = bought_comp_account
+            elif is_type_bought_8:
+                current_row.account_name = bought_8_account
+            #elif is_type_bought_comp_f3s:
                 #   current_row.account_name = bought_comp_f3s_account
-                elif is_type_bought_f3:
-                    current_row.account_name = bought_f3_account
-                elif is_type_bought_f3_2:
-                    current_row.account_name = bought_f3_2_account
-                elif is_type_bought_forced:
-                    current_row.account_name = bought_forced_account
-                elif is_type_bought_sby:
-                    current_row.account_name = bought_sby
-                elif is_type_bought_prod:
-                    current_row.account_name = bought_prod
-                elif is_type_bought_duty:
-                    current_row.account_name = bought_duty
-                else:
-                    current_row.account_name = bought_account
-                current_row.end_time = start_time.adddays(1)
-                current_row.uname = uname
-                current_row.si = comment
-                finished = current_row is not None and \
-                current_row.end_time >= end_time and \
-                current_row.end_time not in periods_to_merge  # Don't forget to merge end if needed
+            elif is_type_bought_f3:
+                current_row.account_name = bought_f3_account
+            elif is_type_bought_f3_2:
+                current_row.account_name = bought_f3_2_account
+            elif is_type_bought_forced:
+                current_row.account_name = bought_forced_account
             else:
-                break
+                current_row.account_name = bought_account
+            current_row.end_time = start_time.adddays(1)
+            current_row.uname = uname
+            current_row.si = comment
+            finished = current_row is not None and \
+            current_row.end_time >= end_time and \
+            current_row.end_time not in periods_to_merge  # Don't forget to merge end if needed
 
 def integer_to_reltime_hour(val):
     if val is None:
@@ -364,7 +349,10 @@ def buy_days_svs(crew_id, start_time, end_time, leg_type, comment="",time_hh_sby
 
 def get_row_day_type(leg_type):
         # The activity code to save:
-    is_svs = 'crew.%has_agmt_group_svs%'
+    is_svs, = R.eval(
+        R.selected('levels.leg'),
+        'crew.%has_agmt_group_svs%',
+        )
     if is_svs:
         if not leg_type:
             return "F"

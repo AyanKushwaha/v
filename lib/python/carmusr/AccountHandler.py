@@ -16,6 +16,7 @@
 #
 # David Lennartsson, Jeppesen 2007-02-28
 #
+
 import Cui
 import AbsTime
 import RelTime
@@ -24,13 +25,9 @@ import utils.Names as Names
 import carmensystems.rave.api as R
 import time
 import carmusr.HelperFunctions as HF
-#import datetime
 import application
 from salary.reasoncodes import REASONCODES
 
-#from datetime import datetime
-#from time import strftime, time, localtime
-#from AbsTime import AbsTime
 
 
 
@@ -461,6 +458,7 @@ def updateAccountsForCrewInWindow(crewid_list, account_list, currentArea=Cui.Cui
         crew_object = _get_crew_object(crew_id)
         unbooked_where_expr = "compdays.%leg_has_online_transaction_unbooked%"
         leg_where_expr = 'compdays.%leg_affects_accounts% <> ""'
+
         unbooked_eval_expr = R.foreach(
             R.iter('iterators.leg_set', where=unbooked_where_expr),
             R.foreach(
@@ -558,19 +556,16 @@ def _check_unbooked_bought_periods(crew_list, ppstart, ppend, entry_info, accoun
     migration_date, = R.eval('default_context', 'compdays.%account_migration_date%')
 
     bought_period_cache = []
-    bought_periods_to_check = []
 
+    bought_periods_to_check = []
     for crew_id in crew_list:
         try:
             crew = TM.crew[(crew_id,)]
-            is_svs = 'crew.%has_agmt_group_svs%'
-            ##crew_id= crew.id
-            ##curr_date = AbsTime(datetime.now().strftime('%d%b%Y'))
-            ##print "## date1:", curr_date
-            ##crew_company = R.eval('model_crew.%company_at_date_by_id%("{crew_id}", {dt})'.format(
-            ##    crew_id=crew_id, 
-            ##    dt=curr_date)
-            ##    )[0]
+            is_svs, = R.eval(
+                R.selected('levels.leg'),
+                'crew.%has_agmt_group_svs%'
+                )
+            print "is_svs", is_svs
             if is_svs:
                 for bought_period in crew.referers('bought_days_svs', 'crew'):
                     # Check period and migration date, migration date is a safe check!
@@ -593,7 +588,6 @@ def _check_unbooked_bought_periods(crew_list, ppstart, ppend, entry_info, accoun
     for bought_period in bought_periods_to_check:
         crew_id = bought_period.crew.id
         # Check if already booked
-
         # If we bought some other activity then we need to mimic that leg lookup
         account = bought_period.day_type  # The account for the other activity
         if account is not None and account in account_list:
@@ -644,9 +638,7 @@ def _create_activity_account_entry_from_bought_period(bought_period,
     """
     Bought account activities still affecte their accounts
     """
-
     affect_account_info = _bought_period_account_effect(bought_period,account)
-    
     entry={'crew':bought_period.crew.id,
            'amount':affect_account_info['amount'],
            'account':account,
@@ -671,7 +663,6 @@ def _create_bought_account_entry_from_bought_period(bought_period, published, no
                      'compdays.%%bought_day_source%%("%s")'%bought_period.day_type)
     account = bought_period.account_name
     amount = 100*int((bought_period.end_time-bought_period.start_time)/RelTime.RelTime('24:00'))
-    
     # Bought F3_2 activites should be booked as 2 F3 in F3 account
     if account == "BOUGHT_F3_2":
         amount = 2*amount
