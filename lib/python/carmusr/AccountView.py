@@ -76,6 +76,11 @@ BOUGHT_BL = 'BOUGHT_BL'
 BOUGHT_FORCED = 'BOUGHT_FORCED'
 SOLD = 'SOLD'
 BOUGHT_PR='BOUGHT_PR'
+#Added Bought for SAS Link
+BOUGHT_SBY = 'BOUGHT_SBY'
+BOUGHT_PROD = 'BOUGHT_PROD'
+BOUGHT_DUTY = 'BOUGHT_DUTY'
+#End for SAS Link
 
 # Actions
 IN_ADMIN   = REASONCODES["IN_ADMIN"]  #'IN Administrative'
@@ -161,6 +166,11 @@ ACTION[BOUGHT_FORCED] = []
 #ACTION[SOLD] = [IN_CORR, OUT_CORR]
 ACTION[SOLD] = []
 ACTION[PR] = []
+#Added Bought for SAS Link
+ACTION[BOUGHT_SBY] = []
+ACTION[BOUGHT_PROD] = []
+ACTION[BOUGHT_DUTY] = []
+#End for SAS Link
 
 """
 Temporary class that holds crew information.
@@ -555,6 +565,7 @@ def updateForm(*args):
     setCrewInScriptBuffer(crewId)
     
     # This is the new faster bulk-function
+
     AccountHandler.updateAccountsForCrewInWindow([crewId],
                                                  [account],
                                                  Cui.CuiScriptBuffer)

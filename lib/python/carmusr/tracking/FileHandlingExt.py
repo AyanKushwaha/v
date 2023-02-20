@@ -313,6 +313,7 @@ def __preload_model_tables():
         "alert_time_exception",
         "bases",
         "bought_days",
+        "bought_days_svs",
         "ci_frozen",
         "cio_event",
         "cio_status",

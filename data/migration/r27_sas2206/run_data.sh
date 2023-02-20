@@ -48,7 +48,6 @@ python $CARMUSR/data/migration/$RELEASE/skcms-2774.py 2>&1 | tee $LOG_DIR/skcms-
 echo "  * SKCMS-3022: Link Salary addition for flight duty hours"
 python $CARMUSR/data/migration/$RELEASE/skcms-3022.py 2>&1 | tee $LOG_DIR/skcms-3022.log
 
-
 # Uncomment this in case dave filters shall be modified, remember to update JIRA number
 #echo "  * SKCMS-XXXX: Importing crc/etable/dave_filter/*.etab into database"
 #$CARMUSR/bin/admin/setup/setup_filters.sh -c -d | tee -a $LOG_DIR/SKCMS-XXXX.log

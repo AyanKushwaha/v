@@ -30,9 +30,15 @@ import trip;
 import iterators;
 import duty;
 import task;
+import base_utils;
 /****************************************************************
  * Section 1: External table definitions and lookups
  ***************************************************************/
+export %bought_table_svs% = %etab_path%(%table_p%);
+%table_p% =
+  parameter "bought_days_svs"
+  remark "ETAB: Table with bought days in svs";
+
 %table% = leg.%bought_table%;
 
 table bought_day_table(AbsTime t) = 
@@ -65,8 +71,26 @@ table rudob_bought_day_table(Int match) =
   - , -, -                       -> void_abstime, void_string, void_string, void_string, void_abstime, void_string;
 end
 
+
+table rudob_bought_day_svs_table(Int match) =
+  crew.%id%, round_down(fundamental.%loaded_data_period_start%, 24:00), match ->
+    export AbsTime %start_time_svs%, export String %bought_day_comment_svs%, 
+    export String %bought_day_username_svs%, export String %bought_day_type_svs%,
+    export AbsTime %end_time_svs%,
+    export Reltime %hours%,
+    export Reltime %minutes%,
+    export String %account_name_for_match_svs%;
+  external %bought_table_svs%;
+  crew, <=start_time, match_number -> start_time, si, uname, day_type, end_time, hours, minutes, account_name;
+  - , -, -                       -> void_abstime, void_string, void_string, void_string, void_abstime, void_reltime, void_reltime, void_string;
+end
+
+
+
 export %is_co_type_account_name%(String account_name) =
   account_name = %co_on_f_account_name%;
+
+export %bought_svs%= crew.%has_agmt_group_svs%;
 
 export %bought_days_length%(Int match)=
 let end_time=%end_time%(match),start_time=%start_time%(match);
@@ -77,6 +101,20 @@ else
   00:00  
 ;
 
+export %bought_days_length_svs%(Int match)=
+let end_time_svs=%end_time_svs%(match),start_time_svs=%start_time_svs%(match);
+if not void(end_time_svs) and not void(start_time_svs)
+then 
+  end_time_svs-start_time_svs
+else
+  00:00  
+;
+
+
+export %bought_days_hours_and_min%(Int match)=
+let hrs=%hours%(match), mn=%minutes%(match), hrs_val =format_time(hrs,"%02h"), min_val =format_time(mn,"%02M");
+  concat(" ",hrs_val,":",min_val)
+;
 
 export %types_in_period%(AbsTime start_time, AbsTime end_time)=
   cat(times((end_time-start_time)/24:00),
@@ -146,9 +184,8 @@ export %bdi_count%(Abstime s, Abstime e) =
  ***************************************************************/
 
 
-export %type_shall_be_recreated%(string type) = 
-  %code_is_buyable%(type);
-
+export %type_shall_be_recreated%(string type) = %code_is_buyable%(type);
+export %type_shall_be_recreated_svs%(string type) = %code_is_buyable_svs%(type);
 
 
 /*********************************************************************
@@ -162,10 +199,25 @@ export %bought8_account_name% = "BOUGHT_8"; /* Do not change unless bought accou
 export %bought_f3s_account_name% = "BOUGHT_COMP_F3S"; /* Do not change unless bought account name changed*/
 export %bought_f3_account_name% = "BOUGHT_F3"; /* Do not change unless bought account name changed*/
 export %bought_f3_2_account_name% = "BOUGHT_F3_2"; /* Do not change unless bought account name changed*/
-export %co_on_f_account_name% = "BOUGHT_FORCED"; 
+
+
+export %bought_sby_account_name% = "BOUGHT_SBY"; /* Do not change unless bought account name changed*/
+export %bought_prod_account_name% = "BOUGHT_PROD"; /* Do not change unless bought account name changed*/
+export %bought_duty_account_name% = "BOUGHT_DUTY"; /* Do not change unless bought account name changed*/
+export %co_on_f_account_name% = "BOUGHT_FORCED";  
 export %bought_pr_account_name% = "BOUGHT_PR";
 export %leg_is_bought% = 
   leg.%is_bought%;
+
+export %leg_is_bought_svs% = 
+  leg.%is_bought_svs%;
+
+export %hr_udor%(String hr) =
+   concat(hr,":","00");
+
+export %mn_udor%(String mn) =
+   concat("00",":",mn);
+  
 
 %leg_code%(AbsTime a1, AbsTime a2) = 
   first(leg(chain), leg.%code%)
@@ -209,6 +261,40 @@ export %days_may_be_bought%(AbsTime a1, AbsTime a2) =
        substr(code,1,2) = "BL");
       
 set buyable_task_groups = "VAC", "PFR", "FRE", "CMP" , "LOA", "PPF", "F4XNG";
+
+/* SVS codes which can be bought */
+
+set buyable_task_groups_svs = "VAC", "PFR", "FRE", "CMP" , "PPF";
+
+export %days_may_be_bought_svs%(AbsTime a1, AbsTime a2) =
+  let code = %leg_code%(a1,a2);
+  if %code_is_buyable_svs%(code) 
+  then code
+  else void_string;
+
+%code_is_buyable_svs%(string code) =
+    not (code in non_buyable_codes_svs) and
+     (%code_is_off_duty_day_svs%(code)
+       or
+     %code_is_blankday%(code));
+
+set non_buyable_codes_svs = "F33";
+
+export %duty_may_be_bought_svs%(AbsTime a1, AbsTime a2) =
+  let code = %leg_code%(a1,a2);
+  if not %code_is_buyable_svs%(code)
+  then code
+  else void_string;
+
+%code_is_off_duty_day_svs%(string code) =
+      let  task = task.%group%(code);
+     (task in buyable_task_groups_svs and
+     (substr(code,1,1) = "F" or
+      substr(code,1,2) = "LA" or
+      substr(code,1,2) = "VA" or 
+      substr(code,1,2) = "PR"));
+
+/* End */
 
 /* F33 can't be bought according to CR240. ATM this is the only one */
 set non_buyable_codes = "F33";
