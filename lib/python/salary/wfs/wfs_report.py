@@ -450,6 +450,22 @@ def planninggroup_from_id(crew_id, dt):
         )[0]
     return planninggroup
 
+def base_from_id(crew_id, dt):
+    crew_base= r.eval('model_crew.%base_at_date_by_id%("{crew_id}", {dt})'.format(
+        crew_id=crew_id, 
+        dt=dt)
+        )[0]
+    return crew_base
+
+def crew_not_BGOFD(crew_id, dt):
+    crew_base= base_from_id(crew_id,dt)
+    crewid_rank = rank_from_id(crew_id, dt)
+    if crew_base != 'BGO':
+        return True
+    elif crewid_rank == 'FC':
+        return False
+    else:
+        return True
 
 def crew_excluded(crew_id, curr_date):
     if extperkey_from_id(crew_id,curr_date) in crew_exclusion_list:
