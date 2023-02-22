@@ -14,7 +14,7 @@ def main():
     fixit()
  
 def fetch_crew_data():
-    with open('/users/tcskuyadm/repo/CARMUSR/SAS-Tracking/lib/python/adhoc/new_crew_entry/newCrewData.csv') as csvFile:
+    with open('./newCrewData.csv') as csvFile:
         data = csv.reader(csvFile, delimiter=';', quotechar='|')
         for row in data:
             newCrew.append(dict({'Crewid': row[0],'EmplNo': row[1],'Extperkey': row[2],'BirthCity': row[3],'BirthCountry': row[4],'EmplDate': row[5],'Base': row[6],'Rank': row[7],'PlanningGroup': row[8],'Contract': row[9],'AircraftQualification': row[10],'Name': row[11],'Forenames': row[12]}))
