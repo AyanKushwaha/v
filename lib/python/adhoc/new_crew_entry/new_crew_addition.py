@@ -24,6 +24,8 @@ def fetch_crew_data():
 @fixrunner.run
 def fixit(dc, *a, **k):
     ops = []
+    dash = "-"
+    slash = "/"
     for crew in newCrew:
         temp=fixrunner.dbsearch(dc, 'crew', "id='%s'" % crew['Crewid'])
         if(temp!=[]):
@@ -33,7 +35,14 @@ def fixit(dc, *a, **k):
             if(crew['EmplDate']!=''):
                 empd=crew['EmplDate']
                 format = "%d%b%Y"
-                strtodate =  datetime.strptime(empd, '%Y/%m/%d')
+                if slash in empd: 
+                    strtodate =  datetime.strptime(empd, '%Y/%m/%d')
+                elif dash in empd:
+                    strtodate =  datetime.strptime(empd, '%Y-%m-%d')
+                    print(strtodate)
+                else:
+                    print("DATE FORMAT MAY BE WRONG, PLEASE CHECK CREW ID-->{0}".format(crew['Crewid']))
+                    continue
                 datechg=strtodate.strftime("%d%b%Y %H:%M:%S:%f")
                 employmentDate = AbsTime(datechg[:15])
                 bDay = datetime(2019, 1, 1).strftime(format) 
