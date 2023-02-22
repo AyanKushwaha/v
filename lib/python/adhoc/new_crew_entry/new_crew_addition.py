@@ -104,7 +104,7 @@ def fixit(dc, *a, **k):
 
     return ops
 
-__version__ = 'Run22'
+__version__ = '2023-02-20_01V'
 fixit.program = 'new_crew_addition.py (%s)' % __version__
  
 main()
