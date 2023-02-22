@@ -81,7 +81,7 @@ class CrewDataDocument(XMLDocument):
         # Get data from database.
         crew_table = dbconn.runSearch(DaveSearch('crew', []))
         tbl_crew_employment = dbconn.runSearch(DaveSearch('crew_employment', [('validto', '>', from_time),
-                                                                    ('planning_group', '!=', 'SVS')])) 
+                                                                    ('company', '!=', 'SVS')])) 
         non_svs_crew = []                                                                    
         for ce in tbl_crew_employment:
             if ce['crew'] not in non_svs_crew:
