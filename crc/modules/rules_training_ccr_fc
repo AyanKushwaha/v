@@ -802,6 +802,60 @@ end
 
 /*
 ** Rule:
+**    Check that ILC, LC and 4 first LIFUS flights' flying time 
+**    is longer than limit for SVS FD.
+**
+** Description:
+**    The rule checks that an initial line check, line check flight or any 
+**    of the 4 first LIFUS flights for SVS flight deck is at least one hour long.
+**
+**  Agreement:
+**    Footprint SAS Link training
+*/
+rule trng_min_training_flight_length_svs_fc =
+  valid %trng_min_training_flight_length_svs_fc_valid% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+        
+  leg.%scheduled_time% >=  %min_length_of_training_svs_fc% + rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%);
+
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %trng_min_training_flight_lenght_svs_fc_failtext% ;
+  remark "OMD: Training flight length SVS FD",
+  planner "Rule to check that duration of ILC, LC or 4 first LIFUS"
+          "for SVS FD is long enough";
+end
+
+%trng_min_training_flight_length_svs_fc_valid% =
+  roster.%check_rules% and
+  crew.%is_svs% and
+  trip.%in_pp_extended% and
+  trip.%has_training_code% and
+  trip.%qual% = "EJ" and
+  (leg.%is_any_lc% or
+  (leg.%is_lifus% and %up_to_fourth_lifus_leg%));
+
+%up_to_fourth_lifus_leg% =
+    training.%is_first_lifus% 
+        or leg.%is_lifus% and prev(leg(roster), training.%is_first_lifus%
+                or leg.%is_lifus% and prev(leg(roster), training.%is_first_lifus%
+                        or leg.%is_lifus% and prev(leg(roster), training.%is_first_lifus%)
+                                            where(leg.%is_active_flight%))
+                                       where(leg.%is_active_flight%))
+                               where(leg.%is_active_flight%);
+
+%min_length_of_training_svs_fc% = 
+    parameter 1:00
+    remark "SVS FD: Min duration for SVS FD training flight";
+
+%trng_min_training_flight_lenght_svs_fc_failtext% = 
+  rules.%failtext_rel%("OMD: Training flight for SVS FD too short", 
+                       leg.%scheduled_time%, 
+                       %min_length_of_training_svs_fc%);
+
+/*
+** Rule:
 **    Max days between LIFUS legs and btw LIFUS and simulator
 **
 ** Description:
@@ -826,7 +880,7 @@ export rule trng_max_days_between_lifus_legs_FC =
   failobject = leg.%failobject_departure%;
   failtext(Int value, Int limit) = 
     %trng_max_days_between_lifus_sup_asf_legs_failtext%(value,limit);
-  remark "OMA: Max days between LIFUS legs and LIFUS and simulator",
+  remark "OM: Max days between LIFUS legs and LIFUS and simulator",
   planner "";
 end
 
