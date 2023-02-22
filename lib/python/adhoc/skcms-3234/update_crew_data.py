@@ -5,7 +5,7 @@ import os
 import adhoc.fixrunner as fixrunner
 from AbsTime import AbsTime
 
-__version__ = "2023-01-31_3"
+__version__ = "2023-01-31_4"
 
 filepath = os.path.expandvars("$CARMUSR")
 dataFile = filepath + "/lib/python/adhoc/skcms-3234/spg_crew_list"
