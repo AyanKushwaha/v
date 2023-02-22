@@ -877,6 +877,57 @@ class PAXLST_NO(PAXLST_UK):
                 city_of_birth = None
             PAXLST_US.LOC.__init__(self, qual, id, city_of_birth, province_of_birth)
 
+# PAXLST_IE =============================================================={{{1
+# Assuming IE is *almost* identical to UK ...
+class PAXLST_IE(PAXLST_UK):
+    # UNB ----------------------------------------------------------------{{{3
+    class UNB(PAXLST_US.UNB):
+        def __init__(self, sender=None, recipient=None, date_time=None, reference=None):
+            PAXLST_US.UNB.__init__(self, sender, recipient, date_time, reference)
+            self.application = 'APIS'
+    class EMP(PAXLST.EMP):
+        def __init__(self, category):
+            """
+            category    : 9005      Employment category description code
+                'CR1'   - Cockpit crew and individuals in cockpit
+                'CR2'   - Cabin crew
+                'CR3'   - Airline operation management with cockpit access.
+                'CR4'   - Cargo non-cockpit crew and/or non-crew individuals.
+                'CR5'   - Pilots on A/C but not on duty (deadhead).
+            """
+            PAXLST.EMP.__init__(self)
+            self.qual = '1'
+            self.category.code = category
+        # DOC ----------------------------------------------------------------{{{3
+    class DOC(PAXLST.DOC):
+        def __init__(self, code, id):
+            """
+            code    : 1001     Document name code
+                'P'     - Passport (issuer: Yes)
+                'G'     - Group Passport
+                'A'     - National Identity Card or Resident Card (Exact use
+                          defined by issuing state)
+                'C'     - National Identity Card or Resident Card (Exact use
+                          defined by issuing state)
+                'I'     - National Identity Card or Resident Card (Exact use
+                          defined by issuing state)
+                'M'     - Military Identification
+                'D'     - Diplomatic Identification
+                'AC'    - Crew Member Certificate
+                'IP'    - Passport Card
+                'F'     - Approved non-standard identity documents used for
+                          travel.
+            id       : 1004     Document identifier
+            """
+            PAXLST.DOC.__init__(self)
+            self.name.code = code
+            self.details = alnum(id)
+    class LOC(PAXLST_US.LOC):
+        def __init__(self, qual, id, city_of_birth=None, province_of_birth=None):
+            if qual == "180":
+                city_of_birth = None
+            PAXLST_US.LOC.__init__(self, qual, id, city_of_birth, province_of_birth)
+
 
 # PAXLST_MX =============================================================={{{1
 # Assuming MX is *almost* identical to UK ...

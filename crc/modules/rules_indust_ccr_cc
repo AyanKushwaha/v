@@ -223,6 +223,44 @@ end
 
 /*
 ** Rule:
+**   Maximum FDP extension duties in calendar month for CC.
+**
+** Description:
+**   Check the number of SH FDP extension duties in a calendar month.
+**
+** Union Agreement:
+**      4ExNG 6.3.1.1.B
+**      Changes made 2022 in SKCMS-3069
+*/
+export rule ind_max_fdp_with_extension_in_month_cc =
+  valid trip.%check_rules% and
+        trip.%is_short_haul% and      
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and
+        duty_period.%is_last_duty_period_on_start_day% and
+        oma16.%is_extended_fdp% and
+        oma16.%is_last_fdp_extension_duty_in_month%;
+        
+  %num_extension_duties_in_month% <= duty_time.%max_fdp_extensions_month% +
+                rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%(format_time(duty.%start_month_start%,
+                                     "(CCR) Coll: Max FDP extension duties in %b"),
+                         value,limit);
+  remark "Coll: Max FDP extension duties in month for CC",
+  planner "The rule checks that the number of FDP extensions in a calendar "
+          "month is less than maximum allowed.";
+end
+%num_extension_duties_in_month% =
+    accumulators.%extended_shorthaul_duties_in_period%(duty.%start_month_start%,
+                                             duty.%start_month_end%);
+
+
+/*
+** Rule:
 **    Max duty time in 2x24 hrs
 **
 ** Description:
@@ -1455,6 +1493,173 @@ end
     where(duty.%end_hb% <= calendar.%month_pair_end%(wop.%start_hb%))
     , wop.%failobject_start%);
 
+/*
+** Rule:
+**    Max short haul production days before long haul
+**
+** Description:
+**    Check that long haul production is not preceded by more than 2 (1) days short
+**    haul production.
+**    
+**    NB! Two implementations are done. One in Pairing (when planning
+**    short-before-long) and one in Rostering.
+**    
+**    There is also a "sister rule" for MFF in rules_qual_ccr_fc - SKCMS-3215
+**
+** Agreement:
+**    CAU E.1.1 E.1.4, K06 P.3.4b
+**    SCCA D.1.1
+**    NKF K11 Appendix B 1.5
+**
+**    4ExNG 6.3.1.1.C
+**    Engagement CC 2019 - Limit is 1 SH day before LH for SKD and SKS
+
+*/
+export rule ind_max_sh_duty_days_before_lh_cc =
+  valid roster.%check_rules% and not
+       (crew.%is_skd% and crew.%is_temporary%) and
+        trip.%in_pp_extended% and
+        trip.%is_long_haul% and
+        not trip.%is_bought% and
+        %trip_is_preceded_by_short_haul_gd_not_bought_or_standby%;
+
+ %sh_days_before_lh% <= %max_sh_days_before_lh% + rule_exceptions.%overshoot_int%(trip.%start_UTC%);
+ 
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_sh_duty_days_before_lh_failobject%;
+  failtext (Int value, Int limit) = rules.%failtext_int%("Coll: SH production days before LH", value, limit);
+  remark "(CCR) Coll: Max short haul production days before long haul",
+  planner "The rule checks that LH production is not preceded by more than"
+          " 1 short haul production days (2 for SKN CC).";
+end
+
+
+%trip_is_preceded_by_short_haul_gd_not_bought_or_standby% =
+  default(prev(trip(wop), trip.%is_standby%), false) or
+  %trip_is_preceded_by_short_haul_or_gd_not_bought%;
+
+%trip_is_preceded_by_short_haul_or_gd_not_bought% =
+  default(prev(trip(wop), %_trip_is_sh_or_gd_not_bought%), false);
+
+%_trip_is_sh_or_gd_not_bought% =
+  (trip.%is_short_haul% or
+   (trip.%is_ground_duty% and not trip.%is_off_duty_cmp%) or
+   %_k4exng_trip_is_sh_standby%) and
+  not trip.%is_bought%;
+
+%_k4exng_trip_is_sh_standby% =
+  not base_product.%is_tracking% and
+  not trip.%is_long_haul% and
+  trip.%is_standby%;
+
+%ind_max_sh_duty_days_before_lh_failobject% =
+  first(duty(trip), duty.%failobject_start%)
+    where(duty.%is_long_haul% and not duty.%is_bought%);
+
+%first_sh_trip_start% =
+  first(trip(wop), trip.%start_day%)
+    where (%_trip_is_sh_or_gd_not_bought%);
+
+
+%first_lh_duty_start_hb% =
+  first(duty(wop), duty.%start_hb%)
+    where (duty.%is_long_haul% and not duty.%is_bought%);
+
+%first_lh_duty_start_day% =
+  first(duty(wop), duty.%start_day%)
+    where (duty.%is_long_haul% and not duty.%is_bought%);
+
+%max_sh_days_before_lh% =
+    if crew.%has_agmt_group_skd_cc% or
+    (crew.%has_agmt_group_sks_cc% and system_db_parameters.%max_1_sh_before_lh_sks_cc%(%pp_start%))
+      and (%nr_of_sh_duty_days_in_wop% >= 2) then
+    1
+    else
+    2;
+
+%nr_of_sh_duty_days_in_wop% =
+sum(duty(wop), duty.%days%)
+    where (duty.%is_short_haul%);
+    
+%sh_days_before_lh% =
+  %days_since%(%first_lh_duty_start_day%, %first_sh_trip_start%);
+
+/*
+** Rule:
+**    Max short haul flight duty period before long haul
+**
+** Description:
+**    Check that the maximum flight duty period for short haul production before
+**    long haul production is not exceeded.
+**
+**   Agreement:
+**    An agreement has been signed between CAU and SAS with the intent to
+**    limit the number of short haul (sh) days before long haul (lh) to 1.
+**    The SH-day can not be scheduled with a FDP > 11:00 or FDP > 09:30 if
+**    the first LH has a scheduled FDP > 11:00 for CC SKD
+**
+**    SKCMS-1879. Max 1 SH before LH with max FDP 11h CC SKD
+**    
+**    NB!Moved from rules_indust_ccr in SKCMS-3215
+**    There is also a "sister rule" for MFF in rules_qual_ccr_fc - SKCMS-3215
+
+*/
+
+export rule ind_max_sh_fdp_before_lh =
+  valid roster.%check_rules% and
+        %max_fdp_before_lh_agmt_groups% and
+        trip.%in_pp_extended% and
+        trip.%is_long_haul% and
+        not trip.%is_bought% and
+        %trip_is_preceded_by_short_haul_gd_not_bought_or_standby%;
+
+  %sh_fdp_before_lh% <= %max_sh_fdp_before_lh_calc%  +
+    rule_exceptions.%overshoot_rel%(trip.%start_UTC%);
+
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_sh_fdp_before_lh_failobject%;
+  failtext (Reltime value, Reltime limit) =
+    rules.%failtext_rel%("Coll: SH FDP time before LH", value, limit);
+  remark "(CCR) Coll: Max short haul flight duty period before long haul",
+  planner "The rule checks that the maximum allowed short haul flight duty period"
+          " before long haul is not exceeded.";
+end
+
+%max_fdp_before_lh_agmt_groups% =
+  not base_product.%is_tracking% and
+      crew.%has_agmt_group_sk_cc% and not 
+      crew.%is_temporary%;
+
+%ind_max_sh_fdp_before_lh_failobject% =
+  first(duty(trip), duty.%failobject_start%)
+    where(duty.%is_long_haul% and not duty.%is_bought%);
+
+%sh_fdp_before_lh% = fdp.%scheduled_time_in_interval%(
+       crew.%utc_time%(%first_sh_trip_start%),
+       crew.%utc_time%(%first_lh_duty_start_day%));
+       
+%first_lh_fdp% =
+  first(duty(wop), fdp.%end_scheduled_utc% - fdp.%start_scheduled_utc%)
+    where (duty.%is_long_haul% and not duty.%is_bought%);
+
+%max_sh_fdp_before_lh_calc% =
+    if crew.%has_agmt_group_skd_cc% and %first_lh_fdp% > 11:00 then
+      %max_sh_fdp_before_long_lh_cc_skd%
+    else
+      %max_sh_fdp_before_lh%;
+
+%max_sh_fdp_before_lh% =
+    parameter 11:00
+    remark "Max FDP time day before LH";
+
+%max_sh_fdp_before_long_lh_cc_skd% =
+    parameter 09:30
+    remark "Max FDP time day before LH with FDP >11:00";
+
+
+
 /****************************************************************
  * Section 2: Block time rules
  ***************************************************************/
@@ -2528,23 +2733,12 @@ let month_start = round_down_month(trip.%start_hb%),
 **    CAU K04 F.1.1.11
 **
 **    4eXNG 6.4.3.1
+**    K22 SKN CC - SKCMS-3232
 */
 /* CR404 */
 rule ind_max_bl_days_in_calendar_year_SKD_SKS_SKN =
   valid roster.%check_rules%
-    and crew.%is_homebase_scand%
-    /*
-    and (crew.%k4exng_cc_sp5_1_valid%(trip.%start_day%)
-    or  (crew.%is_SKD% and not crew.%is_temporary%)
-    or  crew.%is_SKS%
-    or  roster.%is_SKN_valid%(trip.%start_day%, trip.%end_day%))
-    and not (crew.%agmt_group_id% = "SNK_CC_AG" and
-             parameters.%k15_cc_valid%(trip.%start_hb%))
-    and not (crew.%has_agmt_group_nkf_cc% and
-             parameters.%nkf_bl_month_valid%(trip.%start_utc%))
-   */
-   and  not crew.%has_agmt_group_snk_cc%
-   and  not crew.%has_agmt_group_nkf_cc% /* SKCMS-1061 CBA 16*/
+   and crew.%is_homebase_scand%
    and  trip.%start_hb% >= %pp_start%
    and  trip.%is_last_blank_day_in_month_or_pp%
    and  not crew.%is_leased_trip_start%;
@@ -2558,11 +2752,17 @@ rule ind_max_bl_days_in_calendar_year_SKD_SKS_SKN =
   failtext(Int value, int limit) =
     rules.%failtext_int%("Coll: BL days in year", value, limit);
   remark "Coll: Max BL days in calendar year",
-  planner "Check that number of BL days in a calendar year doesn't exceed max "
-          "15 for 4ExNG.";
+  planner "Check that number of BL days in a calendar year doesn't exceed max limit";
 end
 
-%max_bl_days_in_calendar_year% = 15;
+%max_bl_days_in_calendar_year% = 
+    if crew.%has_agmt_group_skn_cc%
+        then default(system_db_parameters.%max_bl_year_skn_cc%(%pp_start%),10)
+    else if crew.%has_agmt_group_skd_cc%
+        then default(system_db_parameters.%max_bl_year_skd_cc%(%pp_start%),10)
+    else if crew.%has_agmt_group_sks_cc%
+        then default(system_db_parameters.%max_bl_year_sks_cc%(%pp_start%),10)
+    else 365; /*Other crew have no limit*/
 
 %bl_days_in_calendar_year% =
   accumulators.%blank_days_in_period%(round_down_year(trip.%end_day%),
@@ -2573,7 +2773,7 @@ end
 %bl_calendar_year_failobject% =
   first(trip(roster),trip.%failobject_start%)
   where (trip.%in_pp% and
-         %is_blank_day_cr404% and
+         trip.%is_blank_day% and
          %bl_days_in_calendar_year% > %max_bl_days_in_calendar_year%);
 
 /*
@@ -2603,14 +2803,6 @@ export rule ind_bl_not_allowed_resource_pool_CC =
   remark "(CCR) Coll: BL days not allowed for Resource Pool CC",
   planner "The rule checks that BL days are not assigned to Resource Pool CC";
 end
-
-/*****************************
- * Define blank day for CR404
- *****************************/
-%is_blank_day_cr404% =
-  if roster.%is_SKN_valid%(trip.%start_day%, trip.%end_day%) then
-     trip.%is_blank_day_BL%
-  else trip.%is_blank_day%;
 
 /****************************************************************
  * Section 6: SKBU Resource Pool rules

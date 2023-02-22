@@ -354,8 +354,8 @@ class PerDiemTripManager:
         perDiemTrip.perDiemExtraEndTime = [AbsTime(endtime) for endtime in trip[TRIP_PER_DIEM_EXTRA_END_TIMES].split(',')]
         perDiemTrip.perDiemExtraCompensation = [int(compensation) / 100 for compensation in trip[TRIP_PER_DIEM_EXTRA_COMPENSATION].split(',')]
         perDiemTrip.perDiemExtraCurrency = trip[TRIP_PER_DIEM_EXTRA_CURRENCY].split(',')
-        perDiemTrip.perDiemExtraExchangeRate = [float(rate) for rate in trip[TRIP_PER_DIEM_EXTRA_EXCHANGE_RATE].split(',')]
-        perDiemTrip.perDiemExtraExchangeUnit = [int(unit) for unit in trip[TRIP_PER_DIEM_EXTRA_EXCHANGE_UNIT].split(',')]
+        perDiemTrip.perDiemExtraExchangeRate = [float(rate) if type(float(rate)) != str else 0 for rate in trip[TRIP_PER_DIEM_EXTRA_EXCHANGE_RATE].split(',')] if trip[TRIP_PER_DIEM_EXTRA_EXCHANGE_RATE] != "" else []
+        perDiemTrip.perDiemExtraExchangeUnit = [int(unit) for unit in trip[TRIP_PER_DIEM_EXTRA_EXCHANGE_UNIT].split(',')] if trip[TRIP_PER_DIEM_EXTRA_EXCHANGE_UNIT] != "" else []
         perDiemTrip.perDiemExtraType = trip[TRIP_PER_DIEM_EXTRA_TYPE].split(',')
 
         perDiemTrip.legs = []
@@ -402,7 +402,7 @@ class PerDiemTripManager:
                     float(leg[LEG_COMPENSATION_PER_DIEM])
                     / trip[TRIP_COMPENSATION_UNIT]) if leg[LEG_COMPENSATION_PER_DIEM] != None else 0
                 perDiemLeg.exchangeRate = (float(leg[LEG_EXCHANGE_RATE])
-                                           / leg[LEG_EXCHANGE_UNIT])
+                                           / leg[LEG_EXCHANGE_UNIT]) if leg[LEG_EXCHANGE_RATE] != None else 0
                 perDiemLeg.currency = leg[LEG_CURRENCY]
                 perDiemLeg.taxDeduct = leg[LEG_TAX_DEDUCT]
                 #Last leg of duty has per diem for the duty stop
@@ -424,7 +424,7 @@ class PerDiemTripManager:
                         perDiemLeg.allocatedPerDiem = leg[LEG_PER_DIEM_ALLOCATED] / (24.0 * 60.0) if leg[LEG_PER_DIEM_ALLOCATED] else 0
                     else:                        
                         perDiemLeg.allocatedPerDiem = (
-                        duty[DUTY_PER_DIEM_ALLOCATED] / 4.0)
+                        duty[DUTY_PER_DIEM_ALLOCATED] / 4.0) if duty[DUTY_PER_DIEM_ALLOCATED] else 0
 
                     perDiemLeg.perDiemStopTime = duty[DUTY_PER_DIEM_REST_TIME]
                     perDiemLeg.actualStopTime = duty[DUTY_ACTUAL_REST_TIME]

@@ -1855,25 +1855,26 @@ end
 
 /*
 ** Rule:
-**   Min 4 freedays between east/west bound trips. 
+**   Min 4 freedays between west/east bound trips.
 **    ... changed to off duty days, for K15. rule name is retained for simplicity.
 ** Description:
 **   There must be at least 4 real freedays(not VA etc) between
-**   an eastbound trip and a westbound or V.V. The rule
-**   is only valid for SKI crew.
+**   a westbound trip and a eastbound (v.v only requires 3 freedays) The rule
+**   is only valid for SKI and MFF crew.
 ** Agreement:
 **   Ref K08.5 passage 6.3.9.1
 **
 **   K11 - no longer applies
 **   K15 - applies again, but now with 4 days limit.
+**   K22 - 4 days only required W ?? E 
 */
-rule ind_min_freedays_btw_east_west_FC =
+rule ind_min_freedays_btw_west_east_fc =
   valid roster.%check_rules% and
         (crew.%is_ski% or
          crew.%has_agmt_group_sk_fd_mff%) and
-        parameters.%k15_fc_lh_single_slipping_valid%(wop.%start_hb%) and
         wop.%touches_pp% and
-        %wop_lh_east_preceded_by_west_or_vv%;
+        %wop_lh_east_preceded_by_west% or
+        %wop_lh_west_preceded_by_east%;
   %off_duty_days_btw_east_west% +
   rule_exceptions.%overshoot_int%(wop.%start_utc%)
   >= 
@@ -1882,8 +1883,8 @@ rule ind_min_freedays_btw_east_west_FC =
   severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
   failobject = %ind_min_off_duty_days_btw_east_west_FC_failobject%;
   failtext(int value, int limit) = 
-    rules.%failtext_int%("Coll: Min off duty days between east/west",value,limit);
-  remark "Coll: Min off duty days between east/west";
+  rules.%failtext_int%("Coll: Min off duty days between west/east",value,limit);
+  remark "Coll: Min off duty days between west/east";
 end
 
 %off_duty_days_btw_east_west% =
@@ -1891,16 +1892,32 @@ end
       start = prev(wop(roster), wop.%end_day% + 24:00) where (wop.%is_on_duty%); 
   duty.%days_with_selection_possible%(duty.%duty_sel_off_duty%, start, stop);
   
-%min_required_off_duty_days_btw_ew% = 4;
+%min_required_off_duty_days_btw_ew% = 
+  if %wop_lh_east_preceded_by_west%
+    then %min_required_off_duty_days_btw_east_preceded_by_west%
+  else %min_required_off_duty_days_btw_west_preceded_by_east%;
 
-%wop_lh_east_preceded_by_west_or_vv% =
-  default(%_wop_lh_east_preceded_by_west_or_vv%, false);
+%min_required_off_duty_days_btw_east_preceded_by_west% = 
+  parameter 4
+  remark "Coll: Min F-days after LH east preceded by west";
+%min_required_off_duty_days_btw_west_preceded_by_east% = 
+  parameter 3
+  remark "Coll: Min F-days after LH west preceded by east";
 
-%_wop_lh_east_preceded_by_west_or_vv% =
-  (wop.%is_east_bound% and 
-   prev(wop(roster), wop.%is_west_bound%) where (wop.%is_on_duty%)) or
-  (wop.%is_west_bound% and
+%wop_lh_west_preceded_by_east% =
+  default(%_wop_lh_west_preceded_by_east%, false);
+  
+%_wop_lh_west_preceded_by_east% =
+  (wop.%is_west_bound% and 
    prev(wop(roster), wop.%is_east_bound%) where (wop.%is_on_duty%));
+
+%wop_lh_east_preceded_by_west% =
+  default(%_wop_lh_east_preceded_by_west%, false);
+
+%_wop_lh_east_preceded_by_west% =
+  (wop.%is_east_bound% and 
+   prev(wop(roster), wop.%is_west_bound%) where (wop.%is_on_duty%));
+
   
 %ind_min_off_duty_days_btw_east_west_FC_failobject% =
   first(trip(wop), trip.%failobject_start%) where 
@@ -2152,6 +2169,77 @@ end
 
 /*
 ** Rule:
+**   Maximum FDP extension duties in calendar month for FC.
+**
+** Description:
+**   Check the number of SH FDP extension duties in a calendar month.
+**
+** SKCMS-3069
+*/
+
+export rule ind_max_fdp_with_extension_7_days =		
+  valid trip.%check_rules% and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and
+        trip.%is_short_haul% and
+        duty_period.%is_last_duty_period_on_start_day% and
+        oma16.%is_extended_fdp%; 
+        
+  %ind_num_extended_fdps_in_last_7_days% <= %ind_max_extended_fdps_in_7_days% + rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_fdp_with_extension_in_7_days_ALL_failboject%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%(concat("Coll: Max extended FDPs in 7 days ",
+                                format_time( duty_period.%last_7_days_start_day_start% +24:00 ,"%d%b"), "-",
+                                format_time( duty_period.%last_7_days_start_day_end% ,"%d%b")),
+                         value,limit);
+  remark "Coll: FD max extended FDPs in 7 days",
+  planner "The rules checks that the number of FDPs with extension in 7 calendar days for FD is less than maximum allowed according to K22 agreement";
+end
+
+export %ind_max_extended_fdps_in_7_days% = 1;
+
+export %ind_is_extended_sh_fdp% =
+      let  start = duty.%start_month_start%,
+           stop = duty.%start_month_end%;
+           fdp.%start_utc% >= start and
+           fdp.%end_utc% < stop and
+           duty_period.%is_on_duty% and
+           oma16.%is_extended_fdp% and
+           duty.%is_short_haul%;
+
+
+%ind_num_extended_fdps_in_last_7_days% = 
+  let start = duty_period.%last_7_days_start_day_start%;
+  count(duty(chain))
+    from (current)
+    backwards
+    while (fdp.%start_utc% >= start)
+    where (duty_period.%is_on_duty% and
+           %ind_is_extended_sh_fdp%);   
+
+        
+
+%ind_max_fdp_with_extension_in_7_days_ALL_failboject% =
+  let start_7_days = duty_period.%last_7_days_start_day_start%,
+      end_7_days = duty_period.%last_7_days_start_day_end%,
+      overshoot = rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+  last(leg(duty),
+       prev(leg(chain),next(leg(chain),leg.%failobject_departure%)) where
+        (count(duty(chain))
+           from (current)
+           backwards
+           while (fdp.%start_utc% >= start_7_days)
+           where (%ind_is_extended_sh_fdp%) <=
+         %ind_max_extended_fdps_in_7_days% +
+         overshoot)) where
+  (leg.%start_hb% < end_7_days);
+
+
+/*
+** Rule:
 **  Max duty time 2 months (Jan-feb, Mar-Apr etc...)
 ** Description:
 **  Duty time in 2 months may not exceed the number of working(P) days x
@@ -2235,7 +2323,6 @@ end
 export %ind_additional_weekend_days_in_period_sks_valid_crew% = false;
 export %day_is_a_weekend_day%(Abstime d) = false;
 
-
 /* SKCMS-2153 */
 export rule ind_training_a5_crew_need_ast_in_pca3a5_grace_period =
     valid %agreement_valid_a5_ast_before_pc% and
@@ -2304,3 +2391,4 @@ else 00:00;
 
 /* end of file */
 
+ 

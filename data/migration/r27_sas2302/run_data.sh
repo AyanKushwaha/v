@@ -29,16 +29,17 @@ echo "  * Setting up CARMENV ..."
 
 cd $CARMUSR/data/migration/$RELEASE
 
-echo " - Processing migration tasks"
+
+echo " - Processing migration tasks" 
 
 #### Insert migration tasks below ####
 # Example:
-# echo "  * SKCMS-1234: Some description"
-# python $CARMUSR/data/migration/$RELEASE/skcms-1234.py 2>&1 | tee $LOG_DIR/skcms-1234.log
 
+# echo "  * SKCMS-1234:  Link CC SCC course set up"
+
+# python $CARMUSR/data/migration/$RELEASE/skcms-1234.py 2>&1 | tee $LOG_DIR/skcms-1234.log
 echo "  * SKCMS-3217 A2LR: Add LRP2R to table activity_set."
 python $CARMUSR/data/migration/$RELEASE/skcms_3217_add_lrp2r_code.py 2>&1 | tee $LOG_DIR/skcms-3217_add_lrp2r_code.log
-
 
 # Uncomment this in case dave filters shall be modified, remember to update JIRA number
 #echo "  * SKCMS-XXXX: Importing crc/etable/dave_filter/*.etab into database"
