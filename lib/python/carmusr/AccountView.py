@@ -51,6 +51,7 @@ F38 = 'F38'
 F3S = 'F3S'
 F7 = 'F7'
 F7S = 'F7S'
+PR = 'PR'
 # Added FS as part of SASBids5 project
 FS = 'FS'
 F89 = 'F89'
@@ -74,11 +75,13 @@ BOUGHT_F3_2 = 'BOUGHT_F3_2'
 BOUGHT_BL = 'BOUGHT_BL'
 BOUGHT_FORCED = 'BOUGHT_FORCED'
 SOLD = 'SOLD'
+BOUGHT_PR='BOUGHT_PR'
 #Added Bought for SAS Link
 BOUGHT_SBY = 'BOUGHT_SBY'
 BOUGHT_PROD = 'BOUGHT_PROD'
 BOUGHT_DUTY = 'BOUGHT_DUTY'
 #End for SAS Link
+
 
 # Actions
 IN_ADMIN   = REASONCODES["IN_ADMIN"]  #'IN Administrative'
@@ -168,7 +171,7 @@ ACTION[BOUGHT_SBY] = []
 ACTION[BOUGHT_PROD] = []
 ACTION[BOUGHT_DUTY] = []
 #End for SAS Link
-
+ACTION[PR] = []
 
 """
 Temporary class that holds crew information.
