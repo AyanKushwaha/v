@@ -497,6 +497,7 @@ def openPlanPostProc():
         "annotation_set",
         "bases",
         "bought_days",
+        "bought_days_svs",
         "cabin_training",
         "cabin_recurrent",
         "course_type",
