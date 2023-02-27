@@ -39,12 +39,14 @@ def fixit(dc, *a, **k):
                     strtodate =  datetime.strptime(empd, '%Y/%m/%d')
                 elif dash in empd:
                     strtodate =  datetime.strptime(empd, '%Y-%m-%d')
-                    print(strtodate)
                 else:
                     print("DATE FORMAT MAY BE WRONG, PLEASE CHECK CREW ID-->{0}".format(crew['Crewid']))
                     continue
-                datechg=strtodate.strftime("%d%b%Y %H:%M:%S:%f")
-                employmentDate = AbsTime(datechg[:15])
+                datechg=strtodate.replace(day=1)
+                dateFormatchgCrew=datechg.strftime("%d%b%Y %H:%M:%S:%f")
+                CrewEmpDate = AbsTime(dateFormatchgCrew[:15])
+                dateFormatchg=strtodate.strftime("%d%b%Y %H:%M:%S:%f")
+                employmentDate = AbsTime(dateFormatchg[:15])
                 bDay = datetime(2019, 1, 1).strftime(format) 
                 birthday = AbsTime(bDay[:9])
                 EvalidTo = datetime(2035, 12, 31).strftime(format)
@@ -69,16 +71,26 @@ def fixit(dc, *a, **k):
                 else:
                     print("BASE IS MISSING, PLEASE CHECK CREW ID-->{0}".format(crew['Crewid']))
                     continue
+
+                if not crew['BirthCity']:
+                    birthCity = '0'
+                else:
+                    birthCity = crew['BirthCity']
+
+                if not crew['BirthCountry']:
+                    birthCountry = '0'
+                else:
+                    birthCountry = crew['BirthCountry']
                 ops.append(fixrunner.createOp('crew', 'N', {'id': crew['Crewid'],
                                                             'empno': crew['EmplNo'],
                                                             'sex': 'F',
                                                             'birthday': int(birthday)/1440,
-                                                            'name': crew['Name'],
+                                                            'name': crew['Name'].decode("latin-1").encode("utf-8"),
                                                         'forenames': crew['Forenames'],
                                                         'logname': crew['Name'] +' '+ crew['Forenames'],
-                                                            'bcity': crew['BirthCity'],
-                                                            'bcountry': crew['BirthCountry'],
-                                                            'employmentdate': int(employmentDate)/1440}))
+                                                            'bcity': birthCity,
+                                                            'bcountry': birthCountry,
+                                                            'employmentdate': int(CrewEmpDate)/1440}))
                 
                 ops.append(fixrunner.createOp('crew_employment','N',{'crew':crew['Crewid'],
                                                                     'validfrom':int(employmentDate),
@@ -113,7 +125,7 @@ def fixit(dc, *a, **k):
 
     return ops
 
-__version__ = '2023-02-20_01V'
+__version__ = '2023-02-23_15V'
 fixit.program = 'new_crew_addition.py (%s)' % __version__
  
 main()
