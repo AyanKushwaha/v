@@ -561,30 +561,25 @@ def _check_unbooked_bought_periods(crew_list, ppstart, ppend, entry_info, accoun
     for crew_id in crew_list:
         try:
             crew = TM.crew[(crew_id,)]
-            is_svs, = R.eval(
-                R.selected('levels.leg'),
-                'crew.%has_agmt_group_svs%'
-                )
-            print "is_svs", is_svs
-            if is_svs:
-                for bought_period in crew.referers('bought_days_svs', 'crew'):
-                    # Check period and migration date, migration date is a safe check!
-                    if bought_period.start_time < migration_date or \
-                        not (bought_period.start_time <= ppend and bought_period.end_time >= ppstart):
-                        continue
-                    bought_periods_to_check.append(bought_period)         
-            else:
-                for bought_period in crew.referers('bought_days', 'crew'):
-                    # Check period and migration date, migration date is a safe check!
-                    if bought_period.start_time < migration_date or \
-                        not (bought_period.start_time <= ppend and bought_period.end_time >= ppstart):
-                        continue
-                    bought_periods_to_check.append(bought_period)
+
+            for bought_period in crew.referers('bought_days_svs', 'crew'):
+                # Check period and migration date, migration date is a safe check!
+                if bought_period.start_time < migration_date or \
+                    not (bought_period.start_time <= ppend and bought_period.end_time >= ppstart):
+                    continue
+                bought_periods_to_check.append(bought_period)         
+            for bought_period in crew.referers('bought_days', 'crew'):
+                # Check period and migration date, migration date is a safe check!
+                if bought_period.start_time < migration_date or \
+                    not (bought_period.start_time <= ppend and bought_period.end_time >= ppstart):
+                    continue
+                bought_periods_to_check.append(bought_period)
             
         except EntityNotFoundError:
             Errlog.log("AccountHandler.py:: Warning: " +
                        "Table bought_day has reference to no-existing" +
                        " crew id:%s" % str(bought_period.getRefI('crew')))
+
     for bought_period in bought_periods_to_check:
         crew_id = bought_period.crew.id
         # Check if already booked

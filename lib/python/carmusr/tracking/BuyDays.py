@@ -94,7 +94,7 @@ def buy_days(crew_id, start_time, end_time, leg_type, comment="", bought_day_typ
     is_cabincrew = main_cat == 'C'
     uname = Names.username()
 
-    row_day_type = get_row_day_type(leg_type)
+    row_day_type = get_row_day_type(leg_type,start_time)
     # Cache current existing rows, since we might need to loop through these more than once
     periods_to_merge = {}
     touch_start = None
@@ -192,7 +192,7 @@ def buy_days_svs(crew_id, start_time, end_time, leg_type, comment="",time_hh_sby
     is_cabincrew = main_cat == 'C'
     uname = Names.username()
     
-    row_day_type = get_row_day_type(leg_type)
+    row_day_type = get_row_day_type(leg_type,start_time)
     # Cache current existing rows, since we might need to loop through these more than once
     periods_to_merge = {}
     touch_start = None
@@ -347,12 +347,13 @@ def buy_days_svs(crew_id, start_time, end_time, leg_type, comment="",time_hh_sby
             current_row.end_time not in periods_to_merge  # Don't forget to merge end if needed
 
 
-def get_row_day_type(leg_type):
+def get_row_day_type(leg_type,start_time):
         # The activity code to save:
     is_svs, = R.eval(
         R.selected('levels.leg'),
-        'crew.%has_agmt_group_svs%',
+        "crew.%%has_agmt_group_svs_at_date%%(%s)" % start_time,
         )
+    print '##Is SVS##:',is_svs    
     if is_svs:
         if not leg_type:
             return "F"
@@ -489,7 +490,7 @@ def markDaysAsBought(buy):
         'crew.%is_temporary%',
         'crew.%is_cabin%',
         'crew.%has_agmt_group_qa%',
-        'crew.%has_agmt_group_svs%',
+        "crew.%%has_agmt_group_svs_at_date%%(%s)" % start_time,
         "salary_overtime.%is_CJ%",
         "salary_overtime.%is_EMJ%",
         "parameters.%%fxx_boughtday_comp_valid_at_date%%(%s)" % start_time,
@@ -574,10 +575,10 @@ def markDaysAsBought(buy):
             if "bought_days.%%leg_is_bought_svs%%" and is_active_flightduty:
                 day_bought_duty = True
         
-        print '###############Active LEG###:',is_active_flightduty
-        print '###code_duty###:',code_duty
-        print '###code###:',code
-        print '###code_svs##:',code_svs
+        print '##Active LEG##:',is_active_flightduty
+        print '##code_duty##:',code_duty
+        print '##code##:',code
+        print '##code_svs##:',code_svs
         if is_svs:
             #Buy F days as Standby or Production    
             for (start, code), end in activities_in_period.items():        
