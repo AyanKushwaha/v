@@ -58,30 +58,24 @@ import oma16;
 **
 **    4ExNG CC 3.1.1
 */
-export rule ind_max_duty_time_in_calendar_month_FC_SKN_SKL_SKS =
+export rule ind_max_duty_time_in_calendar_month_cc_skd_sks =
   valid roster.%check_rules%
-   and %r_valid_duty_time_calendar_month%
    and  wop.%start_hb% >= %pp_start%
-   and not crew.%has_agmt_group_qa_cc%
    and  wop.%is_last_on_duty_in_month%
-   and (crew.%is_SKS% and
-         (crew.%k4exng_cc_sp5_1_valid%(wop.%start_month_start%) or
-         (%use_max_duty_time_for_100_percent_SKS_CC_p% or
-          not(crew.%is_SKS% and
-              crew.%is_cabin% and
-              crew.%part_time_factor_at_date%(wop.%start_utc%) = 100)))) or
-       (crew.%is_SKD% and crew.%is_crew_monthly_parttime_at_date%(wop.%start_utc%))
-   and not (crew.%has_agmt_group_snk_cc% or crew.%has_agmt_group_nkf_cc%);
+   and  crew.%k4exng_cc_sp5_1_valid%(wop.%start_month_start%) 
+   and  (crew.%has_agmt_group_sks_cc%
+         and (%use_max_duty_time_for_100_percent_SKS_CC_p% or
+         crew.%part_time_factor_at_date%(wop.%start_utc%) = 100))
+   or (crew.%has_agmt_group_skd_cc% and crew.%is_crew_monthly_parttime_at_date%(wop.%start_utc%));
 
   %duty_time_calendar_month% <= duty_time.%max_in_month_wop% +
 				rule_exceptions.%overshoot_rel%(wop.%start_UTC%);
 
-
   startdate  = wop.%start_UTC%;
   severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_max_duty_time_in_calendar_month_CC_SKN_SKS_failobject%;
+  failobject = %ind_max_duty_time_in_calendar_month_CC_SKD_SKS_failobject%;
   failtext(Reltime value, Reltime limit) =
-    %ind_max_duty_time_in_calendar_month_CC_SKN_SKS_failtext%(value, limit);
+    %ind_max_duty_time_in_calendar_month_CC_SKD_SKS_failtext%(value, limit);
   remark "(CCR) Coll: Max duty time in calendar month",
   planner "The rule checks that the maximum duty in calendar month"
           " is not exceeded. Night upgrade is not included. The rule is valid for"
@@ -94,11 +88,11 @@ end
   parameter true
   remark "Use max duty time rule for 100% SKS CC";
 
-%ind_max_duty_time_in_calendar_month_CC_SKN_SKS_failtext%(Reltime value, Reltime limit) =
+%ind_max_duty_time_in_calendar_month_CC_SKD_SKS_failtext%(Reltime value, Reltime limit) =
   rules.%failtext_rel%(format_time(wop.%start_month_start%, "Coll: Duty time %b"),
            value, limit);
 
-%ind_max_duty_time_in_calendar_month_CC_SKN_SKS_failobject% =
+%ind_max_duty_time_in_calendar_month_CC_SKD_SKS_failobject% =
   let overshoot = default(rule_exceptions.%overshoot_rel%(wop.%start_UTC%),0:00),
       month = wop.%start_month_start%,
       max_in_month = duty_time.%max_in_month_wop%;
@@ -142,14 +136,10 @@ end
 
 redefine export %ind_max_duty_time_in_calendar_month_pt_cc_parttime_SKS_monthly_parttime_SKD_valid% =
     roster.%check_rules%
-    and not crew.%has_agmt_group_snk_cc%
-    and not crew.%has_agmt_group_nkf_cc%
-    and not crew.%has_agmt_group_qa_cc%
-    and (crew.%part_time_factor_at_date%(%_specific_date%) < 100
-         and crew.%is_SKS%
-         and (crew.%in_variable_group_wop_start% or
-         crew.%is_legal_pt_wop_start%)) or
-         (crew.%is_SKD% and crew.%is_crew_monthly_parttime_at_date%(wop.%start_utc%));
+    and (crew.%has_agmt_group_sks_cc%
+        and crew.%part_time_factor_at_date%(%_specific_date%) < 100
+        and (crew.%in_variable_group_wop_start% or crew.%is_legal_pt_wop_start%)) 
+    or (crew.%has_agmt_group_skd_cc% and crew.%is_crew_monthly_parttime_at_date%(wop.%start_utc%));
 
 %_specific_date% =
   let pp_month_start = round_down_month(wop.%start_utc%),
@@ -204,7 +194,7 @@ export rule ind_max_duty_time_in_3_months_pt_cc =
          not crew.%is_legal_pt_wop_start%) and
         crew.%in_fixed_group%(add_months(round_up_month(wop.%start_utc%),-3)) and
         duty_time.%_planned_months_into_quarter% = 2
-        and not (crew.%agmt_group_id% = "SNK_CC_AG");
+        and not crew.%has_agmt_group_snk_cc%;
 
   duty_time.%planned_duty_time_in_3_months% <= duty_time.%max_duty_in_3_months_pt_cc%(round_up_month(wop.%start_utc%)) +
 				rule_exceptions.%overshoot_rel%(wop.%start_UTC%);
@@ -1880,55 +1870,6 @@ end
   parameter 270:00
   remark "Max block time in 90 days";
 
-/*
-** Rule:
-**    4 production days followed by 2 freedays should only occur a limited number of times
-**
-** Description:
-**    The rule checks that 4 production days followed by 2 freedays does not occur
-**    more times than allowed per month. The limit is configurable through parameters.
-**    The period consisting the 4+2 days should belong to the month where the second
-**    freeday occurs. E.g If the 4 production days are placed between the dates
-**    26-29 September in a month, and the freedays are  placed on 30 September and
-**    1 October, this 4P+2F period belongs to October.
-**    Only the planning month is checked by this rule. Empty days are also regarded
-**    as freedays in the case of this rule.
-**
-** Agreement:
-**     K17
-**
-** Valid for:
-**     CC variable groups for SKD, SKN, SKS (an almost identical rule also exists for FC)
-**
-** Note:
-**     * The rule only checks wops from pp_start and one month forward,
-**       so it is assumed that pp_start equals the 1st of a month.
-**     * A 4p2f that ends the last day of the month is always counted as a 4p2f,
-**       no matter if the next month starts with a production day or not.
-*/
-
-rule engagement_max_4P_followed_by_2F_per_month_CC =
-  valid %ind_max_4P_followed_by_2F_per_month_valid_4P_wop%;
-  %nr_4P_followed_by_2F_in_planning_month_until_wop_end%
-    <= (if crew.%has_agmt_group_skd_cc% then %max_nr_4P_followed_by_2F_per_month_SKD_CC% else
-        if crew.%has_agmt_group_skn_cc% then %max_nr_4P_followed_by_2F_per_month_SKN_CC% else
-        if crew.%has_agmt_group_sks_cc% then %max_nr_4P_followed_by_2F_per_month_SKS_CC% else
-        void(int)) +
-        rule_exceptions.%overshoot_int%(wop.%start_utc%);
-
-  startdate = wop.%start_utc%;
-  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%, %duty_lh_region%));
-  failobject = wop.%failobject_start%;
-  failtext(Int value, Int limit) = rules.%failtext_int%("Engagement: 4P followed by 2F (per month)", value, limit);
-  remark "(CCR) Engagement: Working periods of 4P followed by 2F must not occur too often per month.",
-  planner "4 production days followed by 2 freedays should occur a limited number of times in a month."
-          " The period consisting the 4+2 days should belong to the month where the second freeday occurs.";
-end
-
-%max_nr_4P_followed_by_2F_per_month_SKD_CC% = parameter 1 minvalue 0 maxvalue 6 remark "Max 4P+2F limit for SKD CC";
-%max_nr_4P_followed_by_2F_per_month_SKN_CC% = parameter 1 minvalue 0 maxvalue 6 remark "Max 4P+2F limit for SKN CC";
-%max_nr_4P_followed_by_2F_per_month_SKS_CC% = parameter 1 minvalue 0 maxvalue 6 remark "Max 4P+2F limit for SKS CC";
-
 /****************************************************************
  * Section 3: Rest rules
  ***************************************************************/
@@ -2188,7 +2129,6 @@ rule ind_min_rest_after_4_or_3_prod_days =
    valid roster.%check_rules% and
         not (freedays.%freedays_after_duty% = 1) and
         %_k_valid_and_crew_origin% and
-        not crew.%has_agmt_group_qa_cc% and /* SKSCMS-787 */
         crew.%is_short_haul_wop_start% and
         (wop.%in_pp% or %_next_duty_in_pp%) and
         %wop_day_limit% and
@@ -2214,11 +2154,11 @@ end
 
 export %_k_valid_and_crew_origin% = 
    ((parameters.%k11_skn_cc_valid%(duty.%start_hb%) and
-     crew.%is_skn%) or
+     crew.%has_agmt_group_skn_cc%) or
      (parameters.%k12_skd_cc_sp4_3_valid%(duty.%start_hb%) and
-     crew.%is_skd%) or
+     crew.%has_agmt_group_skd_cc%) or
      (parameters.%k12_sks_cc_sp4_4_valid%(duty.%start_hb%) and
-     crew.%is_sks%));
+     crew.%has_agmt_group_sks_cc%));
 
 export %_k4exng_and_not_lh% =
    ((crew.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and
@@ -2227,8 +2167,7 @@ export %_k4exng_and_not_lh% =
      %is_short_haul_or_standby%));
 
 %wop_day_limit% =
-  if base_product.%is_rostering% or
-     (crew.%is_skn% and parameters.%k20_skn_cc_planned_rest_after_3_prod_days%(duty.%start_hb%)) then
+  if (crew.%has_agmt_group_skn_cc% and parameters.%k20_skn_cc_planned_rest_after_3_prod_days%(duty.%start_hb%)) then
     (freedays.%wop_days% = 3 or freedays.%wop_days% = 4)
   else
     freedays.%wop_days% = 4;
@@ -2636,92 +2575,6 @@ export %day_is_a_weekend_day%(Abstime d) =
 /****************************************************************
  * Section 5: Blank day rules
  ***************************************************************/
-
-/*** JIRA SKCMS-523 SAS28 ***/
-/*** Max 3 blank days per calender month for agreement group SNK_CC_AG ***/
-/*** Blank days between 24Dec - 01Jan and between Maundy Thursday and Easter Monday are excluded ***/
-/*** SNK agreement 2014. SNK 2014 item 4.4.1 ***/
-/* I am sure this rue will come back later, so I keep the code
-  rule ind_max_blank_days_in_calendar_month_SNK =
-  valid roster.%check_rules%
-  and parameters.%k15_cc_valid%(trip.%start_hb%)
-  and crew.%has_agmt_group_snk_cc%
-  and not crew.%is_leased_trip_start%
-  and trip.%is_blank_day%
-  and not base_product.%is_tracking%
-  and trip.%is_last_blank_day_in_month_or_pp%;
-  %_nbr_of_blank_days_SNK% <= %_max_blank_days_in_calendar_month_SNK% + rule_exceptions.%overshoot_int%(trip.%start_UTC%);
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext(Int value, int limit) =
-    rules.%failtext_int%("Coll: Max BL days in calendar month. (SNK)", value, limit);
-  remark "(CCR) Coll: Max BL days in calendar month (SNK)",
-  planner "The rule checks the maximum of BL days for SNK crew";
-end
-
-%_max_blank_days_in_calendar_month_SNK% = 3;
-%_01jan_this_year_start% = round_down_year(calendar.%month_start%);
-%_01jan_this_year_end% = %_01jan_this_year_start% + 24:00;
-%_easter_monday_end% = calendar.%easter_monday_end%(%_01jan_this_year_start%);
-%_easter_maundy_thursday_start% = calendar.%maundy_thursday_start%(%_01jan_this_year_start%);
-%_xmas_this_year_start% = add_months(%_01jan_this_year_start%, 11) + 23*24:00;
-
-%_valid_SNK_blank_day_date% =
-   if (leg.%start_hb% >= %_01jan_this_year_end% and leg.%start_hb% < %_easter_maundy_thursday_start%) or
-      (leg.%start_hb% >= %_easter_monday_end% and leg.%start_hb% < %_xmas_this_year_start%) then True
-   else False;
-
-
-%_nbr_of_blank_days_SNK% =
-let month_start = round_down_month(trip.%start_hb%),
-    month_end = round_up_month (trip.%start_hb% + 0:01)-0:01;
-
- count(leg(roster)) where (leg.%is_blank_day% and
-                           leg.%start_hb% >= month_start and
-                           leg.%start_hb% <= month_end and
-                           %_valid_SNK_blank_day_date%);
-
-*/
-
-/*** JIRA SKCMS-752 ***/
-/**
-/** Max 3 blank days per calender month for agreement group NKF_CC_AG ***/
-
-rule ind_max_blank_days_in_calendar_month_NKF_SNK_CC =
-  valid roster.%check_rules%
-  and not base_product.%is_tracking%
-  and trip.%in_pp_extended%
-  and (crew.%has_agmt_group_nkf_cc% or crew.%has_agmt_group_snk_cc%)/*SKCMS-1061*/
-  and trip.%is_last_blank_day_in_month_or_pp%
-  and not crew.%is_leased_trip_start%;
-
-  %nbr_of_blank_days_in_calendar_month_NKF_SNK% <= %max_blank_days_in_calendar_month_NKF_SNK% + rule_exceptions.%overshoot_int%(trip.%start_UTC%);
-
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext(Int value, int limit) =
-    rules.%failtext_int%("Coll: Max BL days in calendar month. (NKF/SNK)", value, limit);
-  remark "(CCR) Coll: Max BL days in calendar month (NKF/SNK)",
-  planner "The rule checks the maximum of BL days for NKF/SNK crew";
-end
-
-%max_blank_days_in_calendar_month_NKF_SNK% = 3;
-%nbr_of_blank_days_in_calendar_month_NKF_SNK% =
-let month_start = round_down_month(trip.%start_hb%),
-    month_end = round_up_month (trip.%start_hb% + 0:01)-0:01;
-
- count(leg(roster)) where (leg.%is_blank_day% and
-                           leg.%start_hb% >= month_start and
-                           leg.%start_hb% <= month_end);
-
-
-/*
-** Note: Possibly to be moved to rules_studio to exclude BL days from
-** optimization phase
-*/
-
 /*
 ** Rule:
 **    Max BL-days in calendar year
@@ -3457,45 +3310,6 @@ end
   count(trip(roster)) where(trip.%is_long_haul% and trip.%lh_duty_starts_in_main_months% and not %_in_training%);
 
 %_max_lh_trips_per_month_for_60_part_time_crew_cc% =  1;
-
-/* ************************************************************************* */
-
-
-
-
-export rule FX_to_be_added_manually =
-    valid %_FX_to_be_added_manually_valid%;
-
-    %_FX_to_be_added_manually_limit_exceeded_by% = 0:00;
-
-    startdate = duty.%start_UTC%;
-    failobject = duty.%failobject_start%;
-    failtext (Reltime value, Reltime limit) =
-        rules.%failtext_rel%("FX to be added manually (OT limit exceeded)", value, limit);
-    remark "FX to be added manually when overtime limit for QA CC (03:00) is exceeded.";
-end
-
-%_FX_to_be_added_manually_valid% =
-    crew.%has_agmt_group_qa_cc%
-    and (duty.%is_flight_duty% or duty.%is_deadhead% or duty.%is_ground_duty%)
-    and duty.%check_out_after_midnight%
-    /* only get FX day if overtime goes into freeday. */
-    and duty.%is_followed_by_freeday%;
-
-%_FX_to_be_added_manually_limit_exceeded_by% =
-    let
-          CO = time_of_day(duty.%end_hb%),
-          OT_exceed = CO - 03:00;
-
-          if OT_exceed > 0:00 then
-                OT_exceed
-          else
-                0:00;
-
-
-
-
-
 
 
 /********************

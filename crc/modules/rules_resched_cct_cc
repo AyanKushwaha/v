@@ -45,7 +45,6 @@ redefine %trip_notification_deadline_CC% =
 
 export rule resched_R242_CC =
   valid not (crew.%is_SKD% and crew.%is_temporary_trip_start%) and
-        not %is_qa_feb16_valid% and
         not %trip_inf_is_standby_at_checkin% and
         not %trip_inf_is_first_in_wop%;
     
@@ -60,12 +59,9 @@ export rule resched_R242_CC =
 end
 
 rule resched_R243_CC =
-  valid not (crew.%is_SKD% and crew.%is_temporary_trip_start%) and
-        not %is_qa_feb16_valid% and
-        %trip_inf_is_first_in_wop%
-        and not (crew.%agmt_group_id% = "QA_CC_AG") /* SKCMS-590 and SKCMS-589 */
+  valid not (crew.%is_SKD% and crew.%is_temporary_trip_start%) 
+        and %trip_inf_is_first_in_wop%
         and %trip_has_not_started%;
-
 
   rescheduling.%trip_inf_checkin_diff% >= 0:00;
 
@@ -78,11 +74,8 @@ rule resched_R243_CC =
   remark "(CCT) Resched: Check-in after time-off must not be earlier than informed";
 end
 
-
-
 export rule resched_R246_CC =
   valid not (crew.%is_SKD% and crew.%is_temporary_trip_start%) and
-    not %is_qa_feb16_valid% and
     rescheduling.%trip_is_short_haul% and
     not %trip_inf_is_standby_at_checkout% and
     not rescheduling.%trip_inf_hist_blank_day% and
@@ -269,100 +262,6 @@ end
 
 %min_time_off_after_lh% = 72:00;
 
-
-
-/*
-** Agreement Group: QA_CC_AG
-**
-** JIRA: SKCMS-590. Sprint: SAS30 (OCT 2015)
-**
-*/
-export rule resched_earlier_standby_start_time_QA_CC_AG =
-  valid
-        crew.%agmt_group_id% = "QA_CC_AG"
-        and rescheduling.%trip_has_rescheduled_checkin%
-        and %resched_earlier_check_in_homebase_deadline_sh_valid%
-        and %trip_inf_is_standby_at_checkout%
-        and rule_exceptions.%rule_on%(trip.%start_UTC%);
-  %now_hb% <= %resched_standby_earlier_start_qa_inform_at_latest%;
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext(Abstime value, Abstime limit) =
-    rules.%failtext_abs%("Coll: Earlier standby start informed too late QA CC", value, limit);
-  remark "(CCT) Resched: Earlier standby check-in must be published 18h before",
-  planner "This rule is for Cimber. It checks that earlier standby start is published"
-          "minimum 18h prior to the new start time."
-          "Ref. Cimber CC agreements as of 01mar2014";
-end
-
-export rule resched_later_standby_start_time_QA_CC_AG =
-  valid
-        crew.%agmt_group_id% = "QA_CC_AG"
-        and rescheduling.%trip_has_rescheduled_checkin%
-        and (rescheduling.%trip_inf_checkin_diff% > 0:00)
-        and %trip_inf_is_standby_at_checkout%
-        and rule_exceptions.%rule_on%(trip.%start_UTC%);
-  %now_hb% <= %resched_standby_later_start_time_qa_inform_at_latest% ;
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext(Abstime value, Abstime limit) =
-    rules.%failtext_abs%("Coll: Later standby start informed too late QA CC", value, limit);
-  remark "(CCT) Resched: Later standby start must be published 18h before original start",
-  planner "This rule is for Cimber CC. It checks that later SBY start is published"
-          "minimum 18h prior to the original standby start time."
-          "Ref. Cimber CC agreements as of 01mar2014";
-end
-
-/*
-** QA Oct 2015
-**
-*/
-
-export rule resched_check_in_homebase_qa_CC =
-  valid %resched_earlier_check_in_homebase_deadline_sh_valid%
-        and crew.%has_agmt_group_qa_cc%
-        and not %trip_inf_is_blank_day_at_start%
-        and rescheduling.%trip_has_rescheduled_checkin%
-        and not %is_duty_inf_long_haul%
-        and not %trip_inf_is_standby_at_checkout%
-        and rule_exceptions.%rule_on%(trip.%start_UTC%);
-
-  %now_hb% <= %resched_earlier_check_in_homebase_qa_inform_at_latest%;
-
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext(Abstime value, Abstime limit) =
-    rules.%failtext_abs%("Coll: Earlier C/I published too late", value, limit);
-  remark "(CCT) Resched: Earlier check-in must be published 96h before",
-  planner "This rule is for Cimber. It checks that earlier check-in is published"
-          "minimum 96h prior to the new check-in time."
-          "Ref. Cimber agreements as of 01mar2015";
-end
-
-export rule resched_check_out_homebase_qa_CC =
-  valid crew.%has_agmt_group_qa_cc% and
-        %later_checkout_homebase% and
-        not trip.%has_standby_callout% and
-        not %trip_inf_is_standby_at_checkout%
-        and rule_exceptions.%rule_on%(trip.%start_UTC%);
-
-  %now_hb% <= %resched_earlier_check_out_homebase_qa_inform_at_latest%;
-
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext(Abstime value, Abstime limit) =
-    rules.%failtext_abs%("Coll: Later C/O published too late", value, limit);
-  remark "(CCT) Resched: Later check-out must be published 96h before",
-  planner "This rule is for Cimber. It checks that later check-out is published"
-          "minimum 96h prior to the new check-out time."
-          "Ref. Cimber agreements as of 01mar2015";
-end
-
-redefine %qa_notice_before_limit% = 96:00;
 
 /*  Reduction for Danish crew according to agreement CAU 2014-12-22.
 

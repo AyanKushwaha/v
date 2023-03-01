@@ -74,7 +74,6 @@ export rule ind_max_duty_time_in_1x24_hrs_FC_SKD_SKN_SKL_JAP =
   valid trip.%check_rules% and
         not parameters.%K15_jan16_valid%(duty.%start_UTC%) and
         not duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and
-        not duty.%is_ac_employer_qa% and
         not duty_time.%crew_or_duty_ski_fd% and
         not duty_time.%crew_or_duty_skd_fd% and
         duty.%in_pp_extended% and
@@ -145,181 +144,84 @@ export %duty_time_1x24_hrs_diff% =
 export %duty_time_1x24_hrs_fwd% = Reltime;
 export %duty_time_1x24_hrs_bwd% = Reltime;
 
-/* New Rules in K15 SKCMS-579
+/*
 /*
 ** Rule: 
-**    Maximum no of sectors in daily duty for qa crew including SK pilots 
-**    flying CJ
+**    Maximum no of sectors in daily duty for non SK crew
 *     Checks the no of sectors in a daily duty.
 ** 
 ** Description:
 **    The rules checks that the no of sectors within a daily duty is not 
 **    exceeded
+**
+**  SKCMS-3259 - original rule altered to check non-sk agmt crew
 **                               
 */
 
-
-export rule (on) ind_max_sectors_in_daily_duty_qa_ALL =
+export rule (on) ind_max_sectors_in_daily_duty_non_sk_ALL =
   valid trip.%check_rules%
-    and (duty_time.%crew_or_duty_qa_cc% or 
-         (fundamental.%flight_crew% and duty.%is_ac_employer_qa%))
+    and not duty.%is_regarded_sk_sh_agmt%
     and duty.%in_pp_extended%
     and duty_period.%is_first_duty_in_duty_period%
     and duty_period.%is_fdp%
     and not duty.%is_bought%;
 
         fdp.%num_sectors% <= 
-                        %max_no_of_active_sectors_in_daily_duty_qa% 
+                        %max_no_of_active_sectors_in_daily_duty_non_sk% 
                        + rule_exceptions.%overshoot_int%(duty.%start_utc%);   
 
   startdate  = duty.%start_UTC%;
   severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
   failobject = duty.%failobject_start%;
   failtext(Int value, Int limit) =
-          rules.%failtext_int%("Coll: Active sectors in DP", value, limit);
-
-  remark "Coll: Active serctors in DP",
-  planner "This rule regualtes the number of active sectors  for Cimber."
-          "  Max 6 active sectors in daily duty. Agreement Cimber FD and"
-          " Cabin 2014";
+          rules.%failtext_int%("Coll: non SK max active sectors in DP", value, limit);
+  remark "Coll: non SK max active sectors in DP",
+  planner "This rule regualtes the number of active sectors for non SK."
+          " Max 6 active sectors in daily duty.";
 
 end
 
+%max_no_of_active_sectors_in_daily_duty_non_sk% =
+    parameter 6 minvalue 0 maxvalue 20
+    remark "Non SK: Limit for active sectors in daily duty";
 
-table no_of_active_sectors_per_daily_duty_limit_qa_table =
-  fundamental.%flight_crew%,
-  parameters.%K15_qa_FD_feb16_valid%(duty.%start_utc%)
-                   -> %max_no_of_active_sectors_in_daily_duty_qa% ;
-                      
-  true, false   -> 100;
-  true, true    -> 6;
-  false, -      -> 6;
-  -     ,   -   -> 100;
-end
-
-/* New Rules in K15 SKCMS-582
-/*
-** Rule: 
-**    Checks the number of sectors in the last duty in a duty period.
-**    Valid for CC QA and FD QA  
-**                               
-*/
-
-export rule(on) ind_max_sectors_after_split_duty_qa =
-  valid trip.%check_rules%
-    and (if fundamental.%flight_crew% then
-            parameters.%K15_qa_FD_feb16_valid%(duty.%start_UTC%) and
-                duty.%is_ac_employer_qa%
-        else
-           parameters.%K15_qa_cc_mar16_valid%(duty.%start_UTC%) and
-           duty_time.%crew_or_duty_qa_cc%)
-   and  duty.%in_pp_extended%
-   and  duty_period.%is_split%
-   and  duty_period.%is_last_duty_in_duty_period%
-   and  duty.%has_flight_duty%;
-
-        duty.%num_flight_legs% <= %max_sectors_after_split_duty_qa% 
-                         +  rule_exceptions.%overshoot_int%(duty.%start_UTC%);   
-  startdate  = duty.%start_UTC%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = duty.%failobject_start%;
-  failtext(Int value, int limit) =
-          rules.%failtext_int%("Coll: Max 2 sectors after short stop)", value, limit);
-  remark "Coll: Max 2 sectors after short stop",
-  planner "This rule is QA crew. It checks that there are max 2 legs"
-          " after a break that is shorter than 8 hrs from block-on to"
-	  " check-in. Agreement Cimber FD and CC 2014"; 
-end
-
-%max_sectors_after_split_duty_qa% = 2;
-
-
-
-/*
-** Rule:
-**    Duty restrictions after short stop
-**
-** Description:
-**    The rule checks that the duty period following a short stop not at 
-**    homebase doesn't include more than 1 active leg, which can be followed by 
-**    a passive transfer to homebase.
-**
-** Agreement:
-**    FC 1:18 2.4b
-**    CAU H.1.1.2
-**
-**    4ExNG CC - no longer applies
-*/
-export rule ind_duty_restrictions_after_short_stop_FC_SKD =
-  valid trip.%check_rules% and
-        %r_valid_duty_restrictions_after_short_stop% and
-        leg.%is_first_in_duty% and
-        not leg.%departs_from_homebase% and
-        trip.%in_pp_extended% and
-        trip.%is_short_haul% and
-        rest.%is_short_in_trip% and
-        rest.%is_short_in_prev_duty% and
-        not leg.%is_bought% and
-        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
-        
-  leg.%is_last_in_duty% or
-  next(leg(trip), leg.%is_deadhead% and
-                  leg.%is_last_in_duty% and
-                  leg.%arrives_at_trip_or_crew_homebase%);
-  startdate = leg.%activity_scheduled_start_time_UTC%;
-  deadline = leg.%end_UTC%;
-  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
-  failobject = next(leg(trip), leg.%failobject_departure%);
-  failtext %short_stop_duty_restr_failtext%;
-  remark "(CCP) Coll: Max 1 active leg (plus passive to hb) after short stop",
-  planner "The rule checks that the duty after short stop consist of at most 1"
-          " 1 active leg, which can be followed by a passive transfer to homebase."
-          " The rule is valid for FCSH and cabin crew SKD.";
-end
-
-%r_valid_duty_restrictions_after_short_stop% = Bool;
-
-%short_stop_duty_restr_failtext% =
-  if leg.%is_last_in_duty% then
-    "Coll: >1 active leg after short stop"
-  else
-    "Coll: 2nd leg not passive to hb"; 
 /* New Rules in K15 SKCMS-579
 /*
 ** Rule: 
-**    Maximum daily duty- Daily duty is counted from CI to CO for qa crew.
+**    Maximum daily duty- Daily duty is counted from CI to CO for non SK crew.
 ** 
 ** Description:
 **    The rules checks that the max daily duty is not exceeded
 **                               
 */
-export rule (on) ind_max_daily_duty_qa_ALL =
+export rule (on) ind_max_daily_duty_non_sk_ALL =
   valid trip.%check_rules% 
-   and (duty_time.%crew_or_duty_qa_cc% or 
-       (fundamental.%flight_crew% and duty.%is_ac_employer_qa%))
    and not duty_period.%is_split%
+   and not duty.%is_regarded_sk_sh_agmt%
+   and not duty.%is_regarded_ski_agmt%
    and duty.%in_pp_extended%
    and duty.%is_on_duty%
    and duty.%is_flight_duty%
    and not duty.%is_bought%;
 
-        duty_period.%time% <= duty_time.%max_daily_duty_qa% + rule_exceptions.%overshoot_rel%(duty.%start_utc%);   
+        duty_period.%time% <= duty_time.%max_daily_duty_non_sk% + rule_exceptions.%overshoot_rel%(duty.%start_utc%);   
   startdate  = duty.%start_UTC%;
   severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
   failobject = duty.%failobject_end%;
   failtext (Reltime value, Reltime limit) =    
-           rules.%failtext_rel%("Coll: Max daily duty for QA CC and pilots flying CJ", value, limit);
-  remark "Coll: Max daily duty qa CC and pilots flying CJ",
-  planner "This rule regualtes the max daily duty time for Cimber. Max 16 hours"
-          " including passive flights in the duty period. The 16 hour"
-          " restriction is not valid at split duty. agreement Cimber FD and"
-          " Cabin 2014";
+           rules.%failtext_rel%("Coll: Max daily duty for non SK crew", value, limit);
+  remark "Coll: Max daily duty CC+FD flying non SK",
+  planner "This rule regulates the max daily duty time for non SK crew. Max 16 hours"
+          " including passive flights in the duty period."
+          "The 16 hour restriction is not valid at split duty.";
 end
 
-
+/**********************************
+variables shared for rules in cc resp fc sub-modules:
+ind_min_rest_after_fdp_12h_more
+***********************************/
 %ind_min_rest_after_fdp_12h_more_failtext%(Reltime value, Reltime limit) =
   rules.%failtext_rel%("Coll: min rest after FDP>12h", value, limit);
-
 
 %_minimum_time_cc_with_extra% =
   rest.%minimum_time_cc% + %extra_rest_for_fdp_12h_more%;
