@@ -35,7 +35,7 @@ def fixit(dc, *a, **k):
     # rate = -100
 
     format = "%d%b%Y %H:%M:%S:%f"
-    tim1 = datetime(2023, 2, 1).strftime(format)
+    tim1 = datetime(2023, 4, 1).strftime(format)
     validFrom= AbsTime(tim1[:15])
     tim2 = datetime(2035, 12, 31).strftime(format)
     validTo = AbsTime(tim2[:15])
@@ -51,7 +51,7 @@ def fixit(dc, *a, **k):
                		                                    'si': crew['si']}))
     return ops
  
-__version__ = 'SASINC0244695'
+__version__ = 'SASINC0251680'
 fixit.program = 'insert_crew_seniority.py (%s)' % __version__
  
 main()

@@ -32,7 +32,7 @@ def update_crew_qual():
 def fixit(dc, *a, **k):
 
     format = "%d%b%Y %H:%M:%S:%f"
-    ae_tim = datetime(2023, 2, 1).strftime(format)
+    ae_tim = datetime(2023, 4, 1).strftime(format)
     tim = AbsTime(ae_tim[:15])
     print(tim)
  
@@ -48,7 +48,7 @@ def fixit(dc, *a, **k):
                                                             'validto': int(tim)}))
     return ops
  
-__version__ = 'SASINC0244695'
+__version__ = 'SASINC0251680'
 fixit.program = 'update_crew_seniority.py (%s)' % __version__
  
 main()
