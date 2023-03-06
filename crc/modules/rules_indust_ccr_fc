@@ -7,7 +7,7 @@
  *   and as studio only in Carmen Crew Tracking.
  *
  * Sections:
- *   1. Duty rules (1x24, 3x24, 7x24, 4weeks, month)
+ *   1. Duty rules (4weeks, month)
  *   2. Block time rules
  *   3. Rest rules
  *   4. Freeday rules
@@ -35,20 +35,6 @@ import duty_time;
 /****************************************************************
  * Section 1: Duty rules
  ***************************************************************/
-
-/*
-** Rule: Maximum duty time in 7x24 hrs
-**
-** 4ExNG: no longer applies
-*/
-redefine export %r_valid_duty_time_7x24_hrs% =
-  False;
-
-redefine %duty_time_7x24_hrs% =
-  duty_time.%7x24_hrs%;
-
-%duty_time_7x24_hrs_fwd% =
-  roster.%duty_time_in_period%(wop.%start_UTC%, wop.%start_UTC% + 7*24:00, fundamental.%night_upg%, duty.union);
 
 /*
 ** Rule: Maximum duty time in 4 weeks
@@ -209,8 +195,6 @@ count(duty(roster))
 %night_shift_end% = parameter 06:00 remark "Max 2 night simulator sessions in a row, night shift end";
 
 
-
-
 /* SKCMS-1838
 ** Rule:
 **    Earliest check-in at 12.00 after two consecutive night simulator sessions
@@ -347,91 +331,96 @@ end
 %max_working_days_when_pilot_edu_night% = 3;
 
 /*
-** Rule: Maximum number of night duties in a working period
-*/
-redefine %r_valid_max_night_duties_in_wop% = true;
-redefine %check_consecutive_nights% = true;
-/* Rule depends on the fact that the max number of consecutive night duties <= max number of night duties + 1 */
-redefine %max_night_duties% = 3;
-redefine %max_consecutive_night_duties% = 2;
-
-
-/*
-** Rule:
-**    Max SubQ dutyhours in rolling 7 calendar days.
+** Rule: 
+**    Maximum number of night duties in a working period
 **
 ** Description:
-**    Check that a pilot is not scheduled more than 47:30 hours
-**    in any consecutive 7 calendar days.
+**    Check that maximum number of night duties between time-off period,
+**    (for CCR = inside working period) as well as number of consecutive night 
+**    duties is not exceeded. Night duty is defined as any duty 
+**    touching the time interval 0000-0500 (FCSH).
+**
+**    NB! Two implementations are done. One in Pairing checking
+**    inside trips and one in Rostering checking inside working period.
 **
 ** Agreement:
-**    GM 6.1.5.1 A (Short haul pilots).
+**    FC 1:17 2.3Ac
+**    CAU K06 C.1.1.4
+**    NKF/SBK 8.2
+**    4ExNG - no longer applies
 **
-** NB! The same rule exists in rules_indust_ccp_fc
 */
-
-rule ind_subq_duty_time_in_7x24_all =
+/* Depends on the fact that the max number of consecutive night duties <= max number of night duties + 1 */
+export rule ind_max_night_duties_in_working_period_FC =
   valid roster.%check_rules% and
-        not %is_trip% and
-        not trip.%is_ski% and
-        not trip.%is_skd% and
-        not ((trip.%is_sks% or trip.%is_skn%) and %agreement_valid%("7x24_fd_sks", trip.%start_UTC%)) and
-        duty.%in_pp% and
-        duty_period.%is_on_duty%;
+        crew.%is_short_haul_trip_start% and
+        trip.%in_pp_extended% and
+        trip.%is_night_duty% and
+        not training.%trip_is_in_school_period_min_7x24% and
+        rule_exceptions.%rule_on%(duty.%start_UTC%) and 
+        is_last(duty(trip)) where (duty.%is_night_duty%);
         
-  %duty_time_7x24% <= %max_duty_time_in_7x24% -
-                              %p_buffer_max_duty_time_7x24% +
-                              rule_exceptions.%overshoot_rel%(duty.%start_utc%);
-                              
+  %nr_night_duties% <= %max_night_duties% + 
+		       rule_exceptions.%overshoot_int%(duty.%start_UTC%) and
+  (%nr_consecutive_night_duties% <= %max_consecutive_night_duties% + rule_exceptions.%overshoot_int%(duty.%start_UTC%));
+  
   startdate  = duty.%start_UTC%;
   severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_subq_duty_time_in_7x24_all_failobject%;
-  failtext(Reltime value, Reltime limit) =
-    rules.%failtext_rel%("Coll: Max duty time 7x24", value, limit);
-  remark "(CCR) Coll: Max duty time 7x24",
-  planner "This rule checks that a short-haul pilot is not scheduled more "
-          " then 47:30 hours of subq duty time in any 7 calendar days";
+  failobject = %ind_max_night_duties_in_working_period_FC_failobject%;
+  failtext %max_night_duties_failtext%;
+  remark "(CCR) Coll: Max night duties in working period",
+  planner "The rule checks that the maximum number of, as well as the"
+	        " maximum consecutive night duties is not exceeded."
+          " A duty is at night if it touches the interval FCSH: (00:00,05:00),"
+          " The rule is valid for FC, with limits: max 3 nights total and max 2 consecutive for FCSH";
 end
 
-%duty_time_7x24% =
-  /* If duty spans midnight we must check from both duty start day AND end day */
-  if duty.%start_day% <> duty.%end_day% then
-    nmax(duty_time.%7x24_hrs_in_period%(add_weeks(duty.%end_day_hb_utc%, -1),
-                                        duty.%end_day_hb_utc%, 
-                                        false, 
-                                        duty.union),
-         duty_time.%7x24_hrs_in_period%(add_weeks(duty.%end_day_hb_utc% + 24:00, -1),
-                                        duty.%end_day_hb_utc% + 24:00, 
-                                        false, 
-                                        duty.union))
+%ind_max_night_duties_in_working_period_FC_failobject% =
+  let overshoot = rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+  
+  if %nr_night_duties_until_now% = %max_night_duties% + overshoot + 1 or
+     (%nr_consecutive_night_duties% = %max_consecutive_night_duties% + overshoot + 1) then
+        duty.%failobject_start%
   else
-    duty_time.%7x24_hrs_in_period%(add_weeks(duty.%end_day_hb_utc% + 24:00, -1),
-                                   duty.%end_day_hb_utc% + 24:00, 
-                                   false, 
-                                   duty.union);
+    prev(duty(trip), duty.%failobject_start%)
+    where(%nr_night_duties_until_now% = %max_night_duties% + overshoot + 1 or
+          (%nr_consecutive_night_duties% = %max_consecutive_night_duties% + overshoot + 1));
+/* Rule depends on the fact that the max number of consecutive night duties <= max number of night duties + 1 */
 
-%ind_subq_duty_time_in_7x24_all_failobject% = 
-  default(%_ind_subq_duty_time_in_7x24_all_failobject%, duty.%failobject_start%);
+%max_night_duties% = 
+    parameter 3
+    remark "CCR: Max night duties in working period limit";
+%max_consecutive_night_duties% = 
+    parameter 2
+    remark "CCR: Max consecutive night duties in working period limit";
 
-%_ind_subq_duty_time_in_7x24_all_failobject% =
-  let limit =  %max_duty_time_in_7x24% -
-               %p_buffer_max_duty_time_7x24% +
-               default(rule_exceptions.%overshoot_rel%(duty.%start_utc%), 0:00);
-  if duty.%start_day% = duty.%end_day% then
-    first(leg(duty), leg.%failobject_departure%) 
-    where (duty_time.%7x24_hrs_in_period%(add_weeks(duty.%end_day_hb_utc% + 24:00, -1), 
-                                          leg.%co_end_utc%, 
-                                          false, 
-                                          duty.union) 
-           > limit)
+%max_night_duties_failtext% =
+  if  %nr_consecutive_night_duties%>%max_consecutive_night_duties% then
+      rules.%failtext_int%("Coll: Cons. night duties",
+                           %nr_consecutive_night_duties%, 
+                           %max_consecutive_night_duties%)
   else
-    first(leg(duty), leg.%failobject_departure%)
-    where(duty_time.%7x24_hrs_in_period%(
-            add_weeks(leg.%start_day_hb_utc%(leg.%homeairport%, leg.%start_utc%) + 24:00, -1),
-            nmin(leg.%start_day_hb_utc%(leg.%homeairport%, leg.%start_utc%) + 24:00,
-                 leg.%co_end_utc%), false, duty.union) >= limit);
+      rules.%failtext_int%("Coll: Night duties",%nr_night_duties%, 
+                           %max_night_duties%);
 
-%max_duty_time_in_7x24% = 47:30;
+%nr_night_duties% = 
+  count(duty(wop)) 
+  where (%valid_night_duty% and not duty.%is_bought%);
+  
+%nr_night_duties_until_now% =
+  count(duty(wop))
+  from(first) to(current)
+  where (%valid_night_duty%);
+  
+%valid_night_duty% =
+  not duty.%is_blank_day% and
+  duty.%is_night_duty% and
+  not duty.%is_long_haul%;
+
+%nr_consecutive_night_duties% =
+  count(duty(wop))
+  from (current) backwards
+  while (%valid_night_duty% and not duty.%is_bought%);
 
 /*
 ** Rule:
@@ -533,9 +522,7 @@ end
 %ind_max_block_time_in_3_months_FC_failtext%(Reltime value, Reltime limit) =
   let start_month = format_time(add_months(trip.%start_month_start%, -2), "%02d%b");
   rules.%failtext_rel%(concat("Coll: BLH 3 months ", start_month, "->"), value, limit);
-  
 
-                                                      
 /*
 ** Rule: Max block time in 12 calendar months
 **
@@ -602,52 +589,6 @@ redefine %r_valid_night_rest_surrounding_short_stop% =
   and not trip.%is_rest% 
   and not trip.%is_bought%;
 
-/*
-** Rule:
-**    No split duties 
-**
-** Description:
-**    The rule checks that split duty according to the Subpart Q definition
-**    is not assigned:
-**
-**    1) Before K11 for SKN FC
-**
-**    2) After K11 for SKD/SKN/SKS FC at homebase
-**
-**    It is necessary because FC SH after K11 no longer have any union rules 
-**    for minimum rest, and Subpart Q allows split duty at homebase,
-**    but the FC unions don't want it!
-**
-**    NB! A separate rule in rules_indust_ccp_fc checks for split duty after
-**    a duty period, but this CCR version is needed to prevent Matador
-**    assigning two trips with split duty between them.
-**
-** Agreement:
-**    OSL 6.1.5 (CR 306)
-**    K11 FC SH SKD/SKN/SKS 6.1.8
-*/
-
-rule ind_no_split_duty_at_homebase_fc  =
-  valid trip.%check_rules%
-        and not trip.%is_ski%
-        and duty.%arrives_at_homebase% 
-        and trip.%in_pp%
-        and trip.%is_on_duty% 
-        and not is_last(trip(wop)) 
-        and not last(duty(trip),duty.%is_split_duty_exception%) 
-        and rule_exceptions.%rule_on%(trip.%end_utc%);
-
-  not (duty_period.%is_split% and duty_period.%is_first_duty_in_duty_period%);
-  
-  startdate = trip.%end_utc%;
-  severity =  first(leg(trip), %severity_filter_int%(leg.%start_utc%,%duty_lh_region%));
-  failobject = next(trip(roster), trip.%failobject_start%);
- failtext "Coll: Split duty not allowed at homebase";
-  remark "Coll: No split duties at homebase",
-  planner "The rule checks that no split duty "
-          "is scheduled for flight deck crew at homebase";
-end
-  
 /****************************************************************
  * Section 4: Freeday rules
  ***************************************************************/
@@ -1188,6 +1129,52 @@ end
 %number_of_split_duties_in_wop_limit_non_sk% = 
     parameter 2
     remark "Limit for split duties in same wop non-SK FD";
+
+/*
+** Rule:
+**    No split duties 
+**
+** Description:
+**    The rule checks that split duty according to the Subpart Q definition
+**    is not assigned:
+**
+**    1) Before K11 for SKN FC
+**
+**    2) After K11 for SKD/SKN/SKS FC at homebase
+**
+**    It is necessary because FC SH after K11 no longer have any union rules 
+**    for minimum rest, and Subpart Q allows split duty at homebase,
+**    but the FC unions don't want it!
+**
+**    NB! A separate rule in rules_indust_ccp_fc checks for split duty after
+**    a duty period, but this CCR version is needed to prevent Matador
+**    assigning two trips with split duty between them.
+**
+** Agreement:
+**    OSL 6.1.5 (CR 306)
+**    K11 FC SH SKD/SKN/SKS 6.1.8
+*/
+
+rule ind_no_split_duty_at_homebase_fc =
+  valid trip.%check_rules%
+        and not trip.%is_ski%
+        and duty.%arrives_at_homebase% 
+        and trip.%in_pp%
+        and trip.%is_on_duty% 
+        and not is_last(trip(wop)) 
+        and not last(duty(trip),duty.%is_split_duty_exception%) 
+        and rule_exceptions.%rule_on%(trip.%end_utc%);
+
+  not (duty_period.%is_split% and duty_period.%is_first_duty_in_duty_period%);
+  
+  startdate = trip.%end_utc%;
+  severity =  first(leg(trip), %severity_filter_int%(leg.%start_utc%,%duty_lh_region%));
+  failobject = next(trip(roster), trip.%failobject_start%);
+  failtext "Coll: Split duty not allowed at homebase";
+  remark "Coll: No split duties at homebase",
+  planner "The rule checks that no split duty "
+          "is scheduled for flight deck crew at homebase";
+end
 
 /****************************************************************
  * Section 7: Restrictions

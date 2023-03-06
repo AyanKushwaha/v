@@ -29,122 +29,6 @@ import hotel;
 import system_db_parameters;
 
 /*
-** Rule: 
-**    Maximum duty time in 1x24 hrs. Valid until K15 but not for SKI,QA and
-**    SKD FC
-**    SKI, QA and SKD FC is handled in 
-**    ind_max_duty_time_in_1x24_hrs_FC_SKI_QA_SKD. The rule triggers 
-**    independent of K15. The duty times dependencies of different
-**    validity parameters is defined in duty_time table duty_time_1x24_limits_fc
-**
-**    After K15 the following rules are used:
-**     ind_max_duty_time_in_1x24_hrs_FC_SKD_SKS_split_duty
-**     ind_max_duty_time_in_calendar_start_day_FC
-**     ind_max_duty_time_in_calendar_end_day_FC
-**     ind_max_duty_time_in_1x24_hrs_FC_SKI_QA_SKD (independent of K15)
-**    
-**    SKCMS-680
-** Description:
-**    The rule checks that the duty time with or without night upgrade in
-**    any 1x24 hrs period is less than the maximum allowed. The limit is depending
-**    on a number of cases, see module duty_time.
-**    Both forward and backward values are checked to cover all cases.
-**    The forward calculation covers from duty start and 1x24 hrs forwards,
-**    whereas the backward calculation covers from duty end and 1x24 hrs backwards.
-**
-**    This rule is not needed in CCR since the minimum rest rules will prevent this
-**    rule from breaking.
-**
-**    NB! The rule includes the SKN CC K12 rule for max duty after a long duty.
-**    The limit is dependent on the previous duty time, and needs also to be
-**    checked in Matador. Therefore, a separate rule in rules_indust_ccr checks 
-**    it for a duty that is the first in a trip, and this rules checks it only
-**    duties that are not the first in a trip.
-**
-** Agreement:
-**    FC SKI K06 p.3
-**    CAU C.1.2, D.1.2, L.1.2a
-**    NKF/SBK qual F5 2.3.1a
-**
-**    NB! Doesn't apply to SKJ Japanese CC!
-**
-**    4ExNG CC - no longer applies
-*/
-export rule ind_max_duty_time_in_1x24_hrs_FC_SKD_SKN_SKL_JAP =
-  valid trip.%check_rules% and
-        not parameters.%K15_jan16_valid%(duty.%start_UTC%) and
-        not duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and
-        not duty_time.%crew_or_duty_ski_fd% and
-        not duty_time.%crew_or_duty_skd_fd% and
-        duty.%in_pp_extended% and
-        duty.%has_flight_duty% and
-        not duty.%is_bought% and
-        %r_valid_duty_time_in_1x24_hrs% and
-        rule_exceptions.%rule_on%(duty.%scheduled_block_off_utc%);
-  %duty_time_1x24_hrs_fwd% <= duty_time.%max_in_1x24_hrs_fwd%  
-  and
-  %duty_time_1x24_hrs_bwd% <= duty_time.%max_in_1x24_hrs_bwd%;
-  
-  startdate  = duty.%scheduled_block_off_utc%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_max_duty_time_in_1x24_hrs_FC_SKD_SKN_SKL_JAP_failobject%;
-  failtext %ind_max_duty_time_in_1x24_hrs_FC_SKD_SKN_SKL_JAP_failtext%;
-  remark "Coll: Max duty time in 1x24 hrs",
-  planner "The rule checks that maximum duty time in 1x24 hrs is"
-	      " not exceeded. The rule is valid for FC SKI (when 2 active pilots),"
-          " CC SKD SH (except when in Tracking mode), and CC JAP.";
-end
-
-%duty_time_1x24_hrs_fwd_diff% =
-    duty_time.%max_in_1x24_hrs_fwd% -
-    %duty_time_1x24_hrs_fwd%;
-    
-%duty_time_1x24_hrs_bwd_diff% =
-    duty_time.%max_in_1x24_hrs_bwd% -
-    %duty_time_1x24_hrs_bwd%;
-    
-export %duty_time_1x24_hrs_diff% =
-    if duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) then
-        99:00
-    else
-        nmin(%duty_time_1x24_hrs_fwd_diff%, %duty_time_1x24_hrs_bwd_diff%);
-
-%ind_max_duty_time_in_1x24_hrs_FC_SKD_SKN_SKL_JAP_failtext% =
-  if %duty_time_1x24_hrs_fwd% > duty_time.%max_in_1x24_hrs_fwd% then
-    concat(format_time(%duty_time_1x24_hrs_fwd%, "Coll: Duty time 1x24h "),
-           format_time(%duty_time_1x24_hrs_fwd%," %h:%02M"),
-           format_time(duty_time.%max_in_1x24_hrs_fwd%, " [%h:%02M]"),
-           format_time(duty.%start_utc%, "  %02d%02b"),
-           format_time(time_of_day(duty.%start_utc%), " %02h:%02M ->"))
-  else
-    concat(format_time(%duty_time_1x24_hrs_bwd%, "Coll: Duty time 1x24h "),
-           format_time(%duty_time_1x24_hrs_bwd%," %h:%02M"),
-           format_time(duty_time.%max_in_1x24_hrs_bwd%, " [%h:%02M]"),
-           format_time(duty.%end_utc% - 24:00, "  %02d%02b"),
-           format_time(time_of_day(duty.%end_utc% - 24:00), " %02h:%02M ->"));
-    
-%ind_max_duty_time_in_1x24_hrs_FC_SKD_SKN_SKL_JAP_failobject% =
-  let max_duty_time_fwd = duty_time.%max_in_1x24_hrs_fwd%,
-      max_duty_time_bwd = duty_time.%max_in_1x24_hrs_bwd%;
-  if %duty_time_1x24_hrs_fwd% > duty_time.%max_in_1x24_hrs_fwd% then
-    first(leg(duty), first(leg(chain), leg.%failobject_departure%)
-                     from (current)
-                     where(%leg_duty_time_1x24hrs_until_now% >
-                           max_duty_time_fwd))
-  else
-     first(leg(duty), first(leg(chain), leg.%failobject_departure%)
-                      from (current)
-                      where(%leg_duty_time_1x24hrs_until_now% >
-                            max_duty_time_bwd));
-  
-/* Defined in child modules, due to different limits and validity for CC and FC. */
-%r_valid_duty_time_in_1x24_hrs% = Bool;
-%duty_time_1x24_hrs% = Reltime;
-%leg_duty_time_1x24hrs_until_now% = Reltime;
-export %duty_time_1x24_hrs_fwd% = Reltime;
-export %duty_time_1x24_hrs_bwd% = Reltime;
-
-/*
 /*
 ** Rule: 
 **    Maximum no of sectors in daily duty for non SK crew
@@ -158,9 +42,9 @@ export %duty_time_1x24_hrs_bwd% = Reltime;
 **                               
 */
 
-export rule (on) ind_max_sectors_in_daily_duty_non_sk_ALL =
+export rule ind_max_sectors_in_daily_duty_non_sk_ALL =
   valid trip.%check_rules%
-    and not duty.%is_regarded_sk_sh_agmt%
+    and duty.%is_regarded_fpu_agmt%
     and duty.%in_pp_extended%
     and duty_period.%is_first_duty_in_duty_period%
     and duty_period.%is_fdp%
@@ -177,7 +61,7 @@ export rule (on) ind_max_sectors_in_daily_duty_non_sk_ALL =
           rules.%failtext_int%("Coll: non SK max active sectors in DP", value, limit);
   remark "Coll: non SK max active sectors in DP",
   planner "This rule regualtes the number of active sectors for non SK."
-          " Max 6 active sectors in daily duty.";
+          " Max 6 active sectors in daily duty for trips named FPU.";
 
 end
 
@@ -196,9 +80,8 @@ end
 */
 export rule (on) ind_max_daily_duty_non_sk_ALL =
   valid trip.%check_rules% 
+   and duty.%is_regarded_fpu_agmt%
    and not duty_period.%is_split%
-   and not duty.%is_regarded_sk_sh_agmt%
-   and not duty.%is_regarded_ski_agmt%
    and duty.%in_pp_extended%
    and duty.%is_on_duty%
    and duty.%is_flight_duty%
@@ -211,9 +94,9 @@ export rule (on) ind_max_daily_duty_non_sk_ALL =
   failtext (Reltime value, Reltime limit) =    
            rules.%failtext_rel%("Coll: Max daily duty for non SK crew", value, limit);
   remark "Coll: Max daily duty CC+FD flying non SK",
-  planner "This rule regulates the max daily duty time for non SK crew. Max 16 hours"
-          " including passive flights in the duty period."
-          "The 16 hour restriction is not valid at split duty.";
+  planner "This rule regulates the max daily duty time for non SK. "
+          "Max 16 hours including passive flights in the duty period. "
+          "The 16 hour restriction is not valid at split duty and only for trips named FPU.";
 end
 
 /**********************************

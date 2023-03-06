@@ -7,7 +7,7 @@
  *   and as studio only in Carmen Crew Tracking.
  *
  * Sections:
- *   1. Duty rules (1x24, 3x24, 7x24, 4weeks, month)
+ *   1. Duty rules (7x24, 4weeks, month)
  *   2. Block time rules
  *   3. Rest rules
  *   4. Freeday rules
@@ -68,145 +68,12 @@ import bunkering;
 /****************************************************************
  * Section 1: Duty rules
  ***************************************************************/
- 
-/*
-** Rule: 
-**    Maximum duty time in 7x24 hrs
-**
-** Description:
-**    The rule checks that the duty time in 7x24 period is less than the maximum
-**    allowed. For SKS CC, the rule is checked for calendar weeks and without
-**    night upgrade. For Japanese CC, the rule is checked for 7 calendar days.
-**    
-**    For FC the rule checks both backwards and forwards from duty end and 
-**    duty start respectively. For CAU only the forward value is checked from the
-**    first duty start where preceded by an off duty period.
-**
-**    NB! Two implementations are done. One in CCP checking only forward values 
-**    from trip start and this one in CCR.
-**
-** Agreement:
-**    FC 1:17 2.3Aa, 1:3 mom3.a, 1:9 1.4, 1:13 H1
-**    CAU C.1.2, D.1.2
-**    JCC 3.1
-**    NKF/SBK 1.2
-**    SCCA K06 2
-**
-** Valid for:
-**    All
-** 
-** 4ExNG CC: no longer applies
-**    
-*/
-export rule ind_max_duty_time_in_7x24_hrs_ALL =
-  valid roster.%check_rules% and
-        %r_valid_duty_time_7x24_hrs% and
-        %valid_time_limits%;
-  %duty_time_7x24_hrs% <= duty_time.%max_in_7x24_hrs% -
-                          (if %flight_crew% and duty_time.%crew_has_training_restr_trip_start% and 
-                              training.%trip_is_in_school_period_min_7x24% then
-                             0:00 
-                           else
-                             %p_buffer_max_duty_time_7x24%) -
-                          duty_time.%soft_limit_reduction_fc_skd% +
-                          rule_exceptions.%overshoot_rel%(%ind_max_duty_time_in_7x24_hrs_ALL_failobject_start%);
-  startdate = %ind_max_duty_time_in_7x24_hrs_ALL_failobject_start%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_max_duty_time_in_7x24_hrs_ALL_failobject%;
-  failtext(Reltime value, Reltime limit) = 
-    %ind_max_duty_time_in_7x24_hrs_ALL_failtext%(value, limit);
-  remark "(CCR) Coll: Max duty time in 7x24 hrs",
-  planner "The rule checks that maximum duty time in 7x24 hrs is not"
-	        " exceeded. Only the forward value is checked in CCP under the"
-          " assumption that no trip is longer than 7 days. Then this is"
-          " sufficient. For SKS CC and SKJ CC the period is a calendar week and"
-          " without night upgrade. The rule is valid for ALL.";
-end
 
-%duty_time_7x24_hrs% = duty_time.%7x24_hrs%;
-
-%valid_time_limits% =
-  let end_7x24_hrs_fwd = duty.%start_hb% + 7*24:00;
-  (duty.%start_hb% >= %pp_start% and duty.%start_hb%  < %pp_end%) or
-  (end_7x24_hrs_fwd >= %pp_start% and 
-   duty.%start_hb%  < %pp_end% and 
-   duty_time.%7x24_hrs_fwd% >= %_max_in_7x24% and
-   %overlap_7x24_pp_contributes_duty_time%(end_7x24_hrs_fwd));
-
-/*
-/* True for a 7x24 hrs period starting in the previous PP and ending in the
-/* current PP, if the part of the 7x24 overlapping the current PP
-/* contributes any duty time. Only if it does, should the 7x24 rule be checked
- */
-%overlap_7x24_pp_contributes_duty_time% (Abstime end_7x24_hrs_fwd) =
-  any(duty(roster),not duty.%has_no_duty_time_contribution%)
-     from (current)
-     while (duty.%start_hb% < end_7x24_hrs_fwd)
-     where (duty.%end_hb% >= %pp_start%);
-     
-%_max_in_7x24% =  
-  duty_time.%max_in_7x24_hrs% -
-  (if %flight_crew% and duty_time.%crew_has_training_restr_trip_start% and 
-      training.%trip_is_in_school_period_min_7x24% then
-     0:00 
-   else
-     %p_buffer_max_duty_time_7x24%) -
-  duty_time.%soft_limit_reduction_fc_skd%; 
-   
-%p_buffer_max_duty_time_7x24% = 
-  parameter 0:00
-  remark "Max duty time 7x24 buffer";
-
-%ind_max_duty_time_in_7x24_hrs_ALL_failtext%(Reltime value, Reltime limit) =
-  let start = if duty_time.%7x24_hrs_fwd% >= duty_time.%7x24_hrs_bwd% then
-                duty_time.%7x24_hrs_fwd_start%
-              else duty_time.%7x24_hrs_bwd_start%,
-      prefix = if %flight_crew% and crew.%is_skd% and 
-               value <= duty_time.%max_in_7x24_hrs% then "Soft: " else "Coll: ",
-      new_limit = if %flight_crew% and crew.%is_skd% and
-                      not training.%trip_is_in_school_period_min_7x24% then
-                    if value <= duty_time.%max_in_7x24_hrs% then
-                      limit
-                    else duty_time.%max_in_7x24_hrs%
-                  else limit;
-  concat(rules.%failtext_rel%(concat(prefix, "Duty time "), value, new_limit),
-         format_time(start, " %02d%02b %02H:%02M ->"));                              
-
-%ind_max_duty_time_in_7x24_hrs_ALL_failobject% =
-  if duty_time.%7x24_hrs_bwd% > duty_time.%7x24_hrs_fwd% then
-    %_ind_max_duty_time_in_7x24_hrs_ALL_failobject%(duty_time.%7x24_hrs_bwd_start%)
+export %time_of_day_wop_end_hb_not_zero% =
+  if time_of_day(wop.%end_hb%) = 0:00 then
+     24:00
   else
-    %_ind_max_duty_time_in_7x24_hrs_ALL_failobject%(duty_time.%7x24_hrs_fwd_start%);
-
-%ind_max_duty_time_in_7x24_hrs_ALL_failobject_start% =
-  if duty_time.%7x24_hrs_bwd% > duty_time.%7x24_hrs_fwd% then
-    %_ind_max_duty_time_in_7x24_hrs_ALL_failobject_start%(duty_time.%7x24_hrs_bwd_start%)
-  else
-    %_ind_max_duty_time_in_7x24_hrs_ALL_failobject_start%(duty_time.%7x24_hrs_fwd_start%);
-
-
-%_ind_max_duty_time_in_7x24_hrs_ALL_failobject%(Abstime start_utc) =
-  let night_upg = duty_time.%7x24_hrs_has_night_upg%,
-      limit = duty_time.%max_in_7x24_hrs% -
-              duty_time.%soft_limit_reduction_fc_skd%;
-  first(leg(roster), leg.%failobject_departure%)
-  where(leg.%start_utc% >= start_utc and
-    duty_time.%7x24_hrs_in_period%(start_utc, leg.%co_end_utc%, night_upg, duty.union) > limit);
-
-%_ind_max_duty_time_in_7x24_hrs_ALL_failobject_start%(Abstime start_utc) =
-  let night_upg = duty_time.%7x24_hrs_has_night_upg%,
-      limit = duty_time.%max_in_7x24_hrs% -
-              duty_time.%soft_limit_reduction_fc_skd%;
-  first(leg(roster), leg.%activity_scheduled_start_time_UTC%)
-  where(leg.%start_utc% >= start_utc and
-    duty_time.%7x24_hrs_in_period%(start_utc, leg.%co_end_utc%, night_upg, duty.union) > limit);
-
-
-
-
-
-/* Defined in child modules, because of different duty limits and validity for CC and FC. */
-export %r_valid_duty_time_7x24_hrs% = Bool;
+    time_of_day(wop.%end_hb%);
 
 /*
 ** Rule:
@@ -548,107 +415,6 @@ export %max_days_btw_freedays% =
  * Only short haul limit was found in the FC agreement. Neither was found for NKF. */
 export %max_days_btw_freedays_lh% = theme_prod.%max_days_btw_freedays_lh%;
 %max_days_btw_freedays_sh% =  theme_prod.%max_days_btw_freedays_lh%;
-
-/*
-** Rule: 
-**    Maximum number of night duties in a working period
-**
-** Description:
-**    Check that maximum number of night duties between time-off period,
-**    (for CCR = inside working period) as well as number of consecutive night 
-**    duties is not exceeded (not for CCNO). Night duty is defined as any duty 
-**    touching the time interval 0000-0500 (FCSH, CCDK), 0200-0400 (CCNO).
-**
-**    NB! Two implementations are done. One in Pairing checking
-**    inside trips and one in Rostering checking inside working period.
-**
-** Agreement:
-**    FC 1:17 2.3Ac
-**    CAU K06 C.1.1.4
-**    NKF/SBK 8.2
-**
-**    4ExNG - no longer applies
-*/
-/* Depends on the fact that the max number of consecutive night duties <= max number of night duties + 1 */
-export rule ind_max_night_duties_in_working_period_FC_SKD_SKN_SKL =
-  valid roster.%check_rules% and
-        not crew.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and
-        not crew.%is_leased_duty_start% and
-        crew.%is_short_haul_trip_start% and
-        %r_valid_max_night_duties_in_wop% and
-        trip.%in_pp_extended% and
-        trip.%is_night_duty% and
-        not training.%trip_is_in_school_period_min_7x24% and
-        not duty.%is_bought% and
-        rule_exceptions.%rule_on%(duty.%start_UTC%) and 
-        is_last(duty(trip)) where (duty.%is_night_duty%);
-  %nr_night_duties% <= %max_night_duties% + 
-		       rule_exceptions.%overshoot_int%(duty.%start_UTC%) and
-  (not %check_consecutive_nights% or /* No limit on consecutive nights for CC SKN */
-  (%nr_consecutive_night_duties% <= %max_consecutive_night_duties%));
-  startdate  = duty.%start_UTC%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_max_night_duties_in_working_period_FC_SKD_SKN_SKL_failobject%;
-  failtext %max_night_duties_failtext%;
-  remark "(CCR) Coll: Max night duties in working period",
-  planner "The rule checks that the maximum number of, as well as the"
-	        " maximum consecutive night duties is not exceeded (not for CCNO)."
-          " A duty is at night if it touches the interval FC & CC SKD: (00:00,05:00),"
-          " CC SKN: (02:00, 04:00). The rule is valid for FC and CC SKD/SKN, with"
-          " limits: max 3 nights total and max 2 consecutive for FC & CC SKD and"
-          " max 2 nights total for CC SKN (no limit on number of consecutive).";
-end
-
-%ind_max_night_duties_in_working_period_FC_SKD_SKN_SKL_failobject% =
-  let overshoot = rule_exceptions.%overshoot_int%(duty.%start_UTC%);
-  
-  if %nr_night_duties_until_now% = %max_night_duties% + overshoot + 1 or
-     (%check_consecutive_nights% and %nr_consecutive_night_duties% = %max_consecutive_night_duties% + overshoot + 1) then
-        duty.%failobject_start%
-  else
-    prev(duty(trip), duty.%failobject_start%)
-    where(%nr_night_duties_until_now% = %max_night_duties% + overshoot + 1 or
-          (%check_consecutive_nights% and %nr_consecutive_night_duties% = %max_consecutive_night_duties% + overshoot + 1));
-  
-/* Redefined in child module due to different limits and validity */
-%r_valid_max_night_duties_in_wop% = Bool;
-%check_consecutive_nights% = Bool;
-%max_night_duties% = Int;
-%max_consecutive_night_duties% = Int;
-%max_night_duties_failtext% =
-  if %check_consecutive_nights% and 
-     %nr_consecutive_night_duties%>%max_consecutive_night_duties% then
-      rules.%failtext_int%("Coll: Cons. night duties",
-                           %nr_consecutive_night_duties%, 
-                           %max_consecutive_night_duties%)
-  else
-      rules.%failtext_int%("Coll: Night duties",%nr_night_duties%, 
-                           %max_night_duties%);
-
-%nr_night_duties% = 
-  count(duty(wop)) 
-  where (%valid_night_duty% and not duty.%is_bought%);
-  
-%nr_night_duties_until_now% =
-  count(duty(wop))
-  from(first) to(current)
-  where (%valid_night_duty%);
-  
-%valid_night_duty% =
-  not duty.%is_blank_day% and
-  duty.%is_night_duty% and
-  not duty.%is_long_haul%;
-
-%nr_consecutive_night_duties% =
-  count(duty(wop))
-  from (current) backwards
-  while (%valid_night_duty% and not duty.%is_bought%);
-
-export %time_of_day_wop_end_hb_not_zero% =
-  if time_of_day(wop.%end_hb%) = 0:00 then
-     24:00
-  else
-    time_of_day(wop.%end_hb%);
 
 /*
 ** Rule:
