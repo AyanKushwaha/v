@@ -30,7 +30,7 @@ import system_db_parameters;
 
 redefine %trip_notification_deadline_CC% =
   nmin(
-       default(%trip_notification_deadline_R316%, 31Dec2099),
+       default(%trip_notification_deadline_resched_temp_cc_roster% , 31Dec2099),
        default(%trip_notification_deadline_resched_bl%,31Dec2099));
   
 /*******************************************************************************
@@ -43,63 +43,9 @@ redefine %trip_notification_deadline_CC% =
  * These rules are only dependent on the current roster
  ***************************************************************/
 
-export rule resched_R242_CC =
-  valid not (crew.%is_SKD% and crew.%is_temporary_trip_start%) and
-        not %trip_inf_is_standby_at_checkin% and
-        not %trip_inf_is_first_in_wop%;
-    
-  rescheduling.%trip_inf_checkin_diff% >= -2:00;
-  
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext(Reltime value, Reltime limit) =
-    rules.%failtext_rel%("Coll: C/I >2h earlier than informed",value,limit);    
-  remark "(CCT) Resched: Check-in must be < 2 hours earlier than informed";
-end
-
-rule resched_R243_CC =
-  valid not (crew.%is_SKD% and crew.%is_temporary_trip_start%) 
-        and %trip_inf_is_first_in_wop%
-        and %trip_has_not_started%;
-
-  rescheduling.%trip_inf_checkin_diff% >= 0:00;
-
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext rules.%failtext_abs%("Coll: C/I after T/O earlier than informed C/I",
-                                rescheduling.%trip_checkin_hb%,
-                                rescheduling.%trip_inf_checkin%);
-  remark "(CCT) Resched: Check-in after time-off must not be earlier than informed";
-end
-
-export rule resched_R246_CC =
-  valid not (crew.%is_SKD% and crew.%is_temporary_trip_start%) and
-    rescheduling.%trip_is_short_haul% and
-    not %trip_inf_is_standby_at_checkout% and
-    not rescheduling.%trip_inf_hist_blank_day% and
-    not %trip_inf_is_last_in_wop_with_co%;
-
-  rescheduling.%trip_inf_checkout_diff% <= 2:00;
-
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %resched_R246_CCSH_failobject%;
-  failtext(Reltime value, Reltime limit) =
-    rules.%failtext_rel%("Coll: C/O >2h later than informed C/O", value, limit);
-  remark "(CCT) Resched: Check-out must not be >2 hours after informed";
-end
-
 %resched_R246_CCSH_failobject% = 
   first(leg(trip),leg.%failobject_departure%) where
     (leg.%co_end_scheduled_hb% > rescheduling.%trip_inf_checkout% + 2:00);
-
-
-                                  
-/*
-** 4ExNG CC: 6.4.3 Blank day
-*/
 
 /*
 ** Rule:
@@ -191,18 +137,18 @@ end
 ** Rule: R316
 */
 
-%_R316_valid% =
+%resched_roster_removed_12h_before_temp_cc_valid% =
   crew.%is_SKD%
   and crew.%is_temporary_trip_start%
   and not crew.%is_leased_trip_start%
   and rescheduling.%trip_is_rescheduled%
   and %trip_free_is_rescheduled_checkin%;
 
-rule resched_R316_CC_SKD =
-  valid %_R316_valid%
+rule resched_roster_removed_12h_before_temp_cc_skd =
+  valid %resched_roster_removed_12h_before_temp_cc_valid%
     and rule_exceptions.%rule_on%(trip.%start_UTC%);
 
-  %_R316_inform_in_time%;
+  %resched_roster_temp_cc_inform_in_time%;
   
   startdate = trip.%start_UTC%;
   severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
@@ -214,11 +160,11 @@ rule resched_R316_CC_SKD =
           " The rule is only valid for CC CAU.";
 end
 
-%_R316_inform_in_time% =
+%resched_roster_temp_cc_inform_in_time% =
   %trip_free_inf_checkin% >= %now_hb% + 12:00;
   
-%trip_notification_deadline_R316% =
-  if %_R316_valid%
+%trip_notification_deadline_resched_temp_cc_roster% =
+  if %resched_roster_removed_12h_before_temp_cc_valid%
   then %trip_free_inf_checkin% - 12:00
   else void_abstime;
 
@@ -280,8 +226,7 @@ rule max_limit_reduction_CAU_7_day_window =
         (crew.%has_agmt_group_skd% or crew.%has_agmt_group_sks%) and
         %_has_hours_duty_reduction_7_days% and
         trip.%check_rules% and
-        ( crew.%k4exng_cc_sp5_1_valid%(duty.%start_day%) or
-          parameters.%k4exng_fc_sp5_1_valid%(duty.%start_day%)) and
+        crew.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and
         duty.%in_pp_extended% and
         (duty_period.%is_on_duty% or %_is_CAU_reducing%) and
         duty_period.%is_last_duty_period_on_start_day%;
