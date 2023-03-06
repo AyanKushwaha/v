@@ -1082,11 +1082,10 @@ export %ind_check_in_time_limit_for_wop_ALL_valid% =
   wop.%starts_in_pp% and
   wop.%is_on_duty% and
   not (crew.%in_5_4_flex_group%(wop.%start_hb%) and not prev(wop(chain), wop.%is_vacation%)) and
-  /* jastrom: removed since not work if wop preceded by empty days.
-  (wop.%start_utc% - %r_comparative_check_out% < 24:00) and */
   first(trip(wop), not (trip.%is_blank_day% or trip.%is_gnd%)) and
   not first(duty(wop),duty.%is_bought%) and
-  %r_valid_check_in%;
+  %r_valid_check_in% and
+  (wop.%start_utc% - %r_comparative_check_out% < 24:00);
 
 %start_of_ci% = first(trip(wop),trip.%start_od%) where (not trip.%is_rest%);
 %ci_start_day_of_week% =
@@ -1104,28 +1103,31 @@ export %ind_check_in_time_limit_for_wop_ALL_valid% =
 table check_in_time_limitations(Int ix) =
   %flight_crew%, crew.%region%, ix ->
     %_r_valid_check_in%,
-    %_r_comparative_check_out%,
-    %_check_in_time_limit%,
+    %_r_comparative_check_out%, /* if c/i limit is NOT controlled after a certain block on roster (e.g. VA block) then wop.%start_utc% should be used.... Freedays are not on roster in optimization, they are just empty days */
+    %_check_in_time_limit%,  /* hb times! */
     %_check_in_limitation_type%;
-
+  
+  
   /* Flight crew */
-  true,<>"SKI", 1 -> crew.%in_variable_group_wop_start% and
+  true, <>"SKI",1 -> crew.%in_variable_group_wop_start% and
+                     not crew.%has_agmt_group_fpu_fd% and
                      not training.%wop_is_in_school_period_min_7x24% and
                      %has_check_in_limitation_after_2_freedays%,
-                     prev(wop(roster), wop.%end_utc%),
+                     wop.%start_utc%,
                      %ci_limit_after_2F%,
                      "2 freedays";
   true,     - , 2 -> crew.%has_rotationsferie_contract_SKN_FD_at_date%(round_down(wop.%start_hb%, 24:00) - 14 * 24:00) and
                      not first(trip(wop), trip.%is_compensation_day%) and
                      not first(duty(wop), duty.%is_privately_traded%) and
                      %_rotationsferie_ci_valid%,
-                     void_abstime,
+                     prev(wop(roster), wop.%end_utc%),
                      6:00,
                      "summer rotationsferie";
-  true,     - , 3 -> freedays.%prev_not_freedays_wop_was_vacation% and
+  true,<>"SKD", 3 -> not (crew.%homebase% = "CPH") and /* is needed to not be valid for SVS/SZS CPH */
+                     freedays.%prev_not_freedays_wop_was_vacation% and
                      freedays.%vacation_days% >= 7,
-                     prev(wop(roster), wop.%end_utc%) where(wop.%is_vacation%),
-                     07:00,
+                     prev(wop(roster), wop.%end_utc%),
+                     06:00,
                      "vacation";
   true,    -,   4 -> training.%wop_is_in_school_period_min_7x24%,
                      wop.%start_utc%,
@@ -1137,56 +1139,56 @@ table check_in_time_limitations(Int ix) =
                      "isolated FS";
 
   /* Cabin crew */
-  false,"SKD", 6 -> first(leg(wop),leg.%is_standby_with_rest%) where (not leg.%is_rest%)
+  false, "SKD", 6-> first(leg(wop),leg.%is_standby_with_rest%) where (not leg.%is_rest%)
                      and freedays.%prev_not_freedays_wop_was_vacation% and
                      freedays.%vacation_days% >= 7
                      and system_db_parameters.%skd_cc_cau_nov2016%(wop.%start_hb%),
-                     wop.%start_utc%,
+                     prev(wop(roster), wop.%end_utc%),
                      04:40,
                      "vacation"; 
-  false, "SKD", 7 -> freedays.%prev_not_freedays_wop_was_vacation% and
+  false,"SKD", 7 -> freedays.%prev_not_freedays_wop_was_vacation% and
                      freedays.%vacation_days% >= 7
                      and system_db_parameters.%skd_cc_cau_nov2016%(wop.%start_hb%),
-                     wop.%start_utc%,
+                     prev(wop(roster), wop.%end_utc%),
                      06:00,
                      "vacation";
   false,   -,   8 -> crew.%in_variable_group_wop_start% and
                      %cabin_crew% and
-                     not crew.%has_agmt_group_snk_cc% and
+                     not crew.%has_agmt_group_skn_cc% and
                      wop.%is_preceded_by_F4% and
                      %ci_start_day_of_week% = 1,
                      prev(wop(roster), wop.%end_utc%),
                      freedays.%free_we_earliest_end%,
                      "F4";
   false, "SKD", 9 -> %has_check_in_limitation_after_2_freedays%,
-                     prev(wop(roster), wop.%end_utc%),
+                     wop.%start_utc%,
                      08:00,
                      "LH charter with 2 freedays";
   false,"SKN", 10 -> first(leg(wop),leg.%is_standby_with_rest%) where (not leg.%is_rest%)
                      and freedays.%prev_not_freedays_wop_was_vacation% and
                      freedays.%vacation_days% >= 7
                      and system_db_parameters.%skn_cc_oct2016_valid%(wop.%start_hb%),
-                     wop.%start_utc%,
+                     prev(wop(roster), wop.%end_utc%),
                      04:20,
                      "vacation";
- false, "SKN", 11 -> freedays.%prev_not_freedays_wop_was_vacation% and
+  false,"SKN", 11 -> freedays.%prev_not_freedays_wop_was_vacation% and
                      freedays.%vacation_days% >= 7
                      and system_db_parameters.%skn_cc_oct2016_valid%(wop.%start_hb%),
-                     wop.%start_utc%,
+                     prev(wop(roster), wop.%end_utc%),
                      06:00,
                      "vacation";
- false, "SKS", 12 -> default(is_first(trip(wop))
+  false,"SKS", 12 -> default(is_first(trip(wop))
                          where (not trip.%is_rest%)
                          and not first(trip(wop), trip.%is_rest%)
                          and freedays.%prev_wop_is_vacation_with_no_freedays%
                          and freedays.%vacation_days% >= 5
                          and system_db_parameters.%scca_engagement_2019%(wop.%start_hb%),
                     false),
-                    wop.%start_utc%,
+                    prev(wop(roster), wop.%end_utc%),
                     06:00,
                     "vacation";  
   /* Default */
-  -, -, - -> false, wop.%start_utc%, 0:00, "UNKNOWN";
+  -, -, - -> false, prev(wop(roster), wop.%end_utc%), 0:00, "UNKNOWN";
 end
 export %check_in_time_limitations_max% = 20;
 
@@ -1224,6 +1226,7 @@ export %check_in_time_limitations_max% = 20;
 
 %has_check_in_limitation_after_2_freedays% =
   freedays.%wop_after_2_freedays% and
+  first(trip(wop), not trip.%is_long_haul%) where (trip.%has_active_flight%) and
   prev(wop(roster),not last(trip(wop),trip.%has_no_duty_time_contribution%) and
                    %_ci_limitation_after_2F%)
   where (not wop.%is_freeday%);
@@ -1244,15 +1247,12 @@ export %check_in_time_limitations_max% = 20;
 **
 ** Description:
 **    Checks that the check-out time bfore summer vacation is before 19:00
-**    Valid for SKN-FD_AG, SKS-FD_AG, SKIN-FD-AG, SKIN-FD-AG
+**    Valid for SKN-FD_AG, SKS-FD_AG, SKIN-FD-AG, SKIS-FD-AG
 **    If vacation period which includes LA days, LOA days and F days together
 **    with summer vacation VA days (starts earliest 30May bad ends latest 04sepo
 **   is exactly 21 days then the checout time must be before 19:00
 **
 */
-
-
-
 export rule ind_check_out_before_summer_va =
   valid roster.%check_rules%
   and  is_first(duty(wop))
@@ -1279,10 +1279,10 @@ export rule ind_check_out_before_summer_va =
 end
 %ind_check_out_before_summer_va_agmt_groups_valid% =
     crew.%has_agmt_group_skis_fd_at_date%(duty.%start_utc%) or
+    crew.%has_agmt_group_sks_fd_at_date%(duty.%start_utc%) or
     crew.%has_agmt_group_skin_fd_at_date%(duty.%start_utc%) or
     crew.%has_agmt_group_skn_fd_at_date%(duty.%start_utc%) or
-    crew.%has_agmt_group_skn_cc_at_date%(duty.%start_utc%) or
-    model_crew.%has_agmt_qual_sks_fd_oth_at_date%(crew.%id%, duty.%start_utc%);
+    crew.%has_agmt_group_skn_cc_at_date%(duty.%start_utc%);
 
 %ind_check_out_before_summer_va_num_va_days% =
     if crew.%has_agmt_group_skn_cc_at_date%(duty.%start_utc%) then
@@ -1384,11 +1384,12 @@ export %planned_check_out% =
 table check_out_time_limitations(Int ix) =
   %flight_crew%, crew.%region%, ix ->
     %_r_valid_check_out%,
-    %_check_out_time_limit%,
+    %_check_out_time_limit%, /* hb times! */
     %_check_out_limitation_type%;
   
   /* Flight crew */
   true, <>"SKI", 1 -> crew.%in_variable_group_wop_end% and
+                      not crew.%has_agmt_group_fpu_fd% and
                       not training.%wop_is_in_school_period_min_7x24% and
                       %has_check_out_limitation_before_2_freedays%,
                       %co_limit_before_2F%,
