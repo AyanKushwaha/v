@@ -2115,15 +2115,9 @@ export %wop_is_followed_by_summer_vacation_skn% =
 
 
 /* see rule rules_indust_ccr.ind_min_freedays_surrouding_summer_vacation  */
-/* TODO: when Cimber is removed, this should be valid for all FD */
 export %freedays_surrounding_summer_vacation_group_at_date%(Abstime date) =
     let start_day = round_down(date, 24:00);
-
-    crew.%has_agmt_group_ski_fd_at_date%(start_day) or
-    crew.%has_agmt_group_skn_fd_at_date%(start_day) or
-    crew.%has_agmt_group_skd_fd_at_date%(start_day) or
-    model_crew.%has_agmt_qual_sks_fd_oth_at_date%(crew.%id%, start_day);
-
+    crew.%has_agmt_group_sk_fd_at_date%(start_day);
 
 export %is_summer_vacation%(Bool co) =
        let
@@ -2155,8 +2149,7 @@ export %is_summer_vacation%(Bool co) =
           else 
          /* For late check-out 04 sep is counted as end_day */
            end_day <= day_for_05Sep));
-              
-        
+
 export %count_summer_vacation_days_from_date%(Abstime start) =
     count(times(30))
     while (%is_summer_vacation_day_at_date%(round_down(start + ((%times_index_0% - 1) * 24:00), 24:00)));
@@ -2166,7 +2159,6 @@ export %count_summer_vacation_days_from_date%(Abstime start) =
   any(leg(chain), overlap(date, date + 23:59, leg.%start_hb%, leg.%end_hb%) > 0:00)
   where (%leg_in_summer_vacation_codes%);
 
-
 export %leg_in_summer_vacation_codes% =
     leg.%in_summer_vacation_codes%;
 
@@ -2174,10 +2166,8 @@ export %duty_is_LOA100% =
     crew.%crew_contract_part_time_factor_at_date%(duty.%start_day%) = 100
     and %duty_is_LOA%;
 
-
 export %duty_is_LOA% =
    first(leg(duty), leg.%is_loa%);
-
 
 /************************************************
 * This table is used for FD VG part time crew,
@@ -3274,6 +3264,9 @@ export %number_of_days_until_next_on_duty_wop% =
   else
     void(abstime);
 
+/*************************************************
+*       Single freeday
+**************************************************/
 /*
 ** Single freeday is allowed:
 ** In case fpu, always, if only oma16 rules fulfilled (2 local nights)
@@ -3406,26 +3399,30 @@ export %wop_max_work_with_single_f%(Abstime start, Abstime stop) =
 %min_time_off_single_f% =
     if crew.%has_agmt_group_skn_cc% then
         38:00
-    else if crew.%has_agmt_group_svs% then
+    else if crew.%has_agmt_group_fpu% then
         36:00
     else
         40:00;
 
 
-/* SVS freeday does not worry about work period length */
+/* FPU freeday does not worry about work period length */
 %is_next_next_qualifying_single_freeday%(int prev_work_period_days, Abstime rest_start) =
   let work_period_days = (wop.%end_day% - duty.%start_day%) / 24:00 + 1;
   if (not duty.%is_blank_day% and not %prev_duty_is_fs1% and duty.%start_hb% - rest_start < %min_time_off_single_f%) then
     rules.%failtext_rel%("Min rest when single freeday",duty.%start_hb% - rest_start, %min_time_off_single_f%)
-  else if not crew.%has_agmt_group_svs% and prev_work_period_days>4 then
+  else if not crew.%has_agmt_group_fpu% and prev_work_period_days>4 then
     rules.%failtext_int%("Workdays before single freeday",prev_work_period_days,4)
-  else if not crew.%has_agmt_group_svs% and work_period_days>4 then
+  else if not crew.%has_agmt_group_fpu% and work_period_days>4 then
     rules.%failtext_int%("Workdays after single freeday",work_period_days,4)  
-  else if not crew.%has_agmt_group_svs% and (prev_work_period_days+work_period_days)>6 then
+  else if not crew.%has_agmt_group_fpu% and (prev_work_period_days+work_period_days)>6 then
     rules.%failtext_int%("Workdays around single freeday",prev_work_period_days+work_period_days,6)
   else "OK"; /* Qualifying */
 
 %prev_duty_is_fs1% = default(prev(duty(chain), duty.%is_fs1%), false);
+
+/*************************************************************
+*           Freedays after duty
+*************************************************************/
 
 export %min_required_freedays_after_duty% =
   if duty.%is_on_duty% then
@@ -3453,15 +3450,15 @@ export %min_required_freedays_after_duty% =
     	2
       else
         3
-    /* SVS wop length does not matter, but if not a qualifying single
+    /* FPU wop length does not matter, but if not a qualifying single
        freeday (handled above) it should be at least a 2 day 60:00 block */
-    else if crew.%has_agmt_group_svs% then
+    else if crew.%has_agmt_group_fpu% then
         2
     else
-      if crew.%k4exng_cc_sp5_1_valid%(wop.%start_day%) then
-        %min_required_freedays_after_duty_all%
-      else
-        %_min_required_freedays_after_duty%
+     if %cabin_crew% and crew.%is_homebase_scand% then
+        %min_required_freedays_after_duty_all%  /* = CC with scandinavian base*/
+       else
+        %_min_required_freedays_after_duty% /* = FD and asian CC */
   else
   	0;
 
@@ -3470,10 +3467,6 @@ export %min_required_freedays_after_duty_failtext%(Int value, Int limit) =
   if single_ft="OK" or single_ft="NO" then
     rules.%failtext_int%("Coll: F-days after prod(duty)", value, limit)
   else concat("Coll: ",single_ft);
-
-
-
-
 
 %standby_or_bl_ccr% =
   any(duty(wop),duty.%is_standby% or duty.%is_blank_day%); 
@@ -3488,13 +3481,13 @@ table min_required_after_duty_4exng =
                      -> export %min_required_freedays_after_duty_all%;
 
   "C", <5  , true , false,   -  ,   -    -> 2; /* SH 1-4 P-days */
-  "C",  5  , true , false,   -  , true   -> 2; /* SH 5 P-days, 3 time-off days */
-  "C",  5  , true , false,   -  , false  -> 3; /* SH 5 P-days, 2 time-off days */
+  "C",>=5  , true , false,   -  , true   -> 2; /* SH 5 P-days, 2 off duty days and 1 other time-off day */
+  "C",>=5  , true , false,   -  , false  -> 3; /* SH 5 P-days, 3 off duty days */
   "C",  -  , false, true ,   -  , true   -> 2; /* LH */
   "C",  -  , false, true ,   -  , false  -> 3; /* LH */
   "C", <5  , false, false, true ,   -    -> 2; /* 1-4P incl. sby or BL */
-  "C",  5  , false, false, true , true   -> 2; /* 5P incl. sby or BL, 3 time-off days */
-  "C",  5  , false, false, true , false  -> 3; /* 5P incl. sby or BL, 2 time-off days */
+  "C",>=5  , false, false, true , true   -> 2; /* 5P incl. sby or BL, 3 time-off days */
+  "C",>=5  , false, false, true , false  -> 3; /* 5P incl. sby or BL, 2 time-off days */
   "C",  -  , false, false, false,   -    -> 2; /* ground duty days */
 
   "F",  -  ,   -  ,   -  ,   -  ,   -    -> %_min_required_freedays_after_duty%;  
@@ -3502,6 +3495,94 @@ table min_required_after_duty_4exng =
    - ,  -  ,   -  ,   -  ,   -  ,   -    -> 99;  
 end  
 
+
+%min_required_pt_freedays_after_duty% =
+  if (crew.%is_skj% or crew.%is_skj%) and
+     duty.%is_on_duty% and
+     not duty.%is_off_duty_cmp% then
+    %_min_required_pt_freedays_after_duty% /* only for CC Asia, FD have all 0 as value in table */
+  else
+    0;
+
+/*
+ * SKS/SKN SH FC should normally have 3 F-days after 5 production days. but
+ * 2 F-days plus any other off-duty activity (e.g. VA, F7 etc.) is allowed.
+ */
+
+export %any_offduty_may_replace_one_freeday% =
+  %freedays_after_duty% = 2 and
+  default(next(wop(roster),wop.%is_off_duty%)
+            where (not wop.%is_freeday%),
+          false);
+ 
+table min_required_after_duty =
+  crew.%main_func%,
+  crew.%region%,
+  %wop_days%,
+  %wop_is_short_haul%,              /* Any trip is short haul but no trip is long haul */
+  %wop_is_long_haul%,               /* Any trip is long haul */
+  %wop_has_ground_duty%,            /* Any trip is ground duty */
+  %next_duty_is_isolated_FS%,       /* Production followed by super freeday */
+  %wop_has_standby%,                /* Any trip is standby */
+  %wop_has_short_standby_block% or wop.%is_blank_day%, /* Any trip is short standby */
+  training.%wop_is_in_school_period_min_7x24%,  /* Is part of course > 7 days duration */
+  %any_offduty_may_replace_one_freeday% ->  /* 5P=3F - any offduty may replace 1 F-day */
+    export %_min_required_freedays_after_duty%,
+    export %_min_required_pt_freedays_after_duty%;
+  /* FC on course > 7 days duration should always have 2F after 5 production days. */
+  "F" ,   -  , >4,   -   , -    , -    , -    , -    , -    , true ,  -   -> 2, 0;
+ &
+  "F",<>"SKI",  - ,  -   , -    , -    , true ,   -  , -    , -    ,  -   -> 1, 0; /* FC SH followed by isolated FS */
+ &
+ /* FC 1.11 G */
+  "F" ,   -  ,  >4, false, false, -    , false, false, -    , -   , true  -> 2, 0;
+  "F" ,   -  ,  >4, false, false, -    , false, false, -    , -   , false -> 3, 0;
+ /* FC SH should have 3F after 5 days production or standby */
+  "F" ,   -  ,  >4, -    , -    , -    , -    , true , -    , -   , true  -> 2, 0;
+  "F" ,   -  ,  >4, -    , -    , -    , -    , true , -    , -   , false -> 3, 0;
+  "F" ,   -  ,  >4, true , -    , -    , false, false, -    , -   , true  -> 2, 0;
+  "F" ,   -  ,  >4, true , -    , -    , false, false, -    , -   , false -> 3, 0;
+  "F" ,   -  ,  <5, true , -    , -    , false, -    , false, -   ,   -   -> 2, 0;
+  "F" ,   -  ,  - , false, true , -    , -    , false, false, -   ,   -   -> 3, 0;
+  &
+  /* Japanese CC 3.9 */
+  "C",  "SKJ", -  , false, true ,    - ,   -  , -    ,   -  , -   ,   -   -> %cc_lh_freedays_skj_duty%, %cc_lh_pt_freedays_skj_duty%;
+  /* Chines CC */
+  "C",  "SKK", -  , false, true ,    - ,   -  , -    ,   -  , -   ,   -   -> %cc_lh_freedays_skk_duty%, 0;
+  /* Only ground duty btw freedays */
+   -,       -,   -, false, false, true ,  -   , -    , false, -   ,   -   -> 2, 0;
+  
+  -, -, -, -, -, -, -, -, -, -, - -> 2, 0;
+end
+
+/* Required F-days after production for Japanese CC*/
+%cc_lh_freedays_skj_duty% = 4;
+
+/* Required F-days after production for Chinese CC*/
+%cc_lh_freedays_skk_duty% = 3;
+
+/*
+** Required part-time F88 days after production for Japanese CC
+**
+** 50% = Flight duty days + normal F-days
+**
+** 75% = (Flight duty days + normal F-days) / 2 rounded up.
+*/
+
+%cc_lh_pt_freedays_skj_duty% =
+  if crew.%part_time_factor_duty_start% = 50 then
+    %flight_duty_days_in_wop% + %cc_lh_freedays_skj_duty%
+  else
+    if crew.%part_time_factor_duty_start% = 75 then
+      ((10 * (%flight_duty_days_in_wop% + %cc_lh_freedays_skj_duty%) / 2) + 5)/ 10 
+    else
+      0;
+
+%flight_duty_days_in_wop% =
+  (last(trip(wop),trip.%end_day% + 24:00)
+     where (trip.%has_flight_duty% and not trip.%is_standby%) -
+   first(trip(wop),trip.%start_day%)
+     where (trip.%has_flight_duty% and not trip.%is_standby%)) / 24:00;
 
 /* count freedays following last duty in wop. In ccr gaps are allowed to be filled in later */
 export %count_mixed_freedays_following_last_duty_in_wop% =
@@ -3543,14 +3624,10 @@ export %is_last_duty_in_wop_cau1412_662% =
      * variable %req_freedays_after_trip%. If change, please apple this to report_common too.
      */
     if wop.%has_active_long_haul% then
-        if crew.%is_skj% then
-            4
-        else
-            3
-    else
-        2
-    ;
-
+        if crew.%is_skj% 
+        then 4
+        else 3
+    else 2;
 
 /** 
 *** Used for soft rule and assign script.
@@ -3703,339 +3780,6 @@ end
   
 set gd_not_qualifying_freeday_set = "KD", "GD";  
 set freeday_exception_set = "COD","OFD","REC","SGD","MET";
-
-%min_required_pt_freedays_after_duty% =
-  if not crew.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and
-     duty.%is_on_duty% and
-     not duty.%is_off_duty_cmp% then
-    %_min_required_pt_freedays_after_duty%
-  else
-    0;
-
-/*
- * SKS/SKN SH FC should normally have 3 F-days after 5 production days. but
- * 2 F-days plus any other off-duty activity (e.g. VA, F7 etc.) is allowed.
- */
-
-export %any_offduty_may_replace_one_freeday% =
-  %freedays_after_duty% = 2 and
-  default(next(wop(roster),wop.%is_off_duty%)
-            where (not wop.%is_freeday%),
-          false);
- 
-table min_required_after_duty =
-  crew.%main_func%,
-  wop.%start_hb%,
-  crew.%region%,
-  %wop_days%,
-  %wop_is_short_haul%,              /* Any trip is short haul but no trip is long haul */
-  %wop_is_long_haul%,               /* Any trip is long haul */
-  %wop_has_ground_duty%,            /* Any trip is ground duty */
-  %next_duty_is_isolated_FS%,       /* Production followed by super freeday */
-  %wop_has_standby%,                /* Any trip is standby */
-  %wop_has_short_standby_block% or wop.%is_blank_day%, /* Any trip is short standby */
-  training.%wop_is_in_school_period_min_7x24%,  /* Is part of course > 7 days duration */
-  %any_offduty_may_replace_one_freeday% ->  /* 5P=3F - any offduty may replace 1 F-day */
-    export %_min_required_freedays_after_duty%,
-    export %_min_required_pt_freedays_after_duty%;
-  /* FC SKD SH should always have 2F after 5 production days. */
-  /* but from 01jun11, they must have 3F                      */
-  "F", < 01jun11,  "SKD", >4, -    , -    , -    , -    , -    , - , false, -      -> 2, 0;
-  /* FC on course > 7 days duration should always have 2F after 5 production days. */
-  "F",      -    ,   -  , >4, -    , -    , -    , -    , -    , - , true, -       -> 2, 0;
- &
-  "F",  -    , <> "SKI", - ,   -  , -    , -    , true ,   -  ,   -  , -, -   -> 1, 0; /* FC SH followed by isolated FS */
- &
- /* FC 1.11 G */
-  "F",  -    ,   -  , >4, false, false, -    , false, false, - , -, true      -> 2, 0;
-  "F",  -    ,   -  , >4, false, false, -    , false, false, - , -, false     -> 3, 0;
- /* FC SH (except SKD before 01jun11) should have 3F after 5 days production or standby */
-  "F",  -    ,   -  , >4, -    , -    , -    , -    , true , - , -, true      -> 2, 0;
-  "F",  -    ,   -  , >4, -    , -    , -    , -    , true , - , -, false     -> 3, 0;
-  "F",  -    ,   -  , >4, true , -    , -    , false, false, - , -, true      -> 2, 0;
-  "F",  -    ,   -  , >4, true , -    , -    , false, false, - , -, false     -> 3, 0;
-
-  "F",  -    ,   -  , <5, true , -    , -    , false, -    , false, -, -  -> 2, 0;
-  "F",  -    ,   -  , - , false, true , -    , -    , false, false, -, -  -> 3, 0;
- 
-  /* CAU J, L and P */
-  "C", -, "SKD", -,  true,     -,    -,   -, -,       -, -, -   -> %cc_sh_freedays_skd_duty%, %cc_sh_pt_freedays_skd_duty%;
-  "C", -, "SKD", -, false,  true,    -,   -, -,       -, -, -   -> %cc_lh_freedays_skd_duty%, 0;
-  "C", -, "SKD", -, false, false,    -,   -, -,    true, -, -   -> %cc_sh_freedays_skd_duty%, %cc_sh_pt_freedays_skd_duty%;
-  
-  /* NKF/SBK 2.4.3.4 */
-  "C", -, "SKN", >=5,  true,     -, false,    -, -,     -, -, true  -> %skn_cc_k11_freedays%, 0;
-  "C", -, "SKN", >=5,  true,     -, false,    -, -,     -, -, false -> 3, 0;
-  "C", -, "SKN", >=5, false, false, false,    -, -,  true, -, true  -> %skn_cc_k11_freedays%, 0;
-  "C", -, "SKN", >=5, false, false, false,    -, -,  true, -, false -> 3, 0;
-  "C", -, "SKN", >=5, true,    -,   true,  -, -,   false, -, true   -> %skn_cc_k11_freedays%, 0; /* Mix of ground duty and short haul */
-  "C", -, "SKN", >=5, true,  false, true,  -, -,   false, -, false  -> 3, 0; /* Mix of ground duty and SH */
-  "C", -, "SKN", >=5, false, false, true,  -, true, true, -, false  -> 3, 0; /* Mix of ground duty and SH standby block*/
-  "C", -, "SKN", >=5, false, false, true,  -, true, false, -, false -> 3, 0; /* Mix of ground duty and SH standby */
-  "C", -, "SKN", <5, true,    -,   false, -, -,   false, -, -   -> 2, 0;
-  "C", -, "SKN", <5,  true,    -,   true,  -, -,   false, -, -   -> 2, 0; /* Mix of ground duty and short haul */
-  "C", -, "SKN", -,  false, true,    -,   -, -,   false, -, -   -> %cc_lh_freedays_skn_duty%, 0;
-  
-  /* SCCA H and N.3a */
-  "C", -, "SKS", >4,    -,    -,     -,   -, -,   -, -, -       -> 3, 0;
-  &
-  "C", -, "SKS", -,  true,    -,     -,   -, -,       -, -, -   -> 2, 0;
-  "C", -, "SKS", -,  false, true,    -,   -, -,       -, -, -   -> 3, 0; /* SCCA K06 5.2 */
-  
-  /* Japanese CC 3.9 */
-  "C", -, "SKJ", -,  false, true,    -,   -, -,       -, -, -   -> %cc_lh_freedays_skj_duty%,
-                                                                   %cc_lh_pt_freedays_skj_duty%;
-  /* Chines CC */
-  "C", -, "SKK", -,  false, true,    -,   -, -,       -, -, -   -> %cc_lh_freedays_skk_duty%, 0;
-  
-  /* Only ground duty btw freedays */
-   -,  -,   -,   -,  false, false, true,  -, -,   false, -, -   -> 2, 0;
-  
-  -, -, -, -, -, -, -, -, -, -, -, - -> 2, 0;
-end
-
-
-/* Only CC SKD has a part time dependency */
-table cc_sh_freedays_skd_duty =
-  crew.%part_time_factor_duty_start%,
-  %wop_days%,
-  %wop_is_ground_duty%,
-  %next_duty_is_F_followed_by_SFJ% ->
-    %cc_sh_freedays_skd_duty%,
-    %cc_sh_pt_freedays_skd_duty%;
-  
-  -, 1, false, true    -> 1, 0;
-  
-  50, -,  true, false  -> 2, 0;
-
-  100, 5,   -, false   -> 3, 0;
-  100, <5,  -, false   -> 2, 0;
-  
-   89, 5,   -, false   -> 3, 1;
-   89, <5,  -, false   -> 2, 0;
-  
-   80, 5,   -, false   -> 3, 1;
-   80, 4,   -, false   -> 2, 1;
-   80, <4,  -, false   -> 2, 0;
-  
-   50, 5, false, false -> 3, 7;
-   50, 4, false, false -> 2, 5;
-   50, 3, false, false -> 2, 2;
-   50, 2, false, false -> 2, 2;
-   50, 1, false, false -> 2, 0;
-  
-   -,  -,  -, -  -> 0, 0;
-end
-
-table cc_min_required_after_lh_skd_duty =
-
-  %wop_has_long_haul_charter_duty%,
-  crew.%part_time_factor_duty_start% ->
-    export %cc_lh_freedays_skd_duty%;
-
-  true,   -    -> %cc_lh_charter_freedays_skd_duty%;
-  false,  80   -> %cc_parttime_80_lh_freedays_skd_duty%;
-
-    -  ,  -    -> %cc_fulltime_lh_freedays_skd_duty%;
-end
-
-/* Required F-days after production for Japanese CC*/
-
-%cc_lh_freedays_skj_duty% = 4;
-
-/* Required F-days after production for Chinese CC*/
-
-%cc_lh_freedays_skk_duty% = 3;
-
-/*
-** Required part-time F88 days after production for Japanese CC
-**
-** 50% = Flight duty days + normal F-days
-**
-** 75% = (Flight duty days + normal F-days) / 2 rounded up.
-*/
-
-%cc_lh_pt_freedays_skj_duty% =
-  if crew.%part_time_factor_duty_start% = 50 then
-    %flight_duty_days_in_wop% + %cc_lh_freedays_skj_duty%
-  else
-    if crew.%part_time_factor_duty_start% = 75 then
-      ((10 * (%flight_duty_days_in_wop% + %cc_lh_freedays_skj_duty%) / 2) + 5)/ 10 
-    else
-      0;
-
-%flight_duty_days_in_wop% =
-  (last(trip(wop),trip.%end_day% + 24:00)
-     where (trip.%has_flight_duty% and not trip.%is_standby%) -
-   first(trip(wop),trip.%start_day%)
-     where (trip.%has_flight_duty% and not trip.%is_standby%)) / 24:00;
-
-/* Agreement: NKF K11 */
-%skn_cc_k11_freedays% =
-  if parameters.%k11_skn_cc_valid%(%pp_start%) and
-     default(next(wop(roster), wop.%is_off_duty% and (wop.%end_UTC% - wop.%start_UTC%) / 24:00 > 1)
-             where (not wop.%is_freeday%), false)
-  then 2
-  else 3;
-
-/* Agreement: CAU J.5. */
-%cc_fulltime_lh_freedays_skd_duty% =
-  if %wop_is_east_bound% then
-    %cc_lh_freedays_skd_east_duty%
-  else
-    %cc_lh_freedays_skd_west_duty%;
-    
-/* Agreement: CAU J.5.a. Max of three alternatives. */
-%cc_lh_freedays_skd_east_duty% =
-  let A = if max(trip(wop), trip.%block_time%) from (current) backwards while(not trip.%is_bought%)
-          <= 20:00 then 3 else 4,
-      B = %roundup_div%(%wop_days%, 2),
-      C = if %wop_is_non_stop_105_longitude_duty% then 4 else 3;
-  nmax(A, B, C);
-  
-%wop_is_non_stop_105_longitude_duty% =
-  any(duty(wop) from (current) backwards while(not duty.%is_bought%), 
-      any(leg(duty), abs(leg.%leg_start_longitude% - 
-      leg.%leg_end_longitude%) > 6300));
-  
-/* Agreement: CAU J.5.b */
-%cc_lh_freedays_skd_west_duty% = nmax(3, %roundup_div%(%wop_days%, 2));
-
-/* Agreement: CAU P.3.4
-**
-** Demand for 80% parttime is fulltime demand multiplied by 1.5
-** if half freeday rest and outstanding half freeday from history
-** or earlier in chain round up demand 1 day, else
-** save the half freeday in 'half freeday' bank.
-*/
-%cc_parttime_80_lh_freedays_skd_duty% =
-  if %cc_parttime_80_lh_is_half_freeday_wop% and
-     not %cc_parttime_80_lh_half_freeday_round_down_is_valid% then
-    (%cc_parttime_80_lh_freedays_basic_skd_duty% + 5) / 10
-  else
-    %cc_parttime_80_lh_freedays_basic_skd_duty% / 10;
-
-/* Wop yields half freeday rest */
-%cc_parttime_80_lh_is_half_freeday_wop% =
-  crew.%is_skd% and
-  crew.%part_time_factor_wop_start% = 80 and
-  wop.%is_long_haul% and
-  last(duty(wop), %cc_fulltime_lh_freedays_skd_duty% mod 2 = 1);
-
-%cc_parttime_80_lh_freedays_basic_skd_duty% =
-  %cc_fulltime_lh_freedays_skd_duty% * 15;
-  
-/* End date for rounded up freeday period after half free day wop */
-%cc_parttime_80_lh_wop_freeday_period_end% =
-  last(duty(wop), duty.%end_day% +
-    24:00 * (1 + (%cc_parttime_80_lh_freedays_basic_skd_duty% + 5)/10));
-
-/* 
-** It is valid to round down number of freedays only if previous time was rounded up. 
-** If no previous "half freeday" wop with freeday period overlapping planning period
-** check instead for outstanding half freeday in history.
-*/
-%cc_parttime_80_lh_half_freeday_round_down_is_valid% =
-  default(prev(wop(roster), last(duty(wop),
-            %cc_parttime_80_lh_freedays_basic_skd_duty% < %freedays_after_wop% * 10))
-          where (%cc_parttime_80_lh_is_half_freeday_wop% and
-                 %cc_parttime_80_lh_wop_freeday_period_end% > %pp_start%),
-          not %half_freeday_in_history%(%pp_start%));
-
-/*
-** Check for outstanding half freeday in history.
-** True: Outstanding half freeday. False: No outstanding half freeday.
-*/
-
-%half_freeday_in_history%(Abstime date) = default(%half_freeday_lookup%(date), false);
-
-%half_freeday_carry_over_p% =  parameter "half_freeday_carry_over"
-  remark "ETAB: Half freeday carry over table";
-
-table half_freeday_carry_over_tab(Abstime date) =
-  crew.%id%, date -> bool %half_freeday_lookup%;
-  external %half_freeday_carry_over_p%;
-  crew, >= tim -> last(carry_over);
-end
-
-/*
- * Variables used by the script (roster publish) that updates
- * the tabel half_freeday_carry_over.
- */
-
-export %half_freeday_carry_over_is_valid% =
-  crew.%region% = "SKD" and
-  %cabin_crew% and
-  crew.%part_time_factor_pp_start% = 80;
-
-export %half_freeday_carry_over%(Abstime a1, Abstime a2) =
-  last(wop(roster), last(duty(wop),
-       %cc_parttime_80_lh_freedays_basic_skd_duty% > %freedays_after_wop% * 10))   
-  where (%cc_parttime_80_lh_is_half_freeday_wop% and
-         %cc_parttime_80_lh_wop_freeday_period_end% <= a2 and
-         wop.%end_day% > a1);
-
-/*
- *Agreement: CAU K06 L.1, L.2.c
- *
- * Freedays after LH charter
- */
-table cc_min_required_after_lh_charter_skd_duty =
-
-  %two_consec_lh_charter_duties_night_stop_not_homebase%,
-  crew.%part_time_factor_duty_start% ->
-    %cc_lh_charter_freedays_skd_duty%;
-
-  false,  100   -> 2;
-  false,   80   -> 3;
-  false,   50   -> 5;
-  true,   100   -> 3;
-  true,    80   -> 4;
-  true,    50   -> 8;
-
-    - ,    -    -> 99;
-end
-
-export %wop_has_long_haul_charter_duty% =
-  any(duty(wop) from (current) backwards while(not duty.%is_bought%), 
-      duty.%is_long_haul_charter_skd%);
-  
-/*
- *  True if there are 2 consecutive charter duty periods,
- *  where at least one is LH and the night stop between them
- *  is not at home base.
- */
- 
-%two_consec_lh_charter_duties_night_stop_not_homebase% =
-   %num_charter_duties_duty% > 1 and
-   any(duty(wop) from (current) backwards while (not duty.%is_bought%) 
-   where (duty.%is_long_haul_charter_skd%),
-     not duty.%arrives_at_homebase%);
-    
-%num_charter_duties_duty% =
-  count(duty(wop)) from (current) backwards while (not duty.%is_bought%)
-    where (duty.%is_charter% and
-           duty.%is_active_flight%);
-  
- 
-/* Agreement: NKF K11 2.4.5 */
-/* Slingfreedays are also regulated by Subpart Q rules */
-export %cc_lh_freedays_skn_duty% =
-  nmax(if %wop_lh_east_followed_by_west_or_vv% then
-         4
-       else
-         3,
-       %roundup_div%(%wop_days%, 2));
-    
-%wop_is_east_bound% =
-  any(duty(wop),duty.%is_east_bound%);
- 
-%wop_start_day% = 
-  if is_first(duty(wop)) then
-    duty.%start_day%
-  else
-    default(prev(duty(wop) where(duty.%is_bought%), next(duty(wop), duty.%start_day%)),
-            wop.%start_day%);
 
 export %wop_days% =
   wop.%days% -
@@ -4233,55 +3977,6 @@ export %r_nbr_of_xmas_freedays%(Abstime date, String crewid, String crewregion, 
     
 export %r_activity_type%(Abstime date, String crewid, String crewregion, String season, Abstime year) = 
     %_activity_type%(date, crewid, crewregion, %season%(season), %year%(year));
-
-/*
- * Variables to support temporary 2012 vacation rule
- */
-
-table required_number_of_freedays_temp_2012_ft(Abstime start_t, Abstime end_t) =
-  start_t,
-  %has_reduced_freeday_requirement_in_month_fc_sh%(start_t) -> int %minimum_number_of_freedays_ft%;
-
-     -,     true  -> %min_required_in_1_month_by_month_startdate%(start_t, end_t) + 1;
-     -,     false -> 13;
-end
-
-%minimum_number_of_freedays_pt%(Abstime start_t, Abstime end_t) =
-  if (start_t = 01Jan2012) then 
-    %min_required_in_1_month_by_month_startdate%(start_t, end_t) + 1
-  else 
-    %min_required_in_1_month_by_month_startdate%(start_t, end_t);  
-
-table required_number_of_freedays_temp_2012(Abstime start_t, Abstime end_t) =
-    start_t,
-	crew.%homebase%, 
-    crew.%is_part_time_at_date%(start_t) -> int %_minimum_number_of_freedays_2012%;
-    
-    01May2011, "STO", false -> %minimum_number_of_freedays_ft%(start_t, end_t);
-    01May2011, "STO", true  -> %minimum_number_of_freedays_pt%(start_t, end_t);
-    &
-    01May2011, -,     -     -> 0;
-    &
-    -,         -,     false -> %minimum_number_of_freedays_ft%(start_t, end_t);
-    -,         -,     true  -> %minimum_number_of_freedays_pt%(start_t, end_t);
-end
-
-export %minimum_number_of_freedays_2012%(Abstime month_start) =
-  let start_t = round_down_month(month_start),
-      end_t = round_up_month(start_t + 0:01);
-
-  if %flight_crew% and
-     (crew.%homebase% = "CPH" or crew.%homebase% = "STO") and
-     %rule_min_freedays_before_2012_holiday_season_fc_cph_sto_on% then
-       default(%_minimum_number_of_freedays_2012%(crew.%variable_group_start%(start_t, end_t),
-                                                  crew.%variable_group_end%(start_t, end_t)),
-               0)
-  else
-    0;
-    
-export %rule_min_freedays_before_2012_holiday_season_fc_cph_sto_on% = 
-  parameter true
-  remark "Use rule min_freedays_before_2012_holiday_season_fc_cph_sto:";
 
 /***************************************************************************
  * F36 entitlement
