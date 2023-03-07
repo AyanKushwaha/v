@@ -346,10 +346,8 @@ end
 */
 
 rule ind_max_duty_time_in_7_days_start_day_ALL =
-  valid trip.%check_rules% and
-        /*not %is_roster% and*/
-        (duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) or
-         parameters.%k4exng_fc_sp5_1_valid%(duty.%start_day%)) and
+  valid %is_trip% and
+        not duty.%is_asian% and
         duty.%in_pp_extended% and
         duty_period.%is_on_duty% and 
         duty_period.%is_last_duty_period_on_start_day% and
@@ -393,7 +391,9 @@ end
           %p_buffer_max_duty_time_7_days%;
      
 %max_duty_time_in_7_days_normal% =
-  if %flight_crew% then
+  if trip.%is_named_fpu% then
+    %max_duty_time_in_7_days_normal_fpu%
+  else if %flight_crew% then
     %max_duty_time_in_7_days_normal_fc%
   else %max_duty_time_in_7_days_normal_cc%;
 
@@ -404,6 +404,10 @@ end
 %max_duty_time_in_7_days_normal_cc% =
   parameter 47:30
   remark "CCP: Max duty time 7 days normal production CC";
+
+%max_duty_time_in_7_days_normal_fpu% =
+  parameter 55:00
+  remark "CCP: Max duty time 7 days FPU named trip";
 
 %p_buffer_max_duty_time_7_days% = 
   parameter 0:00
@@ -490,8 +494,7 @@ export rule ind_max_working_days_in_trip_ALL =
         trip.%is_on_duty% and
         not trip.%is_standby_line% and
         not trip.%is_gnd% and
-        not trip.%is_cmp% and
-        %is_rule_applied%;
+        not trip.%is_cmp%;
   trip.%days_excl_bought% <= %max_days_in_trip% + 
   		 rule_exceptions.%overshoot_int%(trip.%start_UTC%);
   startdate = trip.%start_UTC%;
@@ -518,134 +521,15 @@ end
                           where(leg.%is_bought%),true));
   
 %max_days_in_trip% = Int;
-%is_rule_applied% = True;
 
 /* Both long and short haul limits for CAU and SCCA was found in the agreements,
  * Only short haul limit was found in the FC agreement. Neither was found for NKF. */
 export %max_days_in_trip_sh% = 
     parameter 5
-    remark "Max days in trip for short haul";
-    
-/*
-** Rule: 
-**    Maximum number of night duties in a trip
-**
-** Description:
-**    Check that maximum number of night duties between time-off period,
-**    (for CCP = inside trip) as well as number of consecutive night 
-**    duties (not for CCNO) is not exceeded. Night duty is defined as any duty 
-**    touching the time interval 0000-0500 (FCSH, CCDK), 0200-0400 (CCNO).
-**
-**    NB! Two implementations are done. One in Pairing checking
-**    inside trips and one in Rostering checking inside working period.
-**
-** Agreement:
-**    FC 1:17 2.3Ac
-**    CAU K06 C.1.1.4
-**    NKF/SBK 8.2
-**
-**    4ExNG - no longer applies
-*/
-export rule ind_max_night_duties_in_trip_FC_SKD_SKN_SKL =
-  valid trip.%check_rules% and
-        not duty.%k4exng_cc_sp5_1_valid%(trip.%start_day%) and
-        duty.%in_pp_extended% and
-        %r_valid_max_night_duties_in_trip% and
-        not duty.%is_long_haul% and
-        duty.%is_night_duty% and
-        rule_exceptions.%rule_on%(duty.%start_UTC%);
-        
-  trip.%night_duties% - %trip_bought_night_duties% <= %max_night_duties% and
-  (not %check_consecutive_nights% or
-  %nr_consecutive_night_duties% <= %max_consecutive_night_duties%);
-  
-  startdate  = duty.%start_UTC%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_max_night_duties_in_trip_FC_SKD_SKN_SKL_failobject%;
-  failtext %max_night_duties_failtext%;
-  remark "(CCP) Coll: Max night duties in trip",
-  planner "The rule checks that the maximum number of, as well as the"
-	        " maximum consecutive night duties is not exceeded (only for FC)."
-          " A duty is at night if it touches the interval FC/CC SKD: (00:00,05:00),"
-          " CC SKN: (02:00, 04:00). The rule is valid for FC and CC SKD/SKN, with"
-          " limits: max 3 nights total and max 2 consecutive for FC/CC SKD and"
-          " max 2 nights total for CC SKN (no limit on number of consecutive).";
-end
-
-%trip_bought_night_duties% =
-  count(duty(trip)) where(duty.%is_night_duty% and duty.%is_bought%);
-
-%ind_max_night_duties_in_trip_FC_SKD_SKN_SKL_failobject% =
-  first(duty(trip), duty.%failobject_start%)
-  where(%night_duties_until_now% > %max_night_duties% or
-  (%check_consecutive_nights% and
-  %nr_consecutive_night_duties% > %max_consecutive_night_duties%));
-
-%night_duties_until_now% =
-  count(duty(trip))
-  from(first)
-  to(current)
-  where(duty.%is_night_duty%);
-  
-  
-/* Redefined in child module due to different limits and validity */
-%r_valid_max_night_duties_in_trip% = Bool;
-%check_consecutive_nights% = Bool;
-%max_night_duties% = Int;
-%max_consecutive_night_duties% = Int;
-%max_night_duties_failtext% =
-  if(trip.%night_duties% > %max_night_duties%) then
-    rules.%failtext_int%("Coll: Night duties", trip.%night_duties%, %max_night_duties%)
-  else
-    rules.%failtext_int%("Coll: Cons night duties", %nr_consecutive_night_duties%, %max_consecutive_night_duties%);
-
-%nr_consecutive_night_duties% =
-  count(duty(trip))
-  from (current) backwards
-  while (%valid_night_duty%);
-
-%valid_night_duty% =
-  not duty.%is_long_haul% and
-  duty.%is_night_duty% and 
-  not duty.%is_bought%;
-
-
-/*
-** Rule: 
-**    No duty same day when check out later than 0200
-**
-** Descritption:
-**    Check that crew does not check in for early duty if the check out from
-**    previous duty is later than 0200 local time and at homebase.
-**
-** Agreement:
-**    
-**    4ExNG CC - no longer applies
-*/
-export rule ind_early_duty_day_after_late_check_out_FC_ALL =
-  valid not %is_roster% and
-        not duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and
-        duty.%is_on_duty% and
-        prev(duty(trip), duty.%arrives_at_homebase%) and
-        prev(duty(wop), duty.%has_late_co%) and
-        rule_exceptions.%rule_on%(duty.%start_UTC%);
-        
-  duty.%start_scheduled_hb% >= prev(duty(wop), duty.%end_day%) + 24:00 
-  + %p_check_in_time_limit_after_night_duty_fc_all%;
-  
-  startdate  = duty.%start_UTC%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = duty.%failobject_start%;
-  failtext "Coll: Early C/I day after late C/O";
-  remark "(CCP) Coll: No early check in for duty day after late check out",
-  planner "The rule checks that if there is a new trip assigned the day after"
-          " the previous trip ends, check out for that trip is not later than"
-          " 02:00. The rule is valid for all regions short haul.";
-end
-
-%p_check_in_time_limit_after_night_duty_fc_all% = parameter 07:00 remark "(CCP) Earliest check-in day after night duty.";
-
-
+    remark "CCP: Max days in trip for short haul";
+%max_days_in_trip_lh% = 
+    parameter 12
+    remark "CCP: Max days in long haul trip for CC";
 
 /*
 ** Rule:
@@ -725,10 +609,10 @@ end
 **
 **    4ExNG CC - no longer applies
 **               still valid for fc
+**    For FD this is only valid for crew groups under SKS agreement.
 */
-export rule ind_no_duty_same_day_when_late_check_out_FC_SKD_SKS =
-  valid not duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and
-        %valid_ind_no_duty_same_day_when_late_check_out_FC_SKD_SKS%;
+export rule ind_no_duty_same_day_when_late_check_out_FC_SKS =
+  valid %valid_ind_no_duty_same_day_when_late_check_out_FC_SKS%;
   
   prev(duty(trip), duty.%end_scheduled_od%) <= %latest_co_for_duty_next_day%;
   
@@ -742,7 +626,7 @@ export rule ind_no_duty_same_day_when_late_check_out_FC_SKD_SKS =
           " 02:00. The rule is valid for FCSH and SH crew in SKD & SKS.";
 end
 
-%valid_ind_no_duty_same_day_when_late_check_out_FC_SKD_SKS% =
+%valid_ind_no_duty_same_day_when_late_check_out_FC_SKS% =
     %is_trip% and
     %r_valid_no_duty_same_day_if_late_co% and
     trip.%in_pp_extended% and
@@ -782,9 +666,7 @@ rule ind_max_active_legs_in_FDP_with_extension_ALL =
         duty.%in_pp_extended% and
         duty.%is_short_haul% and
         duty_period.%is_on_duty% and
-        oma16.%is_extended_fdp% and
-        not (trip.%is_ac_employer_qa% and %cabin_crew% and parameters.%K15_qa_cc_mar16_valid%(trip.%start_day%)) /* SKCMS-581 */
-        and not (trip.%is_ac_employer_qa% and %flight_crew% and parameters.%k15qa_feb16_valid%(trip.%start_day%)) /* SKCMS-581 */; 
+        oma16.%is_extended_fdp%; 
   %nr_of_active_legs_in_duty% <=
         %ind_max_active_legs_in_fdp_with_extension% +
                 rule_exceptions.%overshoot_int%(duty.%start_UTC%);
@@ -823,48 +705,42 @@ end
     count(leg(duty)) from(first) to(current) 
     where(leg.%is_active_flight%) + 
     %_nr_of_active_legs_in_prev_duty%; 
-  
 
-
-/* New Rules in K15 SKCMS-582
+/*
 /*
 ** Rule: 
 **    Checks the number of split duties in a trip.
-**    Valid for CC QA and FD QA  
-**                               
+**    Valid for non SK crew
+**  
+**  SKCMS-3259 - making rule valid for non sk agreements
 */
 
-
-rule (on) ind_max_split_duty_in_trip_qa =
+rule (off) ind_max_split_duty_in_trip_non_sk =
     valid trip.%check_rules%
-         and (if fundamental.%flight_crew% then
-                parameters.%K15_qa_FD_feb16_valid%(trip.%start_UTC%) and
-                trip.%is_ac_employer_qa%
-              else
-                 parameters.%K15_qa_cc_mar16_valid%(trip.%start_UTC%) and
-                 trip.%is_ac_employer_qa%)
-        and trip.%start_utc% >= %pp_start%
-        and trip.%start_utc% <= %pp_end%
-        and duty_period.%trip_has_split_duty%;
+          and not trip.%is_regarded_sk_sh_agmt%
+          or trip.%is_named_fpu%
+          and trip.%start_utc% >= %pp_start%
+          and trip.%start_utc% <= %pp_end%
+          and duty_period.%trip_has_split_duty%;
 	
-        duty_period.%trip_count_split_duties% <= %max_number_of_split_duties_in_trip_qa% +
+        duty_period.%trip_count_split_duties% <= %max_number_of_split_duties_in_trip_non_sk% +
 	    rule_exceptions.%overshoot_int%(trip.%start_UTC%);
   	
     startdate = trip.%start_UTC%;
 	severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%, %duty_lh_region%));
-	failobject =  %ind_max_split_duty_in_trip_qa_failobject%;
+	failobject =  %ind_max_split_duty_in_trip_non_sk_failobject%;
 	failtext(Int value, Int limit) = 
-        rules.%failtext_int%("Coll: Max 2 split duties in trip", value, limit);
-	remark "(CCP) Coll: Max 2 split duties in trip",
-    planner "this rule is for Cimber CC and FD. It checks that there are"
-            "  max 2 split duties in a trip"
-            " Agreement Cimber FD and CC 2014.";
+        rules.%failtext_int%("Coll: non SK, Max 1 split duty in trip", value, limit);
+	remark "(CCP) Coll: non SK, Max 1 split duty in trip",
+    planner "This rule is for non SK, or for trips named FPU."
+            "It checks that there are max amount of split duties in a trip";
 end	
  
-%max_number_of_split_duties_in_trip_qa% = 2;
+%max_number_of_split_duties_in_trip_non_sk% = 
+    parameter 1 minvalue 0
+    remark "Non SK: Limit for split duties in same FDP";
 
-
-%ind_max_split_duty_in_trip_qa_failobject% =
+%ind_max_split_duty_in_trip_non_sk_failobject% =
 first(duty(trip),duty.%failobject_start%)
 where (duty_period.%is_split%
    and duty_period.%is_first_duty_in_duty_period%
@@ -967,7 +843,6 @@ export %ind_min_rest_after_duty_period__rest_time_incl_bought% =
 /* Redefined in CCT submodule */  
 %leg_is_standby_callout% = false;
 
-%r_valid_min_rest_after_duty_pass% = Bool;
 %is_first_short_stop_in_trip% =
   is_first(leg(trip)) where (rest.%is_short%);
 
@@ -1074,7 +949,7 @@ export rule ind_night_rest_surrounding_short_stop_FC_SKD_SKS =
   remark "(CCP) Coll: Min night rest surrounding short stop",
   planner "The rule checks that if the duty pass is preceded or followed by"
           " a short stop, the rest time at night (20:00, 09:00) is satisified."
-          " The rule is valid for FC and CC SKD & SKS.";
+          " The rule is valid for FC";
 end
 
 /* Defined in child modules due to different validity for FC and CC. */
@@ -1083,18 +958,18 @@ end
 
 /*
 ** Rule:
-**    Duty restrictions after short stop
+**    Max number of checkin per day between 03.00-02.59
 **
 ** Description:
-**    This rule states that max 1 check-in is allowed per day between 03.00-02.59 for SKD FD, SKS FD
-**    and Cimber FD and CC. During day of operation it is allowed for crew to have an duty break in
-**    case of a delay with a new check-in to the next flight on the same day. Ref. Cimber FD and Cimber CC
-**    union agreement as of 01mar2014 and SPF, DPF, SNF and NSF union agreement 2015.
+**    This rule states that max 1 check-in is allowed per day between 03.00-02.59 for FD SH. 
+**    During day of operation it is allowed for crew to have an duty break in
+**    case of a delay with a new check-in to the next flight on the same day.
 **
-**   note LW: it's not good design to trigger on the first duty in a pair to be checked, and then fail on the second.
+**    note LW: it's not good design to trigger on the first duty in a pair to be checked, and then fail on the second.
 **     I find it more understandable to trigger on any duty and look backward if it is the second in such a pair
-
-
+**
+**    Rule has never taken into production - see SKCMS-623 and SKCMS-797
+**    There seems to be some bugs left to sort out.
 **  
 ** Agreement:
 **
@@ -1106,10 +981,9 @@ end
 %checkin_duty_condition% =
   duty.%is_on_duty_not_rest%;
 
-export rule ind_max_number_checkin_per_day =
+export rule (off) ind_max_number_checkin_per_day =
     valid 
         trip.%check_rules% and
-        %ind_max_number_checkin_per_day_agmt_valid% and 
         %checkin_duty_condition% and
         duty.%is_on_duty% and
         duty_period.%is_first_duty_in_duty_period%;
@@ -1122,15 +996,9 @@ export rule ind_max_number_checkin_per_day =
     failtext "Coll: Max 1 check-in per day between 03.00-02.59";
     remark "(CCP) Coll: Max 1 check-in per day between 03.00-02.59",
     planner "This rule states that max 1 check-in is allowed per day between"
-        " 03.00-02.59 for SKD FD, SKS FD and Cimber FD and CC. During day of"
-        " operation it is allowed for crew to have an duty break in case of a"
-        " delay with a new check-in to the next flight on the same day. Ref."
-        " Cimber FD and Cimber CC union agreement as of 01mar2014 and SPF, DPF,"
-        " SNF and NSF union agreement 2015.";
+         " 03.00-02.59. During day of operation it is allowed for crew to have an duty break in case of a"
+         " delay with a new check-in to the next flight on the same day";
 end
-
-%ind_max_number_checkin_per_day_agmt_valid% =
-    void_bool; /* redefined for fd/cc */
 
 /* simplified solution */
 %duties_per_day% =

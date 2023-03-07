@@ -106,9 +106,6 @@ class PerDiemStatementReport(SASReport):
                 L.append('salary.%%main_rank%% = "%s"' % rank)
             homebase = self.arg('homebase')
             
-            #This is a temporary hack to remove QA crew from per diem run
-            #L.append('not crew.%%has_agmt_group_qa_at_date%%(%s)'%str(firstdate))
-            
             
             if homebase is not None:
                 L.append('salary.%%homebase%% = "%s"' % homebase)

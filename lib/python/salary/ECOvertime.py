@@ -32,13 +32,10 @@ from utils.performance import clockme, log
     MAITRE_DE_CABIN,
     SENIOR_CC_ALLOWANCE ,
     SENIOR_CC_ALLOWANCE_NO_PURSER ,
-    SENIOR_CC_ALLOWANCE_QA,
     LOSS_OF_REST_LOW ,
     LOSS_OF_REST_HIGH ,
     TEMPORARY_CREW_HOURS ,
     ILL_TEMPORARY_CREW_HOURS ,
-    SUM_OT_QA,
-    SUM_QA_CC_TEMP_DAYS,
     EMPNO ,
     IS_SKD ,
     IS_SKN ,
@@ -46,10 +43,8 @@ from utils.performance import clockme, log
     IS_QA_CC_TEMP,
     IS_FC,
     IS_FP,
-    APPLY_QA,
     SUM_OT_FD_UNITS,
     SUM_OT_FD_NETTO,
-    SUM_BOUGHT_COMP_DAYS_QA_FD,
     IS_CONVERTIBLE ,
     IS_FLIGHT_CREW ,
     FULLTIME_DT_MONTH ,
@@ -60,7 +55,7 @@ from utils.performance import clockme, log
     INST_LCI_LH,
     SNGL_SLIP_LONGHAUL,
     TEMPORARY_CREW_HOURS_DAILY,
-) = range(46)
+) = range(40)
 ROSTER_VALUES = ('salary.%salary_system%(salary.%salary_run_date%)',
                 'report_per_diem.%per_diem_home_currency%',
                 'report_common.%crew_id%',
@@ -78,24 +73,18 @@ ROSTER_VALUES = ('salary.%salary_system%(salary.%salary_run_date%)',
                  'report_overtime.%maitre_de_cabin%',
                  'report_overtime.%senior_cc_allowance%',
                  'report_overtime.%senior_cc_allowance_no_purser%',
-                 0,
                  'report_overtime.%loss_of_rest_low%',
                  'report_overtime.%loss_of_rest_high%',
                  'report_overtime.%temporary_crew_hours%',
                  'report_overtime.%ill_temporary_crew_hours%',
-                 'report_overtime.%sum_QA_OT%',
-                 'report_overtime.%sum_QA_CC_temp_days%',
                  'report_common.%employee_number_salary%',
                  'report_overtime.%is_skd%',
                  'report_overtime.%is_skn%',
                  'report_overtime.%is_sks%',
-                 'report_overtime.%is_QA_CC_temp%',
                  'report_overtime.%is_FC%',
                  'report_overtime.%is_FP%',
-                 'report_overtime.%apply_OT_QA%',
                  'report_overtime.%sum_OT_FD_units%',
                  'report_overtime.%sum_OT_FD_netto%',
-                 "report_overtime.%sum_bought_comp_days_QA_FD%",
                  'report_overtime.%is_convertible%',
                  'fundamental.%flight_crew%',
                  'report_overtime.%full_time_duty_in_month%',
@@ -115,13 +104,12 @@ OT_PART_1x24_BWD = 16
 OT_PART_DUTYPASS = 20
 OT_PART_LATE_CHECKOUT = 24
 OT_PART_7_CALENDARDAYS = 28
-OT_QA = 32
-OT_PART_PARTTIME_CC_MONTH = 36
-OT_PART_PARTTIME_CC_3_MONTHS = 40
-MT_PART_PARTTIME_CC_MONTH = 44
-MT_PART_PARTTIME_CC_3_MONTHS = 48
-OT_PART_PARTTIME_MONTH = 52
-OT_PART_MONTH = 56
+OT_PART_PARTTIME_CC_MONTH = 32
+OT_PART_PARTTIME_CC_3_MONTHS = 36
+MT_PART_PARTTIME_CC_MONTH = 40
+MT_PART_PARTTIME_CC_3_MONTHS = 44
+OT_PART_PARTTIME_MONTH = 48
+OT_PART_MONTH = 52
 DUTY_VALUES = ('report_overtime.%overtime_7x24_fwd_ot%',
                'report_overtime.%overtime_7x24_fwd_start%',
                'report_overtime.%overtime_7x24_fwd_end%',
@@ -161,12 +149,6 @@ DUTY_VALUES = ('report_overtime.%overtime_7x24_fwd_ot%',
                'report_overtime.%overtime_7_calendar_days_start%',
                'report_overtime.%overtime_7_calendar_days_end%',
                'report_overtime.%overtime_7_calendar_days_duty%',
-
-               # Overtime calculations for QA flight deck and cabin crew
-               'report_overtime.%QA_OT%',
-               'report_overtime.%QA_start%',
-               'report_overtime.%QA_end%',
-               'report_overtime.%QA_duty%',
 
                # 1 month part time CC overtime
                'report_overtime.%overtime_part_time_cc_one_month%',
@@ -454,24 +436,18 @@ class OvertimeRosterManager:
             rosterItem[MAITRE_DE_CABIN],
             rosterItem[SENIOR_CC_ALLOWANCE],
             rosterItem[SENIOR_CC_ALLOWANCE_NO_PURSER],
-            rosterItem[SENIOR_CC_ALLOWANCE_QA],
             rosterItem[LOSS_OF_REST_LOW],
             rosterItem[LOSS_OF_REST_HIGH],
             rosterItem[TEMPORARY_CREW_HOURS],
             rosterItem[ILL_TEMPORARY_CREW_HOURS],
-            rosterItem[SUM_OT_QA],
-            rosterItem[SUM_QA_CC_TEMP_DAYS],
             rosterItem[EMPNO],
             rosterItem[IS_SKD],
             rosterItem[IS_SKN],
             rosterItem[IS_SKS],
-            rosterItem[IS_QA_CC_TEMP],
             rosterItem[IS_FC],
             rosterItem[IS_FP],
-            rosterItem[APPLY_QA],
             rosterItem[SUM_OT_FD_UNITS],
             rosterItem[SUM_OT_FD_NETTO],
-            rosterItem[SUM_BOUGHT_COMP_DAYS_QA_FD],  # sum_bought_comp_days_qa_fd
             rosterItem[IS_CONVERTIBLE],
             rosterItem[IS_FLIGHT_CREW],
             rosterItem[FULLTIME_DT_MONTH],
@@ -510,24 +486,18 @@ class OvertimeRoster(DataClass):
                  mDC,
                  sCC,
                  sCCNoPurser,
-                 sCCQA,
                  lossRestLow,
                  lossRestHigh,
                  tempCrewHours,
                  illTempCrewHours,
-                 sumOTQA,
-                 sum_QA_CC_temp_days,
                  empNo,
                  isSKD,
                  isSKN,
                  isSKS,
-                 is_QA_CC_temp,
                  isFC,
                  isFP,
-                 applyQACCCJ,
                  sum_OT_FD_units,
                  sum_OT_FD_netto,
-                 sum_bought_comp_days_qa_fd,
                  isConvertible,
                  isFlightCrew,
                  fulltimeDtMonth,
@@ -551,11 +521,9 @@ class OvertimeRoster(DataClass):
         self.month = month
         self.mainFunc = mainFunc
         self.empNo = empNo
-
         self.isSKD = isSKD
         self.isSKN = isSKN
         self.isSKS = isSKS
-        self.apply_QA_CC_CJ = applyQACCCJ
         self.isFC = isFC
         self.isFP = isFP
 
@@ -571,7 +539,6 @@ class OvertimeRoster(DataClass):
 
         self.sCC = sCC
         self.sCCNoPurser = sCCNoPurser
-        self.sCCQA = sCCQA
 
         self.lossRestLow = lossRestLow
         self.lossRestHigh = lossRestHigh
@@ -592,21 +559,13 @@ class OvertimeRoster(DataClass):
 
         self.sngl_slip_longhaul = sngl_slip_longhaul
 
-        self.sum_OT_QA = sumOTQA
-        self.sum_QA_CC_temp_days = sum_QA_CC_temp_days
-
-        self.is_QA_CC_temp = is_QA_CC_temp
-
         self.sum_OT_FD_units = sum_OT_FD_units
         self.sum_OT_FD_netto = sum_OT_FD_netto
-
-        self.sum_bought_comp_days_qa_fd = sum_bought_comp_days_qa_fd
 
         # Process balanced overtime
         self.overtimeBalancedContributors = None
         self.mertidContributors = []
         self.threeMonthOvertime = []
-        self.OT_QA_contributors = []
         otSolverSearchList = []
         idx = 0
         otime = None
@@ -647,18 +606,6 @@ class OvertimeRoster(DataClass):
                                 self.threeMonthOvertime.append(tmo)
                             else:
                                 continue
-
-        month_start = R.eval('salary_overtime.%month_start%')[0]
-        month_end = R.eval('salary_overtime.%month_end%')[0]
-        rel_zero = RelTime('0:00')
-
-        for dutyvalues in duties:
-            for OT_values in range(OT_QA+1, OT_QA+3, 4):
-                ot = dutyvalues[OT_values:OT_values+3] + ((dutyvalues[OT_values+3]), (OT_values-1),)
-                # Save if there is a positive value for duty time as well as overtime
-                if ot[0] and ot[1] and ot[0] != rel_zero and ot[1] != rel_zero and ot not in self.OT_QA_contributors \
-                        and month_start <= ot[1] <= month_end:
-                    self.OT_QA_contributors.append(ot)
 
         if otSolverSearchList:    
             # Changed the old functionality because it could not handle large problems (>4-5 items).
@@ -745,10 +692,6 @@ class OvertimeRoster(DataClass):
     def getSCCNOP(self):
         return self.sCCNoPurser
 
-    # Salary code DK (QA_CC_AG): 9164
-    def getSCCQA(self):
-        return self.sCCQA
-
     # Salary code SE: 351
     def getSCCAll(self):
         if self.sCC:
@@ -767,10 +710,8 @@ class OvertimeRoster(DataClass):
     def getLossRestHigh(self):
         return self.lossRestHigh
 
-    # Salary code DK: 409, 410   SE: 201   NO: 3770,3145   DK/QA: 732, 733, 734
+    # Salary code DK: 409, 410   SE: 201   NO: 3770,3145   DK: 732, 733, 734
     def getOvertime(self):
-        if self.apply_QA_CC_CJ:
-            return self.sum_OT_QA
         return self.overtimeBalanced
 
     # Salary code DK: 229 NO 6048
@@ -778,15 +719,11 @@ class OvertimeRoster(DataClass):
         return self.tempCrewHours
     
     def getTempCrewHoursDaily(self):
-        return 0 if self.is_QA_CC_temp else self.tempCrewHoursDaily
+        return self.tempCrewHoursDaily
     
     # Salary code DK: 329
     def getIllTempCrewHours(self):
-        return 0 if self.is_QA_CC_temp else self.illTempCrewHours
-
-    # Salary code NO: 6049
-    def getTempCrewDays(self):
-        return self.sum_QA_CC_temp_days
+        return self.illTempCrewHours
 
     def getInstLciSh(self):
         return self.inst_lci_sh
@@ -796,9 +733,6 @@ class OvertimeRoster(DataClass):
 
     def getSnglSlipLonghaul(self):
         return self.sngl_slip_longhaul
-
-    def get_sum_OT_QA(self):
-        return self.sum_OT_QA
 
     def get_OT_FD_hours100_netto(self):
         units = self.sum_OT_FD_netto
@@ -852,14 +786,10 @@ class OvertimeRoster(DataClass):
                 return otOverTime
 
     def getOtPartTimeCcContributors(self):
-        if self.apply_QA_CC_CJ:
-            return None
         if not self.threeMonthOvertime: return None
         return self.threeMonthOvertime[:]
 
     def getMertidContributors(self):
-        if self.apply_QA_CC_CJ:
-            return None
         if not self.mertidContributors: return None
         return self.mertidContributors[:]
 
@@ -871,15 +801,8 @@ class OvertimeRoster(DataClass):
 
     # no Salary Code
     def getOtContributors(self, dutyTime=False):
-        if self.apply_QA_CC_CJ:
-            return None
         if not self.overtimeBalancedContributors: return None
         return self.overtimeBalancedContributors[:]
-
-    def get_OT_QA_contributors(self):
-        if not self.apply_QA_CC_CJ:
-            return None
-        return self.OT_QA_contributors
 
     # Salary code SE: 200 (part-time), 201 (full-time)
     def getCalendarMonth(self, dutyTime=False):
@@ -967,9 +890,8 @@ def writeovertimecalc(fd, salmon, crewlist):
         cont = crew.getOtContributors()
         mertid_cont = crew.getMertidContributors()
         three_month_ot_cont = crew.getOtPartTimeCcContributors()
-        OT_QA_cont = crew.get_OT_QA_contributors()
         is4ExngValid = crew.is4ExngFCOt() or crew.is4ExngCCOt()
-        if cont or mertid_cont or three_month_ot_cont or OT_QA_cont:
+        if cont or mertid_cont or three_month_ot_cont:
             if cont:
                 for end, duty, otyp, otime, start in cont:
                     if not is4ExngValid and (otyp == OT_PART_7x24_FWD or otyp == OT_PART_7x24_BWD):
@@ -1006,11 +928,7 @@ def writeovertimecalc(fd, salmon, crewlist):
                     if otype == OT_PART_PARTTIME_CC_3_MONTHS:
                         tname = "Overtime part time cc three months"
                     fd.write(T3 + "%s-%s (%9s) %6s (Duty: %6s)\n" % (start,end,tname,otime,duty))
-            if OT_QA_cont:
-                for otime, start, end, duty, otype in OT_QA_cont:
-                    if otype == OT_QA:
-                        tname = "Overtime CJ (FD)" if crew.isFlightCrew else "Overtime QA (CC)"
-                    fd.write(T3 + "%s-%s (%9s) %6s (Duty: %6s)\n" % (start, end, tname, otime, duty))
+
         else:
             fd.write(T3 + "(none)\n")
         if True:
@@ -1024,16 +942,12 @@ def writeovertimecalc(fd, salmon, crewlist):
             for _, startT, endT, timeT in R.eval(ctx, R.foreach("iterators.trip_set", "trip.%start_utc%", "trip.%end_utc%", "salary_overtime.%temp_duty_time_component%"))[0]:
                 if timeT and int(timeT) > 0:
                     trips.append((startT, endT, timeT))
-            for _, startD, endD, daysD in R.eval(ctx, R.foreach(
-                    "iterators.duty_set", "duty.%start_utc%", "duty.%end_utc%","salary_overtime.%QA_CC_temp_days%"))[0]:
-                if (daysD and daysD > 0) and (startD >= salStart and endD < salEnd):
-                    duties.append((startD, endD, daysD))
             for _, startDP, endDP, timeDP in R.eval(ctx, R.foreach(
                     "iterators.duty_set", "duty_period.%start_utc%", "duty_period.%end_utc%", "salary_overtime.%temp_crew_hours_per_duty_period_NKF_SNK_CC%"))[0]:
                 if (timeDP and int(timeDP) > 0) and (endDP >= salStart and endDP < salEnd):
                     dutyperiods.append((startDP, endDP, timeDP))
             if len(duties) > 0:
-                fd.write("  Temporary crew days %s:\n" % ("(QA CC freelance)" if crew.is_QA_CC_temp else ""))
+                fd.write("  Temporary crew days %s:\n")
                 for startD, endD, daysD in duties:
                     fd.write("    %s-%s %s\n" %(startD, endD, daysD))
             if len(trips) > 0:
@@ -1076,8 +990,6 @@ def writeovertimecalc(fd, salmon, crewlist):
             fd.write("    SCC              : %6s\n" % (crew.getSCC() or RelTime(0)))
         if (crew.getSCCNOP() or RelTime(0)) > RelTime(0):
             fd.write("    SCC (no purser)  : %6s\n" % (crew.getSCCNOP() or RelTime(0)))
-        if crew.getSCCQA():
-            fd.write("    SCC (QA)         : %6s\n" % (crew.getSCCQA() or 0))
         if crew.getLossRestLow() or crew.getLossRestHigh():
             showDutyValues = True
             fd.write("    Loss of rest Low : %6s\n" % (crew.getLossRestLow() or 0))
@@ -1088,7 +1000,6 @@ def writeovertimecalc(fd, salmon, crewlist):
             fd.write("    Instructor LCI LH: %6s\n" % (crew.getInstLciLh() or 0))
         
         write_overtime_after_midnight(fd, crew)
-        write_bought_comp_qa_fd(fd, crew)
 
         if showDutyValues:
             for dt in dutyvals(
@@ -1156,46 +1067,6 @@ def write_overtime_after_midnight(fd, crew):
                 wln(T4 + "Replaced by F3 upon crew request")
             if tm_balance != r_balance:
                 wln(T4 + "WARNING! F3 replacement update may not be saved to DB yet.")
-
-
-def write_bought_comp_qa_fd(fd, crew):
-    if crew.sum_bought_comp_days_qa_fd == 0:
-        return
-
-    wln = create_writeln(fd)
-
-    wln(T2 + """Bought comp days: %s""" % crew.sum_bought_comp_days_qa_fd)
-    wln(T2 + "Breakdown:")
-
-    rel_zero = RelTime('0:00')
-    month_start, month_end, source15_str, source16_str = R.eval(
-        'salary_overtime.%month_start%',
-        'salary_overtime.%month_end%',
-        "report_overtime.%bought_FD_F15_source_str%",
-        "report_overtime.%bought_FD_F16_source_str%")
-
-    for start, end, end_hb, is_bought, r_balance in dutyvals(
-        crew.crewId,
-        'duty.%start_UTC%',
-        'duty.%end_UTC%',
-        "duty.%end_HB%",
-        'duty.%is_bought%',
-        "report_overtime.%QA_FD_Fxx_balance%",
-    ):
-        if is_bought and month_start <= start <= month_end:
-            wln(T3 + "%s - %s" % (start, end))
-
-            tm_balance = 0
-            query_str = "(& (crew=%s) (tim=%s) (| (& (account=F15)(source=%s))  (& (account=F16)(source=%s)) ) )" % (
-                crew.crewId, end_hb.day_floor(), source15_str, source16_str)
-            for entry in TM.account_entry.search(query_str):
-                tm_balance += entry.amount
-
-            if tm_balance > 0:
-                wln(T4 + "Replaced by F15+F16 upon crew request")
-            if tm_balance != r_balance:
-                wln(T4 + "WARNING! F15+F16 replacement update may not be saved to DB yet.")
-
 
 def askSalaryPeriod(sal_start, sal_end):
     import utils.DisplayReport as display
@@ -1291,3 +1162,4 @@ def dumpovertimecalc(askDateRange, includePerDiem=True):
         R.param(conf.endparam).setvalue(sal_end0)
         if fd: fd.close()
         os.remove(filename)
+
