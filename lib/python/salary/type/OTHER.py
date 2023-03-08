@@ -48,6 +48,7 @@ class InstructorIterator(RaveIterator):
             'new_hire_follow_up_act': 'salary.%inst_new_hire_follow_up_act%',
             'etops_lifus_act': 'salary.%inst_etops_lifus_act%',
             'etops_lc_act': 'salary.%inst_etops_lc_act%',
+            'cc_lcs_link' : 'salary.%inst_cc_lcs_link%',
         }
         RaveIterator.__init__(self, iterator, fields)
 
@@ -302,6 +303,9 @@ class OtherTransactionsRun(GenericRun):
     def INST_ETOPS_LC_ACT(self, rec):
         #return self.times100(rec.lifus_act)
         return self.makeDayList(rec, self.hours100(rec.etops_lc_act))
+
+    def INST_CC_LCS_LINK(self, rec):
+        return self.makeDayList(rec, self.hours100(rec.cc_lcs_link))
 
     def INST_CRM(self, rec):
         return self.makeDayList(rec, self.hours100(rec.crm))

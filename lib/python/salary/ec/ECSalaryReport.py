@@ -32,9 +32,9 @@ salary_perdim_article = {
     'JP': ['PERDIEM_SALDO']
 }
 salary_supervis_article = {
-    'DK': ['INST_LCI_LH', 'INST_LCI', 'INST_CLASS', 'INST_SKILL_TEST', 'INST_SIM', 'INST_SIM_SKILL_BR', 'INST_LIFUS_ACT', 'INST_NEW_HIRE', 'INST_CC', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT'],
-    'NO': ['SIM_INSTR_FIXED', 'INST_NEW_HIRE', 'INST_SIM_SKILL_BR', 'INST_LIFUS_ACT', 'INST_CLASS', 'INST_SIM', 'INST_SKILL_TEST', 'INST_CC', 'INST_LCI', 'INST_LCI_LH', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT'],
-    'SE': ['INST_CLASS', 'INST_LCI', 'INST_CC', 'INST_LCI_LH', 'INST_LIFUS_ACT', 'INST_NEW_HIRE', 'INST_SIM', 'INST_SIM_SKILL_BR', 'INST_SKILL_TEST', 'SIM_INSTR_FIXED', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT'],
+    'DK': ['INST_LCI_LH', 'INST_LCI', 'INST_CLASS', 'INST_SKILL_TEST', 'INST_SIM', 'INST_SIM_SKILL_BR', 'INST_LIFUS_ACT', 'INST_NEW_HIRE', 'INST_CC', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT', 'INST_CC_LCS_LINK'],
+    'NO': ['SIM_INSTR_FIXED', 'INST_NEW_HIRE', 'INST_SIM_SKILL_BR', 'INST_LIFUS_ACT', 'INST_CLASS', 'INST_SIM', 'INST_SKILL_TEST', 'INST_CC', 'INST_LCI', 'INST_LCI_LH', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT', 'INST_CC_LCS_LINK'],
+    'SE': ['INST_CLASS', 'INST_LCI', 'INST_CC', 'INST_LCI_LH', 'INST_LIFUS_ACT', 'INST_NEW_HIRE', 'INST_SIM', 'INST_SIM_SKILL_BR', 'INST_SKILL_TEST', 'SIM_INSTR_FIXED', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT', 'INST_CC_LCS_LINK'],
     'CN': [],
     'HK': [],
     'JP': []
@@ -436,6 +436,8 @@ class SupervisRun(ECGenericRun):
     def SIM_INSTR_FIXED(self, rec):
         return times100(rec.sim_instr_fixed)
 
+    def INST_CC_LCS_LINK(self, rec):
+        return times100(rec.cc_lcs_link)
 
 class OvertimeRun(ECGenericRun):
     def __init__(self, salary_system=None, crew_ids=[], salary_article_tm=None, report_start_date=None, report_first_absdate=None, report_end_date=None, report_last_absdate=None, release=True, test=False):

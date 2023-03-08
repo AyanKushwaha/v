@@ -44,6 +44,7 @@ class InstructorIterator(RaveIterator):
             'sim_instr_fixed': 'salary.%sim_instr_fixed%',
             'etops_lifus_act': 'salary.%inst_etops_lifus_act%',
             'etops_lc_act': 'salary.%inst_etops_lc_act%',
+            'cc_lcs_link' : 'salary.%inst_cc_lcs_link%',
         }
         RaveIterator.__init__(self, iterator, fields)
 
@@ -54,7 +55,7 @@ class InstructorsAllowanceRun(GenericRun):
         articles = ['INST_LCI', 'INST_LCI_LH', 'INST_LIFUS_ACT', 'INST_PC_OPC',
                 'INST_PC_OPC_BD', 'INST_TYPE_RATING', 'INST_TYPE_RATING_BD',
                 'INST_CLASS', 'INST_CRM', 'INST_CC', 'INST_SKILL_TEST','INST_SIM', 'INST_SIM_SKILL_BR','INST_NEW_HIRE','INST_CC_QA',
-                'SIM_INSTR_FIXED', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT']
+                'SIM_INSTR_FIXED', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT', 'INST_CC_LCS_LINK']
         GenericRun.__init__(self, rundata, articles)
 
     def rosters(self):
@@ -133,6 +134,9 @@ class InstructorsAllowanceRun(GenericRun):
     def SIM_INSTR_FIXED(self, rec):
         return self.times100(rec.sim_instr_fixed)
 
+    def INST_CC_LCS_LINK(self, rec):
+        return self.times100(rec.cc_lcs_link)
+
 
 # DK ====================================================================={{{1
 class DK(InstructorsAllowanceRun):
@@ -161,7 +165,7 @@ class S3(InstructorsAllowanceRun):
     def __init__(self, rundata, articles=[]):
         articles = ['INST_CLASS', 'INST_LCI', 'INST_CC', 'INST_CRM', 'INST_LCI_LH',
             'INST_LIFUS_ACT', 'INST_NEW_HIRE', 'INST_SIM', 'INST_SIM_SKILL_BR', 'INST_SKILL_TEST',
-            'SIM_INSTR_FIXED', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT']
+            'SIM_INSTR_FIXED', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT', 'INST_CC_LCS_LINK']
         InstructorsAllowanceRun.__init__(self, rundata, articles)
 
         # self.accumulated_rosters will likely become an iterator later.
