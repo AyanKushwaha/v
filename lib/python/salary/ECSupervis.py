@@ -52,7 +52,6 @@ class SupervisRosterManager:
             'homeCurrency': 'report_per_diem.%per_diem_home_currency%',
             'etops_lifus_act': 'salary.%inst_etops_lifus_act%',
             'etops_lc_act': 'salary.%inst_etops_lc_act%',
-            'cc_lcs_link' : 'salary.%inst_cc_lcs_link%',
         }
 
     def getSupervisRosters(self):
