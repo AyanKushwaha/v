@@ -15,6 +15,8 @@ from utils.performance import clockme, log
 
 
 (   DUTIES ,
+    SALARY_SYSTEM,
+    HOME_CURRENCY ,
     CREW_ID ,
     FIRST_NAME ,
     LAST_NAME ,
@@ -52,8 +54,10 @@ from utils.performance import clockme, log
     INST_LCI_LH,
     SNGL_SLIP_LONGHAUL,
     TEMPORARY_CREW_HOURS_DAILY,
-) = range(44)
-ROSTER_VALUES = ('report_common.%crew_id%',
+) = range(40)
+ROSTER_VALUES = ('salary.%salary_system%(salary.%salary_run_date%)',
+                'report_per_diem.%per_diem_home_currency%',
+                'report_common.%crew_id%',
                  'report_common.%crew_firstname%',
                  'report_common.%crew_surname%',
                  'report_common.%crew_homebase_salary%',
@@ -91,44 +95,20 @@ ROSTER_VALUES = ('report_common.%crew_id%',
                  'salary.%extra_salary_for_single_slipping_longhaul%',
                 )
 
-OT_PART_7x24_FWD = 0
-OT_PART_7x24_BWD = 4
-OT_PART_CALENDARWEEK = 8
-OT_PART_1x24_FWD = 12
-OT_PART_1x24_BWD = 16
-OT_PART_DUTYPASS = 20
-OT_PART_LATE_CHECKOUT = 24
-OT_PART_7_CALENDARDAYS = 28
-OT_PART_PARTTIME_CC_MONTH = 32
-OT_PART_PARTTIME_CC_3_MONTHS = 36
-MT_PART_PARTTIME_CC_MONTH = 40
-MT_PART_PARTTIME_CC_3_MONTHS = 44
-OT_PART_PARTTIME_MONTH = 48
-OT_PART_MONTH = 52
-DUTY_VALUES = ('report_overtime.%overtime_7x24_fwd_ot%',
-               'report_overtime.%overtime_7x24_fwd_start%',
-               'report_overtime.%overtime_7x24_fwd_end%',
-               'report_overtime.%overtime_7x24_fwd_duty%',
-               
-               'report_overtime.%overtime_7x24_bwd_ot%',
-               'report_overtime.%overtime_7x24_bwd_start%',
-               'report_overtime.%overtime_7x24_bwd_end%',
-               'report_overtime.%overtime_7x24_bwd_duty%',
-               
-               'report_overtime.%overtime_calendar_week_ot%',
+OT_PART_CALENDARWEEK = 0
+OT_PART_DUTYPASS = 4
+OT_PART_LATE_CHECKOUT = 8
+OT_PART_7_CALENDARDAYS = 12
+OT_PART_PARTTIME_CC_MONTH = 16
+OT_PART_PARTTIME_CC_3_MONTHS = 20
+MT_PART_PARTTIME_CC_MONTH = 24
+MT_PART_PARTTIME_CC_3_MONTHS = 28
+OT_PART_PARTTIME_MONTH = 32
+OT_PART_MONTH = 36
+DUTY_VALUES = ('report_overtime.%overtime_calendar_week_ot%',
                'report_overtime.%overtime_calendar_week_start%',
                'report_overtime.%overtime_calendar_week_end%',
                'report_overtime.%overtime_calendar_week_duty%',
-               
-               'report_overtime.%overtime_1x24_fwd_ot%',
-               'report_overtime.%overtime_1x24_fwd_start%',
-               'report_overtime.%overtime_1x24_fwd_end%',
-               'report_overtime.%overtime_1x24_fwd_duty%',
-               
-               'report_overtime.%overtime_1x24_bwd_ot%',
-               'report_overtime.%overtime_1x24_bwd_start%',
-               'report_overtime.%overtime_1x24_bwd_end%',
-               'report_overtime.%overtime_1x24_bwd_duty%',
                
                'report_overtime.%overtime_dutypass_ot%',
                'report_overtime.%overtime_dutypass_start%',
@@ -194,7 +174,7 @@ DUTY_VALUES = ('report_overtime.%overtime_7x24_fwd_ot%',
                )
 # The number of 4-groups of Rave variables above to NOT include in the optimization.
 # Typically all monthly values should be placed here.
-OT_OPT_SKIP_VALUES = 5
+OT_OPT_SKIP_VALUES = 1
 
 
 class OvertimeSolver:
@@ -348,7 +328,7 @@ class OvertimeSolver:
         return value
 
 
-class OvertimeManager:
+class OvertimeRosterManager:
     """
     A class that creates and holds OvertimeRosters.
     """
@@ -414,6 +394,8 @@ class OvertimeManager:
 
         overtimeRoster = OvertimeRoster(
             rosterItem[DUTIES],
+            rosterItem[SALARY_SYSTEM],
+            rosterItem[HOME_CURRENCY],
             rosterItem[CREW_ID],
             rosterItem[FIRST_NAME],
             rosterItem[LAST_NAME],
@@ -462,6 +444,8 @@ class OvertimeRoster(DataClass):
 
     def __init__(self,
                  duties,
+                 salarySystem,
+                 homeCurrency,
                  crewId,
                  firstName,
                  lastName,
@@ -502,6 +486,8 @@ class OvertimeRoster(DataClass):
                  ):
         
 
+        self.salarySystem =  salarySystem
+        self.homeCurrency = homeCurrency
         self.crewId = crewId
         self.firstName = firstName
         self.lastName = lastName
@@ -510,7 +496,6 @@ class OvertimeRoster(DataClass):
         self.month = month
         self.mainFunc = mainFunc
         self.empNo = empNo
-
         self.isSKD = isSKD
         self.isSKN = isSKN
         self.isSKS = isSKS
@@ -596,10 +581,6 @@ class OvertimeRoster(DataClass):
                                 self.threeMonthOvertime.append(tmo)
                             else:
                                 continue
-
-        month_start = R.eval('salary_overtime.%month_start%')[0]
-        month_end = R.eval('salary_overtime.%month_end%')[0]
-        rel_zero = RelTime('0:00')
 
         if otSolverSearchList:    
             # Changed the old functionality because it could not handle large problems (>4-5 items).
@@ -706,7 +687,7 @@ class OvertimeRoster(DataClass):
 
     # Salary code DK: 409, 410   SE: 201   NO: 3770,3145   DK: 732, 733, 734
     def getOvertime(self):
-       return self.overtimeBalanced
+        return self.overtimeBalanced
 
     # Salary code DK: 229 NO 6048
     def getTempCrewHours(self):
@@ -788,12 +769,6 @@ class OvertimeRoster(DataClass):
         return self.mertidContributors[:]
 
     # no Salary Code
-    #def getRolling7x24OvertimeTotal(self):
-    #    if self.overtimeRolling7x24 is None:
-    #        return None
-    #    return self.overtimeRolling7x24['total']
-
-    # no Salary Code
     def getOtContributors(self, dutyTime=False):
         if not self.overtimeBalancedContributors: return None
         return self.overtimeBalancedContributors[:]
@@ -811,20 +786,6 @@ class OvertimeRoster(DataClass):
 
     def get7CalendarDays(self, dutyTime=False):
         return self.getContributingPart(OT_PART_7_CALENDARDAYS, dutyTime)
-    
-    def get7x24(self, dutyTime=False):
-        rt1 = self.getContributingPart(OT_PART_7x24_FWD, dutyTime)
-        rt2 = self.getContributingPart(OT_PART_7x24_BWD, dutyTime)
-        if not rt1: return rt2
-        if not rt2: return rt1
-        return rt1 + rt2
-    
-    def get1x24(self, dutyTime=False):
-        rt1 = self.getContributingPart(OT_PART_1x24_FWD, dutyTime)
-        rt2 = self.getContributingPart(OT_PART_1x24_BWD, dutyTime)
-        if not rt1: return rt2
-        if not rt2: return rt1
-        return rt1 + rt2
     
     # Salary code SE: 204
     def getDutyPass(self, dutyTime=False):
@@ -874,7 +835,7 @@ def create_writeln(fd):
 
 def writeovertimecalc(fd, salmon, crewlist):
 
-    om = OvertimeManager('default_context', crewlist=crewlist)
+    om = OvertimeRosterManager('default_context', crewlist=crewlist)
     for crew in om.getOvertimeRosters():
         fd.write("Crew %s (%s %s)  %s:\n" % (crew.crewId, crew.firstName, crew.lastName, salmon))
         if crew.isExcludedFromSalaryFiles():
@@ -888,14 +849,10 @@ def writeovertimecalc(fd, salmon, crewlist):
         if cont or mertid_cont or three_month_ot_cont:
             if cont:
                 for end, duty, otyp, otime, start in cont:
-                    if not is4ExngValid and (otyp == OT_PART_7x24_FWD or otyp == OT_PART_7x24_BWD):
-                        tname = "7x24"
-                    elif is4ExngValid and otyp == OT_PART_7_CALENDARDAYS:
+                    if is4ExngValid and otyp == OT_PART_7_CALENDARDAYS:
                         tname = "7 Calendar days"
                     elif otyp == OT_PART_CALENDARWEEK:
                         tname = "Week"
-                    elif otyp == OT_PART_1x24_FWD or otyp == OT_PART_1x24_BWD:
-                        tname = "1x24"
                     elif otyp == OT_PART_DUTYPASS:
                         tname = "Duty pass"
                     elif otyp == OT_PART_LATE_CHECKOUT:
@@ -941,7 +898,7 @@ def writeovertimecalc(fd, salmon, crewlist):
                 if (timeDP and int(timeDP) > 0) and (endDP >= salStart and endDP < salEnd):
                     dutyperiods.append((startDP, endDP, timeDP))
             if len(duties) > 0:
-                fd.write("  Temporary crew days %s:\n"))
+                fd.write("  Temporary crew days %s:\n")
                 for startD, endD, daysD in duties:
                     fd.write("    %s-%s %s\n" %(startD, endD, daysD))
             if len(trips) > 0:
@@ -954,23 +911,16 @@ def writeovertimecalc(fd, salmon, crewlist):
                     fd.write("    %s-%s %s\n" %(startDP, endDP, timeDP))
         fd.write(T2 + "Summary:\n")
         
-        if not(is4ExngValid):
-            fd.write(T3 + "7x24             : %6s (%6s)\n" % (crew.get7x24(False) or RelTime(0), crew.get7x24(True) or RelTime(0)))
-        elif is4ExngValid:
-            fd.write(T3 + "7 Calendar days  : %6s (%6s)\n" % (crew.get7CalendarDays(False) or RelTime(0), crew.get7CalendarDays(True) or RelTime(0)))
+        fd.write(T3 + "7 Calendar days  : %6s (%6s)\n" % (crew.get7CalendarDays(False) or RelTime(0), crew.get7CalendarDays(True) or RelTime(0)))
         fd.write(T3 + "Calendar week    : %6s (%6s)\n" % (crew.getCalendarWeek(False) or RelTime(0), crew.getCalendarWeek(True) or RelTime(0)))
-        fd.write(T3 + "1x24             : %6s (%6s)\n" % (crew.get1x24(False) or RelTime(0), crew.get1x24(True) or RelTime(0)))
         fd.write(T3 + "Duty pass        : %6s (%6s)\n" % (crew.getDutyPass(False) or RelTime(0), crew.getDutyPass(True) or RelTime(0)))
         fd.write(T3 + "Mertid part cc   : %6s/%6s (%6s/%6s)\n" % (crew.getMertidParttimeCc(False) or RelTime(0), crew.getMertidParttimeCcLong(False) or RelTime(0), crew.getMertidParttimeCc(True) or RelTime(0), crew.getMertidParttimeCcLong(True) or RelTime(0)))
         fd.write(T3 + "Overtime part cc : %6s/%6s (%6s/%6s)\n" % (crew.getOvertimeParttimeCc(False) or RelTime(0), crew.getOvertimeParttimeCcLong(False) or RelTime(0), crew.getOvertimeParttimeCc(True) or RelTime(0), crew.getOvertimeParttimeCcLong(True) or RelTime(0)))
-
         fd.write("\n" + T1 + "Other compensation:\n")
 
         showDutyValues = False
         if (crew.getTempCrewHours() or RelTime(0)) > RelTime(0):
             fd.write("    Duty (temp.crew) : %6s\n" % (crew.getTempCrewHours() or RelTime(0)))
-        if (crew.getTempCrewDays() or 0) > 0:
-            fd.write("    Duty days (temp) : %6s\n" % (crew.getTempCrewDays() or 0))
         if (crew.getIllTempCrewHours() or RelTime(0)) > RelTime(0):
             showDutyValues = True
             fd.write("    Ill (temp.crew)  : %6s\n" % (crew.getIllTempCrewHours() or RelTime(0)))
@@ -1061,7 +1011,6 @@ def write_overtime_after_midnight(fd, crew):
                 wln(T4 + "Replaced by F3 upon crew request")
             if tm_balance != r_balance:
                 wln(T4 + "WARNING! F3 replacement update may not be saved to DB yet.")
-
 
 def askSalaryPeriod(sal_start, sal_end):
     import utils.DisplayReport as display
