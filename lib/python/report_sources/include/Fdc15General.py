@@ -19,9 +19,9 @@ from report_sources.include.ReportUtils import OutputReport
 # constants =============================================================={{{1
 CONTEXT = 'default_context'
 TITLE = 'FDC15 General'
-cells = ("name","empno","contract","parttimePercentage","yearFreedaysBasic","yearFreedaysEntitled","yearFreedaysScheduled","monthFreedaysEntitled","monthFreedaysScheduled","twinMFreedaysEntitled","twinMFreedaysScheduled","reducingDays","yearRatio")
-cellWidths = (100,30,30,30,30,30,30,30,30,30,30,30,30)
-cellAligns = (p.LEFT, p.LEFT, p.LEFT, p.RIGHT, p.RIGHT, p.RIGHT, p.RIGHT, p.RIGHT, p.RIGHT, p.RIGHT, p.RIGHT, p.RIGHT, p.RIGHT)
+cells = ("name","empno","contract","parttimePercentage","yearFreedaysBasic","yearFreedaysEntitled","yearFreedaysScheduled","monthFreedaysEntitled","monthFreedaysScheduled","reducingDays","yearRatio")
+cellWidths = (100,30,30,30,30,30,30,30,30,30,30)
+cellAligns = (p.LEFT, p.LEFT, p.LEFT, p.RIGHT, p.RIGHT, p.RIGHT, p.RIGHT, p.RIGHT, p.RIGHT, p.RIGHT, p.RIGHT)
 
 
 
@@ -49,8 +49,6 @@ class Fdc15General(SASReport):
             'report_fdc15.%freedays_acc_year_scheduled%',
             'report_fdc15.%freedays_calendar_month_entitled%',
             'report_fdc15.%freedays_calendar_month_scheduled%',
-            'report_fdc15.%freedays_twin_month_entitled%',
-            'report_fdc15.%freedays_twin_month_scheduled%',
             'report_fdc15.%freedays_reducing_days%'
             )
             
@@ -60,8 +58,8 @@ class Fdc15General(SASReport):
         crewCol = p.Column()#width=0.5*self.pageWidth)
         
         # Loop over all the 'bags' that comes from the RAVE expression and collect the data
-        for (ix, surname, firstname, empno, contractPeriodCount, contract, parttimePercentage, yearFreedaysBasic, yearFreedaysEntitled, yearFreedaysScheduled, monthFreedaysEntitled, monthFreedaysScheduled, twinMFreedaysEntitled, twinMFreedaysScheduled, reducingDays) in rosters:
-            crew = CrewData(empno, surname, firstname, contractPeriodCount, contract, parttimePercentage, yearFreedaysBasic, yearFreedaysEntitled, yearFreedaysScheduled, monthFreedaysEntitled, monthFreedaysScheduled, twinMFreedaysEntitled, twinMFreedaysScheduled, reducingDays)
+        for (ix, surname, firstname, empno, contractPeriodCount, contract, parttimePercentage, yearFreedaysBasic, yearFreedaysEntitled, yearFreedaysScheduled, monthFreedaysEntitled, monthFreedaysScheduled, reducingDays) in rosters:
+            crew = CrewData(empno, surname, firstname, contractPeriodCount, contract, parttimePercentage, yearFreedaysBasic, yearFreedaysEntitled, yearFreedaysScheduled, monthFreedaysEntitled, monthFreedaysScheduled, reducingDays)
             self.crewDict[empno] = crew
           
         #Header row
@@ -111,7 +109,7 @@ class Fdc15General(SASReport):
         return str(sum)
 
     def getReportFooter(self, crewCol):
-        crewCol.add(self.getTableFooter(["Total", "", "", "", "","", self.getTotal("yearFreedaysScheduled"), self.getTotal("monthFreedaysEntitled"), self.getTotal("monthFreedaysScheduled"), self.getTotal("twinMFreedaysEntitled"), self.getTotal("twinMFreedaysScheduled"),self.getTotal("reducingDays"), self.getTotalRatio()],widths=cellWidths, aligns=cellAligns))
+        crewCol.add(self.getTableFooter(["Total", "", "", "", "","", self.getTotal("yearFreedaysScheduled"), self.getTotal("monthFreedaysEntitled"), self.getTotal("monthFreedaysScheduled"), self.getTotal("reducingDays"), self.getTotalRatio()],widths=cellWidths, aligns=cellAligns))
             
     def getTableFooter(self, items, vertical=False, widths=None, aligns=None, def_width=0):
         if vertical:
@@ -151,14 +149,14 @@ class Fdc15General(SASReport):
 #        return (["", "", "", "", "basic", "fdc15", "fdc15", "fdc15", "fdc15", "fdc15", "fdc15", "", ""])
   
     def getReportHeader1(self):
-        return (["Name", "Empno", "Rule", "Pt", "Basic", "Acc", "Acc", "Mon", "Mon", "Twin", "Twin mon", "Reduc", "Year"])
+        return (["Name", "Empno", "Rule", "Pt", "Basic", "Acc", "Acc", "Mon", "Mon", "Reduc", "Year"])
     def getReportHeader2(self):
-        return (["", 	"", 	"", 	"", 	"year",	"year",	"year",	"min",	"min",	"mon",	"mon", "days", "ratio"])
+        return (["", 	"", 	"", 	"", 	"year",	"year",	"year",	"min",	"min", "days", "ratio"])
     def getReportHeader3(self):
-        return (["", 	"", 	"", 	"", 	"entl", "entl", "sched", "entl", "sched", "entl", "sched", "", ""])
+        return (["", 	"", 	"", 	"", 	"entl", "entl", "sched", "entl", "sched", "", ""])
  
 class CrewData:
-    def __init__(self, empno, surname, firstname, contractPeriodCount, contract, parttimePercentage, yearFreedaysBasic, yearFreedaysEntitled, yearFreedaysScheduled, monthFreedaysEntitled, monthFreedaysScheduled,  twinMFreedaysEntitled, twinMFreedaysScheduled, reducingDays):
+    def __init__(self, empno, surname, firstname, contractPeriodCount, contract, parttimePercentage, yearFreedaysBasic, yearFreedaysEntitled, yearFreedaysScheduled, monthFreedaysEntitled, monthFreedaysScheduled,  reducingDays):
         self.values = dict()
         self.values["surname"] = surname
         self.values["firstname"] = firstname
@@ -172,8 +170,6 @@ class CrewData:
         self.values["parttimePercentage"] = self.getContractDependentString(parttimePercentage)
         self.values["monthFreedaysEntitled"] = monthFreedaysEntitled
         self.values["monthFreedaysScheduled"] = monthFreedaysScheduled
-        self.values["twinMFreedaysEntitled"] = twinMFreedaysEntitled
-        self.values["twinMFreedaysScheduled"] = twinMFreedaysScheduled
         self.values["reducingDays"] = reducingDays
         self.values["yearRatio"] = self.getYearRatio(yearFreedaysEntitled, yearFreedaysScheduled)
     
@@ -200,10 +196,10 @@ class CrewData:
     
         
     def getOutputHeader(self):
-        return "Name;Empno;Rule;Parttime %;Freedays/year basic;Freedays/year entitled;Freedays/year so far;Freedays/month entitled;Freedays/month scheduled;Freedays/twin mon entitl;Freedays/twin mon sched;Reducing days;Year ratio"
+        return "Name;Empno;Rule;Parttime %;Freedays/year basic;Freedays/year entitled;Freedays/year so far;Freedays/month entitled;Freedays/month scheduled;Reducing days;Year ratio"
     
     def getOutputText(self):
-        return self.values["name"] + ";" + str(self.values["empno"]) + ";" + self.values["contract"] + ";" + self.values["parttimePercentage"] + ";" + str(self.values["yearFreedaysBasic"]) + ";" + str(self.values["yearFreedaysEntitled"]) + str(self.values["yearFreedaysScheduled"]) + ";" + str(self.values["monthFreedaysEntitled"]) + ";" + str(self.values["monthFreedaysScheduled"]) + ";"  + str(self.values["twinMFreedaysEntitled"]) + ";" + str(self.values["twinMFreedaysScheduled"])+ ";" + str(self.values["reducingDays"]) + ";" + self.values["yearRatio"]
+        return self.values["name"] + ";" + str(self.values["empno"]) + ";" + self.values["contract"] + ";" + self.values["parttimePercentage"] + ";" + str(self.values["yearFreedaysBasic"]) + ";" + str(self.values["yearFreedaysEntitled"]) + str(self.values["yearFreedaysScheduled"]) + ";" + str(self.values["monthFreedaysEntitled"]) + ";" + str(self.values["monthFreedaysScheduled"]) + ";" + str(self.values["reducingDays"]) + ";" + self.values["yearRatio"]
   
 
     def getReportRow(self):
@@ -213,3 +209,4 @@ class CrewData:
         return tmpRow
             
 # End of file
+

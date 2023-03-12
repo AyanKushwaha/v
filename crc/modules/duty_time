@@ -2,7 +2,7 @@
  *
  * Purpose:
  *   This module contains duty time calculations and limits for both cabin crew 
- *   and flight crew. This module defines the limits for duty pass, 1x24 and 7x24.
+ *   and flight crew. This module defines the limits for duty pass, 7 calendar days etc.
  *   The other limits are defined in the child module duty_time_ccr.
  *   Some limits are redefined in duty_time_ccr as they are dependant on crew
  *   properties not available in CCP.
@@ -49,12 +49,6 @@ export %max_in_duty_period% =
 export %max_in_2x24_hrs% =
     %max_in_2x24_hrs_cc%;
 
-export %max_in_7x24_hrs% =
-  if %flight_crew% then
-    %max_in_7x24_hrs_fc%
-  else 
-    %max_in_7x24_hrs_cc%;
-    
 /* Redefined in CCT submodule */
 export %soft_limit_reduction_fc_skd% = 0:00;
 
@@ -120,13 +114,7 @@ end
 export %is_any_sim_instr_scand_dp% = false;
 
 /*
-** 7x24 hrs
-*/
-%max_in_7x24_hrs_fc% = 
-  %_max_in_7x24_hrs_fc%;
-
-/*
-** Calendar day, only valid for FC SKS and SKN
+** Calendar day
 */
 export %max_duty_time_in_calendar_day_sks_skn% = 17:00;
 
@@ -139,17 +127,6 @@ export %max_daily_duty_non_sk% =
 
 /* Redefined in child module in order to cover for pilot education limits. */
 %crew_has_training_restr_trip_start% = false;
-
-%_max_in_7x24_hrs_fc% =
-    60:00
-    remark "Max duty over rolling 7 days";
-
-/* Only for tracking */
-%delayed_check_out_7x24_fwd% = 
-    %any_delayed_check_out_in_7x24_hrs_fwd%;
-
-/* Redefined */
-export %any_delayed_check_out_in_7x24_hrs_fwd% = false;
 
 /* Redefined in child module to cover for trips 7 days backwards or forwards */
 %production_with_long_haul_ac% = trip.%with_long_haul_ac%;
@@ -183,7 +160,6 @@ export %any_delayed_check_out_in_7x24_hrs_fwd% = false;
 %max_in_duty_period_lh_skd% = 14:00;           /* SKD */
 %max_in_duty_period_sh_skn_basic% = 10:30;     /* SKN */
 %max_in_duty_period_sh_skn_short_rest% = 9:00; /* SKN */
-%max_in_duty_period_sh_skn_f50% = 11:00;       /* SKN */
 %max_in_duty_period_lh_skn% = 14:00;           /* SKN */
 %max_in_duty_period_sh_sks% = 10:30;           /* SKS */
 %max_in_duty_period_lh_sks% = 12:00;           /* SKS */
@@ -356,99 +332,6 @@ export %max_in_duty_period_sh_skn_prev_duty_long% =
 /* Agreement: Greenland 2 */
 %max_in_2x24_hrs_cc% = 21:00; /* One-day Greenland return */
 
-/*
-** 7x24 hrs
-*/
-%max_in_7x24_sh_skd% =
-  if parameters.%k12_skd_cc_sp4_3_valid%(duty.%start_hb%) then
-    44:00
-  else
-    42:00; /* SKD */
-
-%max_in_7x24_lh_skd% = 
-  if parameters.%k12_skd_cc_sp4_3_valid%(duty.%start_hb%) then
-    44:00
-  else
-    42:00; /* SKD */
-
-%max_in_7x24_sh_skn% = 42:00; /* SKN */
-%max_in_7x24_lh_skn% = 42:00; /* SKN */
-%max_in_week_sks% = 42:00;    /* SKS */
-
-/* Redefined in duty_time_cct */
-%max_in_7x24_skj% = 35:00;    /* Japanese CC */
-
-/* Get correct limit */
-table duty_time_7x24_limits_cc =
-  duty.%region%, %production_is_long_haul% ->
-    %max_in_7x24_hrs_cc%;
-  
-  /* SKD */
-  "SKD", false     -> %max_in_7x24_sh_skd%;
-  "SKD", true      -> %max_in_7x24_lh_skd%;
-  
-  /* SKN */
-  "SKN", false     -> %max_in_7x24_sh_skn%;
-  "SKN", true      -> %max_in_7x24_lh_skn%;  
-  
-  /* SKS */
-  "SKS",   -       -> %max_in_week_sks%;
-  
-  /* Japanese CC */
-  "SKJ",   -       -> %max_in_7x24_skj%;
-  
-  -, - -> 0:00;
-end
-
-/* Redefined in child module to cover for trips 7 days forwards. */
-export %production_is_long_haul% =
-  if duty.%region% = "SKD" then /* Only forward values */
-    %any_duty_is_long_haul_in_7x24_fwd%
-  else if duty.%region% = "SKN" then
-    %any_duty_is_long_haul_in_7x24_fwd% and
-    %any_duty_is_long_haul_in_7x24_bwd%
-  else
-    duty.%is_long_haul%;
-    
-export %production_is_long_haul_not_bought_day% = 
-  if duty.%region% = "SKD" then /* Only forward values */
-    %any_duty_is_long_haul_in_7x24_fwd_not_bought_day%
-  else if duty.%region% = "SKN" then
-    %any_duty_is_long_haul_in_7x24_fwd_not_bought_day% and
-    %any_duty_is_long_haul_in_7x24_bwd_not_bought_day%
-  else
-    duty.%is_long_haul% and not duty.%is_bought%;
-
-export %any_duty_is_long_haul_in_7x24_fwd% =
-  let stop = duty.%start_UTC% + 7*24:00;
-  any(duty(chain), duty.%is_long_haul%)
-  from (current) forwards
-  while (duty.%start_UTC% < stop)
-  where (duty.%has_flight_duty%);
-
-export %any_duty_is_long_haul_in_7x24_bwd% =
-  let stop = duty.%end_UTC% - 7*24:00;
-  any(duty(chain), duty.%is_long_haul%)
-  from (current) backwards
-  while (duty.%end_UTC% > stop)
-  where (duty.%has_flight_duty%);
-  
-export %any_duty_is_long_haul_in_7x24_fwd_not_bought_day% =
-  let stop = duty.%start_UTC% + 7*24:00;
-  any(duty(chain), duty.%is_long_haul%)
-  from (current) forwards
-  while (duty.%start_UTC% < stop)
-  where (duty.%is_flight_duty% and not
-         duty.%is_bought%);
-
-export %any_duty_is_long_haul_in_7x24_bwd_not_bought_day% =
-  let stop = duty.%end_UTC% - 7*24:00;
-  any(duty(chain), duty.%is_long_haul%)
-  from (current) backwards
-  while (duty.%end_UTC% > stop)
-  where (duty.%is_flight_duty% and not
-         duty.%is_bought%);
-
 /* 
 ** 4 weeks
 */
@@ -549,23 +432,8 @@ end
 %__basic_duty_time_limits% =
   %max_in_duty_period_sh_skd% + rest.%add_hrs%(%last_is_deadhead%, 1:00);
 
-export %trip_has_long_leg_extended_duty% = any(duty(trip), %duty_is_long_leg_extended%);
-
-export %duty_is_long_leg_extended% =
-  %long_leg_in_duty% and
-  duty.%is_short_haul% and
-  %in_duty_period_scheduled%(duty.union,True) > 
-    (%max_in_duty_period_sh_skn_basic% + %passive_extension%(false));
-
-export %trip_has_long_leg_extended_duty_not_bought% = 
-  any(duty(trip), %duty_is_long_leg_extended% and not duty.%is_bought%);
-
 /* Agreement: CAU D.1.2 */
 %tracking_extension% = if %product% = "CCT" then 2:00 else 0:00;
-
-/* Agreement: NKF/SBK qual F5 2.3.1a */
-%night_upg_extension%(Reltime extension) =
-  0:00;
 
 /****************************************************************
  * Section 4: Duty time calculations
@@ -604,57 +472,8 @@ export %duty_time_calendar_day_start_day% = %calendar_day_start_day_trip%;
 /* Redefined for CCT% */
 export %duty_time_reduction_sby_callout_skn_cc% = 0:00;
 
-/* 
-** 7x24 hrs
-*/
-export %7x24_hrs_in_period%(Abstime start_utc, Abstime stop_utc, Bool night_upg, DutyCalculation dutycalc) =
-  trip.%duty_time_in_period%(start_utc, stop_utc, night_upg, dutycalc);
-
-export %7x24_hrs% =
-  if duty.%is_skj% then
-    %7_calendar_days%
-  else
-    nmax(%_7x24_hrs_fwd%, %7x24_hrs_bwd%);
-
-%_7x24_hrs_fwd% =
-  if duty.%k4exng_cc_sp5_1_valid%(duty.%start_hb% + 7*24:00) or
-     parameters.%k4exng_fc_sp5_1_valid%(duty.%start_hb% + 7*24:00) then
-    0:00
-  else
-    %7x24_hrs_fwd%;
-
-/* Net duty time in 7 calendar days for Japanese CC */
-export %7_calendar_days% =
-  trip.%duty_time_in_period%(duty.%end_day_hb_utc% - 6*24:00, duty.%end_day_hb_utc% + 24:00,
-                             fundamental.%night_upg%, duty.net_skj);
-
-export %7x24_hrs_fwd% = 
- trip.%duty_time_in_period%(duty.%start_UTC%, duty.%start_UTC% + 7*24:00, fundamental.%night_upg%, duty.union);
-export %7x24_hrs_bwd% = 
-  trip.%duty_time_in_period%(duty.%end_UTC% - 7*24:00, duty.%end_UTC%, fundamental.%night_upg%, duty.union);
-export %7x24_hrs_until_now% =
-  if leg.%is_SKS% and %cabin_crew% then
-    duty.%duty_time_in_period%(leg.%end_UTC% - 7*24:00, leg.%end_UTC%, false, duty.union)
-  else
-    duty.%duty_time_in_period%(leg.%end_UTC% - 7*24:00, leg.%end_UTC%, fundamental.%night_upg%, duty.union);
-export %trip_7x24_hrs_fwd% = 
-  trip.%duty_time_in_period%(duty.%start_UTC%, duty.%start_UTC% + 7*24:00, fundamental.%night_upg%, duty.union);
 export %calendar_week% =
   trip.%duty_time_in_period%(duty.%start_week_start%, duty.%start_week_end%, false, duty.union);
-
-
-/* Different limit in Tracking acc to CAU E.1.4 */
-export %max_duty_day_before_lh_skd% = 
-    %max_duty_day_before_lh_skd_CCT%;
-
-/* %max_duty_day_before_lh_skd_CCT% = 10:00;*/
-export %max_duty_day_before_lh_skd_CCT% = 8:00;
-export %max_duty_day_before_lh_skn% = 
-  if any(duty(trip), duty.%departs_from_homebase% and duty.%is_long_haul%) and 
-     parameters.%k11_skn_cc_valid%(%pp_start%) and %cabin_crew% then
-    9:00
-  else
-    10:30;
 
 /* Redefined in duty_time_ccr */
 export %passive_plus_reduction%(Abstime a1, Abstime a2) =
