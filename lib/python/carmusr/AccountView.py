@@ -128,7 +128,6 @@ ACTION[F89] = COMPDAY_ACTIONS
 ACTION[F9]  = COMPDAY_ACTIONS
 ACTION[F15] = COMPDAY_ACTIONS
 ACTION[F16] = COMPDAY_ACTIONS
-
 # Vacation accounts
 ACTION[VA1] = [IN_CORR, OUT_CORR]
 ACTION[FS]  = [IN_MAN, OUT_CORR]
@@ -160,7 +159,7 @@ ACTION[BOUGHT_F3_2] = [IN_CORR, OUT_CORR]
 ACTION[BOUGHT_FORCED] = []
 #ACTION[SOLD] = [IN_CORR, OUT_CORR]
 ACTION[SOLD] = []
-ACTION[PR] = []
+ACTION[PR] = [IN_CORR, OUT_CORR]
 
 """
 Temporary class that holds crew information.
@@ -281,6 +280,7 @@ class ActionTable(TempTable):
         for row in self:
             row.remove()
         if account is not None and ACTION.has_key(account): 
+
             for action in ACTION[account]:
                 row = self.create((id, action))
 
