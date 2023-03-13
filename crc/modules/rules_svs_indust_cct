@@ -626,16 +626,15 @@ export rule ind_max_duty_time_in_calendar_end_day =
         not duty_period.%is_split% and
         duty.%in_pp_extended% and
         duty.%has_flight_duty% and
-        not duty.%is_bought% and
-        %r_valid_duty_time_in_1x24_hrs%;
+        not duty.%is_bought%;
 
         duty_time.%duty_time_calendar_day_end_day% <= %max_duty_time_in_calendar_day_svs% + rule_exceptions.%overshoot_rel%(duty.%start_UTC%);   
   startdate  = duty.%start_UTC%;
   severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
   failobject = duty.%failobject_end%;
   failtext (Reltime value, Reltime limit) =    
-           rules.%failtext_rel%("Coll: Max duty time in calendar day (duty.end_day)", value, limit);
-  remark "Coll: Max duty time in caldendar day (duty.end_day + 24:00)",
+           rules.%failtext_rel%("Coll: Max duty time in calendar day ", value, limit);
+  remark "Coll: Max duty time in caldendar day (duty end day)",
   planner "The rule checks that maximum duty time in calendar day"
 	  " is not exceeded.";
 end
@@ -646,28 +645,21 @@ export rule ind_max_duty_time_in_calendar_start_day =
         not duty_period.%is_split% and
         duty.%in_pp_extended% and
         duty.%has_flight_duty% and
-        not duty.%is_bought% and
-        %r_valid_duty_time_in_1x24_hrs%;
+        not duty.%is_bought%;
 
         duty_time.%duty_time_calendar_day_start_day% <= %max_duty_time_in_calendar_day_svs% + rule_exceptions.%overshoot_rel%(duty.%start_UTC%);   
   startdate  = duty.%start_UTC%;
   severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
   failobject = duty.%failobject_start%;
   failtext(Reltime value, Reltime limit) =
-          rules.%failtext_rel%("Coll: Max duty time in calendar day (duty.start_day)", value, limit);
-  remark "Coll: Max duty time in caldendar day (duty.end_day + 24:00",
+          rules.%failtext_rel%("Coll: Max duty time in calendar day ", value, limit);
+  remark "Coll: Max duty time in caldendar day (duty start day)",
   planner "The rule checks that maximum duty time in calendar day"
 	  " is not exceeded.";
 end
 
 
 export %max_duty_time_in_calendar_day_svs% = 16:00;
-
-export %r_valid_duty_time_in_1x24_hrs% = not %duty_touches_excepted_airport%;
-
-%duty_touches_excepted_airport% =
-  any(leg(duty), crew_pos.%leg_touches_excepted_airport%)
-  where(leg.%is_active_flight%);
 
 /*
 ** SVS Standby limits for rest
@@ -720,7 +712,6 @@ end
 **
 **
 */
-
 
 export rule ind_min_freedays_in_1_month_ALL =
   valid roster.%check_rules% and
@@ -890,9 +881,9 @@ export rule(on) ind_max_sectors_after_split_duty_svs =
   severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
   failobject = duty.%failobject_start%;
   failtext(Int value, int limit) =
-          rules.%failtext_int%("Coll: Max 2 sectors after short stop)", value, limit);
+          rules.%failtext_int%("Coll: Max 2 sectors after short stop", value, limit);
   remark "Coll: Max 2 sectors after short stop",
-  planner "This rule is SVS crew. It checks that there are max 2 legs"
+  planner "This rule is for SVS crew. It checks that there are max 2 legs"
           " after a break that is shorter than 8 hrs from block-on to"
 	  " check-in."; 
 end
@@ -1109,9 +1100,7 @@ end
 */
 
 export rule sft_booked_greater_than_max_crew_seats_ALL =
-  valid trip.%check_rules% and
-        (%product% = "CCP" or %product% = "CCR" or
-        %is_roster%) and
+  valid %is_roster% and
         leg.%is_flight_duty% and
         not leg.%is_deadhead% and
         not leg.%is_school_flight% and
@@ -1129,7 +1118,7 @@ export rule sft_booked_greater_than_max_crew_seats_ALL =
                          limit);
   remark "Soft: Booked crew must not exceed available seats",
   planner "The rule checks that the total number of "
-          "booked(CCP)/assigned(CCR/CCT) crew "
+          "assigned crew "
 	      "does not exceed the number of crew seats.";
 end
 
@@ -1142,16 +1131,9 @@ end
 
 table booked_crew =
   %product%, %flight_crew% -> %crew_booked%;
-  /* In CCP and CCR we care about booked value, i.e. warn when open and assigned
-     positions are too many */
-  "CCP", true   -> crew_pos.%total_flight_crew_booked%;
-  "CCP", false  -> crew_pos.%total_cabin_crew_booked%;
-  /* In CCR and CCT we allow supernum positions to reduce the total value */
-  "CCR", true   -> crew_pos.%total_flight_crew_booked%;
-  "CCR", false  -> crew_pos.%total_cabin_crew_booked% - %cj_supernum_reduction%;
   /* CCT only cares about assigned positions */
   "CCT", true   -> crew_pos.%total_leg_rostered_fc%;
-  "CCT", false  -> crew_pos.%total_leg_rostered_cc% - %cj_supernum_reduction%;
+  "CCT", false  -> crew_pos.%total_leg_rostered_cc% - %ej_supernum_reduction%;
   &
       -, true   -> crew_pos.%total_flight_crew_booked%;
       -, false  -> crew_pos.%total_cabin_crew_booked%;
@@ -1160,9 +1142,9 @@ end
 /* In general we count all crew, but CRJ doesn't have any extra seats and will
    be illegal for all crew if there is training in AU. In reality the CC crew on
    training will take a passenger seat or the extra seat in FD. When this isn't 
-   possible it is handled by the tracker. /EKG 090305 */
-%cj_supernum_reduction% =
-    if leg.%qual% = "CJ" and crew_pos.%leg_rostered_pos%(8) > 0 then
+   possible it is handled by the tracker. */
+%ej_supernum_reduction% =
+    if leg.%qual% = "EJ" and crew_pos.%leg_rostered_pos%(8) > 0 then
         1
     else 
         0;
@@ -1196,38 +1178,12 @@ end
 %nr_scand_speaking_crew_on_flight% =
   count(equal_legs) where (%is_scand_speaking_crew_on_flight%);
 
-
 export %is_scand_speaking_crew_on_flight% =
 leg.%is_active_flight% and crew.%is_cabin% and %is_scand_speaking% ;
-
 
 %is_scand_speaking% =
 crew.%has_qln%("LANGUAGE", "SCAND", leg.%start_utc%);
 
-table booked_crew_svs =
-  %product%, %flight_crew% -> %crew_booked_svs%;
-  /* CCT only cares about assigned positions */
-  "CCT", true   -> crew_pos.%total_leg_rostered_fc%;
-  "CCT", false  -> crew_pos.%total_leg_rostered_cc%;
-  &
-      -, true   -> crew_pos.%total_flight_crew_booked%;
-      -, false  -> crew_pos.%total_cabin_crew_booked%;
-end
-
 /* end of file */
-
- 
-
-
-
- 
-
-
-
- 
-
-
-
- 
 
 
