@@ -280,7 +280,6 @@ class ActionTable(TempTable):
         for row in self:
             row.remove()
         if account is not None and ACTION.has_key(account): 
-
             for action in ACTION[account]:
                 row = self.create((id, action))
 
