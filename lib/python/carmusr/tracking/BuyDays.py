@@ -31,7 +31,6 @@ BOUGHT_LABELS = [
         
             'OT comp, C/O on Fday']
 BOUGHT_LABELS_SVS = [
-            'Bought Day Off',
             'Standby',
             'Production',
             'Bought Additional Duty']
@@ -93,8 +92,8 @@ def buy_days(crew_id, start_time, end_time, leg_type, comment="", bought_day_typ
     main_cat, = R.eval('crew.%%main_cat_of_crew_id%%("%s",%s)' % (crew_id, start_time))
     is_cabincrew = main_cat == 'C'
     uname = Names.username()
-
-    row_day_type = get_row_day_type(leg_type,start_time)
+    is_svs = False
+    row_day_type = get_row_day_type(leg_type,is_svs)
     # Cache current existing rows, since we might need to loop through these more than once
     periods_to_merge = {}
     touch_start = None
@@ -191,8 +190,8 @@ def buy_days_svs(crew_id, start_time, end_time, leg_type, comment="",time_hh_sby
     main_cat, = R.eval('crew.%%main_cat_of_crew_id%%("%s",%s)' % (crew_id, start_time))
     is_cabincrew = main_cat == 'C'
     uname = Names.username()
-    
-    row_day_type = get_row_day_type(leg_type,start_time)
+    is_svs=True
+    row_day_type = get_row_day_type(leg_type,is_svs)
     # Cache current existing rows, since we might need to loop through these more than once
     periods_to_merge = {}
     touch_start = None
@@ -347,13 +346,10 @@ def buy_days_svs(crew_id, start_time, end_time, leg_type, comment="",time_hh_sby
             current_row.end_time not in periods_to_merge  # Don't forget to merge end if needed
 
 
-def get_row_day_type(leg_type,start_time):
+def get_row_day_type(leg_type,is_svs):
         # The activity code to save:
-    is_svs, = R.eval(
-        R.selected('levels.leg'),
-        "crew.%%has_agmt_group_svs_at_date%%(%s)" % start_time,
-        )
-    print '##Is SVS##:',is_svs    
+    print("Is SVS:",is_svs)
+    print("leg_type:",leg_type) 
     if is_svs:
         if not leg_type:
             return "F"
@@ -497,7 +493,7 @@ def markDaysAsBought(buy):
         'crew.%has_agmt_group_skd_cc%',
         "system_db_parameters.%%f3_compensation_skd_cc%%(%s)" % start_time,
         )
-    print "  ## eval_result:", eval_result
+    print("## eval_result:", eval_result)
     is_temp, is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, has_agmt_skd_cc, is_f3_valid = eval_result
 
     # for easy dev/test, set to True:
@@ -575,16 +571,17 @@ def markDaysAsBought(buy):
             if "bought_days.%%leg_is_bought_svs%%" and is_active_flightduty:
                 day_bought_duty = True
         
-        print '##Active LEG##:',is_active_flightduty
-        print '##code_duty##:',code_duty
-        print '##code##:',code
-        print '##code_svs##:',code_svs
+        print("Leg is active flight duty:",is_active_flightduty)
+        print("code_duty is:",code_duty)
+        print("code for SK:",code)
+        print("code_svs for Link:",code_svs)
         if is_svs:
             #Buy F days as Standby or Production    
             for (start, code), end in activities_in_period.items():        
                 if flag or day_bought and not is_active_flightduty:
-                    print 'flag:',flag
-                    print 'day_bought:',day_bought
+                    print("flag for Bought Day Off:",flag)
+                    print("day_bought:",day_bought)
+
                     if comment == "":
                         try:
                             if is_svs:
@@ -599,15 +596,28 @@ def markDaysAsBought(buy):
                             "type of operation.", title="No change")
                         return 1
                     else:
-                        if bought_type is "BOUGHT_SBY" and time_hh_sby is "" and  time_mm_sby is "":
+                        print("Type of bought_type",bought_type)
+                        if bought_type is "BOUGHT_SBY" and (time_hh_sby is "" or time_mm_sby is ""):
                             cfhExtensions.show(
-                                "Please enter HH and MM.\n"
+                                "Please enter HH and MM for Standby.\n"
                                 "The current assignment(s) do not permit this\n"
                                 "type of operation.", title="No change")
                             return 1
-                        elif bought_type is "BOUGHT_PROD" and time_hh_prod is "" and  time_mm_prod is "":
+                        elif bought_type is "BOUGHT_PROD" and (time_hh_prod is "" or  time_mm_prod is ""):
                             cfhExtensions.show(
-                                "Please enter HH and MM.\n"
+                                "Please enter HH and MM for Production.\n"
+                                "The current assignment(s) do not permit this\n"
+                                "type of operation.", title="No change")
+                            return 1
+                        elif bought_type is "BOUGHT_SBY" and (time_hh_prod is not "" or  time_mm_prod is not ""):
+                            cfhExtensions.show(
+                                "Please enter HH and MM only for the selected type.\n"
+                                "The current assignment(s) do not permit this\n"
+                                "type of operation.", title="No change")
+                            return 1
+                        elif bought_type is "BOUGHT_PROD" and (time_hh_sby is not "" or  time_mm_sby is not ""):
+                            cfhExtensions.show(
+                                "Please enter HH and MM only for the selected type.\n"
                                 "The current assignment(s) do not permit this\n"
                                 "type of operation.", title="No change")
                             return 1
@@ -624,8 +634,8 @@ def markDaysAsBought(buy):
                 flag = True
             for (start, code_duty), end in activities_in_period.items():
                 if flag or day_bought_duty and is_active_flightduty:
-                    print 'flag:',flag
-                    print 'day_bought_duty:',day_bought_duty
+                    print("flag for Additiona Duty:",flag)
+                    print("day_bought_duty:",day_bought_duty)
                     if comment == "":
                         try:
                             if is_svs:
@@ -639,14 +649,20 @@ def markDaysAsBought(buy):
                             "type of operation.", title="No change")
                         return 1    
                     else:
-                        if bought_type is "BOUGHT_DUTY" and time_hh is "" and  time_mm is "":
+                        if bought_type is "BOUGHT_DUTY" and (time_hh is "" or  time_mm is ""):
                             cfhExtensions.show(
-                                "Please enter HH and MM.\n"
+                                "Please enter HH and MM for Additional Duty.\n"
                                 "The current assignment(s) do not permit this\n"
                                 "type of operation.", title="No change")
                             return 1
+                        elif bought_type is "BOUGHT_DUTY" and (time_hh_sby is not "" or  time_mm_sby is not "" or time_hh_prod is not "" or  time_mm_prod is not ""):
+                            cfhExtensions.show(
+                                "Please enter HH and MM only for the selected Additional Duty.\n"
+                                "The current assignment(s) do not permit this\n"
+                                "type of operation.", title="No change")
+                            return 1    
                         else:
-                            buy_days_svs(crew_id, start, end, code, comment, time_hh_sby, time_mm_sby, time_hh_prod, time_mm_prod, time_hh, time_mm, bought_type, has_agmt_skd_cc, is_f3_valid)
+                            buy_days_svs(crew_id, start, end, code_duty, comment, time_hh_sby, time_mm_sby, time_hh_prod, time_mm_prod, time_hh, time_mm, bought_type, has_agmt_skd_cc, is_f3_valid)
                             no_change = False
         else:
             #For SK it will work as is
@@ -691,7 +707,7 @@ class BuyDayCommentForm(Cfh.Box):
             self.svs_type_label = Cfh.Label(self, "SVS_TYPE_LABEL", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(0, 0)), "Please enter comment:")
             self.comment = Cfh.String(self, "COMMENT", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(1, 0)), 20, "")
             change = True
-            #self.Bought_day_off_label = Cfh.Label(self, "Bought_day_Off", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(2, 0)), "Bought Day Off")
+            self.bought_day_off_label = Cfh.Label(self, "Bought_Day_Off_Label", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(2, 1)), "Bought Day Off as Standby/Production")
             for row in TM.bought_days_svs.search('(crew='+crew_id+')'):
                 if row.start_time == start_time:
                     hr_sby = " "
@@ -725,7 +741,6 @@ class BuyDayCommentForm(Cfh.Box):
                     self.time_hh = Cfh.String(self, "HH_duty", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(6, 9)), 2, hr)
                     self.time_mm = Cfh.String(self, "MM_duty",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(6, 13)), 2, min)
 
-               
                     change = False 
             if change:
                 self.time_hh_sby = Cfh.String(self, "HH_sby", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 9)), 2, " ")
@@ -734,17 +749,14 @@ class BuyDayCommentForm(Cfh.Box):
                 self.time_mm_prod = Cfh.String(self, "MM_prod",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(4, 13)), 2, " ")
                 self.time_hh = Cfh.String(self, "HH_duty", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(6, 9)), 2, " ")
                 self.time_mm = Cfh.String(self, "MM_duty",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(6, 13)), 2, " ")
-        
-            #self.comment_label = Cfh.Label(self, "COMMENT_LABEL", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(0, 0)), "Please enter comment:")
-            #self.comment = Cfh.String(self, "COMMENT", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(1, 0)), 20, "")
-            #self.time_hh = Cfh.String(self, "HH", Cfh.Area(Cfh.Dim(2, 1), Cfh.Loc(4, 6)), 2, "")
-            #self.time_mm = Cfh.String(self, "MM", Cfh.Area(Cfh.Dim(2, 1), Cfh.Loc(4, 10)), 2, "")
+
             self.button_area = Cfh.Area(Cfh.Loc(-1, -1))
             self.ok = CfhCheckDone(self, "OK", self.button_area, "Ok", "_Ok")
 
             num_entries = LBL_COUNT_CC if is_cabin else LBL_COUNT_FD
-            self.bought_type = Cfh.String(self, "Compensation", Cfh.Area(Cfh.Dim(20, num_entries), Cfh.Loc(2, 0)), LBL_MAX_LEN, "Bought")
+            self.bought_type = Cfh.String(self, "Compensation", Cfh.Area(Cfh.Dim(20, num_entries), Cfh.Loc(3, 0)), LBL_MAX_LEN, "Bought")
             bought_type_options_str = "Select;" + ";".join(BOUGHT_LABELS_SVS[:num_entries])
+
             self.bought_type.setMenuString(bought_type_options_str)
             self.bought_type.setStyle(Cfh.CfhSChoiceRadioCol)
 
@@ -800,7 +812,7 @@ class BuyDayCommentForm(Cfh.Box):
             return self.comment.valof(), ACCOUNTS[selected_index]
         elif is_svs:
             selected_index = BOUGHT_LABELS_SVS.index(self.bought_type.getValue())
-            return self.comment.valof(), self.time_hh_sby.valof(), self.time_mm_sby.valof(),self.time_hh_prod.valof(), self.time_mm_prod.valof(),self.time_hh.valof(), self.time_mm.valof(), ACCOUNTS_SVS[selected_index - 1] 
+            return self.comment.valof(), self.time_hh_sby.valof(), self.time_mm_sby.valof(),self.time_hh_prod.valof(), self.time_mm_prod.valof(),self.time_hh.valof(), self.time_mm.valof(), ACCOUNTS_SVS[selected_index] 
         else:
             selected_index = BOUGHT_LABELS.index(self.bought_type.getValue())
 
@@ -810,4 +822,4 @@ class BuyDayCommentForm(Cfh.Box):
 
 
 if __name__ == "__main__":
-    print "BuyDays:: The module is not for running as a standalone file."
+    print("BuyDays:: The module is not for running as a standalone file.")
