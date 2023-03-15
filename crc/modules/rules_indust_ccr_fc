@@ -7,7 +7,7 @@
  *   and as studio only in Carmen Crew Tracking.
  *
  * Sections:
- *   1. Duty rules (1x24, 3x24, 7x24, 4weeks, month)
+ *   1. Duty rules (4weeks, month)
  *   2. Block time rules
  *   3. Rest rules
  *   4. Freeday rules
@@ -35,20 +35,6 @@ import duty_time;
 /****************************************************************
  * Section 1: Duty rules
  ***************************************************************/
-
-/*
-** Rule: Maximum duty time in 7x24 hrs
-**
-** 4ExNG: no longer applies
-*/
-redefine export %r_valid_duty_time_7x24_hrs% =
-  False;
-
-redefine %duty_time_7x24_hrs% =
-  duty_time.%7x24_hrs%;
-
-%duty_time_7x24_hrs_fwd% =
-  roster.%duty_time_in_period%(wop.%start_UTC%, wop.%start_UTC% + 7*24:00, fundamental.%night_upg%, duty.union);
 
 /*
 ** Rule: Maximum duty time in 4 weeks
@@ -128,101 +114,6 @@ redefine %duty_time_calendar_month_until_now% =
                                  fundamental.%night_upg%, 
                                  duty.union);
 
-/*
-** Rule:
-**    Max duty time in 1 calendar month
-**
-** Description:
-**    Check that duty time in a calendar month doesn't exceed the number of
-**    production days in the month x 9:30.
-**
-** Agreement:
-**    FC K11 6.1.5.1 - applies for SKD, SKN and SKS (VG only)
-**
-*/
-
-rule ind_max_duty_time_in_calendar_month_FC =
-  valid roster.%check_rules% and
-        not base_product.%is_tracking% and
-        wop.%in_pp% and
-        wop.%is_last_on_duty_in_pp_start_month% and
-        (crew.%is_skd% or crew.%is_skn% or (crew.%is_sks% and (crew.%in_fixed_group_wop_start% or duty_time.%crew_changes_from_vg_to_fg%)));
-  
-  %duty_time_in_calendar_month% <= %max_duty_time_in_calendar_month% + 
-    rule_exceptions.%overshoot_rel%(wop.%start_utc%);
-  
-  startdate  = wop.%start_utc%;
-  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = wop.%failobject_start%;
-  failtext(Reltime value, Reltime limit) =
-    %ind_max_duty_time_in_calendar_month_FC_failtext%(value,limit);
-  remark "Coll: Max duty time in calendar month (FC K17)",
-  planner "This rule checks that FC SH (excl. SKS VG) are not scheduled more"
-          " than P x 9:30 hours of duty time in a calendar month. For SKN VG the limit is P x 8:48 hours.";
-end
-
-%ind_max_duty_time_in_calendar_month_FC_failtext%(Reltime value, Reltime limit) =
-  rules.%failtext_rel%(format_time(wop.%start_month_start%, "Coll: Duty time %b"),
-           value, limit);
-
-%duty_time_in_calendar_month% =
-  let start_utc = crew.%utc_time%(wop.%start_month_start%),
-      stop_utc = crew.%utc_time%(wop.%start_month_end%);
-
-  (duty_time.%duty_time_agreement_sel%(model_crew.%AGMT_SEL_FG%, wop.%start_month_start%, wop.%start_month_end%) +
-   (if (not crew.%is_passive_plus%(wop.%start_month_start%) and
-        (crew.%is_skd% or crew.%is_skn%)) or
-       (crew.%is_passive_plus%(wop.%start_month_start%) and
-        (crew.%is_homebase_skd%  or crew.%is_homebase_skn%)) then
-      duty_time.%duty_time_agreement_sel%(model_crew.%AGMT_SEL_VG%, wop.%start_month_start%, wop.%start_month_end%) 
-    else
-      0:00)) -
-  duty_time.%passive_plus_reduction%(start_utc,stop_utc);
-  
-  /**
-  * Rule:
-  *   Max 160 duty hours in calendar month for FD SKD & FD SKN & FD SKS (FG only for SKS) 
-  *
-  * Description:
-  *   The rule check that the maximum duty time in calendar month is not exceeded. 
-  *
-  * Agreement:
-  *   SKCMS-2041
-  */
-  export rule engagement_duty_time_in_calendar_month =
-  valid roster.%check_rules% and
-        base_product.%is_rostering% and
-        wop.%start_hb% >= %pp_start% and
-        (crew.%has_agmt_group_skd_fd% or 
-         crew.%has_agmt_group_skn_fd% or 
-       (crew.%has_agmt_group_sks_fd% and crew.%in_fixed_group_wop_start%)) and
-        wop.%is_last_on_duty_in_month%;
-                
-  %engagement_duty_time_calendar_month% <= %engagement_max_in_month% + 
-				rule_exceptions.%overshoot_rel%(wop.%start_UTC%);
-  
-  startdate  = wop.%start_UTC%;
-  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = wop.%failobject_start%;
-  failtext(Reltime value, Reltime limit) =
-    %engagement_duty_time_in_calendar_month_failtext%(value, limit);
-  remark "(CCR) Engagement: Max duty time in calendar month is 160 hrs",
-  planner "The rule check that the maximum duty time in calendar month is not exceeded." 
-          "The rule is valid for FD SKD, SKN and SKS FG crew. The rule is part"
-          " of the engagement initiative and is not part of any union agreement";
-end      
-
-
-
-%engagement_duty_time_calendar_month% = oma16.%duty_time_in_interval_indust_indep%(crew.%utc_time%(wop.%start_month_start%), 
-                                          crew.%utc_time%(wop.%start_month_end%));
-
-%engagement_max_in_month% = 160:00;
-
-%engagement_duty_time_in_calendar_month_failtext%(Reltime value, Reltime limit) =
-  rules.%failtext_rel%(format_time(wop.%start_month_start%, "Engagement: Duty time %b"),
-           value, limit);
-
   /*SKCMS-1796
   /*No early check-in to simulator after day off*/
 export rule ind_training_early_sim_after_day_off =
@@ -252,10 +143,6 @@ end
   rules.%failtext_rel%(format_time(wop.%start_month_start%, "Earliest check-in to sim duty"),
            value, limit);
 
- 
-
- 
- 
  /*SKCMS-1837
  /* Max 2 night simulator sessions in a row*/
 export rule max_night_simulators_in_row =
@@ -308,8 +195,6 @@ count(duty(roster))
 %night_shift_end% = parameter 06:00 remark "Max 2 night simulator sessions in a row, night shift end";
 
 
-
-
 /* SKCMS-1838
 ** Rule:
 **    Earliest check-in at 12.00 after two consecutive night simulator sessions
@@ -349,227 +234,6 @@ end
 %early_checkin_after_consecutive_night_simulator_failtext%(Reltime value, Reltime limit) =
   rules.%failtext_rel%(format_time(wop.%start_month_start%, "No early check-in after two night sim sessions in a row"),
            value, limit);
-
-
-/*
-**  Maximum duty time in calendar month = number of production days x 9:30
-**
-** There can be a problem however in CCR/Matador that e.g. if the first duty
-** assigned exceeds 9:30, it will be considered illegal. To solve this, the
-** number of days that are available for production is used instead of just the
-** number of production days assigned:
-**
-** VG: number of days qualifying as F-days - minimum F-day requirement, or
-**     number of assigned production days, whichever is the greater.
-**
-** FG: F-days, and any other time-off days, are assigned before any production, 
-**     so number of FG-days in month minus number of F/time-off days, or
-**     number of assigned production days, whichever is the greater.
-*/
-
-%max_duty_time_in_calendar_month% =
-  (duty_time.%nr_p_days_fg_in_1_month% +
-   (if (crew.%is_skd% or crew.%is_skn%)
-    then duty_time.%nr_p_days_vg_in_1_month%(pp.%start_month%,pp.%end_month%)
-    else 0)
-  ) * duty_time.%max_duty_time_factor%;
-
-
-/*
-** Rule: 
-**    Maximum duty time in calendar month
-**
-** Description:
-**    The rule checks that the duty time including night upgrade in a 
-**    calendar month is less than the maximum allowed. The period is 
-**    always a calendar month so it is enough to check if the
-**    rule is valid for any period in the month.
-**    According to change request the rule is now valid for both part
-**    time and full time SKS FC, but not 'LA8' parttime.
-**
-**    NB! Assuming only 1 part time change in month
-**
-** Agreement:
-**    FC 13:48
-**
-**    K11: 6.1.5 - applies only for VG, not for FG.
-*/
-export rule ind_max_duty_time_in_calendar_month_FC_SKN_SKL_SKS =
-  valid not system_db_parameters.%k19_160hrs_duty_rule%(duty.%start_hb%) and
-        roster.%check_rules% and
-        %r_valid_duty_time_calendar_month% and
-        wop.%start_hb% >= %pp_start% and
-        wop.%is_last_on_duty_in_month% and
-        not (((not crew.%is_passive_plus%(wop.%start_month_start%) and
-               crew.%is_sks%) or
-              (crew.%is_passive_plus%(wop.%start_month_start%) and
-               crew.%is_homebase_sks%)) and 
-             default(freedays.%parttime_code_wop_start% = "LA8", false)) and
-        /* Just so the parameter will be attached with the rule in the form */ 
-        (%use_100_percent_limit_part_time_SKS_FD_p% or True);
-        
-  %duty_time_calendar_month% <= %max_in_month_wop% + 
-				rule_exceptions.%overshoot_rel%(wop.%start_UTC%);
-        
-  startdate  = wop.%start_UTC%;
-  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_max_duty_time_in_calendar_month_FC_SKN_SKL_SKS_failobject%;
-  failtext(Reltime value, Reltime limit) =
-    %ind_max_duty_time_in_calendar_month_FC_SKN_SKL_SKS_failtext%(value, limit);
-  remark "(CCR) Coll: Max duty time in calendar month [FC SKS]",
-  planner "The rule checks that the maximum duty in calendar month"
-          " is not exceeded."
-          " The rule is valid for SKS FC SH VG crew.";
-end
-  
-%use_100_percent_limit_part_time_SKS_FD_p% =
-  parameter false
-  remark "Use 100 percent limit for part-time SKS FD";  
-  
-%max_in_month_wop% =
-  if %100_percent_limit_for_part_time_SKS_FD% then
-     duty_time.%max_duty_in_month_fc%
-  else
-    duty_time.%max_in_month_wop%;
-    
-%100_percent_limit_for_part_time_SKS_FD% = 
-  crew.%is_sks% and %flight_crew% and 
-  %use_100_percent_limit_part_time_SKS_FD_p% and 
-  not (default(freedays.%parttime_code_wop_start% = "LA8", false));
-  
-%ind_max_duty_time_in_calendar_month_FC_SKN_SKL_SKS_failtext%(Reltime value, Reltime limit) =
-  rules.%failtext_rel%(format_time(wop.%start_month_start%, "Coll: Duty time %b"),
-           value, limit);
-
-%ind_max_duty_time_in_calendar_month_FC_SKN_SKL_SKS_failobject% = 
-  let overshoot = default(rule_exceptions.%overshoot_rel%(wop.%start_UTC%),0:00),
-      month = wop.%start_month_start%,
-      max_in_month = duty_time.%max_in_month_wop%;
-  default(
-          last(leg(wop),
-               prev(leg(chain),
-                    next(leg(chain),leg.%failobject_departure%)) 
-               where(%duty_time_calendar_month_until_now% < max_in_month +
-                     overshoot)) 
-          where(round_down_month(leg.%start_hb%) = month),
-          wop.%failobject_start%);    
-
-/*
-** Rule: 
-**    Maximum duty time in calendar month for SKS crew with la8
-**
-** Description:
-**    The rule checks that the duty time including night upgrade in a 
-**    calendar month is less than the maximum allowed. The period is 
-**    always a calendar month so it is enough to check if the rule is 
-**    valid for any period in the month.
-**    As opposed to "(CCR) Coll: Max duty time in calendar month" this
-**    rule handles crew with parttime according to swedish law.
-**
-**    NB! Assuming only 1 part time change in month
-**
-** Agreement:
-**
-**
-**
-*/
-export rule ind_max_duty_time_in_calendar_month_LA8_FC_SKS =
-  valid not system_db_parameters.%k19_160hrs_duty_rule%(wop.%start_hb%) and
-        roster.%check_rules% and
-        wop.%start_hb% >= %pp_start% and
-        ((not crew.%is_passive_plus%(%contract_or_month_start_hb%) and
-          crew.%is_sks%) or
-         (crew.%is_passive_plus%(%contract_or_month_start_hb%) and 
-          crew.%is_homebase_sks%)) and
-        (crew.%in_variable_group_wop_start%) and
-        crew.%has_some_part_time_in_month% and
-        (wop.%is_last_on_duty_in_month% and
-         %crew_has_la8_contract_wop_start% or
-         %last_wop_with_la8_contract%);
-        
-  %duty_time_calendar_month_LA8% <= %max_in_month_la8% + 
-				rule_exceptions.%overshoot_rel%(wop.%start_UTC%);
-        
-  startdate  = wop.%start_UTC%;
-  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_max_duty_time_in_calendar_month_LA8_FC_SKS_failobject%;
-  failtext(Reltime value, Reltime limit) =
-    %ind_max_duty_time_in_calendar_month_LA8_FC_SKS_failtext%(value, limit);
-  remark "Coll: Max duty time in calendar month [FC SKS LA8]",
-  planner "The rule checks that the maxmimum duty in calendar month"
-          " is not exceeded. The rule is valid for SKS FC SH VG crew,"
-          " who have part time code LA8 contracts.";
-end
-
-/* Crew can change group anywhere in month, but only
-** the time with La8 contract should be counted. Crew could however
-** change from VG->FG or vice versa but still be on LA8 contract.
-** Check is now done by checking if crew changes contract or it is the last
-** wop with LA8 contract in month*/
-
-%max_in_month_la8% =
-  if crew.%in_fixed_group%(%contract_or_month_start_hb%) then
-    duty_time.%nr_available_days_in_period_fg%(%contract_or_month_start_hb%, 
-                                               %contract_or_month_end_hb%) * 9:30
-  else
-    duty_time.%max_duty_in_month_fc_pt_vg%;
-
-%crew_has_la8_contract_wop_start% =
-  default(freedays.%parttime_code_wop_start% = "LA8", false); 
-
-%last_wop_with_la8_contract% =
-  let contract_end = %contract_or_month_end_utc%;
-  %crew_has_la8_contract_wop_start% and
-  default(next(wop(chain), wop.%start_day% > contract_end)
-          where(wop.%is_on_duty%), false);
-
-/* Max of either start of month or the start of the current contract based on the 
-** current WOP. It is assumed that crew never changes contract in the 
-** middle of a WOP.*/
-%contract_or_month_start_utc% =
-  crew.%utc_time%(nmax(crew.%agreement_at_date_valid_from%(wop.%start_hb%), 
-                       wop.%start_month_start%));
-  
-%contract_or_month_start_hb% =
-  nmax(crew.%agreement_at_date_valid_from%(wop.%start_hb%), 
-                       wop.%start_month_start%);
-
-/* Minimum of either end of month or end of current contract */  
-%contract_or_month_end_utc% =
-  crew.%utc_time%(nmin(crew.%agreement_at_date_valid_to%(wop.%start_hb%),
-                       wop.%start_month_end%));
-  
-%contract_or_month_end_hb% =
-  nmin(crew.%agreement_at_date_valid_to%(wop.%start_hb%),
-                       wop.%start_month_end%);
-    
-
-%duty_time_calendar_month_LA8% =
-  roster.%duty_time_in_period%(%contract_or_month_start_utc%, 
-                                %contract_or_month_end_utc%, 
-                                fundamental.%night_upg%, 
-                                duty.union) -
-  duty_time.%passive_plus_reduction%(%contract_or_month_start_utc%, 
-                                     %contract_or_month_end_utc%);
-
-%ind_max_duty_time_in_calendar_month_LA8_FC_SKS_failtext%(Reltime value, Reltime limit) =
-  rules.%failtext_rel%(format_time(wop.%start_month_start%, "Coll: Duty time in month %b"),
-           value, limit);
-
-%ind_max_duty_time_in_calendar_month_LA8_FC_SKS_failobject% = 
-  let overshoot = default(rule_exceptions.%overshoot_rel%(wop.%start_UTC%),0:00),
-      month = wop.%start_month_start%,
-      check_start = %contract_or_month_start_utc%,
-      max_in_month = %max_in_month_la8% + overshoot;
-  default(
-          last(leg(wop),
-               prev(leg(chain),
-                    next(leg(chain),leg.%failobject_departure%)) 
-               where(roster.%duty_time_in_period%(check_start, leg.%co_end_utc%, 
-                                                  fundamental.%night_upg%, 
-                                                  duty.union) < max_in_month)) 
-          where(round_down_month(leg.%start_hb%) = month),
-          wop.%failobject_start%);
 
 /*
 ** Rule: No duty same day when check out later than 0200
@@ -667,267 +331,96 @@ end
 %max_working_days_when_pilot_edu_night% = 3;
 
 /*
-** Rule: Maximum number of night duties in a working period
-*/
-redefine %r_valid_max_night_duties_in_wop% = true;
-redefine %check_consecutive_nights% = true;
-/* Rule depends on the fact that the max number of consecutive night duties <= max number of night duties + 1 */
-redefine %max_night_duties% = 3;
-redefine %max_consecutive_night_duties% = 2;
-
-
-/*
 ** Rule: 
-**    C/O last day must no be offset more than max +12hours, compared to C/I 
-**    first days.
+**    Maximum number of night duties in a working period
 **
 ** Description:
-**    Check that C/O time is less than 12 h after C/I time irrespecrtivly of 
-**    no of days in wop.
-**    Rule only valid in Rostering, not in tracking, correspding rule exists 
-**    in pairing
-**    Rule is only valid for SH FD
-**    Rule is only valid for flight duty, this includes SB and SIM duty like 
-**    PC/OPC.
-**    BL is counted as flight when inside a production block
-**    Rule is not valid when crew is on course, except flight duty like LIFUS.
+**    Check that maximum number of night duties between time-off period,
+**    (for CCR = inside working period) as well as number of consecutive night 
+**    duties is not exceeded. Night duty is defined as any duty 
+**    touching the time interval 0000-0500 (FCSH).
 **
-** Agreement: SKCMS-494
-*/
-rule ind_min_offset_ci_co_vg_FC =
-  valid %ind_min_offset_ci_co_vg_FC_valid%;
-	%co_time_not_zero% <= %ci_time_at_co_day_plus_offset% + 
-                      rule_exceptions.%overshoot_rel%(trip.%start_utc%);
-
-  startdate = wop.%start_UTC%;
-  failobject = wop.%failobject_start%;
-  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failtext(Abstime val, Abstime limit) = 
-    rules.%failtext_abs%("CO too late, must be CI in for first wop + offset",val, limit);
-  remark "C/O of last leg in wop must be C/I of first leg in wop + offset",
-  planner "This rule is valid for SH FD when number of days in wop are the same or more than parameter %ci_co_offset_p%. "
-  "It is not valid if the WOP consists of SBYs only, or if the WOP ends with a SBY. "
-  "If the WOP ends with a SBY and the offset is exceeded, then a cost calculation is applied in stead.  (Stability: 3.24)"
-  "Time for C/O last day in wop, may not be offset more than given in parameter %ci_co_min_length_of_wop_p%, compared to C/I for first day in wop. "
-  "Flight, SIM (which are flight duties) and SB counts as flight days. BL counts as flight days when inside a flight block.";
-end
-
-/**
-** SKCMS-1033
-**/
-
-rule ind_min_offset_ci_co_fg_FC =
-    valid
-        %ind_min_offset_ci_co_fg_FC_valid%;
-
-        rules_indust_ccr.%time_of_day_wop_end_hb_not_zero% <= time_of_day(%first_wop_in_production_block_start_hb%) +
-                        %ci_co_offset_p% + rule_exceptions.%overshoot_rel%(wop.%start_hb%);
-
-  startdate = wop.%start_hb%;
-  failobject = wop.%failobject_start%;
-  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failtext(Reltime val, Reltime limit) = 
-    rules.%failtext_rel%("CO too late, must be CI in for first wop in production block + offset",val, limit);
-  remark "C/O of last leg in wop must be C/I of first leg in production block in wop + offset",
-  planner "This rule is valid for SH FD fixed group when number of days in wop are the same or more than parameter %ci_co_offset_p%. "
-  "It is not valid if the WOP consists of SBYs only, or if the WOP ends with a SBY. "
-  "If the WOP ends with a SBY and the offset is exceeded, then a cost calculation is applied in stead.  (Stability: 3.24)"
-  "Time for C/O last day in wop, may not be offset more than given in parameter %ci_co_min_length_of_wop_p%, compared to C/I for first day in wop. "
-  "Flight, SIM (which are flight duties) and SB counts as flight days. BL counts as flight days when inside a flight block.";
-
-end
-
-%days_from_ci_to_co% =
-  let d = round_down(wop.%end_hb%, 24:00),
-      e = if d=wop.%end_hb% then d-24:00 else d;
-  (e - round_down(%first_wop_in_production_block_start_hb%, 24:00))/24:00 +1;
-
-
-%ind_min_offset_ci_co_vg_FC_valid% =
-  not base_product.%is_tracking% 
-        and trip.%check_rules%
-	and crew.%in_variable_group%(wop.%start_hb%)
-        and is_first(trip(wop) where (trip.%has_flight_duty% or trip.%is_training% or trip.%is_meeting% or trip.%is_office_duty%))
-        and is_first(trip(wop))
-        and not wop.%is_standby% 
-        and not wop.%ends_with_standby%
-        and not wop.%ends_with_ground_duty% 
-        and not wop.%ends_with_simulator% 
-        and wop.%in_pp_extended%
-        and crew.%has_agmt_group_sk_sh_fd%
-        and not wop.%is_employer_qa%
-        and wop.%days% >= %ci_co_min_length_of_wop_p%
-        and not %wop_starts_or_ends_with_blank%
-        and %wop_consists_of_specified_activities%;
-  
-%ind_min_offset_ci_co_fg_FC_valid% =
-  not base_product.%is_tracking%
-    and roster.%check_rules%
-    and crew.%in_fixed_group%(wop.%start_hb%)
-    and crew.%has_agmt_group_sk_sh_fd%
-    and not wop.%is_employer_qa%
-    and wop.%in_pp_extended%
-    and %is_last_prod_wop_in_this_FG_production_block%
-    and not wop.%is_standby%
-    and not wop.%ends_with_standby%
-    and not wop.%ends_with_ground_duty%
-    and not wop.%ends_with_simulator%
-    and not wop.%ends_with_blank%
-    and not %first_wop_in_production_block_starts_with_blank%
-    and %days_from_ci_to_co% >= %ci_co_min_length_of_wop_p%
-    and %all_wop_in_proction_block_consists_of_specified_activities%;
-  
-export %first_wop_in_production_block_start_hb% = 
-    let actual_wop_start_hb = wop.%start_hb%;
-    first(wop(chain),wop.%start_hb%)
-                      where (wop.%start_hb%>=crew.%activity_block_start%(actual_wop_start_hb+0:01));
-
-                                    
-%all_wop_in_proction_block_consists_of_specified_activities% =
-    let bl_start = crew.%activity_block_start%(wop.%start_hb%),
-        bl_end = crew.%activity_block_end%(wop.%start_hb%)+24:00;
-    all(wop(chain),%wop_consists_of_specified_activities%)
-    where (wop.%start_hb% >= bl_start and wop.%end_hb% <= bl_end);
-                      
-%_first_wop_in_production_block_starts_with_blank%(Abstime start_date)=
-    first(leg(wop),leg.%is_blank_day%)
-              where (leg.%ci_start_hb% = start_date);
-
-export %first_wop_in_production_block_starts_with_blank% =
-   let start_date = %first_wop_in_production_block_start_hb%;
-   default(%_first_wop_in_production_block_starts_with_blank%(start_date), /* when single wop in prod block */
-           default(prev(wop(chain), %_first_wop_in_production_block_starts_with_blank%(start_date)), /* when last of two blocks in prod block */
-                False)); /* when more than 2 wops in prod block, should not occur */
- 
-export %is_last_prod_wop_in_this_FG_production_block% =
-   let next_on_duty_wop_start_hb = default( next(wop(chain),round_down(wop.%start_hb%, 24:00)) where(wop.%is_on_duty%), %END_OF_TIME%);
-   if crew.%in_production_block%(wop.%start_hb%) and wop.%is_on_duty% then
-      (crew.%last_date_in_prod_block%(wop.%end_hb%-0:01) = round_down(wop.%end_hb%, 24:00)) or
-      (crew.%last_date_in_prod_block%(wop.%end_hb%-0:01) < next_on_duty_wop_start_hb )
-   else
-      false;
-
-%wop_consists_of_specified_activities% =
-  if parameters.%K15_SKCMS_742_DEC15%(wop.%start_UTC%) then
-    %wop_consists_of_flt_duties_sim_bl_ground_and_sb%
-  else
-    %wop_consists_of_flt_duties_sim_bl_and_sb%;
-
-%wop_starts_or_ends_with_blank% = 
-(first(leg(wop),leg.%is_blank_day%)) or (last(leg(wop),leg.%is_blank_day%));
-
-%trip_consists_of_flt_duties_sim_bl_and_sb% =not (not trip.%has_only_flight_duty% and not trip.%is_blank_day% and not trip.%is_pc_or_opc% and not trip.%is_ast% and not trip.%is_asf%);
-
-/* trip.has_only_flight_duty uses leg.%is_considered_as_flight_duty% */
-%wop_consists_of_flt_duties_sim_bl_and_sb% =not any(trip(wop), not trip.%has_only_flight_duty% and not trip.%is_blank_day% and not trip.%is_pc_or_opc% and not trip.%is_ast% and not trip.%is_asf%);
-
-/* AFter K15 ground duties are added as well */
-%wop_consists_of_flt_duties_sim_bl_ground_and_sb% =not any(trip(wop), not trip.%has_only_flight_duty% and not trip.%is_blank_day% and not trip.%is_pc_or_opc% and not trip.%is_ast% and not trip.%is_asf% and not trip.%is_ground_duty%);
-
-
-
-redefine export %ci_time_at_co_day_plus_offset% = %co_time_not_zero% -time_of_day(%co_time_not_zero%) + time_of_day(%ci_time%) + %ci_co_offset_p%;
-                                  
-%_co_time_not_zero% =
-  last(trip(wop), trip.%end_hb%) where (trip.%has_flight_duty%);
-
-redefine export %co_time_not_zero% =
-  if time_of_day(%_co_time_not_zero%)=0:00 then %_co_time_not_zero% - 0:01
-  else %_co_time_not_zero%;
-
-%ci_time% = first(trip(wop),trip.%start_hb%) where (trip.%has_flight_duty% or trip.%is_training% or trip.%is_meeting% or trip.%is_office_duty%);
-
-
-/*
-  Calculates how much time the (12h) offset is exceeded by.
-  Used in roster_costs
-*/
-redefine export %wop_overshoot_12h_offset% =
-    let overshoot = %co_time_not_zero% - %ci_time_at_co_day_plus_offset%;
-    if overshoot > 0:00 then
-        overshoot
-    else
-        0:00;
-
-
-
-
-/*
-** Rule:
-**    Max SubQ dutyhours in rolling 7 calendar days.
-**
-** Description:
-**    Check that a pilot is not scheduled more than 47:30 hours
-**    in any consecutive 7 calendar days.
+**    NB! Two implementations are done. One in Pairing checking
+**    inside trips and one in Rostering checking inside working period.
 **
 ** Agreement:
-**    GM 6.1.5.1 A (Short haul pilots).
+**    FC 1:17 2.3Ac
+**    CAU K06 C.1.1.4
+**    NKF/SBK 8.2
+**    4ExNG - no longer applies
 **
-** NB! The same rule exists in rules_indust_ccp_fc
 */
-
-rule ind_subq_duty_time_in_7x24_all =
+/* Depends on the fact that the max number of consecutive night duties <= max number of night duties + 1 */
+export rule ind_max_night_duties_in_working_period_FC =
   valid roster.%check_rules% and
-        not %is_trip% and
-        not trip.%is_ski% and
-        not trip.%is_skd% and
-        not ((trip.%is_sks% or trip.%is_skn%) and %agreement_valid%("7x24_fd_sks", trip.%start_UTC%)) and
-        duty.%in_pp% and
-        duty_period.%is_on_duty%;
+        crew.%is_short_haul_trip_start% and
+        trip.%in_pp_extended% and
+        trip.%is_night_duty% and
+        not training.%trip_is_in_school_period_min_7x24% and
+        rule_exceptions.%rule_on%(duty.%start_UTC%) and 
+        is_last(duty(trip)) where (duty.%is_night_duty%);
         
-  %duty_time_7x24% <= %max_duty_time_in_7x24% -
-                              %p_buffer_max_duty_time_7x24% +
-                              rule_exceptions.%overshoot_rel%(duty.%start_utc%);
-                              
+  %nr_night_duties% <= %max_night_duties% + 
+		       rule_exceptions.%overshoot_int%(duty.%start_UTC%) and
+  (%nr_consecutive_night_duties% <= %max_consecutive_night_duties% + rule_exceptions.%overshoot_int%(duty.%start_UTC%));
+  
   startdate  = duty.%start_UTC%;
   severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_subq_duty_time_in_7x24_all_failobject%;
-  failtext(Reltime value, Reltime limit) =
-    rules.%failtext_rel%("Coll: Max duty time 7x24", value, limit);
-  remark "(CCR) Coll: Max duty time 7x24",
-  planner "This rule checks that a short-haul pilot is not scheduled more "
-          " then 47:30 hours of subq duty time in any 7 calendar days";
+  failobject = %ind_max_night_duties_in_working_period_FC_failobject%;
+  failtext %max_night_duties_failtext%;
+  remark "(CCR) Coll: Max night duties in working period",
+  planner "The rule checks that the maximum number of, as well as the"
+	        " maximum consecutive night duties is not exceeded."
+          " A duty is at night if it touches the interval FCSH: (00:00,05:00),"
+          " The rule is valid for FC, with limits: max 3 nights total and max 2 consecutive for FCSH";
 end
 
-%duty_time_7x24% =
-  /* If duty spans midnight we must check from both duty start day AND end day */
-  if duty.%start_day% <> duty.%end_day% then
-    nmax(duty_time.%7x24_hrs_in_period%(add_weeks(duty.%end_day_hb_utc%, -1),
-                                        duty.%end_day_hb_utc%, 
-                                        false, 
-                                        duty.union),
-         duty_time.%7x24_hrs_in_period%(add_weeks(duty.%end_day_hb_utc% + 24:00, -1),
-                                        duty.%end_day_hb_utc% + 24:00, 
-                                        false, 
-                                        duty.union))
+%ind_max_night_duties_in_working_period_FC_failobject% =
+  let overshoot = rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+  
+  if %nr_night_duties_until_now% = %max_night_duties% + overshoot + 1 or
+     (%nr_consecutive_night_duties% = %max_consecutive_night_duties% + overshoot + 1) then
+        duty.%failobject_start%
   else
-    duty_time.%7x24_hrs_in_period%(add_weeks(duty.%end_day_hb_utc% + 24:00, -1),
-                                   duty.%end_day_hb_utc% + 24:00, 
-                                   false, 
-                                   duty.union);
+    prev(duty(trip), duty.%failobject_start%)
+    where(%nr_night_duties_until_now% = %max_night_duties% + overshoot + 1 or
+          (%nr_consecutive_night_duties% = %max_consecutive_night_duties% + overshoot + 1));
+/* Rule depends on the fact that the max number of consecutive night duties <= max number of night duties + 1 */
 
-%ind_subq_duty_time_in_7x24_all_failobject% = 
-  default(%_ind_subq_duty_time_in_7x24_all_failobject%, duty.%failobject_start%);
+%max_night_duties% = 
+    parameter 3
+    remark "CCR: Max night duties in working period limit";
+%max_consecutive_night_duties% = 
+    parameter 2
+    remark "CCR: Max consecutive night duties in working period limit";
 
-%_ind_subq_duty_time_in_7x24_all_failobject% =
-  let limit =  %max_duty_time_in_7x24% -
-               %p_buffer_max_duty_time_7x24% +
-               default(rule_exceptions.%overshoot_rel%(duty.%start_utc%), 0:00);
-  if duty.%start_day% = duty.%end_day% then
-    first(leg(duty), leg.%failobject_departure%) 
-    where (duty_time.%7x24_hrs_in_period%(add_weeks(duty.%end_day_hb_utc% + 24:00, -1), 
-                                          leg.%co_end_utc%, 
-                                          false, 
-                                          duty.union) 
-           > limit)
+%max_night_duties_failtext% =
+  if  %nr_consecutive_night_duties%>%max_consecutive_night_duties% then
+      rules.%failtext_int%("Coll: Cons. night duties",
+                           %nr_consecutive_night_duties%, 
+                           %max_consecutive_night_duties%)
   else
-    first(leg(duty), leg.%failobject_departure%)
-    where(duty_time.%7x24_hrs_in_period%(
-            add_weeks(leg.%start_day_hb_utc%(leg.%homeairport%, leg.%start_utc%) + 24:00, -1),
-            nmin(leg.%start_day_hb_utc%(leg.%homeairport%, leg.%start_utc%) + 24:00,
-                 leg.%co_end_utc%), false, duty.union) >= limit);
+      rules.%failtext_int%("Coll: Night duties",%nr_night_duties%, 
+                           %max_night_duties%);
 
-%max_duty_time_in_7x24% = 47:30;
+%nr_night_duties% = 
+  count(duty(wop)) 
+  where (%valid_night_duty% and not duty.%is_bought%);
+  
+%nr_night_duties_until_now% =
+  count(duty(wop))
+  from(first) to(current)
+  where (%valid_night_duty%);
+  
+%valid_night_duty% =
+  not duty.%is_blank_day% and
+  duty.%is_night_duty% and
+  not duty.%is_long_haul%;
+
+%nr_consecutive_night_duties% =
+  count(duty(wop))
+  from (current) backwards
+  while (%valid_night_duty% and not duty.%is_bought%);
 
 /*
 ** Rule:
@@ -1029,9 +522,7 @@ end
 %ind_max_block_time_in_3_months_FC_failtext%(Reltime value, Reltime limit) =
   let start_month = format_time(add_months(trip.%start_month_start%, -2), "%02d%b");
   rules.%failtext_rel%(concat("Coll: BLH 3 months ", start_month, "->"), value, limit);
-  
 
-                                                      
 /*
 ** Rule: Max block time in 12 calendar months
 **
@@ -1083,55 +574,6 @@ end
   
 %limit_block_time_12_months% = 900:00;
 
-/*
-** Rule:
-**    4 production days followed by 2 freedays should only occur a limited number of times
-**
-** Description:
-**    The rule checks that 4 production days followed by 2 freedays does not occur
-**    more times than allowed per month. The limit is configurable through parameters.
-**    The period consisting the 4+2 days should belong to the month where the second
-**    freeday occurs. E.g If the 4 production days are placed between the dates
-**    26-29 September in a month, and the freedays are  placed on 30 September and
-**    1 October, this 4P+2F period belongs to October.
-**    Only the planning month is checked by this rule. Empty days are also regarded
-**    as freedays in the case of this rule.
-**
-** Agreement:
-**     K17
-**
-** Valid for:
-**     FD variable groups for SKD, SKN, SKS (an almost identical rule also exists for CC)
-**
-** Note:
-**     * The rule only checks wops from pp_start and one month forward,
-**       so it is assumed that pp_start equals the 1st of a month.
-**     * A 4p2f that ends the last day of the month is always counted as a 4p2f,
-**       no matter if the next month starts with a production day or not.
-*/
-
-rule ind_max_4P_followed_by_2F_per_month_FC =
-  valid %ind_max_4P_followed_by_2F_per_month_valid_4P_wop%;
-  %nr_4P_followed_by_2F_in_planning_month_until_wop_end%
-    <= (if crew.%has_agmt_group_skd_fd% then %max_nr_4P_followed_by_2F_per_month_SKD_FD% else
-        if crew.%has_agmt_group_skn_fd% then %max_nr_4P_followed_by_2F_per_month_SKN_FD% else
-        if crew.%has_agmt_group_sks_fd% then %max_nr_4P_followed_by_2F_per_month_SKS_FD% else
-        void(int)) +
-        rule_exceptions.%overshoot_int%(wop.%start_utc%);
-
-  startdate = wop.%start_utc%;
-  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%, %duty_lh_region%));
-  failobject = wop.%failobject_start%;
-  failtext(Int value, Int limit) = rules.%failtext_int%("Coll: 4P followed by 2F (per month)", value, limit);
-  remark "(CCR) Coll: Working periods of 4P followed by 2F must not occur too often per month.",
-  planner "4 production days followed by 2 freedays should occur a limited number of times in a month."
-          " The period consisting the 4+2 days should belong to the month where the second freeday occurs.";
-end
-
-%max_nr_4P_followed_by_2F_per_month_SKD_FD% = parameter 6 minvalue 0 maxvalue 6 remark "Max 4P+2F limit for SKD FD";
-%max_nr_4P_followed_by_2F_per_month_SKN_FD% = parameter 2 minvalue 0 maxvalue 6 remark "Max 4P+2F limit for SKN FD";
-%max_nr_4P_followed_by_2F_per_month_SKS_FD% = parameter 6 minvalue 0 maxvalue 6 remark "Max 4P+2F limit for SKS FD";
-
 /****************************************************************
  * Section 3: Rest rules
  ***************************************************************/
@@ -1147,53 +589,6 @@ redefine %r_valid_night_rest_surrounding_short_stop% =
   and not trip.%is_rest% 
   and not trip.%is_bought%;
 
-/*
-** Rule:
-**    No split duties 
-**
-** Description:
-**    The rule checks that split duty according to the Subpart Q definition
-**    is not assigned:
-**
-**    1) Before K11 for SKN FC
-**
-**    2) After K11 for SKD/SKN/SKS FC at homebase
-**
-**    It is necessary because FC SH after K11 no longer have any union rules 
-**    for minimum rest, and Subpart Q allows split duty at homebase,
-**    but the FC unions don't want it!
-**
-**    NB! A separate rule in rules_indust_ccp_fc checks for split duty after
-**    a duty period, but this CCR version is needed to prevent Matador
-**    assigning two trips with split duty between them.
-**
-** Agreement:
-**    OSL 6.1.5 (CR 306)
-**    K11 FC SH SKD/SKN/SKS 6.1.8
-*/
-
-rule ind_no_split_duty_after_trip_fc =
-  valid trip.%check_rules%
-        and not trip.%is_ski%
-        and duty.%arrives_at_homebase% 
-        and trip.%in_pp%
-        and trip.%is_on_duty% 
-        and not is_last(trip(wop)) 
-        and not last(duty(trip),duty.%is_split_duty_exception%) 
-        and rule_exceptions.%rule_on%(trip.%end_utc%);
-
-  not (duty_period.%is_split% and duty_period.%is_first_duty_in_duty_period%);
-  
-  startdate = trip.%end_utc%;
-  severity =  first(leg(trip), %severity_filter_int%(leg.%start_utc%,%duty_lh_region%));
-  failobject = next(trip(roster), trip.%failobject_start%);
-  failtext "Coll: Split duty - Not Allowed";
-  remark "Coll: No split duties after trip",
-  planner "The rule checks before K11 that no split duty according to OMA16 " 
-          " is scheduled for SKN FC, or after K11 that no split duty is"
-          " scheduled for SKD/SKN/SKS FC at homebase";
-end
-  
 /****************************************************************
  * Section 4: Freeday rules
  ***************************************************************/
@@ -1206,12 +601,6 @@ redefine export %crew_may_have_f36% = False;
 redefine export %r_valid_freedays_in_1_month% =
   freedays.%r_valid_freedays_in_1_month% and
   not training.%month_is_in_school_period_min_7x24%;
-
-redefine %r_valid_freedays_in_2_months% =
-  (crew.%has_some_part_time_in_month% or
-   not freedays.%gm_agreement_valid%(wop.%start_day%)) and
-  crew.%is_short_haul_wop_start% and
-  not crew.%is_fdrc_wop_start%;
 
 /*
 ** Rule: Min freedays before/around vacation
@@ -1352,201 +741,6 @@ export rule ind_early_duty_day_after_late_check_out_FC_ALL =
 end
 
 %p_check_in_time_limit_after_night_duty_fc_all% = parameter 07:00 remark "(CCR) Earliest check-in day after night duty.";
-
-
-/*
-** Rule:
-**    Min number of parttime freedays in calendar month.
-**
-** Description:
-**    Checks that FC SH VG parttime crew is scheduled at least the minimum i
-**    number of free days required in a calendar month. This is according to
-**    nr available days and part time factor.
-**    Calculation algorithms differs from ordinary algorithm mainly
-**    because part_time_freedays are not reduced in relation to qualifying days,
-**    They do however themselves reduce ordinary freedays.
-**
-** Agreement:
-**    FC 1:18 2.5c, 13:46 8
-*/
-rule ind_min_pt_freedays_in_1_month_FC_ALL =
-  valid roster.%check_rules% and
-        (wop.%start_hb% >= %pp_start% or /*overlap pp_start */
-         (wop.%start_hb% <= %pp_start% and wop.%end_hb% > %pp_start%)) and
-        wop.%is_last_on_duty_in_month% and
-        wop.%start_month_start% = %pp_start% and
-        crew.%has_some_variable_group_in_publ% and
-        crew.%has_some_part_time_in_month% and
-        not training.%month_is_in_school_period_min_7x24% and
-        not crew.%is_leased_wop_start%;
-
-  freedays.%possible_pt_freedays_1_month_pp% >= freedays.%required_pt_freedays_1_month_pp% - 
-				         rule_exceptions.%overshoot_int%(wop.%start_UTC%);
-                 
-  startdate  = wop.%start_UTC%;
-  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = wop.%failobject_start%;
-  failtext(Int value, Int limit) = 
-    rules.%failtext_int%(format_time(wop.%start_month_start%,
-                                     "Coll: Parttime F-days %b"),
-                                     value,limit);
-  remark "(CCR) Coll: Min parttime freedays in month.",
-  planner "Checks that VG crew are scheduled at least the "
-          "minimum number of parttime freedays required in a calendar month.";
-end
-
-
-/*
-** Rule:
-**    Min number of parttime freedays in 2 months
-**
-** Description:
-**    Check that VG crew is scheduled at least the minimum number of parttime freedays 
-**    required in 2 months according to nr available days and part time factor.
-**
-** NB! K11 - applies only for SKI
-**
-** Agreement:
-**    FC 1:18 2.5c
-*/
-
-rule ind_min_pt_freedays_in_2_months_FC_ALL =
-  valid roster.%check_rules% and
-        crew.%is_ski%  and
-        wop.%start_month_start% >= %pp_start% and
-        wop.%is_last_on_duty_in_month% and
-        crew.%has_some_variable_group_in_month% and
-        crew.%has_some_part_time_in_month% and
-        not crew.%is_leased_wop_start% and 
-        %r_valid_pt_freedays_in_2_months%;
-        
-  freedays.%possible_pt_freedays_2_months% >= freedays.%min_required_pt_freedays_2_months% - 
-					  rule_exceptions.%overshoot_int%(wop.%start_UTC%);
-            
-  startdate  = wop.%start_UTC%;
-  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = wop.%failobject_start%;
-  failtext(Int value, Int limit) = 
-    rules.%failtext_int%(concat("Coll: Parttime F-days ",
-                                format_time(freedays.%prev_month_start%, "%b-"),
-                                format_time(wop.%start_month_start%, "%b")),
-                          value,limit);
-  remark "Coll: Min parttime freedays in 2 months",
-  planner "";
-end
-
-%r_valid_pt_freedays_in_2_months% = 
-  fundamental.%even_month_by_month_start%(wop.%start_month_start%);
-
-/*
-** Rule:
-**   Min number of freedays in quarter for FC SKN
-** Description:
-**    Check that VG crew is scheduled at least the minimum number of freedays 
-**    required in a quarter according to nr available days and part time factor.
-**
-**    NB. K11: applies also for SKD/SKS
-**        K12: doesn't apply for 'Passive +'
-**
-** Agreement:
-**
-**    K11 6.9.1
-*/
-
-export rule ind_min_freedays_in_quarter_FC_SKN =
-  valid roster.%check_rules% and
-        not crew.%is_leased_wop_start% and
-        not crew.%is_passive_plus%(wop.%start_month_start%) and
-        (crew.%is_skn% or crew.%is_skd% or crew.%is_sks%) and
-        wop.%is_last_on_duty_in_quarter% and
-        wop.%start_month_start% >= %pp_start% and
-        %some_vg_pre_fdc15%;
-  freedays.%nr_qualifying_in_3_months% >= freedays.%min_required_in_3_months% - 
-					  rule_exceptions.%overshoot_int%(wop.%start_UTC%);
-  startdate  = wop.%start_UTC%;
-  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_min_freedays_in_quarter_SKN_failobject%;
-  failtext(Int value, Int limit) = 
-    rules.%failtext_int%("Coll: F-days in quarter", value, limit);
-  remark "(CCR) Coll: Min freedays in quarter",
-  planner "";
-end
-
-%ind_min_freedays_in_quarter_SKN_failobject% = 
-  let month = wop.%start_month_start%,
-      overshoot = default(rule_exceptions.%overshoot_int%(wop.%start_UTC%),0);
-  last(duty(wop),
-       if (sum(duty(chain),trip.%days_in_period%(duty.%start_day%,
-                                                 duty.%start_month_end%) -
-                     (if(duty.%start_day% = prev(duty(chain),duty.%end_day%)) then 1 else 0))
-              from (current) forwards while (duty.%start_month_start% = month) where
-              (%_duty_can_make_freeday%) >=
-                  freedays.%min_required_in_quarter%(wop.%start_utc%) - 
-                  freedays.%nr_qualifying_in_3_months% -
-                  overshoot) then
-    duty.%failobject_start% 
-  else
-    prev(duty(chain),duty.%failobject_start%) where
-       (sum(duty(chain),trip.%days_in_period%(duty.%start_day%,
-                                              duty.%start_month_end%) -
-                  (if(duty.%start_day% = prev(duty(chain),duty.%end_day%)) then 1 else 0))
-              from (current) forwards while (duty.%start_month_start% = month) where
-              (%_duty_can_make_freeday%) >=
-                  freedays.%min_required_in_quarter%(wop.%start_utc%) - 
-                  freedays.%nr_qualifying_in_3_months% -
-                  overshoot)) where
-  (duty.%start_month_start% = month);
-
-/* Rule:
-**   Maximum one FS block in month
-**
-** Description:
-**   This rule checks that there are no more than one FS block in a  
-**   calendar month.
-**
-**   E.g. FS, FS or FS,FS,FS,FS on e.g. 30May-02June
-*/
-
-export rule (off) ind_max_fs_blocks_in_month_FC =
-  valid roster.%check_rules% and
-        not crew.%is_leased_trip_start% and
-        trip.%is_fs% and
-        %is_last_fs_trip_in_month% and
-        %flight_crew% and
-        crew.%is_SKI_in_month%(trip.%start_utc%) and
-        crew.%in_variable_group_trip_start% and
-        trip.%in_pp_extended% and
-        rule_exceptions.%rule_on%(trip.%start_utc%);
-        
-  %num_fs_blocks_in_month% <= %max_fs_blocks_in_month%;
-  
-  startdate  = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext "Coll: Max 1 FS block in month";
-  remark "Coll: Maximum 1 FS block in month (SKI)",
-  planner "Check that there are only one block of FS days in a calendar month";
-end
-
-%num_fs_blocks_in_month% = 
-  let month_start = trip.%start_month_start%;
-  sum(trip(chain), 1)
-  from (current) backwards 
-  while(trip.%start_hb% >= month_start)
-  where (trip.%is_fs% and not
-         (prev(trip(chain),trip.%is_fs% and trip.%start_hb% >= month_start) and
-             trip.%start_day% = prev(trip(chain),trip.%end_day%) + 24:00));
-
-  
-%max_fs_blocks_in_month% = 1;  
- 
-%is_last_fs_trip_in_month% =
-  let month_end = round_up_month(trip.%start_hb%);
-    
-    trip.%is_fs% and 
-    default(next(trip(chain), trip.%start_hb% >= month_end)
-            where(trip.%is_fs%),
-            True);
 
 /* Rule:
 **   FS not allowed during Christmas and New Year
@@ -1695,9 +889,7 @@ redefine %days_before% =
 %_days_before_va_or_loa% =
   if system_db_parameters.%IB6_valid%(duty.%start_UTC%) then 
     if %agreement_valid_4exng_fs_day_logic% then
-      if duty.%is_ac_employer_qa% then 5
-      else
-         	if %fs_unfriendly_days%(3,9) >= 6 then 6 else 0
+       if %fs_unfriendly_days%(3,9) >= 6 then 6 else 0
     else
       if crew.%is_ski% then 7 else 5
   else
@@ -1791,68 +983,6 @@ redefine %course% = trip.%is_course_period_min_length%(7);
     while ((duty.%code% = "F14" or duty.%is_vacation%) and duty.%consecutive_duties_bw%)
     where (duty.%code% = "F14"), 0);
 
-   
-/*
-** Rule:
-**    Limit for check-in/out around FS days
-**
-** Description:
-**    Check that there is space either from 22:00 before OR until 08:00 after
-**    a single day FS-day(00:00-00:00)
-**
-** Agreement:
-**    Introduced with Bid5
-**
-*/
-    
-rule (off) ind_check_in_out_around_fs_day_FC =
-  valid roster.%check_rules% and
-        not crew.%is_SKI% and
-        not crew.%is_leased_duty_start% and
-        crew.%in_variable_group_trip_start% and
-        %is_single_day_fs% and
-        duty.%in_pp_extended% and
-        rule_exceptions.%rule_on%(duty.%start_utc%);
-        
-  %check_in_out_limit_ok% or %space_for_freeday%;
-  startdate  = duty.%start_UTC%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = duty.%failobject_start%;
-  failtext "CI/CO around single FS";
-  remark "Coll: Check-in/out around single FS-day",
-  planner "There should be space either from 22:00 before OR until 08:00 after"
-          " a single day FS-day(00:00-00:00)"
-          " Valid for FC SH";
-end
-
-%is_single_day_fs% = 
-  duty.%is_fs% and 
-  (duty.%days% = 1) and
-  prev(duty(chain), not duty.%is_fs% or not duty.%consecutive_duties_fw%) and 
-  next(duty(chain), not duty.%is_fs% or  not duty.%consecutive_duties_bw%);
- 
-%space_for_freeday% =  
- (default(next(duty(chain), duty.%consecutive_duties_bw% or (duty.%start_od% <= 8:00 and duty.%is_on_duty%)), true) and
-  default(prev(duty(chain), not (duty.%consecutive_duties_fw% and duty.%is_on_duty%)), true))
-  or
- (default(prev(duty(chain), duty.%consecutive_duties_fw%  or  (%duty_check_out_time% >= 22:00 and duty.%is_on_duty%)), true) and
-  default(next(duty(chain), not (duty.%consecutive_duties_bw% and duty.%is_on_duty%)), true));
-   
-%check_in_out_limit_ok% =  %check_in_limit_ok% and %check_out_limit_ok%;
-%check_in_limit_ok% = 
-  default(next(duty(chain), not duty.%consecutive_duties_bw% or (duty.%start_od% >= 8:00 and duty.%is_on_duty%)), true);
-%check_out_limit_ok% = 
-  default(prev(duty(chain), not duty.%consecutive_duties_fw%  or  (%duty_check_out_time% <= 22:00 and duty.%is_on_duty%)), true);
-
-%duty_check_out_time% = 
-  if duty.%ends_at_midnight_hb% then   
-    time_of_day(duty.%end_hb% - 0:01)
-  else 
-    duty.%end_od%; 
-        
-%limit_for_check_in_after_fs_day_SKI% = 8:00;
-%limit_for_check_out_before_fs_day_SKI% = 22:00;
-
 /*
 ** Rule:
 **   Min 4 freedays between west/east bound trips.
@@ -1866,7 +996,7 @@ end
 **
 **   K11 - no longer applies
 **   K15 - applies again, but now with 4 days limit.
-**   K22 - 4 days only required W ?? E 
+**   K22 - 4 days only required W -> E 
 */
 rule ind_min_freedays_btw_west_east_fc =
   valid roster.%check_rules% and
@@ -1923,79 +1053,6 @@ end
   first(trip(wop), trip.%failobject_start%) where 
   (trip.%is_west_bound% or trip.%is_east_bound%);
 
-
-/*
-** Rule:
-**   Max number of single slipping for far time zones in one month
-** Description:
-**
-**   K15
-**   SKCMS-670
-*/
-export rule ind_max_number_of_single_slipping_for_far_timezones_1_month_FC =
-  valid roster.%check_rules% and
-        base_product.%is_rostering% and
-        parameters.%k15_fc_lh_single_slipping_valid%(trip.%start_day%) and
-        (crew.%has_agmt_group_ski_fd% or
-        crew.%has_agmt_group_sk_fd_mff%) and
-        trip.%is_long_haul% and
-        crew.%in_variable_group_ppstart% and
-        trip.%has_single_slipp% and
-        trip.%starts_in_pp% and
-        trip.%lh_layover_time_zone% <= parameters.%slipp_layover_time_zone_p%;
-  %no_of_single_slipping_1_calendar_month% 
-  <=
-  parameters.%max_no_of_single_slipping_far_dest_1_month_p%;
-	startdate = trip.%start_utc%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext(int value, int limit) = 
-    rules.%failtext_int%("Coll: Max number of single slipping far dest one month",value,limit);
-  remark "Coll: Max number of single slipping far dest one month";
-end
-
- %no_of_single_slipping_1_calendar_month% =
-    let month_start = round_down_month(trip.%start_utc%),
-        month_end = round_up_month(trip.%start_utc%) - 0:01;
-    accumulators.%nr_far_single_slipping_in_period%(month_start, month_end);
-
-/*
-** Rule:
-**   Max number of single slipping for far time zones in one year
-** Description:
-**
-**   K15
-**   SKCMS-670
-*/
-rule ind_max_number_of_single_slipping_for_far_timezones_1_year_FC =
-  valid roster.%check_rules% and
-        base_product.%is_rostering% and
-        parameters.%k15_fc_lh_single_slipping_valid%(trip.%start_day%) and
-        (crew.%has_agmt_group_ski_fd% or
-        crew.%has_agmt_group_sk_fd_mff%) and
-        trip.%is_long_haul% and
-        crew.%in_variable_group_ppstart% and
-        trip.%has_single_slipp% and
-        trip.%starts_in_pp% and
-        trip.%lh_layover_time_zone% <= parameters.%slipp_layover_time_zone_p%;
-  %no_of_single_slipping_1_calendar_year% 
-  <=
-  parameters.%max_no_of_single_slipping_far_dest_1_year_p%;
-	startdate = trip.%start_utc%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext(int value, int limit) = 
-    rules.%failtext_int%("Coll: Max number of single slipping far dest one year",value,limit);
-  remark "Coll: Max number of single slipping far dest one year";
-end
-
-
- %no_of_single_slipping_1_calendar_year% =
-    let year_start = round_down_year(trip.%start_utc%),
-        year_end = round_up_year(trip.%start_utc%)-0:01;
-    accumulators.%nr_far_single_slipping_in_period%(year_start, year_end);
-
-
 /*
 ** Rule:
 **   Min 4 freedays for far destinations when single slipp
@@ -2018,8 +1075,6 @@ export rule ind_min_freedays_for_far_timezones_with_single_slipping_FC =
     remark "Coll: Min freedays for far time zones";
 end
 
-
-
 %ind_min_freedays_for_far_timezones_with_single_slipping_FC_valid% =
         roster.%check_rules% and
         parameters.%k15_fc_lh_single_slipping_valid%(trip.%start_day%) and
@@ -2030,8 +1085,6 @@ end
         is_last(duty(trip)) and
         trip.%has_single_slipp% and
         trip.%slipp_layover_time_zone% <= parameters.%slipp_layover_time_zone_p%;
-
-
 
 %ind_min_freedays_for_far_timezones_with_single_slipping_FC_severity% =
     if %ind_min_freedays_after_alert% then
@@ -2045,10 +1098,7 @@ end
 rule ind_max_split_duty_in_wop_FC =
     valid roster.%check_rules%
         and parameters.%K15_jan16_valid%(wop.%start_utc%)   
-        and (crew.%has_agmt_group_skd_fd% or
-             crew.%has_agmt_group_sks_fd% or
-             crew.%has_agmt_group_skn_fd%)
-        and not wop.%has_ac_employer_qa%
+        and not (crew.%has_agmt_group_ski_fd%)
         and wop.%start_utc% >= %pp_start%
         and wop.%start_utc% <= %pp_end%
         and duty_period.%wop_has_split_duty%;
@@ -2064,30 +1114,67 @@ rule ind_max_split_duty_in_wop_FC =
     
 	remark "(CCR) Max number of split duites in a wop",
     planner "The rule check the number of split duties in a wop."
-            "  Applies to SKS-FD_AG, SKD-FD-AG and SKN-FD-AG";
+            "  Applies to all FD";
 end	
  
-%max_number_of_split_duties_in_wop% = 1;
+%max_number_of_split_duties_in_wop% = 
+    if crew.%has_agmt_group_sk%
+    then %number_of_split_duties_in_wop_limit_sk%
+    else %number_of_split_duties_in_wop_limit_non_sk%;
+
+%number_of_split_duties_in_wop_limit_sk% = 
+    parameter 1
+    remark "Limit for split duties in same wop SK FD";
+
+%number_of_split_duties_in_wop_limit_non_sk% = 
+    parameter 2
+    remark "Limit for split duties in same wop non-SK FD";
+
 /*
-*********************************************************************
-** Max production days rules for FD SKN 2011 (Can be removed in 2012)
-*********************************************************************
-** START
-*********************************************************************
+** Rule:
+**    No split duties 
+**
+** Description:
+**    The rule checks that split duty according to the Subpart Q definition
+**    is not assigned:
+**
+**    1) Before K11 for SKN FC
+**
+**    2) After K11 for SKD/SKN/SKS FC at homebase
+**
+**    It is necessary because FC SH after K11 no longer have any union rules 
+**    for minimum rest, and Subpart Q allows split duty at homebase,
+**    but the FC unions don't want it!
+**
+**    NB! A separate rule in rules_indust_ccp_fc checks for split duty after
+**    a duty period, but this CCR version is needed to prevent Matador
+**    assigning two trips with split duty between them.
+**
+** Agreement:
+**    OSL 6.1.5 (CR 306)
+**    K11 FC SH SKD/SKN/SKS 6.1.8
 */
 
-%_max_production_days_in_year_fd_p% = 
-  parameter 176
-  remark "Max production days in year for FD";
+rule ind_no_split_duty_at_homebase_fc =
+  valid trip.%check_rules%
+        and not trip.%is_ski%
+        and duty.%arrives_at_homebase% 
+        and trip.%in_pp%
+        and trip.%is_on_duty% 
+        and not is_last(trip(wop)) 
+        and not last(duty(trip),duty.%is_split_duty_exception%) 
+        and rule_exceptions.%rule_on%(trip.%end_utc%);
+
+  not (duty_period.%is_split% and duty_period.%is_first_duty_in_duty_period%);
   
-redefine %max_production_days_in_year_skn% = 
-    %_max_production_days_in_year_fd_p%;
-
-/*
-*********************************************************************
-** END
-*********************************************************************
-*/
+  startdate = trip.%end_utc%;
+  severity =  first(leg(trip), %severity_filter_int%(leg.%start_utc%,%duty_lh_region%));
+  failobject = next(trip(roster), trip.%failobject_start%);
+  failtext "Coll: Split duty not allowed at homebase";
+  remark "Coll: No split duties at homebase",
+  planner "The rule checks that no split duty "
+          "is scheduled for flight deck crew at homebase";
+end
 
 /****************************************************************
  * Section 7: Restrictions
@@ -2134,38 +1221,6 @@ rule (on) no_ast_for_a2a5_fc =
   failtext "AST is not required for A2A5 qualified";
   remark "(CCR) AST not required for A2A5 qualified";
 end
-
-
-
-rule ind_max_prod_days_in_calendar_month_vg_fc =
-  valid %_max_prod_days_in_calendar_month_vg_fc_valid%;
-
- %_nr_prod_days_in_month_vg_fc% <=
- %_max_prod_days_in_month_vg_fc% +
- rule_exceptions.%overshoot_int%(trip.%start_UTC%);
-
-  startdate  = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext(Int value, Int limit) =
-    rules.%failtext_int%("Coll: Max production days in calendar month for flight crew in VG (K19)", value, limit);
-  remark "Max production days in calendar month for flight crew in VG (K19)",
-  planner "This rule ensures that the number of planned production days does not exceed 19 in a calendar month.";
-end
-
-%_max_prod_days_in_calendar_month_vg_fc_valid% =
-  base_product.%is_rostering% and
-  roster.%check_rules% and
-  (crew.%has_agmt_group_skn% or crew.%has_agmt_group_sks% or crew.%has_agmt_group_skd%) and
-  crew.%in_variable_group_trip_start% and
-  fundamental.%flight_crew% and
-  trip.%starts_in_pp%
-  and trip.%is_last_on_duty_in_month%;
-
-%_nr_prod_days_in_month_vg_fc% =
-  duty_time.%nr_assigned_p_days_vg_in_1_month%(pp.%start_month%, pp.%end_month%);
-
-%_max_prod_days_in_month_vg_fc% =  19;
 
 /*
 ** Rule:
@@ -2238,91 +1293,6 @@ export %ind_is_extended_sh_fdp% =
   (leg.%start_hb% < end_7_days);
 
 
-/*
-** Rule:
-**  Max duty time 2 months (Jan-feb, Mar-Apr etc...)
-** Description:
-**  Duty time in 2 months may not exceed the number of working(P) days x
-**  9:30.
-**  Rule is only valid for SKD FD.
-**  Duty time is calculated according to union agreements but standby counts
-**  as in SubpartQ.
-**
-** Agreement: GM (CR 242)
-**
-** FC K11 - applies to SKD (FG + VG), SKN (FG + VG), SKS FG
-*/
-
-rule (off) ind_max_duty_time_2_months_fc =
-  valid %ind_max_duty_time_2_months_fc_valid%;
-
-  %_duty_time_2_months_fc% <=
-  duty_time.%max_duty_time_2_months_fc% +
-    rule_exceptions.%overshoot_rel%(wop.%start_utc%);
-
-  startdate = wop.%start_utc%;
-  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_max_duty_time_2_months_fc_failobject%;
-  failtext(Reltime value, Reltime limit) =
-    rules.%failtext_rel%("OPT Coll: Max duty time in 2 months",value,limit);
-  remark "OPT Coll: Max duty time in 2 months (FC K17)",
-  planner "OPT This rule checks that FC SH (excl. SKS VG) are not scheduled more"
-          " than P x 9:30 hours of duty time in two fixed calendar months,"
-          " Jan+Feb, Mar+Apr etc. For SKN VG the limit is P x 8:48 hours.";
-end
-
-
-%_duty_time_2_months_fc% =
-  duty_time.%duty_time_fc_in_period%(%duty_time_2_months_start_check%,
-                                     round_up_month(wop.%start_hb%)) -
-  duty_time.%passive_plus_reduction%(%duty_time_2_months_start_check%,
-                                     round_up_month(wop.%start_hb%));
-
-
-%duty_time_month_plus_1% = add_months(duty_time.%duty_time_2_months_start_check%, 1);
-
-%acc_for_previous_month% =
-  accumulators.%nr_planned_p_days_2_months_fc%
-    (duty_time.%duty_time_2_months_start_check%, %duty_time_month_plus_1%);
-
-%duty_time_2_months_start_check% =
-  if %acc_for_previous_month% > 0 then
-    duty_time.%duty_time_2_months_start_check%
-  else
-    %duty_time_month_plus_1%;
-
-%ind_max_duty_time_2_months_fc_valid% =
-   base_product.%is_rostering% and
-   roster.%check_rules% and
-   fundamental.%even_month_by_month_start%(%pp_start%) and
-   wop.%is_last_on_duty_in_month% and
-   wop.%start_month_start% = %pp_start% and
-   (crew.%has_agmt_group_skd% or crew.%has_agmt_group_skn% or crew.%has_agmt_group_sks%) and
-   not crew.%is_leased_wop_start%;
-
-
-%ind_max_duty_time_2_months_fc_failobject% =
-  let month_start_check = %duty_time_2_months_start_check%,
-      limit = duty_time.%max_duty_time_2_months_fc%;
-  default(
-    last(duty(wop),
-         prev(duty(chain),
-              next(duty(chain),
-                   default(first(leg(duty), leg.%failobject_departure%)
-                           where(duty_time.%duty_time_fc_in_period%(
-                                   month_start_check,
-                                   leg.%end_hb% +
-                                   leg.%check_out%) > limit),
-                           duty.%failobject_start%))
-              where(duty_period.%is_on_duty%))
-         where(duty_time.%duty_time_fc_in_period%(month_start_check,
-                                                  duty.%end_hb%) <= limit)),
-    wop.%failobject_start%);
-
-/* Dummy variables for CC additional weekend, needed for rudob logic */
-export %ind_additional_weekend_days_in_period_sks_valid_crew% = false;
-export %day_is_a_weekend_day%(Abstime d) = false;
-
 /* SKCMS-2153 */
 export rule ind_training_a5_crew_need_ast_in_pca3a5_grace_period =
     valid %agreement_valid_a5_ast_before_pc% and
@@ -2355,7 +1325,7 @@ end
 **
 */        
         
-rule(on) ind_min_time_between_simulators_on_instructors =
+rule (on) ind_min_time_between_simulators_on_instructors =
   valid %valid_min_start_times_between_sim_on_instructors%;
   
   %time_between_simulators% >= %min_time_between_simulators% - 

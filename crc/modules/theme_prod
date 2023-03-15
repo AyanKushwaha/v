@@ -39,42 +39,38 @@ import fundamental;
 
 
 /****************************************************************
- * Section 1: Basic stuff 
+ * Section 1: Max working days in wop
  ***************************************************************/
 
 export %max_days_btw_freedays% =
-    if crew.%has_agmt_group_qa_cc% or wop.%is_qa_fd% then
-        %max_days_btw_freedays_qa_cc%
-    else if all(trip(wop), (trip.%has_only_flight_duty% and trip.%is_long_haul%) or trip.%is_standby_line%) then
-        %max_days_btw_freedays_lh%
-    else
-        nmin(%max_days_btw_freedays_sh%, freedays.%max_days_after_singlef%);
+    if crew.%has_agmt_group_fpu% then
+        %max_days_btw_freedays_fpu%
+    else nmin(%_max_days_btw_freedays%, freedays.%max_days_after_singlef%);
 
 /* Both long and short haul limits for CAU and SCCA was found in the agreements,
  * Only short haul limit was found in the FC agreement. Neither was found for NKF. */
 export %max_days_btw_freedays_lh% = 12;
-export %max_days_btw_freedays_qa_cc% = 7;
-export %max_days_btw_freedays_sh% =
-  if %flight_crew% then %max_days_btw_freedays_sh_fc%
-  else if any(trip(wop), trip.%is_one_day_greenland_return%) then
-    3
-  else
-    5;
+%_max_days_btw_freedays% =
+  if %flight_crew% then %max_days_btw_freedays_fd%
+  else %max_days_btw_freedays_cc%;
+ 
+%max_days_btw_freedays_fd% =
+    if all(trip(wop), trip.%is_long_haul_prod%)
+        then 99 /* there's no long haul restriction for FD */
+    else if crew.%part_time_factor_wop_start% = 80 and crew.%in_5_4_flex_group_wop_start% 
+        then 4
+    else 5;
 
-/*
-** Rule: Max working days between freedays
-*/
-table max_days_btw_freedays_fc =
-  crew.%part_time_factor_wop_start%,
-       crew.%in_5_4_flex_group_wop_start% 
-            -> %max_days_btw_freedays_sh_fc%;
+%max_days_btw_freedays_cc% =
+    if all(trip(wop), (trip.%has_only_flight_duty% and trip.%is_long_haul%) or trip.%is_standby_line%)
+        then %max_days_btw_freedays_lh%
+    else if any(trip(wop), trip.%is_one_day_greenland_return%) 
+        then 3
+    else 5;
 
-   80, true -> 4;
-   83, true -> 5;
-  100, true -> 5;
-
-   -,  -    -> 5;
-end
+export %max_days_btw_freedays_fpu% = 
+    parameter 7
+    remark "CCR: Max working days in wop FPU";
 
 
 /****************************************************************
@@ -92,38 +88,30 @@ export %_max_duty_time_in_7_days% =
   if %is_flight_crew_training_7_days% then
     %max_in_7_days_training_fc%
   else
-    %max_in_7_days%;
-
-/* SKCMS-579 */
-export %max_in_7_days% =
-           %max_in_7_days_normal%;
-
-
-/*%within_01oct_30apr%(Abstime date) =
-    let
-        month_number = base_calendar.%month_number%(date);
-    month_number >= 10 or month_number <= 4;*/
-
-%is_skfd% = crew.%has_agmt_group_sk_fd% or crew.%has_agmt_group_sk_sh_fd% 
-        or crew.%has_agmt_group_ski_fd%;
+    %max_in_7_days_normal%;
 
 export %max_in_7_days_normal% =
-  if %is_skfd% then
-    %max_duty_time_in_7_days_normal_fc%
-  else %max_duty_time_in_7_days_normal_cc%;
+  if crew.%has_agmt_group_sk% then
+        if %flight_crew% then
+        %max_duty_time_in_7_days_normal_fc%
+    else %max_duty_time_in_7_days_normal_cc%
+  else %max_duty_time_in_7_days_normal_fpu%;
 
 %max_duty_time_in_7_days_normal_fc% =
   parameter 60:00
   remark "Max duty time 7 days normal production FD";
 
-%max_duty_time_in_7_days_normal_cc% =
-  parameter 47:30
-  remark "Max duty time 7 days normal production CC";
-
-
 %max_in_7_days_training_fc% =
   parameter 55:00
   remark "Max duty time 7 days FC training";
+
+%max_duty_time_in_7_days_normal_cc% =
+   parameter 47:30
+  remark "Max duty time 7 days normal production CC";
+
+%max_duty_time_in_7_days_normal_fpu% =
+  parameter 55:00
+  remark "Max duty time 7 days normal production FPU";
 
 export %p_buffer_max_duty_time_7_days% =
   parameter 0:00
@@ -274,12 +262,12 @@ table vduty_cond_tbl(Int vduty_id, Int vd_cond_id, Bool after) =
                            last(duty(wop),
                               oma16.%duty_time_in_interval_indust%(wop.%end_day% - 6*24:00, wop.%end_day% + 24:00) 
                               + %vduty_duration%(vduty_id)
-                              <= %max_in_7_days%);
+                              <= %max_in_7_days_normal%);
   7, true,  -     -> "Duty time 7 days",      
                            last(duty(wop),
                               oma16.%duty_time_in_interval_indust%(%vduty_end_after_day%(vduty_id) - 6*24:00, %vduty_end_after_day%(vduty_id) + 24:00)
                               + %vduty_duration%(vduty_id)
-                              <= %max_in_7_days%);
+                              <= %max_in_7_days_normal%);
   -, -,     -     -> void_string, true;
 end
 
