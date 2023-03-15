@@ -161,7 +161,7 @@ ACTION[BOUGHT_F3_2] = [IN_CORR, OUT_CORR]
 ACTION[BOUGHT_FORCED] = []
 #ACTION[SOLD] = [IN_CORR, OUT_CORR]
 ACTION[SOLD] = []
-ACTION[PR] = []
+ACTION[PR] = [IN_CORR, OUT_CORR]
 
 """
 Temporary class that holds crew information.
