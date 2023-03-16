@@ -389,7 +389,7 @@ class BuyDayCommentForm(Cfh.Box):
         self.show(1)
         if self.loop() != Cfh.CfhOk:
             raise CancelBuyDay
-        BOUGHT_LABELS.index(self.bought_type.getValue())
+        selected_index = BOUGHT_LABELS.index(self.bought_type.getValue())
         return self.comment.valof(), ACCOUNTS[selected_index]
 
 
