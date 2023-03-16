@@ -4,8 +4,6 @@
 """
 Crew Training Application
 """
-l = []
-count = 0
 import time
 import traceback
 
@@ -47,6 +45,7 @@ if not utils.wave.STANDALONE:
     
 global crewId
 crewId = None
+listA320LH = []
 
 # These accumulators will be found and listed in the
 # tab 'Crew Landings'. This view is constructed from
@@ -541,7 +540,7 @@ class LandingTable(TempTable):
     
     def getDataFromDB(self, ecSearch):
         ec = None
-        global count
+        listA320LH=[]
         try:
             ec = EC(TM.getConnStr(), TM.getSchemaStr())
             for row in ec.accumulator_time.search(ecSearch):
@@ -551,8 +550,8 @@ class LandingTable(TempTable):
                         code = 'A320 LH'
                         key = (typ, code, row.tim)
                         key_list = typ + str(row.tim)
-                        if key_list not in l:
-                            l.append(key_list)
+                        if key_list not in listA320LH:
+                            listA320LH.append(key_list)
                             self.createRow(key, False, typ)
 
                     elif row.name == 'accumulators.last_landing_a320_lh':
@@ -560,16 +559,11 @@ class LandingTable(TempTable):
                         code = 'A320 LH'
                         key = (typ, code, row.tim)
                         key_list = typ + str(row.tim)
-                        if key_list not in l:
-                            l.append(key_list)
+                        if key_list not in listA320LH:
+                            listA320LH.append(key_list)
                             self.createRow(key, False, typ)
-
-
-
                     else:
                         continue
- 
-    
                 except KeyError:
                     # This means the accumulator row wasn't of interest
                     continue
@@ -581,8 +575,8 @@ class LandingTable(TempTable):
                     (typ, code) = LANDING_DICT[row.name]
                     key = (typ, code, row.tim)
                     key_list = typ + str(row.tim)
-                    if key_list not in l:
-                        l.append(key_list)
+                    if key_list not in listA320LH:
+                        listA320LH.append(key_list)
                         self.createRow(key, False, typ)
                     else:
                         pass
@@ -615,8 +609,8 @@ class LandingTable(TempTable):
             temp = "A320 LH" if isLHNX else acfam   
             key = ("FLOWN", temp, tim)
             key_list = 'FLOWN' + str(tim)
-            if key_list not in l:
-                l.append(key_list)
+            if key_list not in listA320LH:
+                listA320LH.append(key_list)
                 self.createRow(key, True, "FLOWN")
             else:
                 pass 
@@ -625,8 +619,8 @@ class LandingTable(TempTable):
             if landing:
                 key = ("LANDING", temp, tim)
                 key_list = 'LANDING' + str(tim)
-                if key_list not in l:
-                    l.append(key_list)
+                if key_list not in listA320LH:
+                    listA320LH.append(key_list)
                     self.createRow(key, True, "LANDING")
                 else:
                     pass
