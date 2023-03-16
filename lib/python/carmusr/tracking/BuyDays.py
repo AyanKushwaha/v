@@ -364,20 +364,20 @@ class BuyDayCommentForm(Cfh.Box):
         self.ok = CfhCheckDone(self, "OK", self.button_area, "Ok", "_Ok")
 
        
-            num_entries = LBL_COUNT_CC if is_cabin else LBL_COUNT_FD
-            self.bought_type = Cfh.String(self, "Compensation", Cfh.Area(Cfh.Dim(20, num_entries), Cfh.Loc(2, 0)), LBL_MAX_LEN, "Bought")
-            bought_type_options_str = "Select;" + ";".join(BOUGHT_LABELS[:num_entries])
-            self.bought_type.setMenuString(bought_type_options_str)
-            self.bought_type.setStyle(Cfh.CfhSChoiceRadioCol)
+        num_entries = LBL_COUNT_CC if is_cabin else LBL_COUNT_FD
+        self.bought_type = Cfh.String(self, "Compensation", Cfh.Area(Cfh.Dim(20, num_entries), Cfh.Loc(2, 0)), LBL_MAX_LEN, "Bought")
+        bought_type_options_str = "Select;" + ";".join(BOUGHT_LABELS[:num_entries])
+        self.bought_type.setMenuString(bought_type_options_str)
+        self.bought_type.setStyle(Cfh.CfhSChoiceRadioCol)
 
-            def enforce_selection_fn():
-                # self.bought_type.compute()
-                if self.bought_type.getValue() not in BOUGHT_LABELS:
-                    cfhExtensions.show("Please select a bought type", title="Missing selection")
-                    return "Warning: No bought type selected"
-                return ""
+        def enforce_selection_fn():
+            # self.bought_type.compute()
+            if self.bought_type.getValue() not in BOUGHT_LABELS:
+                cfhExtensions.show("Please select a bought type", title="Missing selection")
+                return "Warning: No bought type selected"
+            return ""
 
-            self.ok.register_check(enforce_selection_fn)
+        self.ok.register_check(enforce_selection_fn)
 
         self.cancel = Cfh.Cancel(self, "CANCEL", self.button_area, "Cancel", "_Cancel")
         self.build()
