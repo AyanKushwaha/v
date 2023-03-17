@@ -36,7 +36,7 @@ def fixit(dc, *a, **k):
     # rate = -100
 
     format = "%d%b%Y %H:%M:%S:%f"
-    ae_tim = datetime(2023, 5, 31).strftime(format)
+    ae_tim = datetime(2023, 6, 1).strftime(format)
     tim = AbsTime(ae_tim[:15])
     print(tim)
  
