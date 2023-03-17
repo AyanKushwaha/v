@@ -322,7 +322,7 @@ def get_do_remove(is_pub, is_bought, account):
         return True
     # else app is CCT
 
-    if account[0] != 'F':
+    if account[0] != 'F' and account[0] != 'P':
         return True
     # else account is F-account
 

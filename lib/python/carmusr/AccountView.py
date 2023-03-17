@@ -171,7 +171,8 @@ ACTION[BOUGHT_SBY] = []
 ACTION[BOUGHT_PROD] = []
 ACTION[BOUGHT_DUTY] = []
 #End for SAS Link
-ACTION[PR] = []
+
+ACTION[PR] = [IN_CORR, OUT_CORR]
 
 """
 Temporary class that holds crew information.
