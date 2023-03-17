@@ -192,158 +192,102 @@ def buy_days_svs(crew_id, start_time, end_time, leg_type, comment="",time_hh_sby
     uname = Names.username()
     is_svs=True
     row_day_type = get_row_day_type(leg_type,is_svs)
-    # Cache current existing rows, since we might need to loop through these more than once
-    periods_to_merge = {}
+    print("row_day_type is:",row_day_type)
     touch_start = None
     
     for row in TM.bought_days_svs.search('(crew='+crew_id+')'):
-        # If row touches period,  we might need to modify it
-        if row.start_time <= start_time <= row.end_time:
-            touch_start = row  # Touch start_time
-        elif row.start_time == end_time:
-            periods_to_merge[row.start_time] = row  # Touch end_time
-        elif get_overlap(row.start_time, row.end_time, start_time, end_time) > 0:
-            periods_to_merge[row.start_time] = row
-
-    # periods_to_merge.sort(cmp=lambda x,y:cmp(x.start_time,y.start_time))
+        # If data is modified in the already existing row
+        if row.start_time == start_time and row.end_time == end_time:
+            touch_start = row
+            break
     finished = False  # Finished when all days covered!
     current_row = touch_start
-    while not finished:
-        if current_row:
-            if current_row.end_time in periods_to_merge:
-                next_row = periods_to_merge[current_row.end_time]
-                if next_row.day_type == current_row.day_type and next_row.account_name == current_row.account_name:
-                    # Merge found period into current
-                    current_row.end_time = next_row.end_time
-                    next_row.remove()
-                    del periods_to_merge[next_row.start_time]
-                else:
-                    current_row = next_row
-            elif current_row.end_time >= end_time:
-                if is_type_bought_sby:
-                    temp_hour_sby = time_hh_Sby[0:2]
-                    if temp_hour_sby[1] == ':':
-                        temp_hour_sby = '0' +temp_hour_sby
-                    time_hour_Sby = integer_to_reltime_hour(int(temp_hour_sby[0:2]))
-                
-                    temp_min_sby = time_mm_Sby
-                    if temp_min_sby[-2] == ':':
-                        temp_min_sby = temp_min_sby[0:3] +  '0' +temp_min_sby[-1]
-                    time_minute_Sby = integer_to_reltime_min(int(temp_min_sby[3:]))
-                    current_row.hours = time_hour_Sby
-                    current_row.minutes = time_minute_Sby
-                elif is_type_bought_prod:
-                    temp_hour_prod = time_hh_Prod[0:2]
-                    if temp_hour_prod[1] == ':':
-                        temp_hour_prod = '0' +temp_hour_prod
-                    time_hour_Prod = integer_to_reltime_hour(int(temp_hour_prod[0:2]))
-                
-                    temp_min_prod = time_mm_Prod
-                    if temp_min_prod[-2] == ':':
-                        temp_min_prod = temp_min_prod[0:3] +  '0' +temp_min_prod[-1]
-                    time_minute_Prod = integer_to_reltime_min(int(temp_min_prod[3:]))
-                    current_row.hours = time_hour_Prod
-                    current_row.minutes = time_minute_Prod
-                else:
-                    temp_hour = time_HH[0:2]
-                    if temp_hour[1] == ':':
-                        temp_hour = '0' +temp_hour
-                    time_HH_hour = integer_to_reltime_hour(int(temp_hour[0:2]))
-                
-                    temp_min = time_MM
-                    if temp_min[-2] == ':':
-                        temp_min = temp_min[0:3] +  '0' +temp_min[-1]
-                    time_MM_minute = integer_to_reltime_min(int(temp_min[3:]))
-                    current_row.hours = time_HH_hour
-                    current_row.minutes = time_MM_minute
-                
-                break
-            elif current_row.day_type == row_day_type and current_row.account_name == bought_day_type:
-                # Increase period
-                current_row.end_time = current_row.end_time.adddays(1)
-                if is_type_bought_sby:
-                    temp_hour_sby = time_hh_Sby[0:2]
-                    if temp_hour_sby[1] == ':':
-                        temp_hour_sby = '0' +temp_hour_sby
-                    time_hour_Sby = integer_to_reltime_hour(int(temp_hour_sby[0:2]))
-                
-                    temp_min_sby = time_mm_Sby
-                    if temp_min_sby[-2] == ':':
-                        temp_min_sby = temp_min_sby[0:3] +  '0' +temp_min_sby[-1]
-                    time_minute_Sby = integer_to_reltime_min(int(temp_min_sby[3:]))
-                    current_row.hours = time_hour_Sby
-                    current_row.minutes = time_minute_Sby
-                if is_type_bought_prod:
-                    temp_hour_prod = time_hh_Prod[0:2]
-                    if temp_hour_prod[1] == ':':
-                        temp_hour_prod = '0' +temp_hour_prod
-                    time_hour_Prod = integer_to_reltime_hour(int(temp_hour_prod[0:2]))
-                
-                    temp_min_prod = time_mm_Prod
-                    if temp_min_prod[-2] == ':':
-                        temp_min_prod = temp_min_prod[0:3] +  '0' +temp_min_prod[-1]
-                    time_minute_Prod = integer_to_reltime_min(int(temp_min_prod[3:]))
-                    current_row.hours = time_hour_Prod
-                    current_row.minutes = time_minute_Prod
-            else:
-                # Start new period
-                start_time = current_row.end_time
-                current_row = None
-        else:  # Start in empty period!
-            current_row = TM.bought_days_svs.create((crew, start_time))
-            current_row.day_type = row_day_type
-            if is_type_bought_sby:
-                current_row.account_name = bought_sby
-                
-            elif is_type_bought_prod:
-                current_row.account_name = bought_prod
-                
-                
-            else:
-                current_row.account_name = bought_duty
-            current_row.end_time = start_time.adddays(1)
+    if current_row:  #To save the re-entered hrs and min
+        if row.start_time == start_time and current_row.end_time == end_time and current_row.day_type == row_day_type:
             if is_type_bought_sby:
                 temp_hour_sby = time_hh_Sby[0:2]
                 if temp_hour_sby[1] == ':':
                     temp_hour_sby = '0' +temp_hour_sby
                 time_hour_Sby = integer_to_reltime_hour(int(temp_hour_sby[0:2]))
-                
                 temp_min_sby = time_mm_Sby
                 if temp_min_sby[-2] == ':':
                     temp_min_sby = temp_min_sby[0:3] +  '0' +temp_min_sby[-1]
                 time_minute_Sby = integer_to_reltime_min(int(temp_min_sby[3:]))
                 current_row.hours = time_hour_Sby
                 current_row.minutes = time_minute_Sby
-            if is_type_bought_prod:
+            elif is_type_bought_prod:
                 temp_hour_prod = time_hh_Prod[0:2]
                 if temp_hour_prod[1] == ':':
                     temp_hour_prod = '0' +temp_hour_prod
                 time_hour_Prod = integer_to_reltime_hour(int(temp_hour_prod[0:2]))
-                
                 temp_min_prod = time_mm_Prod
                 if temp_min_prod[-2] == ':':
                     temp_min_prod = temp_min_prod[0:3] +  '0' +temp_min_prod[-1]
                 time_minute_Prod = integer_to_reltime_min(int(temp_min_prod[3:]))
                 current_row.hours = time_hour_Prod
                 current_row.minutes = time_minute_Prod
-            if is_type_bought_duty:
+            elif is_type_bought_duty:
                 temp_hour = time_HH[0:2]
                 if temp_hour[1] == ':':
                     temp_hour = '0' +temp_hour
                 time_HH_hour = integer_to_reltime_hour(int(temp_hour[0:2]))
-                
                 temp_min = time_MM
                 if temp_min[-2] == ':':
                     temp_min = temp_min[0:3] +  '0' +temp_min[-1]
                 time_MM_minute = integer_to_reltime_min(int(temp_min[3:]))
                 current_row.hours = time_HH_hour
                 current_row.minutes = time_MM_minute
-            
-            current_row.uname = uname
-            current_row.si = comment
-        finished = current_row is not None and \
-            current_row.end_time >= end_time and \
-            current_row.end_time not in periods_to_merge  # Don't forget to merge end if needed
+            else: print("No valid account to be updated")
+    else:  # To save the fresh data added in the form.
+        try:
+            current_row = TM.bought_days_svs.create((crew, start_time))
+            current_row.end_time = start_time.adddays(1)
+            current_row.day_type = row_day_type
+            if is_type_bought_sby:
+                current_row.account_name = bought_sby
+            elif is_type_bought_prod:
+                current_row.account_name = bought_prod
+            elif is_type_bought_duty:
+                current_row.account_name = bought_duty
+            else: print("No valid account found")
+            if is_type_bought_sby:
+                temp_hour_sby = time_hh_Sby[0:2]
+                if temp_hour_sby[1] == ':':
+                    temp_hour_sby = '0' +temp_hour_sby
+                time_hour_Sby = integer_to_reltime_hour(int(temp_hour_sby[0:2]))
+                temp_min_sby = time_mm_Sby
+                if temp_min_sby[-2] == ':':
+                    temp_min_sby = temp_min_sby[0:3] +  '0' +temp_min_sby[-1]
+                time_minute_Sby = integer_to_reltime_min(int(temp_min_sby[3:]))
+                current_row.hours = time_hour_Sby
+                current_row.minutes = time_minute_Sby
+            elif is_type_bought_prod:
+                temp_hour_prod = time_hh_Prod[0:2]
+                if temp_hour_prod[1] == ':':
+                    temp_hour_prod = '0' +temp_hour_prod
+                time_hour_Prod = integer_to_reltime_hour(int(temp_hour_prod[0:2]))
+                temp_min_prod = time_mm_Prod
+                if temp_min_prod[-2] == ':':
+                    temp_min_prod = temp_min_prod[0:3] +  '0' +temp_min_prod[-1]
+                time_minute_Prod = integer_to_reltime_min(int(temp_min_prod[3:]))
+                current_row.hours = time_hour_Prod
+                current_row.minutes = time_minute_Prod
+            elif is_type_bought_duty:
+                temp_hour = time_HH[0:2]
+                if temp_hour[1] == ':':
+                    temp_hour = '0' +temp_hour
+                time_HH_hour = integer_to_reltime_hour(int(temp_hour[0:2]))
+                temp_min = time_MM
+                if temp_min[-2] == ':':
+                    temp_min = temp_min[0:3] +  '0' +temp_min[-1]
+                time_MM_minute = integer_to_reltime_min(int(temp_min[3:]))
+                current_row.hours = time_HH_hour
+                current_row.minutes = time_MM_minute
+            else: print("No valid account to be added")
+        except:
+            return
+    current_row.uname = uname
+    current_row.si = comment
 
 
 def get_row_day_type(leg_type,is_svs):
@@ -557,38 +501,30 @@ def markDaysAsBought(buy):
         day_bought_duty = False
         is_active_flightduty=False
 
-        if code_duty == "FLT":
-            is_active_flightduty = True
-        else:
-            is_active_flightduty = False
-
-        if code is None:
-            flag = False
         # Check if day is already bought and entry is there in table
         if is_svs:
             if "bought_days.%%leg_is_bought_svs%%" and code_svs is None:
                 day_bought = True
-            if "bought_days.%%leg_is_bought_svs%%" and is_active_flightduty:
+            if "bought_days.%%leg_is_bought_svs%%" and code_duty is not None:
                 day_bought_duty = True
-        
-        print("Leg is active flight duty:",is_active_flightduty)
+
         print("code_duty is:",code_duty)
         print("code for SK:",code)
         print("code_svs for Link:",code_svs)
         if is_svs:
-            #Buy F days as Standby or Production    
-            for (start, code), end in activities_in_period.items():        
-                if flag or day_bought and not is_active_flightduty:
-                    print("flag for Bought Day Off:",flag)
-                    print("day_bought:",day_bought)
-
+            #Buy F days as Standby or Production:
+            #code_svs will be true when there is some valid day to buy and
+            #when the day is already bought, day_bought will be true
+            if code_svs is not None or day_bought and code_duty is None:
+                for (start, code_svs), end in activities_in_period.items():
+                    print("day_bought for Standby or Production:",day_bought)
                     if comment == "":
                         try:
                             if is_svs:
                                 comment, time_hh_sby,time_mm_sby,time_hh_prod,time_mm_prod,time_hh,time_mm,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, start_time, end_time, "Buy_Day_Form")()     
                         except CancelBuyDay:
                             return
-                    # Addition duty cann't be bought on F days
+                    # Addition duty cann't be bought on F or similar types of days
                     if bought_type is "BOUGHT_DUTY":
                         cfhExtensions.show(
                             "Not possible to buy Additional duty on day-off.\n"
@@ -596,7 +532,6 @@ def markDaysAsBought(buy):
                             "type of operation.", title="No change")
                         return 1
                     else:
-                        print("Type of bought_type",bought_type)
                         if bought_type is "BOUGHT_SBY" and (time_hh_sby is "" or time_mm_sby is ""):
                             cfhExtensions.show(
                                 "Please enter HH and MM for Standby.\n"
@@ -622,20 +557,15 @@ def markDaysAsBought(buy):
                                 "type of operation.", title="No change")
                             return 1
                         else:
-                            buy_days_svs(crew_id, start, end, code, comment, time_hh_sby, time_mm_sby, time_hh_prod, time_mm_prod, time_hh, time_mm, bought_type, has_agmt_skd_cc, is_f3_valid)
+                            buy_days_svs(crew_id, start, end, code_svs, comment, time_hh_sby, time_mm_sby, time_hh_prod, time_mm_prod, time_hh, time_mm, bought_type, has_agmt_skd_cc, is_f3_valid)
                             # Remove activity from roster
                             ActivityManipulation.deleteActivityInPeriod(crew_id, start, end, area=area)
                             no_change = False
 
-            #Buy Addtional Duty on a day with active Flight duty
-            if code_duty is None:
-                flag = False
-            else:
-                flag = True
-            for (start, code_duty), end in activities_in_period.items():
-                if flag or day_bought_duty and is_active_flightduty:
-                    print("flag for Additiona Duty:",flag)
-                    print("day_bought_duty:",day_bought_duty)
+            #Buy Addtional Duty on a day with active Flight duty and RC(Standby)
+            elif code_duty is not None or day_bought_duty:
+                for (start, code_duty), end in activities_in_period.items():
+                    print("day_bought_duty for additional hours:",day_bought_duty)
                     if comment == "":
                         try:
                             if is_svs:
@@ -664,6 +594,7 @@ def markDaysAsBought(buy):
                         else:
                             buy_days_svs(crew_id, start, end, code_duty, comment, time_hh_sby, time_mm_sby, time_hh_prod, time_mm_prod, time_hh, time_mm, bought_type, has_agmt_skd_cc, is_f3_valid)
                             no_change = False
+            else: print("This is not a valid call")
         else:
             #For SK it will work as is
             for (start, code), end in activities_in_period.items():
@@ -705,7 +636,6 @@ class BuyDayCommentForm(Cfh.Box):
         self.setText('Buy Day / Overtime checkout on Fday')
         if is_svs or is_emj:
             self.svs_type_label = Cfh.Label(self, "SVS_TYPE_LABEL", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(0, 0)), "Please enter comment:")
-            self.comment = Cfh.String(self, "COMMENT", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(1, 0)), 20, "")
             change = True
             self.bought_day_off_label = Cfh.Label(self, "Bought_Day_Off_Label", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(2, 1)), "Bought Day Off as Standby/Production")
             for row in TM.bought_days_svs.search('(crew='+crew_id+')'):
@@ -731,7 +661,7 @@ class BuyDayCommentForm(Cfh.Box):
                         min = str(row.minutes)
                         hr = hr.split(':')[0]
                         min = min.split(':')[1]
-
+                    self.comment = Cfh.String(self, "COMMENT", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(1, 0)), 20, row.si)
                     self.time_hh_sby = Cfh.String(self, "HH_sby", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 9)), 2, hr_sby)
                     self.time_mm_sby = Cfh.String(self, "MM_sby",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 13)), 2, min_sby)
                                   
@@ -743,6 +673,7 @@ class BuyDayCommentForm(Cfh.Box):
 
                     change = False 
             if change:
+                self.comment = Cfh.String(self, "COMMENT", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(1, 0)), 20, "")
                 self.time_hh_sby = Cfh.String(self, "HH_sby", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 9)), 2, " ")
                 self.time_mm_sby = Cfh.String(self, "MM_sby",  Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(3, 13)), 2, " ")
                 self.time_hh_prod = Cfh.String(self, "HH_prod", Cfh.Area(Cfh.Dim(3, 1), Cfh.Loc(4, 9)), 2, " ")
