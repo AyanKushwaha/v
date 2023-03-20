@@ -35,7 +35,7 @@ wait
 
 (echo "[$(date)] Cleanup archiving tables" >> $logfile
 ${CARMUSR}/bin/db/cleanup_schema_archiving.sh
-echo "[$(date)] Claneup archibing tables done" >> $logfile) &
+echo "[$(date)] Claneup archiving tables done" >> $logfile) &
 
 wait
 
@@ -53,7 +53,7 @@ wait
 
 echo "[$(date)] Cleanup schema regular" >> $logfile
 ${CARMUSR}/bin/db/cleanup_schema_regular.sh  
-echo "[$(date)] Claneup schema regular done" >> $logfile
+echo "[$(date)] Cleanup schema regular done" >> $logfile
 
 echo "[$(date)] Schema stats" >> $logfile
 ${CARMUSR}/bin/cmsshell db schemastats | tee -a ${CARMTMP}/logfiles/cmd_gather_schema_stats.log
