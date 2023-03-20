@@ -80,9 +80,8 @@ TRIP_PER_DIEM_EXTRA_CURRENCY = 30
 TRIP_PER_DIEM_EXTRA_EXCHANGE_RATE = 31
 TRIP_PER_DIEM_EXTRA_EXCHANGE_UNIT = 32
 TRIP_PER_DIEM_EXTRA_TYPE = 33
-TRIP_HAS_AGMT_GROUP_QA = 34
-TRIP_START_DAY_TAX_SKN = 35
-TRIP_END_DAY_TAX_SKN = 36
+TRIP_START_DAY_TAX_SKN = 34
+TRIP_END_DAY_TAX_SKN = 35
 TRIP_VALUES = ('report_per_diem.%trip_per_diem_entitled%',
                'report_per_diem.%trip_per_diem_time%',
                'report_per_diem.%trip_per_diem_time_tax%',
@@ -117,7 +116,6 @@ TRIP_VALUES = ('report_per_diem.%trip_per_diem_entitled%',
                'report_per_diem.%trip_per_diem_extra_exchange_rate%',
                'report_per_diem.%trip_per_diem_extra_exchange_unit%',
                'report_per_diem.%trip_per_diem_extra_type%',
-               'crew.%has_agmt_group_qa_at_date%(salary.%salary_month_start_p%)',
                'report_per_diem.%trip_start_day_tax_skn%',
                'report_per_diem.%trip_end_day_tax_skn%')
 
@@ -168,7 +166,6 @@ LEG_FIRST_DAY_STOP_TIME_TAX_SKS = 20
 LEG_LAST_DAY_STOP_TIME_TAX_SKS = 21
 LEG_IS_LAST_INTL_PERIOD_TAX = 22
 LEG_INTL_PERIOD_IS_INTL_TAX = 23
-LEG_HAS_AGMT_GROUP_QA = 24
 LEG_VALUES = ('report_per_diem.%leg_start_station%',
               'report_per_diem.%leg_end_station%',
               'report_per_diem.%leg_actual_start_UTC%',
@@ -192,8 +189,7 @@ LEG_VALUES = ('report_per_diem.%leg_start_station%',
               'report_per_diem.%first_day_stop_time_tax_sks%',
               'report_per_diem.%last_day_stop_time_tax_sks%',
               'report_per_diem.%leg_is_last_in_intl_period_tax%',
-              'report_per_diem.%intl_period_is_international_tax%',
-              'crew.%has_agmt_group_qa_at_date%(salary.%salary_month_start_p%)')
+              'report_per_diem.%intl_period_is_international_tax%')
 
 
 class PerDiemRosterManager:
@@ -310,11 +306,7 @@ class PerDiemTripManager:
         perDiemTrip.tripTime = trip[TRIP_TIME]
         perDiemTrip.tripTimeTax = trip[TRIP_TIME_TAX]
         perDiemTrip.estimatedPerDiem = trip[TRIP_PER_DIEM_ESTIMATE] / 4.0
-        if trip[TRIP_HAS_AGMT_GROUP_QA]:
-            perDiemTrip.actualPerDiem = trip[TRIP_PER_DIEM_TOTAL] / (24.0 * 60.0)
-        else:    
-            perDiemTrip.actualPerDiem = trip[TRIP_PER_DIEM_TOTAL] / 4.0
-        perDiemTrip.hasAgmtGroupQa = trip[TRIP_HAS_AGMT_GROUP_QA]
+        perDiemTrip.actualPerDiem = trip[TRIP_PER_DIEM_TOTAL] / 4.0
         perDiemTrip.country = trip[TRIP_COUNTRY]
         perDiemTrip.startUTC = trip[TRIP_START_UTC]
         perDiemTrip.startUTCtax = trip[TRIP_START_UTC_TAX]
@@ -401,11 +393,7 @@ class PerDiemTripManager:
                 #Last leg of duty has per diem for the duty stop
                 if counter < legCount:
                     if leg[LEG_PER_DIEM_ALLOCATED]:
-                        if leg[LEG_HAS_AGMT_GROUP_QA]:
-                            perDiemLeg.allocatedPerDiem = leg[LEG_PER_DIEM_ALLOCATED] / (24.0 * 60.0)
-                        else:
-                            perDiemLeg.allocatedPerDiem = (
-                                            leg[LEG_PER_DIEM_ALLOCATED] / 4.0)
+                        perDiemLeg.allocatedPerDiem = (leg[LEG_PER_DIEM_ALLOCATED] / 4.0)
                         
 
                     else:
@@ -413,11 +401,7 @@ class PerDiemTripManager:
                     perDiemLeg.perDiemStopTime = leg[LEG_PER_DIEM_STOP_TIME]
                     perDiemLeg.actualStopTime = leg[LEG_ACTUAL_STOP_TIME]
                 else:
-                    if leg[LEG_HAS_AGMT_GROUP_QA]:
-                        perDiemLeg.allocatedPerDiem = leg[LEG_PER_DIEM_ALLOCATED] / (24.0 * 60.0) if leg[LEG_PER_DIEM_ALLOCATED] else 0
-                    else:                        
-                        perDiemLeg.allocatedPerDiem = (
-                        duty[DUTY_PER_DIEM_ALLOCATED] / 4.0)
+                    perDiemLeg.allocatedPerDiem = (duty[DUTY_PER_DIEM_ALLOCATED] / 4.0)
 
                     perDiemLeg.perDiemStopTime = duty[DUTY_PER_DIEM_REST_TIME]
                     perDiemLeg.actualStopTime = duty[DUTY_ACTUAL_REST_TIME]
@@ -445,7 +429,6 @@ class PerDiemTripManager:
                     LEG_LAST_DAY_STOP_TIME_TAX_SKS]
                 perDiemLeg.isLastInIntlPeriod = leg[LEG_IS_LAST_INTL_PERIOD_TAX]
                 perDiemLeg.isIntlPeriod = leg[LEG_INTL_PERIOD_IS_INTL_TAX]
-                perDiemLeg.hasAgmtGroupQa = leg[LEG_HAS_AGMT_GROUP_QA]
                 perDiemTrip.legs.append(perDiemLeg)
 
         return perDiemTrip
@@ -690,10 +673,7 @@ class PerDiemTrip(DataClass):
     # This method will adjust the per diem for the legs of the trip
     # according to specification.
     def adjustPerDiem(self):
-        if self.hasAgmtGroupQa :
-            pass
-        else:
-            allocatedPerDiem = self.sumAllocatedPerDiem()
+        allocatedPerDiem = self.sumAllocatedPerDiem()
             
             #Per diem is adjusted if total entitled per diem differs from
             #the amount allocated to each stop
@@ -743,10 +723,7 @@ class PerDiemTrip(DataClass):
         for leg in self.legs:
             leg.clearTaxDeductCalcInfo()
         if self.tripTimeTax > RelTime(24, 0):            
-            if self.hasAgmtGroupQa :
-                result = self.getCompensationSumHomeCurrency()
-            else:
-              if not self.legsAdjusted:
+            if not self.legsAdjusted:
                 self.adjustPerDiem()
               nrOfDays = self.tripTimeTax / RelTime(1, 0, 0)
               for leg in self.legs:
@@ -1077,9 +1054,6 @@ class PerDiemTrip(DataClass):
     def getLegsWithPerDiemExtra(self, legs):        
         legsWithPerDiemExtra = [leg for leg in legs]
         for i in xrange(len(self.perDiemExtraType)):
-            if self.hasAgmtGroupQa :
-                pass
-            else :
             
                 if self.perDiemExtraType[i] in ('EX', 'PH'):
                     perDiemExtraLeg = PerDiemLeg()

@@ -163,7 +163,6 @@ class OvertimeRun(run.GenericRun):
             return 0
 
     def OT_CO_LATE_FC(self, rec):
-        """This overtime is applied to all FD except CJ incl. SK.  Ref Jira SKCMS-691"""
         return rec.get_OT_FD_hours100_netto()
 
     def SNGL_SLIP_LONGHAUL(self, rec):
@@ -176,7 +175,7 @@ class OvertimeRun(run.GenericRun):
 class DK(OvertimeRun):
     def __init__(self, record):
         articles = ['LRHIGH', 'LRLOW', 'MDCLH', 'MDCSH', 'OT', 'SCC', 'SCCNOP', 'OTFC', 'OTPT', 'OTPTC',
-                    "OT_FC_CJ", "OT_FP_CJ", "OT_CC_QA", "OT_CO_LATE_FC", 'SCCQA', "SNGL_SLIP_LONGHAUL"]
+                    "OT_CO_LATE_FC", "SNGL_SLIP_LONGHAUL"]
         extra_articles = []
         self.now, self.isCC4EXNG, = rave.eval('fundamental.%now%', 'system_db_parameters.%%agreement_valid%%("4exng_cc_ot", %s)' % record.firstdate)
         if not self.isCC4EXNG:
@@ -199,30 +198,28 @@ class DK(OvertimeRun):
         return accounts.balance(crew, 'F0_BUFFER', self.rundata.starttime)
 
     def LRHIGH(self, rec):
-        return 0 if rec.apply_QA_CC_CJ else OvertimeRun.LRHIGH(self, rec)
+        return OvertimeRun.LRHIGH(self, rec)
 
     def LRLOW(self, rec):
-        return 0 if rec.apply_QA_CC_CJ else OvertimeRun.LRLOW(self, rec)
+        return OvertimeRun.LRLOW(self, rec)
 
     def MDCLH(self, rec):
-        return 0 if rec.apply_QA_CC_CJ else OvertimeRun.MDCLH(self, rec)
+        return OvertimeRun.MDCLH(self, rec)
 
     def MDCSH(self, rec):
-        return 0 if rec.apply_QA_CC_CJ else OvertimeRun.MDCSH(self, rec)
+        return OvertimeRun.MDCSH(self, rec)
 
     def OTPTC(self, rec):
-        return 0 if rec.apply_QA_CC_CJ else OvertimeRun.OTPTC(self, rec)
+        return OvertimeRun.OTPTC(self, rec)
 
     def OTFC(self, rec):
-        return 0 if rec.apply_QA_CC_CJ else OvertimeRun.CALM_OTFC(self, rec)
+        return OvertimeRun.CALM_OTFC(self, rec)
                 
     def OTPT(self, rec):
-        return 0 if rec.apply_QA_CC_CJ else OvertimeRun.OTPT(self, rec)
+        return OvertimeRun.OTPT(self, rec)
     
     def OT(self, rec):
-        if rec.apply_QA_CC_CJ:
-            return 0
-        if rec.isFlightCrew or rec.isConvertible:
+       if rec.isFlightCrew or rec.isConvertible:
             return 0
         else:
             return OvertimeRun.OT(self, rec)
@@ -232,31 +229,15 @@ class DK(OvertimeRun):
         return OvertimeRun.OT_CO_LATE_FC(self, rec) * 2
 
     def SCC(self, rec):
-        return 0 if rec.apply_QA_CC_CJ else OvertimeRun.SCC(self, rec)
+        return OvertimeRun.SCC(self, rec)
 
     def SCCNOP(self, rec):
-        return 0 if rec.apply_QA_CC_CJ else OvertimeRun.SCCNOP(self, rec)
-
-    def SCCQA(self, rec):
-        return self.times100(rec.getSCCQA())
+        return OvertimeRun.SCCNOP(self, rec)
 
     def X_CONVERTIBLE_OT(self, rec):
         if not rec.isConvertible:
             return 0
         return minutes(rec.getOvertime())
-
-
-    def OT_FC_CJ(self, rec):
-        """Overtime Cimber flight captain"""
-        return self.times100(rec.get_sum_OT_QA()) if rec.apply_QA_CC_CJ and rec.isFC else 0
-
-    def OT_FP_CJ(self, rec):
-        """Overtime Cimber flight pilot"""
-        return self.times100(rec.get_sum_OT_QA()) if rec.apply_QA_CC_CJ and rec.isFP else 0
-
-    def OT_CC_QA(self, rec):
-        """Overtime Cimber cabin crew"""
-        return self.times100(rec.get_sum_OT_QA()) if rec.apply_QA_CC_CJ and not rec.isFlightCrew else 0
 
     def __str__(self):
         return 'Danish overtime'
@@ -497,3 +478,4 @@ def conversionReport(rundata, basename):
 # modeline ==============================================================={{{1
 # vim: set fdm=marker fdl=1:
 # eof
+
