@@ -112,7 +112,7 @@ redefine %leg_duty_time_until_now% =
 */
 
 redefine %r_valid_no_duty_same_day_if_late_co% = 
-  trip.%is_SKS% or trip.%is_SKD%;
+  false;
 
 /*
 ** Rule: 
@@ -219,143 +219,6 @@ end
 %max_sh_duty_time_before_lh% = 20:00;
 
 /*
-** Rule: 
-**    Max duty time the day before long haul
-**
-** Description:
-**    Check that max 1 european production day precedes the long haul
-**    production. For SKD and SKN also check that maximum duty time
-**    in the short haul production day the day before long haul production
-**    is not exceeded. SKS has actually a limit but it is defined as a
-**    quality rule with parameterized limits (defined in rules_soft_ccp_cc).
-**
-**    NB! Two implementations are done. One in Pairing (when planning 
-**    short-before-long) and one in Rostering.
-**
-** Agreement:
-**    CAU E.1.1 E.1.4
-**    SCCA D.1.1
-**    NKF ???
-**
-**    4ExNG Rule replaced by separate rules for duty days and duty time.
-*/
-rule ind_max_duty_day_before_lh_CC =
-  valid trip.%check_rules% and
-        not duty.%k4exng_cc_sp5_1_valid%(trip.%start_day%) and
-        trip.%in_pp_extended% and
-        duty.%is_long_haul% and
-        duty.%is_preceded_by_short_haul% and
-        prev(duty(trip),  not duty.%is_bought%) and
-        rule_exceptions.%rule_on%(duty.%start_UTC%);
-  %days_before_lh% <= %max_days_before_lh% /*+ 
-  		      rule_exceptions.%overshoot_int%(duty.%start_UTC%)*/ and
-  (trip.%is_SKS% or /* SKS has a duty limit (but defined as a soft rule) */
-  %duty_time_before_lh% <= %max_duty_day_before_lh% /*+ 
-  			   rule_exceptions.%overshoot_rel%(duty.%start_UTC%)*/);
-  startdate = duty.%start_UTC%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_max_duty_day_before_lh_CC_failobject%;
-  failtext %max_duty_day_before_lh_failtext%;
-  remark "(CCP) Coll: Max duty time the day before long haul",
-  planner "The rule checks that max 1 day with SH production precedes"
-	        " the LH production. This is valid for all regions."
-          " For SKD and SKN the rule also checks that the maximum"
-          " allowed duty time is not exceeded, which is 10:00 (SKD) and"
-          " 10:30 (SKN).";
-end
-
-%ind_max_duty_day_before_lh_CC_failobject% = 
-  first(leg(trip), leg.%failobject_departure%)
-  where(%duty_time_until_now_lh% > %max_duty_day_before_lh%);
-/* The rule is checked on the first long haul duty. This implies that 
- * duty.%start_UTC% always will be greater than trip.%start_UTC%, and the
- * variable will return the sum of all duty times before the lh duty start.*/
-%duty_time_until_now_lh% = 
-  oma16.%trip_duty_time_calc%(duty.union_scheduled, trip.%start_UTC%, leg.%end_UTC%);
-
-
-%duty_time_before_lh% = 
-  oma16.%trip_duty_time_calc%(duty.union_scheduled, trip.%start_UTC%, leg.%end_UTC%);
-
-
-%max_duty_day_before_lh% =
-  if trip.%is_SKD% then
-    duty_time.%max_duty_day_before_lh_skd%
-  else
-    duty_time.%max_duty_day_before_lh_skn%;
-
-%days_before_lh% = (duty.%start_day% - trip.%start_day%) / 24:00;
-%max_days_before_lh% = 1;
-
-%max_duty_day_before_lh_failtext% =
-  if trip.%is_SKS% then
-    rules.%failtext_int%("Coll: SH duty before LH, days", %days_before_lh%, %max_days_before_lh%)
-
-  else
-    concat(rules.%failtext_rel%("Coll: SH before LH", %duty_time_before_lh%, %max_duty_day_before_lh%),
-           rules.%failtext_int%("in", %days_before_lh%, %max_days_before_lh%));
-
-/*
-** Rule:
-**    Max extended duties in period
-**
-** Description:
-**    Check that there is no more than max extended duties in a period.
-**    An extended duty is defined as: (SKN) a short haul duty including
-**    legs with more than 3:00 hrs flying time, (SKD) max 3 legs or max 4
-**    legs and a duty includes a meal stop (X). The rule is only valid for
-**    CC SKD and SKN. Max allowed is 2 for SKD and 1 for SKN. A period is
-**    defined as, between freedays for CC SKN and in 7x24 hrs for CC SKD,
-**    but in CCP it is enough to check within trip.
-**
-**    NB! Two implementations are done. One in Pairing with max extended duties
-**    in a trip and one in Rostering with max extended trips in period.
-**
-** Agreement:
-**    CAU K06 C.1.2.b.ii
-**    NKF/SBK 1.3.3
-**
-**    4ExNG - no longer applies
-*/
-export rule ind_max_extended_duties_in_short_haul_trip_SKD_SKN_SKL =
-  valid trip.%check_rules% and
-        not duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and
-        trip.%in_pp_extended% and
-        (trip.%is_SKD% or trip.%is_SKN%) and
-        duty.%is_short_haul% and
-        duty_time.%duty_is_extended% and
-        not duty.%is_bought%;
-  %nr_extended_duties_in_trip% <= %max_extended_duties% + 
-  				  rule_exceptions.%overshoot_int%(duty.%start_UTC%);
-  startdate  = duty.%start_UTC%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = duty.%failobject_start%;
-  failtext(Int value, Int limit) =
-    rules.%failtext_int%("Coll: Extended duties in trip", value, limit);
-  remark "(CCP) Coll: Max extended duties in trip",
-  planner "The rule checks that there is max 1 long duty (including legs with"
-          " more than 3:00 hrs flying time) in trip. The rule is only valid for"
-          " CC SKN.";
-end
-
-%max_extended_duties% = if trip.%is_SKD% then 2 else 1;
-%nr_extended_duties_in_trip% =
-  count(duty(trip))
-  from (first) to (current)
-  where (duty_time.%duty_is_extended% and
-         not duty.%is_bought%);
-
-/*
-** Rule: Maximum number of night duties in a trip
-*/
-redefine %r_valid_max_night_duties_in_trip% = 
-  (duty.%is_SKD% and duty.%is_short_haul%) or duty.%is_SKN%;
-
-redefine %check_consecutive_nights% = duty.%is_SKD%; /* Only for CC SKD */
-redefine %max_night_duties% = if duty.%is_SKD% then 3 else 2;
-redefine %max_consecutive_night_duties% = 2;
-
-/*
 ** Rule:
 **    Long charter duty is last in trip.
 **
@@ -426,111 +289,15 @@ export rule ind_middle_east_distance_duty_last_in_trip_ALL =
           " and followed by freedays, i.e. the trip must be terminated.";
 end
 
-/*
-** Rule: 
-**    Maximum legs in a 'long legs' duty
-** 
-** Description:
-**    The rule checks that there are no more than 3 legs in a duty that 
-**    includes 'long legs'. 
-**
-**    A 'long leg' is one with > 3:00 block time.
-**
-** Agreement:
-**    SKN CC K11, 1.3.2
-**
-**    4ExNG - no longer applies
-*/
-export rule ind_max_legs_in_long_legs_duty_SKN_CC =
-  valid trip.%check_rules% and
-        not duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and
-        duty.%is_skn% and
-        parameters.%k11_skn_cc_sp10_8_valid%(%pp_start%) and
-        duty.%start_hb% >= %pp_start% and
-        duty_time.%long_leg_in_duty%;
-
-  duty.%num_flight_legs% <= system_db_parameters.%max_legs_in_long_legs_duty_skn_cc_k11%(duty.%start_hb%) + 
-  	rule_exceptions.%overshoot_int%(duty.%start_UTC%);
-  
-  startdate  = duty.%start_UTC%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = last(leg(duty),leg.%failobject_departure%);
-  failtext(Int value, Int limit) =
-    rules.%failtext_int%("Coll: Legs in long legs duty", value, limit);
-  remark "Coll: Max 3 legs in long legs duty",
-  planner "The rule checks that there are no more than 3 legs, active or"
-          " passive in a duty that includes 'long legs'."
-          " A 'long leg' is one with more than 3:00 block time."
-          " The rule is valid for SKN CC K11";
-end
 
 /****************************************************************
  * Section 3: Block time rules
  ***************************************************************/
 
-/*
-** Rule: 
-**    Max block in long haul duty if preceded by short haul
-**
-** Description:
-**    Check that the max block time in a long haul duty preceded by
-**    a short-before-long day is not exceeded. The rule is not valid
-**    for flights to/from NRT. 
-**
-**    NB! Two implementations are done. One in Pairing (when planning 
-**    short-before-long) and one in Rostering.
-**
-** Agreement:
-**    CAU E.1.2
-*/
-rule ind_max_block_in_lh_if_preceded_by_sh_SKD =
-  valid false and /* ref SKCMS-840 */
-        trip.%check_rules% and
-        trip.%in_pp_extended% and
-	      trip.%is_SKD% and
-        duty.%is_long_haul% and
-        not duty.%duty_to_NRT% and
-        duty.%is_preceded_by_short_haul% and
-        prev(duty(trip), not duty.%is_bought%) and
-        not duty.%is_bought%;
-        
-  duty.%block_time% <= %max_block_time_for_lh_duty% + 
-  		       rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
-  startdate  = duty.%start_UTC%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_max_block_in_lh_if_preceded_by_sh_SKD_failobject%;
-  failtext(Reltime value, Reltime limit) =
-    rules.%failtext_rel%("Coll: BLH in lh duty after sh", value, limit);
-  remark "(CCP) Coll: Max block time in long haul trip if preceded by short haul",
-  planner "The rule checks that the max block time in a long haul duty (NRT"
-          " excepted) where preceded by a short haul duty is not exceeded. Only"
-          " valid for SKD.";
-
-end
-
-%ind_max_block_in_lh_if_preceded_by_sh_SKD_failobject%  =
-  first(leg(duty), leg.%failobject_departure%)
-  where(%block_time_in_duty_until_now% > %max_block_time_for_lh_duty% + 
-  		       rule_exceptions.%overshoot_rel%(duty.%start_UTC%));
-
-%block_time_in_duty_until_now% = 
-  sum(leg(duty),leg.%block_time%) from(first) to(current);
-  
-%max_block_time_for_lh_duty% = 10:00;
 
 /****************************************************************
  * Section 4: Rest rules
  ***************************************************************/
-
-/*
-** Rule: Minimum rest time
-*/
-/* Do not check the rest rule for short stops at homebase either for SKD
- * Present in the current source code at SAS, but where is the agreement? HenrikA 05-Apr-2006 */
-redefine %r_valid_min_rest_after_duty_pass% =
-  not (leg.%is_SKD% and 
-       leg.%is_short_haul% and
-       rest.%is_short_at_homebase%);
 
 /*
 ** Rule: Rest in 24hrs from c/i
@@ -738,16 +505,6 @@ redefine %max_days_in_trip% =
     %max_days_in_trip_sh%
   else
     %max_days_in_trip_lh%;
-
-
-/* Both long and short haul limits for CAU and SCCA was found in the agreements,
- * Neither was found for NKF. */
-%max_days_in_trip_lh% = 12;
-
-
-redefine %ind_max_number_checkin_per_day_agmt_valid% =
-   False; /* temporary disable 
-   duty.%is_ac_employer_qa%; */
 
 /* end of file */
 

@@ -1054,7 +1054,6 @@ class RosterPublish(object):
         # This report is disabled due to SKBMM-531
         # self.generateBidSatisfactionReports()
 
-        self.updateHalfFreedayCarryOver()
         self.savePreprocessing()
 
         save_ok = self.save("Save before actual publish", "Saved plan")
@@ -1214,30 +1213,6 @@ class RosterPublish(object):
         et = time.time()
 
         Errlog.log("Publish.generateBidSatisfactionReports:: Finished generating BidSatisfaction reports. Elapsed time %.2fs." % (et-st))
-
-    def updateHalfFreedayCarryOver(self):
-        Errlog.log("Publish.updateHalfFreedayCarryOver:: Updating table half_freeday_carry_over.")
-        
-        pp_start = AbsTime(R.eval('fundamental.pp_start')[0])
-        pp_end = AbsTime(R.eval('fundamental.pp_end')[0])
-
-        default_bag = R.context('sp_crew').bag()
-        for roster_bag in default_bag.iterators.roster_set(where="freedays.half_freeday_carry_over_is_valid"):
-            crew_id = roster_bag.crew.id()
-            carry_over = roster_bag.freedays.half_freeday_carry_over(pp_start, pp_end)
-
-            if not carry_over is None:
-                crew = TM.table("crew").getOrCreateRef((crew_id,))
-  
-                half_freeday_carry_over_table = TM.table("half_freeday_carry_over")
-                try:
-                    entry = half_freeday_carry_over_table.create((crew, pp_end))
-                    entry.carry_over = carry_over
-                except EntityError:
-                    entry = half_freeday_carry_over_table[(crew, pp_end)]
-                    entry.carry_over = carry_over
-        
-        Errlog.log("Publish.updateHalfFreedayCarryOver:: Finished updating table half_freeday_carry_over.")
 
     def tagPublished(self):
         # CuiPublishRosters shall have a UTC time interval as argument.
