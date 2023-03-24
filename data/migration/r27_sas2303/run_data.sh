@@ -44,6 +44,9 @@ python $CARMUSR/data/migration/$RELEASE/skcms-3217.py 2>&1 | tee $LOG_DIR/skcms-
 echo "  * SKCMS-3218:  AST change for A3A5"
 python $CARMUSR/data/migration/$RELEASE/skcms-3218.py 2>&1 | tee $LOG_DIR/skcms-3218.log
 
+echo "  * SKCMS-3263:  Link CC LCS Instructor salary"
+python $CARMUSR/data/migration/$RELEASE/skcms-3263.py 2>&1 | tee $LOG_DIR/skcms-3263.log
+
 # Uncomment this in case dave filters shall be modified, remember to update JIRA number
 #echo "  * SKCMS-XXXX: Importing crc/etable/dave_filter/*.etab into database"
 #$CARMUSR/bin/admin/setup/setup_filters.sh -c -d | tee -a $LOG_DIR/SKCMS-XXXX.log
