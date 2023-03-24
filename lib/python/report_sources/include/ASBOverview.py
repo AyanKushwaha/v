@@ -217,7 +217,7 @@ class ASBOverview(SASReport):
         return ['FC', 'FP', 'AH', 'AP']
 
     def getPlanningGroups(self):
-        return ['SKI', 'SKN', 'SKS', 'SKD', 'QA', 'SKK', 'SKJ', 'SVS']
+        return ['SKI', 'SKN', 'SKS', 'SKD', 'SKK', 'SKJ', 'SVS', 'SZS']
 
     
     def getQualList(self):

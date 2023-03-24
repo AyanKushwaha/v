@@ -532,23 +532,6 @@ class ECList12(SASReport):
                                 else:
                                     dutyTime7CalendarDays = ConditionalHighlight(False, '', border=P.border(bottom=0))
                     
-                        if (legLoop == legLen):
-                            if otRolling and int(leg.nextLegStart) > int(otRolling[0][0]):
-                                if (otRolling[0][2] == Overtime.OT_PART_7x24_FWD or otRolling[0][2] == Overtime.OT_PART_7x24_BWD):
-                                    highlightRolling7x24 = True
-                                    dutyTime7x24Rolling = str(otRolling[0][1])
-                                elif otRolling[0][2] == Overtime.OT_PART_1x24_FWD or otRolling[0][2] == Overtime.OT_PART_1x24_BWD:
-                                    highlightRolling1x24 = True
-                                    overtime1x24 = str(otRolling[0][1])
-                                elif otRolling[0][2] == Overtime.OT_PART_MONTH:
-                                    calendarMonth = str(otRolling[0][1])
-                                elif otRolling[0][2] == Overtime.OT_PART_DUTYPASS or otRolling[0][2] == Overtime.OT_PART_LATE_CHECKOUT:
-                                    highlightDutyPass = True
-                                else:
-                                    print "no, not handling at all"
-                                del otRolling[0]
-                        else:
-                            dutyTime7x24Rolling = ""
                         
                         #if the activity is a ground activity, it should be considered as
                         # homebase time instead of UTC time

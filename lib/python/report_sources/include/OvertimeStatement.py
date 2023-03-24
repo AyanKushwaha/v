@@ -250,16 +250,15 @@ class OvertimeStatement(SASReport):
                 showOvertime = False
                 
             textOt = ""
-            QA_str = " (QA)" if roster.apply_QA_CC_CJ else ""
 
             if roster.isConvertible:
-                otText = 'Convertible Overtime' + QA_str
+                otText = 'Convertible Overtime'
             elif roster.isFlightCrew:
-                otText = 'Overtime (Flight Crew)' + QA_str
+                otText = 'Overtime (Flight Crew)'
             elif roster.isPartTime and roster.isSKS:
-                otText = 'Overtime (Part Time Crew)' + QA_str
+                otText = 'Overtime (Part Time Crew)'
             else:
-                otText = 'Overtime' + QA_str
+                otText = 'Overtime'
                 
             if not showOvertime or overtime == RelTime(0, 0) and overtimeDiff == RelTime(0, 0):
                 textOt = '  '
@@ -328,10 +327,6 @@ class OvertimeStatement(SASReport):
                               prevRoster.getSCCNOP(),
                               type='MDC')
 
-                self.printRow('Senior Cabin Crew (QA)',
-                              roster.getSCCQA(),
-                              prevRoster.getSCCQA(),
-                              type='TEMP_SKN')
 
             else:            
                 self.printRow('Maitre de Cabin',

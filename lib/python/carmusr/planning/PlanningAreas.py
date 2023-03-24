@@ -84,8 +84,16 @@ planning_areas = {
                           {"planning_area.planning_area_crew_planning_group_p":"SVS_PG",
                            "planning_area.planning_area_trip_planning_group_p":"SVS_PG",
                            "planning_area.planning_area_leg_ac_planning_group_p":"SVS_PG"}),
-                  
-        
+
+# Add when go live for SZS (SAS Connect) into CMS                             
+#                       "ALL_SZS":({'maincat':'ALL',
+#                                'planning_group':'SZS',
+#                                'quals':'ALL',
+#                                "area_planning_group":"%",
+#                                "area_qual":"______"},
+#                               {"planning_area.planning_area_crew_planning_group_p":"SZS_PG",
+#                                "planning_area.planning_area_trip_planning_group_p":"SZS_PG",
+#                                "planning_area.planning_area_leg_ac_planning_group_p":"SZS_PG"}),  
             
                     "ALL_CC_SK":({'maincat':'C',
                              'planning_group':'SK_',
@@ -102,19 +110,6 @@ planning_areas = {
                              "area_qual":"F_____"},
                             {"planning_area.planning_area_crew_category_p":"FD_CAT",
                              "planning_area.planning_area_trip_category_p":"FD_CAT"}),
-
-# Removed Feb 2020. QA is no longer part of SAS
-#                             
-#                  "CC_QA":({'maincat':'C',
-#                             'planning_group':'QA',
-#                             'quals':'ALL',
-#                             "area_planning_group":"C%",
-#                             "area_qual":"C_____"},
-#                            {"planning_area.planning_area_crew_category_p":"CC_CAT",
-#                             "planning_area.planning_area_trip_category_p":"CC_CAT",
-#                             "planning_area.planning_area_crew_planning_group_p":"QA_PG",
-#                             "planning_area.planning_area_trip_planning_group_p":"QA_PG",
-#                             "planning_area.planning_area_leg_ac_planning_group_p":"QA_PG"}),
                 
 # Added in Nov2021. SVS is a part of SAS
                              
@@ -130,7 +125,17 @@ planning_areas = {
                              "planning_area.planning_area_leg_ac_planning_group_p":"SVS_PG"}),
 
 
-
+# Add when go live for SZS (SAS Connect) into CMS                             
+#                 "CC_SZS":({'maincat':'C',
+#                                'planning_group':'SZS',
+#                                'quals':'ALL',
+#                                "area_planning_group":"C%",
+#                                "area_qual":"C_____"},
+#                               {"planning_area.planning_area_crew_category_p":"CC_CAT",
+#                                "planning_area.planning_area_trip_category_p":"CC_CAT",
+#                                "planning_area.planning_area_crew_planning_group_p":"SZS_PG",
+#                                "planning_area.planning_area_trip_planning_group_p":"SZS_PG",
+#                                "planning_area.planning_area_leg_ac_planning_group_p":"SZS_PG"}),  
                             
                   "CC_SKD":({'maincat':'C',
                              'planning_group':'SKD',
@@ -176,8 +181,8 @@ planning_areas = {
                             "planning_area.planning_area_trip_planning_group_p":"ANY_PG",
                             "planning_area.planning_area_leg_ac_planning_group_p":"ANY_PG",
                             "planning_area.planning_area_crew_qualification_p":"AL_QUAL",
-                            "planning_area.planning_area_trip_ac_fam_p":"A330_340_350_FAM",
-                            "planning_area.planning_area_leg_ac_fam_p":"A330_340_350_FAM"}),
+                            "planning_area.planning_area_trip_ac_fam_p":"A330_350_FAM",
+                            "planning_area.planning_area_leg_ac_fam_p":"A330_350_FAM"}),
                   
                   "CC_ASIA":({'maincat':'C',
                              'planning_group':'SKI',
@@ -190,8 +195,8 @@ planning_areas = {
                               "planning_area.planning_area_trip_planning_group_p":"SKI_PG",
                               "planning_area.planning_area_leg_ac_planning_group_p":"SKI_PG",
                               #"planning_area.planning_area_crew_qualification_p":"AL_QUAL",
-                              "planning_area.planning_area_trip_ac_fam_p":"A330_340_350_FAM",
-                              "planning_area.planning_area_leg_ac_fam_p":"A330_340_350_FAM"}),
+                              "planning_area.planning_area_trip_ac_fam_p":"A330_350_FAM",
+                              "planning_area.planning_area_leg_ac_fam_p":"A330_350_FAM"}),
 
                   "CC_JAPAN":({'maincat':'C',
                              'planning_group':'SKJ',
@@ -204,8 +209,8 @@ planning_areas = {
                               "planning_area.planning_area_trip_planning_group_p":"SKJ_PG",
                               "planning_area.planning_area_leg_ac_planning_group_p":"SKJ_PG",
                               #"planning_area.planning_area_crew_qualification_p":"AL_QUAL",
-                              "planning_area.planning_area_trip_ac_fam_p":"A330_340_350_FAM",
-                              "planning_area.planning_area_leg_ac_fam_p":"A330_340_350_FAM"}),
+                              "planning_area.planning_area_trip_ac_fam_p":"A330_350_FAM",
+                              "planning_area.planning_area_leg_ac_fam_p":"A330_350_FAM"}),
                   
                   "CC_CHINA":({'maincat':'C',
                              'planning_group':'SKK',
@@ -218,55 +223,33 @@ planning_areas = {
                               "planning_area.planning_area_trip_planning_group_p":"SKK_PG",
                               "planning_area.planning_area_leg_ac_planning_group_p":"SKK_PG",
                               #"planning_area.planning_area_crew_qualification_p":"AL_QUAL",
-                              "planning_area.planning_area_trip_ac_fam_p":"A330_340_350_FAM",
-                              "planning_area.planning_area_leg_ac_fam_p":"A330_340_350_FAM"}),
-
-# Removed Feb 2020. QA is no longer part of SAS                              
-#                  "FD_QA":({'maincat':'F',
-#                                'planning_group':'QA',
-#                                'quals':'CJ',
-#                                "area_planning_group":"F%",
-#                                "area_qual":"F_____"},
-#                               {"planning_area.planning_area_crew_category_p":"FD_CAT",
-#                                "planning_area.planning_area_trip_category_p":"FD_CAT",
-#                                "planning_area.planning_area_crew_planning_group_p":"QA_PG",
-#                                "planning_area.planning_area_trip_planning_group_p":"QA_PG",
-#                                "planning_area.planning_area_leg_ac_planning_group_p":"QA_PG",
-#                                "planning_area.planning_area_crew_qualification_p":"CJ_QUAL",
-#                                "planning_area.planning_area_trip_ac_fam_p":"CRJ_FAM",
-#                                "planning_area.planning_area_leg_ac_fam_p":"CRJ_FAM"}),                              
-                  
-#                  "FD_SKD_A2":({'maincat':'F',
-#                                'planning_group':'SKD',
-#                                'quals':'A2',
-#                                "area_planning_group":"F%",
-#                                "area_qual":"F_____"},
-#                               {"planning_area.planning_area_crew_category_p":"FD_CAT",
-#                                "planning_area.planning_area_trip_category_p":"FD_CAT",
-#                                "planning_area.planning_area_crew_planning_group_p":"SKD_PG",
-#                                "planning_area.planning_area_trip_planning_group_p":"SKD_PG",
-#                                "planning_area.planning_area_leg_ac_planning_group_p":"SKD_PG",
-#                                "planning_area.planning_area_crew_qualification_p":"A320_QUAL",
-#                                "planning_area.planning_area_trip_ac_fam_p":"A320_FAM",
-#                                "planning_area.planning_area_leg_ac_fam_p":"A320_FAM"}),
+                              "planning_area.planning_area_trip_ac_fam_p":"A330_350_FAM",
+                              "planning_area.planning_area_leg_ac_fam_p":"A330_350_FAM"}),
                   
 # Added Nov 2021. SVS is a part of SAS                              
                   "FD_SVS":({'maincat':'F',
                                 'planning_group':'SVS',
-                                'quals':'EJ',
+                                'quals':'ALL',
                                 "area_planning_group":"F%",
                                 "area_qual":"F_____"},
                                {"planning_area.planning_area_crew_category_p":"FD_CAT",
                                 "planning_area.planning_area_trip_category_p":"FD_CAT",
                                 "planning_area.planning_area_crew_planning_group_p":"SVS_PG",
                                 "planning_area.planning_area_trip_planning_group_p":"SVS_PG",
-                                "planning_area.planning_area_leg_ac_planning_group_p":"SVS_PG",
-                                "planning_area.planning_area_crew_qualification_p":"EJ_QUAL",
-                                "planning_area.planning_area_trip_ac_fam_p":"EMJ_FAM",
-                                "planning_area.planning_area_leg_ac_fam_p":"EMJ_FAM"}),                              
+                                "planning_area.planning_area_leg_ac_planning_group_p":"SVS_PG"}),                              
 
-                  
-
+# Add when go live for SZS (SAS Connect) into CMS                             
+#                 "FD_SZS":({'maincat':'F',
+#                                'planning_group':'SZS',
+#                                'quals':'ALL',
+#                                "area_planning_group":"F%",
+#                                "area_qual":"F_____"},
+#                               {"planning_area.planning_area_crew_category_p":"FD_CAT",
+#                                "planning_area.planning_area_trip_category_p":"FD_CAT",
+#                                "planning_area.planning_area_crew_planning_group_p":"SZS_PG",
+#                                "planning_area.planning_area_trip_planning_group_p":"SZS_PG",
+#                                "planning_area.planning_area_leg_ac_planning_group_p":"SZS_PG"}),  
+                                
                   "FD_SKI":({'maincat':'F',
                              'planning_group':'SKI',
                              'quals':'ALL',
@@ -277,9 +260,8 @@ planning_areas = {
                              "planning_area.planning_area_crew_planning_group_p":"SKI_PG",
                              "planning_area.planning_area_trip_planning_group_p":"SKI_PG",
                              "planning_area.planning_area_leg_ac_planning_group_p":"SKI_PG",
-                             #"planning_area.planning_area_crew_qualification_p":"A330_340_350_QUAL",
-                             "planning_area.planning_area_trip_ac_fam_p":"A330_340_350_FAM",
-                             "planning_area.planning_area_leg_ac_fam_p":"A330_340_350_FAM"}),
+                             "planning_area.planning_area_trip_ac_fam_p":"A330_350_FAM",
+                             "planning_area.planning_area_leg_ac_fam_p":"A330_350_FAM"}),
 
                    "FD_B737":({'maincat':'F',
                              'quals':'37|38',
@@ -303,34 +285,5 @@ planning_areas = {
                              "planning_area.planning_area_trip_ac_fam_p":"A320_FAM",
                              "planning_area.planning_area_leg_ac_fam_p":"A320_FAM"}),
 
-#737 group is no longer divided in SKN and SKS. Leave commented out until further.
-#                  "FD_SKN_B737":({'maincat':'F',
-#                                  'planning_group':'SKN',
-#                                  'quals':'37|38',
-#                                  "area_planning_group":"F%",
-#                                  "area_qual":"F_____"},
-#                                 {"planning_area.planning_area_crew_category_p":"FD_CAT",
-#                                  "planning_area.planning_area_trip_category_p":"FD_CAT",
-#                                  "planning_area.planning_area_crew_planning_group_p":"SKN_PG",
-#                                  "planning_area.planning_area_trip_planning_group_p":"SKN_PG",
-#                                  "planning_area.planning_area_leg_ac_planning_group_p":"SKN_PG",
-#                                  "planning_area.planning_area_crew_qualification_p":"B737_QUAL",
-#                                  "planning_area.planning_area_trip_ac_fam_p":"B737_FAM",
-#                                  "planning_area.planning_area_leg_ac_fam_p":"B737_FAM"}),
-                  
-                  
-#                  "FD_SKS_B737":({'maincat':'F',
-#                                  'planning_group':'SKS',
-#                                  'quals':'36|38',
-#                                  "area_planning_group":"F%",
-#                                  "area_qual":"F_____"},
-#                                 {"planning_area.planning_area_crew_category_p":"FD_CAT",
-#                                  "planning_area.planning_area_trip_category_p":"FD_CAT",
-#                                  "planning_area.planning_area_crew_planning_group_p":"SKS_PG",
-#                                  "planning_area.planning_area_trip_planning_group_p":"SKS_PG",
-#                                  "planning_area.planning_area_leg_ac_planning_group_p":"SKS_PG",
-#                                  "planning_area.planning_area_crew_qualification_p":"B737_QUAL",
-#                                  "planning_area.planning_area_trip_ac_fam_p":"B737_FAM",
-#                                  "planning_area.planning_area_leg_ac_fam_p":"B737_FAM"})
-                  
                   }
+

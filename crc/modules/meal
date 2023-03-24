@@ -27,6 +27,7 @@
  * Date   Name             Comment
  * 081216 Hasse Eliasson   Industrialized code + Restructure.
  * 150603 Lars Westerlind  Duty Meal Strings
+ * 230301 Matilda Andersson Changes for SVS+SZS and possibility for CC to follow FD rules
  *
  */
 
@@ -51,7 +52,17 @@ import model_iata;
  *            This section defines the basic values for Meal
  *            and basic variables used in calculations.
  ***************************************************************/
-/****************************************************************
+ 
+ /* Variable to enable an easy way to allow CC groups to follow their corresponding
+ FD groups rules instead of changing all values in all tables back and forth.
+ 
+ Note! This is not added in %need_go_or_gs% since SKN CC that follows FD rules does not require snack box.
+ So if agreed for other groups then a correction is needed manually there */
+export %follow_flight_crew_rules% =
+    %flight_crew% or
+    %cabin_crew% and (locate(trip.%region%, system_db_parameters.%region_to_follow_fd_meal_rules%(duty.%start_day%)) >0);
+
+ /****************************************************************
  * Section 1.1: Defines if Meal is needed in duty.
  ***************************************************************/
 
@@ -69,22 +80,22 @@ import model_iata;
 /* Agreement: FC 13:25 1,2,6, CAU K.1,a,b, NKF/SBK 10, SCCA J.1 */
 
 table duty_requiring_meal_break =
-  system_db_parameters.%cba16_meal_corr_valid%(duty.%start_day%),
-         %flight_crew%,
-          %legality_region%,
-                        duty.%is_ac_employer_sk_sh%,
-                        duty.%is_ac_employer_svs%-> 
-                                export %duty_requiring_meal_break%,
-                                       export %duty_requiring_two_breaks%;
-  -,     True,  -  , True,  false    -> 5:45,  10:00; 
+ %follow_flight_crew_rules%,
+       %legality_region%,
+             trip.%homebase% -> 
+                     export %duty_requiring_meal_break%,
+                     export %duty_requiring_two_breaks%;
+  True,   -  ,   -   -> 5:45, 10:45;
   
-True,  False, "SKN" ,   -,    false  -> if not (system_db_parameters.%K20_skn_cc_meal_stop%(duty.%start_day%)and duty.%is_ac_employer_skn%) then %_max_time_to_first_meal_break% else 5:45,  10:00;
-True,  False, "SKS" ,   -,    false  -> if not (system_db_parameters.%K20_sks_cc_meal_stop%(duty.%start_day%)and duty.%is_ac_employer_sks%) then %_max_time_to_first_meal_break% else 5:45,  10:00;
-True,  False, "SKD" ,   -,    false  -> if not (system_db_parameters.%K20_skd_cc_meal_stop%(duty.%start_day%)and duty.%is_ac_employer_skd%) then %_max_time_to_first_meal_break% else 5:45,  10:00;
-False, False,   -   ,   -,    false  -> 6:00,  10:00;
--,     -,     "SVS" , False,   True  -> 5:00,  10:00;
-  -,   True,   -    , False,  false  -> 5:45,  10:00;
-  -,     -,    -    ,   -  ,   -     -> void_reltime, void_reltime;
+ False, "SKN",   -   -> %_max_time_to_first_meal_break%, 10:00;
+ False, "SKS",   -   -> %_max_time_to_first_meal_break%, 10:00;
+ False, "SKD",   -   -> %_max_time_to_first_meal_break%, 10:00;
+ False, "SVS", "BGO" -> %_max_time_to_first_meal_break%, 10:00;
+ False, "SVS", "CPH" -> %_max_time_to_first_meal_break%, 10:00;
+ False, "SZS", "CPH" -> %_max_time_to_first_meal_break%, 10:00;
+ False, "SZS", "STO" -> %_max_time_to_first_meal_break%, 10:00;
+  
+     -,   -  ,   -   -> void_reltime, void_reltime;
 end
 
 /* true if duty time > 10:00 - duty level */
@@ -104,56 +115,47 @@ export %duty_requires_two_meal_breaks% =
  * Section 1.2: Defines time before Meal is needed.
  ***************************************************************/
 table max_time_btw_meal_breaks =
-  %flight_crew%, 
+  %follow_flight_crew_rules%, 
   %legality_region%,
-  leg.%is_ac_employer_sk_sh%,
-  leg.%is_ac_employer_svs%->
+  leg.%trip_homebase% ->
     export %max_time_to_first_meal_break%,
     export %max_time_btw_meal_breaks%;
 
   /* 4ExNG CC */
-       false, "SKN",     -,   -   -> if not (system_db_parameters.%K20_skn_cc_meal_stop%(leg.%start_date%)and duty.%is_ac_employer_skn%) then %_max_time_to_first_meal_break% else 5:45,  5:00;
-       false, "SKS",     -,   -   -> if not (system_db_parameters.%K20_sks_cc_meal_stop%(leg.%start_date%)and duty.%is_ac_employer_sks%) then %_max_time_to_first_meal_break% else 5:45,  5:00;
-       false, "SKD",     -,   -   -> if not (system_db_parameters.%K20_skd_cc_meal_stop%(leg.%start_date%)and duty.%is_ac_employer_skd%) then %_max_time_to_first_meal_break% else 5:45,  5:00;
+       false, "SKN",    - -> %_max_time_to_first_meal_break%, 5:00;
+       false, "SKS",    - -> %_max_time_to_first_meal_break%, 5:00;
+       false, "SKD",    - -> %_max_time_to_first_meal_break%, 5:00;
+       false, "SVS","BGO" -> %_max_time_to_first_meal_break%, 5:00;
+       false, "SVS","CPH" -> %_max_time_to_first_meal_break%, 5:00;
+       false, "SZS","CPH" -> %_max_time_to_first_meal_break%, 5:00;
+       false, "SZS","STO" -> %_max_time_to_first_meal_break%, 5:00;
   /* Flight crew K15 */
-        true,  - ,    true,   -    -> 5:45,  5:00;
-  /* FD and CC crew SVS */
-       -,    "SVS",  false, true   -> 5:00, 5:00; 
-  &
-  /* Flight crew */
-       true,  "SKD", -,       -    -> 5:45,  5:00;
-       true,  "SKN", -,       -    -> 5:45,  5:00;
-       true,  "SKS", -,       -    -> 5:45,  5:00;
-  
-       -,     -,     -,       -    -> void_reltime, void_reltime;
+        true,    - ,  -   -> 5:45, 5:00;
+
+           -,     -,  -   -> void_reltime, void_reltime;
 end
 
 %_max_time_to_first_meal_break% =
-  if system_db_parameters.%skn_cc_oct2016_valid%(trip.%start_hb%) then
-    %_max_time_to_first_meal_break_parameters%
-  else
-    6:00;
+    %_max_time_to_first_meal_break_parameters%;
 
 %_max_time_to_first_meal_break_parameters% =
-  if duty.%is_ac_employer_skn% then
-    system_db_parameters.%meal_skn_time_to_frst_brk%(duty.%start_day%)
-  else if duty.%is_ac_employer_sks% then
-    system_db_parameters.%meal_sks_time_to_frst_brk%(duty.%start_day%)
-  else if duty.%is_ac_employer_skd% then
-    system_db_parameters.%meal_skd_time_to_frst_brk%(duty.%start_day%)
-  else
-    6:00;
+    default(system_db_parameters.%meal_time_to_frst_brk_limit%(%meal_time_to_frst_brk_name%, duty.%start_day%)
+            ,6:00);
+
+%meal_time_to_frst_brk_name% =
+    if duty.%is_ac_employer_skd% then
+    "meal_skd_time_to_frst_brk"
+    else if duty.%is_ac_employer_skn% then
+    "meal_skn_time_to_frst_brk"
+    else if duty.%is_ac_employer_sks% then
+    "meal_sks_time_to_frst_brk"
+    else if duty.%is_ac_employer_svs% then
+    concat("meal_svs_time_to_frst_brk_",trip.%homebase%)
+    else if duty.%is_ac_employer_szs% then
+    concat("meal_szs_time_to_frst_brk_",trip.%homebase%)
+    else "meal_time_to_frst_brk";
 
 %add_hrs_if%(Reltime value, Bool condition) = if condition then value else 0:00;
-
-/* For SKN CC there are to cases for %max_time_to_first_meal_break%:
-     #1: Max 6h from check in      (normal case)
-     #2: Max 5h from block off     (from blockoff case)
-   The first case is the normal, i.e. we always use ci for %duty_period_start%,
-   but then we have to compensate with the difference for the second case.*/
-%from_blockoff_mod_SKN_CC% =  nmax(1:00 - (%duty_block_off% - %duty_check_in%),
-                                   0:00);
-
 
 /****************************************************************
  * Section 1.3: Defines duration of Meal break.
@@ -164,9 +166,8 @@ export %leg_cnx_time% = leg.%scheduled_connection_time%;
 export %leg_time% = leg.%scheduled_time%;
 
 table meal_break_duration_limits =
-  %flight_crew% ,
+  %follow_flight_crew_rules% ,
   duty.%is_ac_employer_sk_sh%,
-  duty.%is_ac_employer_svs%,
   %legality_region%,
   %next_leg_active_flight%,
   %leg_has_debriefing% ->
@@ -175,40 +176,25 @@ table meal_break_duration_limits =
     %meal_on_ground_in_ac_min_duration%,
     %_meal_during_flight_min_duration_tbl%,
     export %_meal_during_flight_start_time_shift%;
-/*______________________________________________________________________________________________________ */
-/* | FD   |SK_SH  |SVS empl  |region       |nxtActv|debrief|->|stop|relax| grnd| air |shift| */
-   true,   true , -,         -             , -     , false  -> 1:30, 1:15, 0:00, 1:10, 0:00;
-   true,   true , -,         -             , -     , true   -> 2:00, 1:45, 0:00, 1:10, 0:00;
-   true,   false, -,         "SKN"         , true  , false  -> 1:45, 1:30, 0:00, %_meal_during_flight_min_duration%,
-                                                                                            0:00;
-   true,   false, -,         "SKN"         , false , false  -> 1:30, 1:15, 0:00, %_meal_during_flight_min_duration%,
-                                                                                            0:00;
-   true,   false, -,         "SKN"         , true  , true   -> 2:15, 2:00, 0:00, %_meal_during_flight_min_duration%,
-                                                                                            0:00;
-   true,   false, -,         "SKN"         , false , true   -> 2:00, 1:45, 0:00, %_meal_during_flight_min_duration%,
-                                                                                            0:00;
-  
-  false,   -    , -,          "SKS"         , -     , -      -> 1:30, 1:15, if not (system_db_parameters.%K20_sks_cc_meal_stop%(leg.%start_date%) and duty.%is_ac_employer_sks%) then %_4x% else 12:00,
-                                                                                   if not (system_db_parameters.%K20_sks_cc_meal_stop%(leg.%start_date%)and duty.%is_ac_employer_sks%) then %_meal_during_flight_min_duration% else 1:10,
-                                                                                              0:00;
-  false,   -    , -,         "SKN"         , -     ,-       -> 1:30, 1:15, if not (system_db_parameters.%K20_skn_cc_meal_stop%(leg.%start_date%) and duty.%is_ac_employer_skn%) then %_4x% else 12:00,
-                                                                                  if not (system_db_parameters.%K20_skn_cc_meal_stop%(leg.%start_date%) and duty.%is_ac_employer_skn%) then %_meal_during_flight_min_duration% else 1:10,
-                                                                                              0:00;																							  
-  false,   -    , -,         "SKD"         , -     ,-       -> 1:30, 1:15, if not (system_db_parameters.%K20_skd_cc_meal_stop%(leg.%start_date%) and duty.%is_ac_employer_skd%) then %_4x% else 12:00,
-                                                                                  if not (system_db_parameters.%K20_skd_cc_meal_stop%(leg.%start_date%) and duty.%is_ac_employer_skd%) then %_meal_during_flight_min_duration% else 1:10,
-                                                                                              0:00;	
-  true,     false, -,        "SKI"         , -     , -      -> 1:30, 1:15, 0:00, 1:10, 0:00;
- -   ,     false, true,      "SVS"         , -     , -      -> 1:15, 1:00, 0:40, 0:55, 0:00;
- -, -, -, -, -, - -> void_reltime, void_reltime, void_reltime, void_reltime, void_reltime;
+/*___________________________________________________________________________*/
+/* | FD   |SK_SH  |region  |nxtActv|debrief|->|stop X|relax|grnd V|air VO|shift| */
+   true,   -    ,  "SVS"   , -     , -      -> 1:15  , 1:15, 0:45 , 1:00 , 0:00;
+   &
+   true,   true ,     -    , -     , false  -> 1:30  , 1:15, 0:00 , 1:10 , 0:00;
+   true,   true ,     -    , -     , true   -> 2:00  , 1:45, 0:00 , 1:10 , 0:00;
+   true,   false,  "SKI"   , -     , -      -> 1:30  , 1:15, 0:00 , 1:10 , 0:00;
+  false,   -    ,  "SKS"   , -     , -      -> 1:30  , 1:15, %_4x%, %_meal_during_flight_min_duration%, 0:00;
+  false,   -    ,  "SKN"   , -     , -      -> 1:30  , 1:15, %_4x%, %_meal_during_flight_min_duration%, 0:00;																							  
+  false,   -    ,  "SKD"   , -     , -      -> 1:30  , 1:15, %_4x%, %_meal_during_flight_min_duration%, 0:00;
+  false,   -    ,  "SVS"   , -     , -      -> 1:15  , 1:15, 0:40 , 0:55 , 0:00;
+  false,   -    ,  "SZS"   , -     , -      -> 1:15  , 1:15, 0:40 , 0:55 , 0:00;
+ -, -, -, -, - -> void_reltime, void_reltime, void_reltime, void_reltime, void_reltime;
 end
 
 export %meal_during_flight_min_duration% =
   nmax(%_meal_during_flight_min_duration_tbl%, %meal_during_flight_start_time_shift% + %meal_landing_limitation%); 
 /* SASCMS-3086. V code cnx time is pick up from the meal_airport table */
 %_4x% = nmax(%_pick_up_mealcode_v_mincnx%, 0:50);
-%_x1% = nmax(%_pick_up_mealcode_v_mincnx%, 1:00); /* SKD */
-%_x2% = nmax(%_pick_up_mealcode_v_mincnx%, 0:50); /* SKN */
-%_x3% = nmax(%_pick_up_mealcode_v_mincnx%, 1:00); /* SKS */
 
 %_pick_up_mealcode_v_mincnx% = default(%mealcode_v_mincnx_for_station%, 0:00);
   
@@ -222,32 +208,16 @@ export %meal_during_flight_min_duration% =
   leg.%is_any_lc% and
   default(next(leg(duty), not leg.%is_any_lc%), false); 
 
-/* NB! Use with care..*/
-%duty_ac_family% = 
-  default(first(leg(duty), leg.%ac_family%) where (leg.%is_active_flight%),
-          "");
 %_meal_during_flight_min_duration% =
-  if duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) then
-   /* CC 4ExNG */
-   if leg.%is_domestic% then
-      1:31
-    else
-      2:01
-  else
-    /* FC before 4ExNG */
-    if %meal_allocation_skn_fc% then
-      1:10
-    else
-      1:11;
+  if leg.%is_domestic% 
+    then 1:31
+    else 2:01;
 
-/* SASCMS-5797, vallid from 1jun2013 */
 export %valid_meal_not_too_close_cc% =
-if not ((system_db_parameters.%K20_skn_cc_meal_stop%(duty.%start_hb%) and duty.%is_ac_employer_skn%) or (system_db_parameters.%K20_sks_cc_meal_stop%(duty.%start_hb%) and duty.%is_ac_employer_sks%) or (system_db_parameters.%K20_skd_cc_meal_stop%(duty.%start_hb%) and duty.%is_ac_employer_skd%))
-    then
-         (default(%cabin_crew%, true) 
-          and %agreement_valid%("meal_not_too_close_cc", duty.%start_hb%))
-    else
-false;
+    if not %follow_flight_crew_rules%
+        then (default(%cabin_crew%, true) 
+              and %agreement_valid%("meal_not_too_close_cc", duty.%start_hb%))
+    else false;
 
 export %in_flight_meal_delay% = parameter 0:00 minvalue 0:00
 remark "Meal: Time after block off for earliest start of meal stop";
@@ -277,7 +247,6 @@ remark "Meal: Time after arrival for earliest start of ground meal stop";
 export %ground_meal_walktime_end% = parameter 0:00 minvalue 0:00
 remark "Meal: Time before departure for latest end of ground meal stop";
 
-
 export %flight_meal_end% =
   leg.%activity_scheduled_end_time_UTC% - %meal_landing_limitation%;
 
@@ -288,36 +257,22 @@ remark "Meal: Time before block on for latest end of meal stop";
  * Note that the *_act variables are dummies and are redefined in tracking.
  */
 table meal_duty_period_definition =
-  duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%),
-  %flight_crew%, %legality_region% ->
+ %follow_flight_crew_rules%, %legality_region% ->
     export %duty_period_start%,
     export %duty_period_end%,
     export %duty_period_start_act%,
     export %duty_period_end_act%;
   
   /* 4ExNG CC */
-  true ,   -  ,   -   -> %duty_check_in% , %duty_block_on%, void_abstime, void_abstime;
-
+   false,   -   -> %duty_check_in% , %duty_block_on%, void_abstime, void_abstime;
   /* Flight crew */
-  false, true , "SKD" -> %duty_check_in% , %duty_block_on%, void_abstime, void_abstime;
-  false, true , "SKN" -> %duty_check_in% , %duty_block_on%, void_abstime, void_abstime;
-  false, true , "SKS" -> %duty_check_in% , %duty_block_on%, void_abstime, void_abstime;
-  false, true , "SKI" -> %duty_check_in% , %duty_block_on%, void_abstime, void_abstime;
-  
-/* Flight crew - SVS*/
-  false  , true , "SVS" -> %duty_check_in% , %duty_block_on%, void_abstime, void_abstime;
-
-  /* Cabin crew - DK */
-  false, false, "SKD" -> %duty_check_in% , %duty_block_on%, void_abstime, void_abstime;
-  /* Cabin crew - NO */
-  false, false, "SKN" -> %duty_check_in% , %duty_block_on%, void_abstime, void_abstime;
-  /* Cabin crew - SE */
-  false, false, "SKS" -> %duty_block_off%, %duty_block_on%, void_abstime, void_abstime;
-
-  /* Cabin crew -  SVS */
-  false , false, "SVS" -> %duty_check_in% , %duty_block_on%, void_abstime, void_abstime;
+   true , "SKD" -> %duty_check_in% , %duty_block_on%, void_abstime, void_abstime;
+   true , "SKN" -> %duty_check_in% , %duty_block_on%, void_abstime, void_abstime;
+   true , "SKS" -> %duty_check_in% , %duty_block_on%, void_abstime, void_abstime;
+   true , "SKI" -> %duty_check_in% , %duty_block_on%, void_abstime, void_abstime;
+   true , "SVS" -> %duty_check_in% , %duty_block_on%, void_abstime, void_abstime;
   /*  Default */
-  -    ,-    , -      -> void_abstime    , void_abstime   , void_abstime, void_abstime;
+   -    , -      -> void_abstime    , void_abstime   , void_abstime, void_abstime;
 end
 
 /* Modifications for standbys effect on start/end times of duty. */
@@ -356,25 +311,19 @@ export %is_standby% =
   leg.%is_standby_at_home% or leg.%is_standby_at_hotel% or
   leg.%is_standby_at_airport%;
 
-
-/* Agreement: NKF , SCCA K07
- * Note that the *_act variables are dummies and are redefined in tracking.
- * Added Cimber FD, calculating duty time not block time.
- */
 table two_required_meals_duty_period_definition =
-  %flight_crew%,
-         duty.%is_ac_employer_qa%
+  %follow_flight_crew_rules%,
+         duty.%region%
                -> export %two_required_meals_duty_time%,
                                      export %two_required_meals_duty_time_act%;
-  True,  False -> %duty_block_time%, void_reltime;
-  True,  True  -> %duty_duty_time%,  void_reltime;  
-  False, -       -> if not (system_db_parameters.%K20_skn_cc_meal_stop%(duty.%start_hb%) and duty.%is_ac_employer_skn% and (not (trip.%homebase% = "CPH" or trip.%homebase% = "ARN"))) or
-                                        (system_db_parameters.%K20_skd_cc_meal_stop%(duty.%start_hb%) and duty.%is_ac_employer_skd%) or 
-                                        (system_db_parameters.%K20_sks_cc_meal_stop%(duty.%start_hb%) and duty.%is_ac_employer_sks%) 
-                                        then %duty_duty_time% else %duty_block_time%,  void_reltime;
-  -,     -     -> void_reltime,      void_reltime;
+   true,  -     -> %duty_duty_time% ,void_reltime; /* technically FD don't have an agreement that 2 meals are required after X hours. But logically this will happen if there's max 5:45h to first and max 5h between breaks */
+  false,  "SKD" -> %duty_duty_time% ,void_reltime;
+  false,  "SKN" -> %duty_duty_time% ,void_reltime;
+  false,  "SKS" -> %duty_duty_time% ,void_reltime;
+  false,  "SVS" -> %duty_duty_time% ,void_reltime;
+  false,  "SZS" -> %duty_duty_time% ,void_reltime;
+  -    ,   -    -> void_reltime     ,void_reltime;
 end
-
 
 /****************************************************************
  * Section 1.5: Defines Meal regions.
@@ -406,17 +355,21 @@ set meal_regions = external string "meal_customer"."region";
 
 set meal_companies = external string "meal_customer"."company";
 
-set meal_base_stations = "ARN", "CPH", "OSL", "SVG", "TRD";
+set meal_base_stations = "ARN", "CPH", "OSL";
 
 set meal_sks_base_stations = "ARN";
 
-set meal_skn_base_stations = "OSL", "SVG", "TRD";
+set meal_skn_base_stations = "OSL";
+
+set meal_szs_base_stations = "ARN", "CPH";
 
 %is_base_station%(String station) = station in meal_base_stations;
 
 %is_sks_base_station%(String station) = station in meal_sks_base_stations;
 
 %is_skn_base_station%(String station) = station in meal_skn_base_stations;
+
+%is_szs_base_station%(String station) = station in meal_szs_base_stations;
 
 %leg_departs_base_station% =
   %is_base_station%(leg.%start_station%);
@@ -427,6 +380,9 @@ set meal_skn_base_stations = "OSL", "SVG", "TRD";
 %leg_departs_skn_base_station% =
   %is_skn_base_station%(leg.%start_station%);
 
+%leg_departs_szs_base_station% =
+  %is_szs_base_station%(leg.%start_station%);
+
 %leg_arrives_base_station% =
   %is_base_station%(leg.%end_station%);
 
@@ -434,7 +390,6 @@ set meal_skn_base_stations = "OSL", "SVG", "TRD";
  * Section 1.6: Defines if and where Meals are allowed.
  ***************************************************************/
 
- 
  /*This table controls if flights for a meal region should be automatically
   * assigned meals by the system.
   * Note: For meal load, this is per owner of a flight,
@@ -451,10 +406,10 @@ table meal_assignment_activation(Bool meal_stop) =
   false, "SKS" -> true;
   false, "SVS" -> true;
   false, "SKI" -> false;
+  false, "SZS" -> true;
   true,  -     -> true;
   -,     -     -> false;
 end
-
 
 %meal_during_flight_allowed% =
  %meal_during_flight_allowed_general% 
@@ -463,28 +418,24 @@ end
 table allowed_meal_breaks =
   alias astop = %do_meal_assign%(true),
         aload = %do_meal_assign%(false);
-  duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%),
-  %flight_crew%, %legality_region%, leg.%is_long_haul% ->
+    %follow_flight_crew_rules%, %legality_region%, leg.%is_long_haul% ->
     %meal_stop_allowed%,
     %meal_on_ground_in_ac_allowed%,
     %meal_during_flight_allowed_general%;
 /*___________________________________________________ */
-/*4ExNG|  FC  |region| LH   |->|stop | ground| air  | */
-  true , -    , "SKN", -     -> astop, if not(system_db_parameters.%K20_skn_cc_meal_stop%(duty.%start_hb%) and duty.%is_ac_employer_skn%) then aload else false , aload;
-  true , -    , "SKS", -     -> astop, if not(system_db_parameters.%K20_sks_cc_meal_stop%(duty.%start_hb%) and duty.%is_ac_employer_sks%) then aload else false , aload;
-  true , -    , "SKD", -     -> astop, if not(system_db_parameters.%K20_skd_cc_meal_stop%(duty.%start_hb%) and duty.%is_ac_employer_skd%) then aload else false , aload;
-  false, true , "SKD", -     -> astop, false , aload;
-  false, true , "SKN", -     -> astop, false , aload;
-  false, true , "SKS", -     -> astop, false , aload;
-  false, false, "SKD", true  -> false, false , aload;
-  false, false, "SKD", false -> astop, aload , false;
-  false, false, "SKN", -     -> astop, aload , aload;
-  false, false, "SKS", -     -> astop, aload , aload;
-    -  ,   -  , "SVS", -     -> astop, aload , aload;
-  -    , -    , -    , -     -> false, false , false;
+/* FC  |region| LH   |->|stop | ground| air  | */
+  false, "SKN", -     -> astop, aload , aload;
+  false, "SKS", -     -> astop, aload , aload;
+  false, "SKD", -     -> astop, aload , aload;
+  false, "SVS", -     -> astop, aload , aload;
+  true , "SKD", -     -> astop, false , aload;
+  true , "SKN", -     -> astop, false , aload;
+  true , "SKS", -     -> astop, false , aload;
+  true , "SVS", -     -> astop, aload , aload;
+  true , "SZS", -     -> astop, false , aload;
+
+  -    , -    , -     -> false, false , false;
 end
-
-
 
 %meal_prohibit_flight_table% =
     %etab_path%(%meal_prohibit_flight_table_p%);
@@ -533,11 +484,10 @@ end
   %_allowed_station_for_meal_stop%;
 
 table allowed_stations_for_meal_stop =
-  duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%),
-  %flight_crew%, %legality_region% ->
+  %follow_flight_crew_rules%, %legality_region% ->
     %_allowed_station_for_meal_stop%;
-  false, false, "SKD"   -> leg.%arrives_at_homebase%;
-  -    , -    , -       -> true;
+
+   -    , -       -> true;
 end
 
 
@@ -578,31 +528,21 @@ end
 
 /* Agreement: CAU K06 K.1c, NKF/SBK 10.3, SCCA K06 6 */
 table allowed_stations_for_meal_on_ground_in_ac =
-  duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%),
-  %flight_crew%, %legality_region% ->
+    %follow_flight_crew_rules%, %legality_region% ->
     %allowed_station_for_meal_on_ground_in_ac%;
-  true ,   -  ,   -     -> not leg.%arrives_at_SAS_base%;
-  false, false, "SKD"   -> not leg.%arrives_at_homebase%;
-  false, false, "SVS"   -> not leg.%arrives_at_homebase%;
-  false, false, "SKN"   -> not leg.%arrival_is_interscand% or
-                           leg.%end_station% = "LYR";
-  false, false, "SKS"   -> leg.%end_station% <> "ARN";
-  false, true ,   -     -> false;
+  false, "SKD"   -> not leg.%arrives_at_SAS_base%;
+  false, "SKN"   -> not leg.%arrives_at_SAS_base%;
+  false, "SKS"   -> not leg.%arrives_at_SAS_base%;
+  false, "SZS"   -> not leg.%arrives_at_homebase%;
+  false, "SVS"   -> not %arrives_at_CPH%;
+  true , "SVS"   -> not %arrives_at_CPH%;
+  true ,<>"SVS"  -> false;
   
-    -  ,   -  ,   -     -> true;
+    -  ,   -     -> true;
 end
 
-/* Agreement: CAU K06 K.1d */
-table meal_on_ground_in_ac_exceptions =
-  duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%),
-  %flight_crew%, %legality_region% ->
-    %meal_on_ground_in_ac_exception%;
-  true ,   -  ,   -     -> false;
-  false, false, "SKD"   -> %_meal_load_exception% and
-                           next(leg(duty), %_meal_load_exception%);
-    -  ,   -  ,   -     -> false;
-end
-
+%arrives_at_CPH% =
+    leg.%arrival_airport_base% = "CPH";
 /*
 ** Agreement: CAU K06 K.1d
 **
@@ -615,19 +555,20 @@ end
   (parameters.%k12_skd_cc_sp4_3_valid%(duty.%start_hb%) or
    crew_pos.%total_cabin_crew_service_need% > 0);
 
-/* Agreement: FC 13:25 6 */
+/* Table to establish routes where meal during flight is allowed 
+   even if leg time is shorter than limit for V */
 table meal_during_flight_exceptions =
-  parameters.%k15sk_jan16_valid%(duty.%start_day%),
-  %flight_crew%,
+  %follow_flight_crew_rules%,
   leg.%is_ac_employer_sk_sh%,
   %legality_region% ->
     %meal_on_board_exception%;
-  true, true, true, -    -> %leg_is_CPH_ARN_or_vv% or %leg_is_CPH_OSL_or_vv%;
-  &
-  -   , true, -   ,"SKD" -> %leg_is_CPH_ARN_or_vv% or %leg_is_CPH_OSL_or_vv%;
-  -   , true, -   ,"SKN" -> %leg_is_CPH_ARN_or_vv% or %leg_is_CPH_OSL_or_vv%;
-  -   , true, -   ,"SKS" -> %leg_is_CPH_ARN_or_vv% or %leg_is_CPH_OSL_or_vv%;
-  -   ,   - , -   , -    -> false;
+  
+  true, true,"SKD" -> %leg_is_CPH_ARN_or_vv% or %leg_is_CPH_OSL_or_vv% or %leg_is_OSL_ARN_or_vv%;
+  true, true,"SKN" -> %leg_is_CPH_ARN_or_vv% or %leg_is_CPH_OSL_or_vv% or %leg_is_OSL_ARN_or_vv%;
+  true, true,"SKS" -> %leg_is_CPH_ARN_or_vv% or %leg_is_CPH_OSL_or_vv%;
+  true, true,"SZS" -> %leg_is_CPH_ARN_or_vv% or %leg_is_CPH_OSL_or_vv% or %leg_is_OSL_ARN_or_vv%; /* this might need a future change and split up SZS in Swedish and
+                                                                                       Danish crew (or add column for homebase) if VO OSL-ARN becomes only valid for Danish crew */
+    - , -   , -    -> false;
 end
 
 export %leg_is_CPH_ARN_or_vv% =
@@ -763,8 +704,7 @@ export %on_ground_in_ac% =
   connection.%is_trusted_same_ac% and
   %allowed_station_for_meal_on_ground_in_ac% and
   not %leg_is_prevented_by_correction% and
-  (default(%leg_cnx_time% >= %meal_on_ground_in_ac_min_duration%, false) or
-   default(%meal_on_ground_in_ac_exception%, false));
+  default(%leg_cnx_time% >= %meal_on_ground_in_ac_min_duration%, false);
    
 /* Meal in the air */
 %during_flight% =
@@ -930,12 +870,9 @@ export %late_stop_for_CC_SKS_needed_VO_leg% =
  
 export %meal_allocation_skn_fc% =
   parameters.%meal_allocation_skn%(duty.%start_hb%) and
-  (%flight_crew% or (%cabin_crew% and (system_db_parameters.%K20_skn_cc_meal_stop%(duty.%start_hb%) and duty.%is_ac_employer_skn%) or (system_db_parameters.%K20_skd_cc_meal_stop%(duty.%start_day%) and duty.%is_ac_employer_skd%) or 
-  (system_db_parameters.%K20_sks_cc_meal_stop%(duty.%start_day%) and duty.%is_ac_employer_sks%))) and
+  %follow_flight_crew_rules% and
   (duty.%is_SKN% or
-   (duty.%crew_is_on_loan% and duty.%region_crew_is_on_loan_to% = "SKN"))
-   ;
-
+  (duty.%crew_is_on_loan% and duty.%region_crew_is_on_loan_to% = "SKN"));
 
 %prev_flight_is_bounded% =
   default(prev(leg(duty), leg.%start_station%) = leg.%end_station% and
@@ -980,8 +917,6 @@ export %meal_allocation_skn_fc% =
   not %leg_is_prevented_by_correction% and
   not default(prev(leg(duty), %skn_meal_required_first_leg_rule_1%), True) and  
   %prev_flight_is_bounded% and (%during_flight% or %previous_during_flight%);
-
-
 
 /* Helpers for rule 1 */  
 %next_during_flight% = 
@@ -1154,7 +1089,7 @@ export %nr_meal_breaks% =
 %need_breakfast% =
     time_of_day(leg.%start_lt%) >= 03:00 and
     time_of_day(leg.%start_lt%) < 08:00 and
-    not leg.%is_ac_employer_svs% and
+    leg.%is_ac_employer_sk_sh% and
     not leg.%departs_from_homebase%;
 
 /* top level display to report */
@@ -1198,12 +1133,9 @@ export %mc_code_has%(Int mc_id) =
   base_utils.%strip_leading_comma%(%_mc_code_has%(mc_id));
  
 %assigned_breakfast% =
-  (%flight_crew% or (%cabin_crew% and system_db_parameters.%K20_skn_cc_meal_stop%(duty.%start_hb%) and duty.%is_ac_employer_skn%) or
-  (%cabin_crew% and system_db_parameters.%K20_sks_cc_meal_stop%(duty.%start_hb%) and duty.%is_ac_employer_sks%) or
-  (%cabin_crew% and system_db_parameters.%K20_skd_cc_meal_stop%(duty.%start_hb%) and duty.%is_ac_employer_skd%))
+  %follow_flight_crew_rules%
   and %do_meal_assign%(false)
   and %need_breakfast%
-  and not trip.%is_ac_employer_qa%
   and (not %is_deadhead_non_positioning%);
 
 %leg_in_go_gs_base_block%(Abstime d) =
@@ -1219,7 +1151,7 @@ export %mc_code_has%(Int mc_id) =
 
 %need_go_or_gs% =
   %flight_crew%
-   and not trip.%is_ac_employer_svs%
+   and not (trip.%is_ac_employer_svs%)
    and %leg_in_go_gs_base_block%(leg.%start_date%)
    and not %is_assigned_meal_during_flight%
    and not %need_breakfast%
@@ -1230,7 +1162,8 @@ export %mc_code_has%(Int mc_id) =
 
 %assign_gs_for_go% =
    (duty.%has_agmt_group_sks% and %leg_departs_sks_base_station%)
-   or (duty.%has_agmt_group_skn% and %leg_departs_skn_base_station%);
+   or (duty.%has_agmt_group_skn% and %leg_departs_skn_base_station%)
+   or (duty.%is_regarded_szs_agmt% and %leg_departs_szs_base_station%);
 
 %assigned_mealbox% =
   %need_go_or_gs%
@@ -1304,8 +1237,7 @@ export %meal_code_break% =
 ** NB! This applies to all regions, not only SKN!
  */ 
 %first_best_break_is_meal_stop% =
-  if (duty.%k4exng_cc_sp5_1_valid%(duty.%start_day%) or
-      duty.%is_SKN%) and
+  if %cabin_crew% and
      %duty_requires_two_meal_breaks% and 
      %nr_meal_stop% = 1 and 
      %nr_meal_breaks% = 2 and  
@@ -1351,7 +1283,7 @@ export %second_best_meal_break% =
              true) and
      (default(not %duty_requires_two_meal_breaks%,
               true) or
-      (%flight_crew% and %first_best_break_is_meal_stop%)) and
+      (%follow_flight_crew_rules% and %first_best_break_is_meal_stop%)) and
      not default(%any_manual_override%(%first_best_meal_break_end%), false) or
      void(%first_best_meal_break_end%)
   then
@@ -1801,14 +1733,6 @@ export %dms_start_1_test% =
 export %long_duty% = 
   leg.%is_active_flight% and %duty_period_end% - %duty_period_start% > 10:30;
 
-  
-/* Turn meal rules off after a certain date for QA  (SKCMS-601) */
-export %has_meal_rules_off_QA_CC_FD% =
-   duty.%is_ac_employer_qa% and (
-   (parameters.%K15_qa_fd_meal_valid%(duty.%start_hb%) and %flight_crew%)
-   or (parameters.%k15qa_feb16_valid%(duty.%start_hb%) and %cabin_crew%));
-
-
-
 /* end of file */
+
 
