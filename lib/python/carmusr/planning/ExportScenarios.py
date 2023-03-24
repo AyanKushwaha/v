@@ -281,7 +281,6 @@ def saveGeneralScenario(test_mode_params = None):
         "freeday_requirement_cc",
         "f36_total",
         "f36_targets",
-        "half_freeday_carry_over",
         "hotel",
         "hotel_contract",
         "hotel_transport",

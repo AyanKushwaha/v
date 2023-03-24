@@ -85,7 +85,7 @@ Background:
 
 
   @SCENARIO_2 @To_Be_Checked
-  Scenario: test rule ind_max_duty_time_in_calendar_month_pt_cc_parttime_SKS_monthly_parttime_SKD
+  Scenario: test rule ind_max_duty_time_in_cal_month_pt_cc_pt_SKS_monthly_pt_SKD
 
   Given a trip with the following activities
            | act     | car     | num     | dep stn | arr stn | dep             | arr             | ac_typ  | code    |
