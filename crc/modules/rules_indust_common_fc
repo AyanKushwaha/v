@@ -18,108 +18,9 @@ import fundamental;
 import crew_pos;
 import rules;
 
-/*
-** Rule: Maximum duty time in 1x24 hrs
-** It is actually unnecessary to check this rule for regular LH production,
-** since all other rules and traffic structure will prevent this rule from breaking.
-** But it is stated in the agreement so it is implemented.
-**
-** No longer any restriction for 3 pilots/1 active landing or
-** 2 pilots short haul with long haul ac, HenrikA 13oct2006
-**
-** SKI K12: applies again to 2-pilot production.
-*/
-
 %duty_touches_excepted_airport% =
   any(leg(duty), crew_pos.%leg_touches_excepted_airport%)
   where(leg.%is_active_flight%);
-
-
-redefine %r_valid_duty_time_in_1x24_hrs% =
-  parameters.%k12_fc_sp4_2_valid%(duty.%start_hb%) or
-   not %duty_touches_excepted_airport%;      /* JIRA: SASCMS-2161 (CR443) */
-
-/* No longer any "DD" reduction, HenrikA 17oct2006 */ 
-redefine export %duty_time_1x24_hrs% = duty_time.%1x24_hrs%;
-redefine export %duty_time_1x24_hrs_fwd% = duty_time.%1x24_hrs_fwd%;
-redefine export %duty_time_1x24_hrs_bwd% = duty_time.%1x24_hrs_bwd%;
-
-redefine %leg_duty_time_1x24hrs_until_now% = 
-  trip.%duty_time_in_period%((leg.%co_end_utc% - 1*24:00), leg.%co_end_utc%, fundamental.%night_upg%, duty.union);
-
-
-/*
-** Rule: 
-**    Maximum duty time in 1x24 hrs and is valid for QA FC, SKI FC and SKD FC.
-**    Validity depencies is defined in duty_time. table duty_time_1x24_limits_fc
-**
-**    SKCMS-680
-*/
-export rule ind_max_duty_time_in_1x24_hrs_FC_SKI_QA_SKD =
-  valid trip.%check_rules%
-        and fundamental.%flight_crew% 
-	and (duty_time.%crew_or_duty_ski_fd% or 
-             duty.%is_ac_employer_qa% or 
-             duty_time.%crew_or_duty_skd_fd%)
-        and duty.%in_pp_extended% 
-        and duty.%has_flight_duty% 
-        and not duty.%is_bought% 
-        and %r_valid_duty_time_in_1x24_hrs% and
-        rule_exceptions.%rule_on%(duty.%scheduled_block_off_utc%);
-
-  %duty_time_1x24_hrs_fwd% <= duty_time.%max_in_1x24_hrs_fwd%  
-  and
-  %duty_time_1x24_hrs_bwd% <= duty_time.%max_in_1x24_hrs_bwd%;
-  
-  startdate  = duty.%scheduled_block_off_utc%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_max_duty_time_in_1x24_hrs_FC_SKD_SKN_SKL_JAP_failobject%;
-  failtext %ind_max_duty_time_in_1x24_hrs_FC_SKD_SKN_SKL_JAP_failtext%;
-  remark "Coll: Max duty time in 1x24 hrs (SKI FC, QA FC or SKD FC)",
-  planner "The rule checks that maximum duty time in 1x24 hrs is"
-	      " not exceeded. The rule is valid for FC SKI (when 2 active pilots),"
-          " QA FC and SKD(except when in Tracking mode)";
-end
-
-
-
-
-/*
-** Rule: 
-**    Maximum duty time in 1x24 hrs and is valid for FC SKS and SKN.
-**    Valid when a split duty is used. For all other duties (SKS and SKN) the
-**    duty in calendar day is calculated by the rule 
-**    rules_indust_ccp_fc ind_max_duty_time_in_calendar_end/start_day_FC .
-**    Validity depencies is defined in duty_time. table duty_time_1x24_limits_fc
-**
-**    SKS-680
-*/
-
-export rule ind_max_duty_time_in_1x24_hrs_split_duty_FC_SKS_SKN =
-  valid trip.%check_rules% 
-    and parameters.%K15_jan16_valid%(duty.%start_UTC%)
-    and %flight_crew%        
-    and (duty_time.%crew_or_duty_sks_fd% or duty_time.%crew_or_duty_skn_fd%)
-    and duty.%in_pp_extended%
-    and duty.%has_flight_duty%
-    and duty_period.%is_split%
-    and not duty.%is_bought%
-    and %r_valid_duty_time_in_1x24_hrs%
-    and rule_exceptions.%rule_on%(duty.%scheduled_block_off_utc%);
-  %duty_time_1x24_hrs_fwd% <= duty_time.%max_in_1x24_hrs_fwd%  
-  and
-  %duty_time_1x24_hrs_bwd% <= duty_time.%max_in_1x24_hrs_bwd%;
-  
-  startdate  = duty.%scheduled_block_off_utc%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_max_duty_time_in_1x24_hrs_FC_SKD_SKN_SKL_JAP_failobject%;
-  failtext %ind_max_duty_time_in_1x24_hrs_FC_SKD_SKN_SKL_JAP_failtext%;
-  remark "Coll: Max duty time in 1x24 hrs for FC SKS and SKN when split duty ",
-  planner "The rule checks that maximum duty time in 1x24 hrs is"
-	      " not exceeded. The rule is valid for FC SKS and FC SKN"
-          " when split duty is used";
-end
-
 
 /* New Rules in K15 SKCMS-680
 /*
@@ -133,46 +34,46 @@ end
 */
 export rule ind_max_duty_time_in_calendar_end_day_FC =
   valid trip.%check_rules% and
-        parameters.%K15_jan16_valid%(duty.%start_UTC%) and
-        (duty_time.%crew_or_duty_sks_fd% or duty_time.%crew_or_duty_skn_fd%) and
+        (duty_time.%crew_or_duty_sks_fd% or 
+        duty_time.%crew_or_duty_skn_fd% or
+        duty.%is_ac_employer_svsn% or
+        duty_time.%crew_or_duty_szss_fd%)  and
         not duty_period.%is_split% and
         duty.%in_pp_extended% and
         duty.%has_flight_duty% and
-        not duty.%is_bought% and
-        %r_valid_duty_time_in_1x24_hrs%;
+        not duty.%is_bought%;
 
         duty_time.%duty_time_calendar_day_end_day% <= duty_time.%max_duty_time_in_calendar_day_sks_skn% + rule_exceptions.%overshoot_rel%(duty.%start_UTC%);   
   startdate  = duty.%start_UTC%;
   severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
   failobject = duty.%failobject_end%;
   failtext (Reltime value, Reltime limit) =    
-           rules.%failtext_rel%("Coll: Max duty time in calendar day (duty.end_day)", value, limit);
-  remark "Coll: Max duty time in caldendar day (duty.end_day + 24:00)",
+           rules.%failtext_rel%("Coll: Max duty time in calendar day SKN/SKS", value, limit);
+  remark "Coll: Max duty time in calendar day (duty end day)",
   planner "The rule checks that maximum duty time in calendar day"
-	  " is not exceeded. The rule is valid for pilots who is not flying CJ"
-         "  or SKI";
+	  " is not exceeded. The rule is valid for pilots who is under SKS or SKN agreement";
 end
 
 export rule ind_max_duty_time_in_calendar_start_day_FC =
   valid trip.%check_rules% and
-        parameters.%K15_jan16_valid%(duty.%start_UTC%) and
-        (duty_time.%crew_or_duty_sks_fd% or duty_time.%crew_or_duty_skn_fd%) and
+        (duty_time.%crew_or_duty_sks_fd% or 
+        duty_time.%crew_or_duty_skn_fd% or
+        duty.%is_ac_employer_svsn% or
+        duty_time.%crew_or_duty_szss_fd%) and
         not duty_period.%is_split% and
         duty.%in_pp_extended% and
         duty.%has_flight_duty% and
-        not duty.%is_bought% and
-        %r_valid_duty_time_in_1x24_hrs%;
+        not duty.%is_bought%;
 
         duty_time.%duty_time_calendar_day_start_day% <= duty_time.%max_duty_time_in_calendar_day_sks_skn% + rule_exceptions.%overshoot_rel%(duty.%start_UTC%);   
   startdate  = duty.%start_UTC%;
   severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
   failobject = duty.%failobject_start%;
   failtext(Reltime value, Reltime limit) =
-          rules.%failtext_rel%("Coll: Max duty time in calendar day (duty.start_day)", value, limit);
-  remark "Coll: Max duty time in caldendar day (duty.end_day + 24:00",
+          rules.%failtext_rel%("Coll: Max duty time in calendar day SKN/SKS ", value, limit);
+  remark "Coll: Max duty time in calendar day (dutys start day)",
   planner "The rule checks that maximum duty time in calendar day"
-	  " is not exceeded. The rule is valid for pilots who is not flying CJ"
-         "  or SKI";
+	  " is not exceeded. The rule is valid for pilots who is under SKS or SKN agreement";
 end
 
 
@@ -181,16 +82,14 @@ end
 ** Rule: 
 **    Checks the lenght of last duty in a duty period it shall not
 **    be longer than the break in the duty period.
-**    Valid for SKS_FD,SKN_FD, SKD_FD but not for pilots flying CJ.
+**    Valid for SKS_FD,SKN_FD, SKD_FD
 **                               
 */
 
 export rule ind_max_length_of_last_duty_in_duty_period_FC =
   valid trip.%check_rules% and
         parameters.%K15_jan16_valid%(duty.%start_UTC%) and
-        (duty_time.%crew_or_duty_sks_fd% or duty_time.%crew_or_duty_skn_fd% or
-         duty_time.%crew_or_duty_skd_fd%) and
-        not duty.%is_ac_employer_qa% and
+        not duty_time.%crew_or_duty_ski_fd% and
         duty.%in_pp_extended% and
         duty_period.%is_split% and
         duty_period.%is_last_duty_in_duty_period% and
@@ -206,8 +105,7 @@ export rule ind_max_length_of_last_duty_in_duty_period_FC =
   remark "Coll: Length of last duty in duty period",
   planner "The rule checks that the length of the last duty in duty period"
 	  " is not longer than duty period break."
-          " Valid for  SKS_FD_AG, SKD_FD_AG, SKN_FD_AG." 
-          "  Pilots flying CJ are excluded";
+          " Valid for  SKS_FD_AG, SKD_FD_AG, SKN_FD_AG.";
 end
 
 %time_between_co_and_ci_in_break% = duty.%start_utc% - prev(duty(wop),duty.%end_utc%);
@@ -349,96 +247,6 @@ table max_block_time_duty_pass_skn =
       -     -> void_RelTime;
 end
 
-
-/*  Old rule for crew with homebase CPH, can be removed after
-**  when K15 rules for CPH crew in this matter is in production
-**  rules ind_max_block_time_in_skn_duty_pass_FC and 
-**  ind_max_block_time_in_2_pilot_lh_duty_pass_FC_CPH
-**  SKCMS-644
-*/
-
-rule ind_max_block_time_in_lh_duty_pass_CPH_FC =
-  valid trip.%check_rules% and
-        not parameters.%K15_SKCMS_644_valid%(duty.%start_UTC%) and
-        trip.%homebase% = "CPH" and
-        duty.%in_pp_extended% and
-	    ((duty.%is_long_haul% and duty.%active_pilots% = 2)
-            or (duty.%is_skn% and duty.%active_pilots% > 2)) and
-        (parameters.%k12_fc_sp4_2_valid%(duty.%start_hb%) or
-         not %duty_touches_excepted_airport%);
-  duty.%block_time% <= %max_block_time_in_duty_pass% + 
-  		       rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
-  startdate  = duty.%start_UTC%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_max_block_time_in_lh_duty_pass_FC_failobject%;
-  failtext(Reltime value, Reltime limit) =
-    rules.%failtext_rel%("Coll: BLH in duty pass", value, limit);
-  remark "Coll: Max block time in duty pass",
-  planner "The rule checks that the block time in a long haul"
-          " duty pass is not exceeded. It is only active for legs with "
-          " 2 active pilots.";
-end
-
-
-rule ind_max_block_time_in_lh_duty_pass__exl_CPH_FC =
-  valid trip.%check_rules% and
-        not parameters.%K15_jan16_valid%(duty.%start_UTC%) and
-        trip.%homebase% <> "CPH" and
-        duty.%in_pp_extended% and
-	    ((duty.%is_long_haul% and duty.%active_pilots% = 2)
-            or (duty.%is_skn% and duty.%active_pilots% > 2)) and
-        (parameters.%k12_fc_sp4_2_valid%(duty.%start_hb%) or
-         not %duty_touches_excepted_airport%);
-  duty.%block_time% <= %max_block_time_in_duty_pass% + 
-  		       rule_exceptions.%overshoot_rel%(duty.%start_UTC%);
-  startdate  = duty.%start_UTC%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %ind_max_block_time_in_lh_duty_pass_FC_failobject%;
-  failtext(Reltime value, Reltime limit) =
-    rules.%failtext_rel%("Coll: BLH in duty pass", value, limit);
-  remark "Coll: Max block time in duty pass",
-  planner "The rule checks that the block time in a long haul"
-          " duty pass is not exceeded. It is only active for legs with "
-          " 2 active pilots.";
-end
-
-
-%duty_touches_PEK% =
-  any(leg(duty), crew_pos.%leg_touches_PEK%)
-  where(leg.%is_active_flight%);
-
-%ind_max_block_time_in_lh_duty_pass_FC_failobject% =
-  first(leg(duty), leg.%failobject_departure%)
-  where(%duty_block_time_until_now% > %max_block_time_in_duty_pass% + 
-  		       rule_exceptions.%overshoot_rel%(duty.%start_UTC%));
-
-
-table max_block_time_duty_pass =
-  duty.%region%, duty.%is_long_haul%, duty.%active_pilots%,
-  %duty_touches_excepted_airport%,%duty_touches_PEK%
-                                -> %max_block_time_in_duty_pass%; 
-  -,     true,  2, true, false  ->  9:30;
-  -,     true,  2, true, true   -> 11:00;
-  -,     true,  2, false, -     ->  8:00;
-  "SKN", -,     3,   -  , -     -> 12:30;
-  "SKN", -,     4,   -  , -     -> 16:00;
-  -,     -,     -,   -  , -     -> void_RelTime;
-end
-
-/*
-** Rule: Duty restricitions after a short stop
-*/
-
-redefine %r_valid_duty_restrictions_after_short_stop% =
-  if duty.%is_ac_employer_qa% then
-     not parameters.%K15_qa_FD_feb16_valid%(duty.%start_UTC%)
-  else 
-            (duty_time.%crew_or_duty_sks_fd% or 
-             duty_time.%crew_or_duty_skd_fd% or
-             duty_time.%crew_or_duty_skn_fd%)
-        and not parameters.%K15_jan16_valid%(duty.%start_UTC%);
-
-
 /* New Rules in K15 SKCMS-799
 /*
 ** Rule:
@@ -450,7 +258,7 @@ redefine %r_valid_duty_restrictions_after_short_stop% =
          otherwise 1 sector. 
 **  NSF: 2 sectors allowed after split duty 
 **  SNF: 2 sectors allowed after split duty 
-
+**  FPU: 2 sectors allowed after split duty 
 ** The meaning of this is that :
 **   1)a pilot can fly 2 active sectors after split duty if he/she does not tou **      base station (ie not his/hers home base) or home base.
 **   2)If the crew member arrive at a base station the active duty has to end, 
@@ -459,16 +267,11 @@ redefine %r_valid_duty_restrictions_after_short_stop% =
        the base station.
 **   3)If the crew member arrives at home base the duty has to end, 
        ie no more flights are allowed.
-
-    
 **                               
 */
- 
 
 export rule ind_duty_restrictions_after_short_stop_FC =
   valid trip.%check_rules%
-     and not duty.%is_ac_employer_qa%
-     and parameters.%K15_jan16_valid%(duty.%start_UTC%)
      and duty.%in_pp_extended% 
      and duty_period.%is_split%
      and duty_period.%is_last_duty_in_duty_period%
@@ -481,8 +284,8 @@ export rule ind_duty_restrictions_after_short_stop_FC =
   severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
   failtext(Int value, int limit) =%ind_duty_restrictions_after_short_stop_FC_failext%;
   failobject = %ind_duty_restrictions_after_short_stop_FC_failobject%;
-  remark "(CCP) Coll: Max no of legs in split duty after short stop",
-  planner "The rule checks that the duty after short stop"
+  remark "Coll: Max no of legs in split duty after short stop",
+  planner "The rule checks  the duty after short stop"
           "If legs in duty not touches base or home then the #legs are 2"
           " For SPF 1 if not Norwegian Domestic then 2"
           " If firts leg in duty touches Base then #legs 1 but #legs 2 is"
@@ -508,7 +311,7 @@ then
                            leg.%is_deadhead%) then
             "OK"
          else
-          "Coll: 2nd leg must be passive to homebase"
+          "Coll: 2nd leg after split duty must be passive to homebase"
     else
       if (duty_time.%crew_or_duty_sks_fd% and not (leg.%end_country%="NO")) 
       then
@@ -576,45 +379,5 @@ else
        /* We shall never come here 
        leg.%failobject_departure%;
 */
-
-
-/*
-** Rule:
-**   Rest after duty period >12h
-**
-** Description:
-** According to the K17 agreement, a scheduled FDP >12h requires 4h extended rest for SKN_FD_AG
-** 
-** System:
-** Pairing, Rostering
-**
-*/
-rule ind_min_rest_after_fdp_12h_more =
-  valid 
-	not base_product.%is_tracking% and
-	system_db_parameters.%k17_skn_fc_jcpr_valid%(duty.%start_hb%) and /* Need to be updated to new parameter */
-        not duty.%is_long_haul% and
-        duty.%is_regarded_skn_agmt% and
-        trip.%check_rules% and
-        (duty.%in_pp% or duty.%rest_ends_in_pp%) and
-        duty_period.%is_on_duty% and
-        duty_period.%is_last_duty_in_duty_period% and
-        not duty.%is_single_leg_standby_callout% and
-        %fdp_12h_more% and
-        is_last(leg(duty));
-
-  duty_period.%rest_time_after% >= %_minimum_time_fc_with_extra% - rule_exceptions.%overshoot_rel%(duty.%start_utc%);
-
-  startdate = duty.%scheduled_block_off_utc%;
-  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = next(duty(chain), duty.%failobject_start%) where (duty_period.%is_first_duty_in_duty_period% and duty_period.%is_on_duty%);
-  failtext(Reltime value, Reltime limit) =
-    %ind_min_rest_after_fdp_12h_more_failtext%(value, limit);
-  remark "Coll: Min rest after FDP>12h for SKN_FD_AG ",
-  planner "A scheduled FDP > 12h requires 4 hours extended rest." 
-          "The rest can either be placed with 4 hours after the FDP" 
-          "or divided so that 2 hours is placed before the FDP and" 
-          "2 hours is placed after the FDP";
-end
 
 
