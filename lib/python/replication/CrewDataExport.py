@@ -460,13 +460,18 @@ class CrewElement(XMLElement):
         
         if employments and contracts and qualifications:
             maincat = employments[0].maincat
-            region = employments[0].region           
+            region = employments[0].region
+            base = employments[0].base
             contracttype = contracts[0].contracttype
             temp = contracts[0].temp
             
             if maincat == 'F':           
                 if region in ['SKD', 'SKN', 'SKS']:
                     return 'FD SH ' + region + ' ' +  contracttype
+                elif region == 'SVS' and base == 'BGO':
+                    return 'FD SH SKN ' + contracttype
+                elif region == 'SVS' and base == 'CPH':
+                    return 'FD SH SKD ' + contracttype
                 else:
                     return 'FD LH'                    
             else:
