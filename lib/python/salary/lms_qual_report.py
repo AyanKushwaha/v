@@ -140,8 +140,8 @@ class LMSQualReport:
         crew_emp_table = tm.table('crew_employment')
         curr_day = delta_date
 
-        assignment_filter = crew_emp_table.search("(validfrom={0})".format(curr_day))
-        deassignment_filter = crew_emp_table.search("(validto={0})".format(curr_day))
+        assignment_filter = crew_emp_table.search("(&(crewrank={crewrank})(validfrom<={validfrom}))".format( crewrank="AP", validfrom=curr_day))
+        deassignment_filter = crew_emp_table.search("(&(crewrank={crewrank})(validto<={validto}))".format( crewrank="AP", validto=curr_day))
 
         total_assignment_data = []
         total_deassignment_data = []
@@ -186,10 +186,6 @@ class LMSQualReport:
                 log.info('Skipping sending update for retired crew {crew}'.format(crew=crew))
                 continue
             
-            # in case of retired AP cc we sent extra deassignment entry as DN-Cabin along with DN-Cabin AP
-            if is_retired(crew) and rank == 'AP':
-                extra_dn_cabin = self._create_entries(crew, validfrom, validto, None, 'AH', "deassignment_data")
-                total_deassignment_data.append(extra_dn_cabin)
 
             # Only cabin crew applicable for rank based qualifications to LMS
             if is_cabin_crew(crew, rank):
@@ -255,7 +251,7 @@ class LMSQualReport:
         
         
     def _applicable_qual(self, qual, crew_id):
-        applicable_for_cc = ('MENTOR', 'PMM')
+        applicable_for_cc = ('MENTOR', 'PMM','A2', 'AL','38')
         applicable_for_fc = ('36', '37', '38', 'A2', 'A3', 'A4','A5')
         rank = rank_from_id(crew_id, today_in_abstime())
         
@@ -271,7 +267,7 @@ class LMSQualReport:
         if cc and qual is None:          
             name = rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
                 % (True, rank, '', 'ALL'))[0]
-        elif cc and qual in ('MENTOR', 'PMM'):
+        elif cc and qual in ('MENTOR', 'PMM','A2', 'AL','38'):
             name = rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
                 % (True, '', 'A', qual))[0]
         elif not cc and qual in ('36', '37', '38', 'A2', 'A3', 'A4','A5'):
@@ -582,11 +578,11 @@ def test_mappings():
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
         % (True, '', 'A', 'PMM'))[0] == 'DN-Cabin PM'
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
-        % (True, 'AA', '', 'ALL'))[0] == 'DN-Cabin'
+        % (True, '', '', 'A2'))[0] == 'DN-Cabin A32'
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
-        % (True, 'AS', '', 'ALL'))[0] == 'DN-Cabin'
+        % (True, '', '', 'AL'))[0] == 'DN-Cabin A330/A350'
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
-        % (True, 'AH', '', 'ALL'))[0] == 'DN-Cabin'
+        % (True, '', '', '38'))[0] == 'DN-Cabin B737'
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
         % (True, 'AP', '', 'ALL'))[0] == 'DN-Cabin AP'
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
@@ -599,8 +595,6 @@ def test_mappings():
         % (False, '', '', 'A2'))[0] == 'DN-Pilot A32'
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
         % (False, '', '', 'A3'))[0] == 'DN-Pilot A34'
-    assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
-        % (False, '', '', 'A4'))[0] == 'DN-Pilot A34'
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
         % (False, '', '', 'A5'))[0] == 'DN-Pilot A34'
     log.info('Mapping of CMS qualifications to LMS names OK!')
