@@ -4323,8 +4323,7 @@ export %pc_opc_match_trip_start% =
 %needs_ast% = 
   crew.%is_pilot% and
   not (crew.%is_a2a3_qualified% or crew.%is_a2a5_qualified%) and
-  not %has_ast_in_ast_period% and
-  not %has_skill_test_in_ast_period%;
+  not %has_ast_in_ast_period% ;
 
 %needs_ast_for_qual_group_38% =
   %needs_ast_for_qual_group%("38");
@@ -4332,31 +4331,20 @@ export %pc_opc_match_trip_start% =
 %needs_ast_for_qual_group_A2% =
   %needs_ast_for_qual_group%("A2");
 
-%needs_ast_for_qual_group_A3A4% =
-  %needs_ast_for_qual_group%("A3A4");
-
 %needs_ast_for_qual_group_A3A5% =
   %needs_ast_for_qual_group%("A3A5");
-
-%needs_ast_for_qual_group_A5% =
-  %needs_ast_for_qual_group%("A5");
 
 %needs_ast_for_qual_group%(String qual_group) = 
   crew.%is_pilot% and
   not (crew.%is_a2a3_qualified% or crew.%is_a2a5_qualified%) and
   (%ast_qual_group_of_crew% = qual_group) and
-  not %has_ast_in_ast_period% and
-  not %has_skill_test_in_ast_period%;
+  not %has_ast_in_ast_period%;
 
 %ast_qual_group_of_crew% =
   if %crew_has_ac_qln_in_ast_period%("38", "38") then
     "38"
   else if %crew_has_ac_qln_in_ast_period%("A2", "A2") then
     "A2"
-  else if %crew_has_ac_qln_in_ast_period%("A5", "A5") and %crew_has_A5_qual_group_extras% then
-    "A5"
-  else if %crew_has_ac_qln_in_ast_period%("A3", "A3A4") or %crew_has_ac_qln_in_ast_period%("A4", "A3A4") then
-    "A3A4"
   else if %crew_has_ac_qln_in_ast_period%("A3", "A3A5") or %crew_has_ac_qln_in_ast_period%("A5", "A3A5") then
     "A3A5"
   else
@@ -4367,22 +4355,7 @@ export %pc_opc_match_trip_start% =
 
 %qual_in_ast_qual_group_of_crew%(String qual) =
   (qual = %ast_qual_group_of_crew%) or
-  (("A3A4" = %ast_qual_group_of_crew% or "A3A5" = %ast_qual_group_of_crew% ) and (qual = "A3" or qual = "A4" or qual = "A5"));
-
-%crew_has_a5_qual_group_extras% =
-  let qual_course_end_date = default(%qual_course_end_date%("A5"), 1JAN1986),
-      ast_period_start = system_db_parameters.%ast_period_start%(%pp_end%, "A5");
-
-  qual_course_end_date <= %ast_latest_ctr_a3a5_course_completion_date_p% or qual_course_end_date < ast_period_start;
-
-export %ast_latest_ctr_a3a5_course_completion_date_p% = 
-  parameter 01DEC2020
-  remark "AST: Latest CTR-A3A5 course completion date to be included in AST period.";
-
-%qual_course_end_date%(String ac_qual) =
-  let a5_validfrom_date = crew.%qln_entry_date%("ACQUAL", "A5", %pp_end%);
-  
-  %course_end%(a5_validfrom_date + 0:01);
+  (("A3A5" = %ast_qual_group_of_crew% ) and (qual = "A3" or qual = "A5"));
 
 export %has_ast_in_ast_period% = 
     (%ast_date% >= %ast_period_begin_date% and 
@@ -4411,13 +4384,6 @@ export %inst_on_simulator% =
   or leg.%is_sim_supervis%
   or leg.%is_sim_instr%;
 
-%has_conv_typerating_skill_test_in_roster% =
-   any(leg(roster), leg.%is_skill_test% and (training.%course_name%(leg.%start_utc%) = "CONV TYPERATING"))
-     where((leg.%start_utc% >= %ast_period_begin_date%) and (leg.%end_utc% <= %ast_period_end_date%));
-
-%has_conv_typerating_skill_test_in_training_log% =
-   any(times(20), %is_conv_typerating_skill_test%(base_utils.%ti0%));
-
 %is_conv_typerating_skill_test%(Int idx) =
     %pc_course_name%(idx) = "CONV TYPERATING";
 
@@ -4427,30 +4393,42 @@ export %inst_on_simulator% =
 %pc_course_name%(Int idx) =
     training.%course_name%(%pc_date%(idx));
 
-%has_skill_test_in_ast_period% =
-    %has_conv_typerating_skill_test_in_roster% or
-    %has_conv_typerating_skill_test_in_training_log%;
-
-%num_skill_tests_in_ast_period% =
-    if %has_skill_test_in_ast_period% then
-      1
-    else
-      0;
 
 export %too_many_ast_in_ast_period% =
   let num_planned_asts = %num_planned_asts%;
   if not (crew.%is_a2a3_qualified% or crew.%is_a2a5_qualified%) then
     if num_planned_asts > 1 then
       true
-    else if num_planned_asts + %num_performed_asts% + %num_skill_tests_in_ast_period% > 1 then
+    else if num_planned_asts + %num_performed_asts% > 1 then
       true
     else
       false
   else
-    num_planned_asts + %num_performed_asts% + %num_skill_tests_in_ast_period% > 0;
+    num_planned_asts + %num_performed_asts% > 0;
 
-%num_planned_asts% = count(trip(roster)) where (trip.%is_ast% and
-                                                %assigned_as_student_on_any_ast_duty_in_trip%);
+/*
+* SKCMS-3218
+* A3A5 Crew --> 1 K5 or K6
+* A3 Crew --> 1 K6
+* A5 Crew --> 1 K5
+*/
+%num_planned_asts% = 
+  if crew.%is_a3a5_qualified% then
+    count(trip(roster)) where (trip.%is_ast% and 
+    (trip.%code% = "K5" or trip.%code%= "K6") and 
+    %assigned_as_student_on_any_ast_duty_in_trip%)
+  else if crew.%has_acqln_in_pp%("A3") then
+    count(trip(roster)) where (trip.%is_ast% and 
+    trip.%code%= "K6" and 
+    %assigned_as_student_on_any_ast_duty_in_trip%)
+  else if crew.%has_acqln_in_pp%("A5") then
+    count(trip(roster)) where (trip.%is_ast% and 
+    trip.%code%= "K5" and 
+    %assigned_as_student_on_any_ast_duty_in_trip%)
+  else 
+    count(trip(roster)) where (trip.%is_ast% and
+    %assigned_as_student_on_any_ast_duty_in_trip%);
+  
 
 export %assigned_as_student_on_any_ast_duty_in_trip% =
   any(duty(trip), %assigned_as_student_on_any_ast_leg_in_duty%);
@@ -4481,10 +4459,20 @@ export %any_new_actype_restr_planned_in_year% =
 
     crew.%has_restr_subtype_in_ival%("NEW", "ACTYPE", start_date, end_date);
 
+/*
+* SKCMS-3218
+* Only crew belonging to SKI_FD_AG shall be affected by  ast_period_start/end_a3a5
+*/
 export %ast_period_begin_date% = 
+  if %ast_qual_group_of_crew% = "A3A5" and not crew.%has_agmt_group_ski_fd% then 
+    31dec2035
+  else 
     system_db_parameters.%ast_period_start%(trip.%start_hb%, %ast_qual_group_of_crew%);  
 
 export %ast_period_end_date% =
+  if %ast_qual_group_of_crew% = "A3A5" and not crew.%has_agmt_group_ski_fd% then 
+    1jan1986
+  else 
     system_db_parameters.%ast_period_end%(trip.%start_hb%, %ast_qual_group_of_crew%); 
 
 /* Countings */

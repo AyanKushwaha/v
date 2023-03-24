@@ -234,6 +234,7 @@ class TimeEntryReport(WFSReport):
                     crew_company = company_from_id(crew_id, duty_start_day)
                     if crew_company == "SVS":
                         crew_valid_base_rank = crew_not_BGOFD(crew_id, duty_start_day)
+
                         num_of_flight = duty_bag.report_common.number_of_active_legs()
                         active_flight= duty_bag.duty.has_active_flight()
                         stby_duties = duty_bag.standby.duty_is_standby_callout()
