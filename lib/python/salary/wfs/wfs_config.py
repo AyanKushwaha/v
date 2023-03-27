@@ -69,7 +69,22 @@ PAYCODE_FROM_EVENT = {
             'CNLN_PROD_SICK_DK' :   'SAS_DK_CNLN_PROD_SICK',
             'CNLN_PROD_WEEKDAY_NO': 'SAS_NO_CNLN_PROD_WEEKDAY',
             'CNLN_PROD_WEEKEND_NO':   'SAS_NO_CNLN_PROD_WEEKEND_HOLIDAY',
-            'CNLN_PROD_SICK_NO' :   'SAS_NO_CNLN_PROD_SICK'
+            'CNLN_PROD_SICK_NO' :   'SAS_NO_CNLN_PROD_SICK',
+            'CNLN_BOUGHT_FDAY_DK'  :    'SAS_DK_CNLN_BOUGHT_FDAY',
+            'CNLN_BOUGHT_FHOUR_DUTY_DK_FC' :        'SAS_DK_CNLN_BOUGHT_FHOUR_DUTY_CO',
+            'CNLN_BOUGHT_FHOUR_DUTY_DK_FP' :        'SAS_DK_CNLN_BOUGHT_FHOUR_DUTY_CO',
+            'CNLN_BOUGHT_FHOUR_DUTY_DK_CC' :        'SAS_DK_CNLN_BOUGHT_FHOUR_DUTY_CC',
+            'CNLN_BOUGHT_FHOUR_SB_DK_FC'   :        'SAS_DK_CNLN_BOUGHT_FHOUR_SB_CO',
+            'CNLN_BOUGHT_FHOUR_SB_DK_FP'   :        'SAS_DK_CNLN_BOUGHT_FHOUR_SB_FO',
+            'CNLN_BOUGHT_FHOUR_SB_DK_CC'   :        'SAS_DK_CNLN_BOUGHT_FHOUR_SB_CC',
+            'CNLN_BOUGHT_FDAY_NO'          :     'SAS_NO_CNLN_BOUGHT_FDAY',
+            'CNLN_BOUGHT_FHOUR_DUTY_NO_FC' :        'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_CO',
+            'CNLN_BOUGHT_FHOUR_DUTY_NO_FP'  :       'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_FO',
+            'CNLN_BOUGHT_FHOUR_DUTY_NO_CC'  :       'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_CC',
+            'CNLN_BOUGHT_FHOUR_SB_NO_FC':      'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_CO',
+            'CNLN_BOUGHT_FHOUR_SB_NO_FP':      'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_FO',
+            'CNLN_BOUGHT_FHOUR_SB_NO_CC':      'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_CC'
+
         }
 
 EVENT_FROM_PAYCODE = {
@@ -145,7 +160,22 @@ EVENT_FROM_PAYCODE = {
             'SAS_DK_CNLN_PROD_SICK'         :'CNLN_PROD_SICK',
             'SAS_NO_CNLN_PROD_WEEKDAY'      :'CNLN_PROD_WEEKDAY',
             'SAS_NO_CNLN_PROD_WEEKEND_HOLIDAY':'CNLN_PROD_WEEKEND',
-            'SAS_NO_CNLN_PROD_SICK'         :'CNLN_PROD_SICK'  
+            'SAS_NO_CNLN_PROD_SICK'         :'CNLN_PROD_SICK',
+            'SAS_DK_CNLN_BOUGHT_FDAY':       'CNLN_BOUGHT_FDAY',
+            'SAS_DK_CNLN_BOUGHT_FHOUR_DUTY_CO':'CNLN_BOUGHT_FHOUR_DUTY',
+            'SAS_DK_CNLN_BOUGHT_FHOUR_DUTY_FO': 'CNLN_BOUGHT_FHOUR_DUTY',
+            'SAS_DK_CNLN_BOUGHT_FHOUR_DUTY_CC': 'CNLN_BOUGHT_FHOUR_DUTY',
+            'SAS_DK_CNLN_BOUGHT_FHOUR_SB_CO':   'CNLN_BOUGHT_FHOUR_SB',
+            'SAS_DK_CNLN_BOUGHT_FHOUR_SB_FO':   'CNLN_BOUGHT_FHOUR_SB',
+            'SAS_DK_CNLN_BOUGHT_FHOUR_SB_CC':   'CNLN_BOUGHT_FHOUR_SB',
+            'SAS_NO_CNLN_BOUGHT_FDAY':      'CNLN_BOUGHT_FDAY',
+            'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_CO': 'CNLN_BOUGHT_FHOUR_DUTY',
+            'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_FO': 'CNLN_BOUGHT_FHOUR_DUTY',
+            'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_CC': 'CNLN_BOUGHT_FHOUR_DUTY',
+            'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_CO': 'CNLN_BOUGHT_FHOUR_SB',
+            'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_FO': 'CNLN_BOUGHT_FHOUR_SB',
+            'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_CC': 'CNLN_BOUGHT_FHOUR_SB'
+
 }
 
 ACCOUNT_PAYCODES = (
@@ -209,6 +239,23 @@ ROSTER_PAYCODES = (
 
 )
 
+BOUGHT_LINK_PAYCODES = (
+'SAS_DK_CNLN_BOUGHT_FDAY',
+'SAS_DK_CNLN_BOUGHT_FHOUR_DUTY_CO',
+'SAS_DK_CNLN_BOUGHT_FHOUR_DUTY_FO',
+'SAS_DK_CNLN_BOUGHT_FHOUR_DUTY_CC',
+'SAS_DK_CNLN_BOUGHT_FHOUR_SB_CO',
+'SAS_DK_CNLN_BOUGHT_FHOUR_SB_FO',
+'SAS_DK_CNLN_BOUGHT_FHOUR_SB_CC',
+'SAS_NO_CNLN_BOUGHT_FDAY',
+'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_CO',
+'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_FO',
+'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_CC',
+'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_CO',
+'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_FO',
+'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_CC'
+)
+
 EVENT_FROM_ARTICLE_PAYCODES = {
 	'OTRESCHED'		  :   'OT',
 	'OTPT'            :   'OT',
@@ -256,7 +303,10 @@ EVENT_FROM_ARTICLE_PAYCODES = {
     'CNLN_OT_50_PLUS'   :   'CNLN_OT_50_PLUS',
     'CNLN_PROD_WEEKDAY' :   'CNLN_PROD_WEEKDAY',
     'CNLN_PROD_WEEKEND': 'CNLN_PROD_WEEKEND',
-    'CNLN_PROD_SICK'    :   'CNLN_PROD_SICK'
+    'CNLN_PROD_SICK'    :   'CNLN_PROD_SICK',
+    'CNLN_BOUGHT_FHOUR_DUTY':'CNLN_BOUGHT_FHOUR_DUTY',
+    'CNLN_BOUGHT_FHOUR_SB':'CNLN_BOUGHT_FHOUR_SB',
+    'CNLN_BOUGHT_FDAY' :'CNLN_BOUGHT_FDAY'
 	}
 
 
@@ -300,6 +350,11 @@ class PaycodeHandler:
         elif event_type in ('F7',):
             rank = '_{r}'.format(r=rank) if country in ('NO', 'DK', 'SE') else ''
             return PAYCODE_FROM_EVENT['{e}_{c}{r}'.format(e=event_type, c=country, r=rank)]
+        elif event_type in ('CNLN_BOUGHT_FDAY'):
+            return PAYCODE_FROM_EVENT['{e}_{c}'.format(e=event_type, c=country)]
+        elif event_type in ('CNLN_BOUGHT_FHOUR_SB', 'CNLN_BOUGHT_FHOUR_DUTY'):
+            rank = '_{r}'.format(r=rank) if country in ('NO', 'DK') else ''
+            return PAYCODE_FROM_EVENT['{e}_{c}{r}'.format(e=event_type, c=country, r=rank)]
         else:
             return ''
 
@@ -309,7 +364,9 @@ class PaycodeHandler:
     def is_account_paycode(self, paycode):
         return paycode in ACCOUNT_PAYCODES
 
-    
+    def is_bought_link_paycode(self, paycode):
+        return paycode in BOUGHT_LINK_PAYCODES
+
     def event_from_article_paycode(self,paycode):
         if paycode in EVENT_FROM_ARTICLE_PAYCODES.keys():
             return EVENT_FROM_ARTICLE_PAYCODES[paycode]
