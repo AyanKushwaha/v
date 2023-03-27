@@ -453,7 +453,6 @@ def markDaysAsBought(buy):
             "Coll: FX not allowed for resource cabin crew",
             title="No change")
         return 1
-
     if is_qa and not is_cabin and not is_valid:
         # tread QA FD as SK FD before valid date
         is_qa = False
@@ -512,6 +511,12 @@ def markDaysAsBought(buy):
         print("code for SK:",code)
         print("code_svs for Link:",code_svs)
         if is_svs:
+            end_time_check = start_time.adddays(1)
+            if end_time > end_time_check:
+                cfhExtensions.show(
+                    "Not possible to buy more than 1 day at a time.\n",
+                    title="No change")
+                return 1
             #Buy F days as Standby or Production:
             #code_svs will be true when there is some valid day to buy and
             #when the day is already bought, day_bought will be true
