@@ -51,6 +51,7 @@ F38 = 'F38'
 F3S = 'F3S'
 F7 = 'F7'
 F7S = 'F7S'
+PR = 'PR'
 # Added FS as part of SASBids5 project
 FS = 'FS'
 F89 = 'F89'
@@ -74,6 +75,7 @@ BOUGHT_F3_2 = 'BOUGHT_F3_2'
 BOUGHT_BL = 'BOUGHT_BL'
 BOUGHT_FORCED = 'BOUGHT_FORCED'
 SOLD = 'SOLD'
+BOUGHT_PR='BOUGHT_PR'
 
 
 # Actions
@@ -159,7 +161,7 @@ ACTION[BOUGHT_F3_2] = [IN_CORR, OUT_CORR]
 ACTION[BOUGHT_FORCED] = []
 #ACTION[SOLD] = [IN_CORR, OUT_CORR]
 ACTION[SOLD] = []
-
+ACTION[PR] = [IN_CORR, OUT_CORR]
 
 """
 Temporary class that holds crew information.

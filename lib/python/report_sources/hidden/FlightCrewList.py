@@ -60,18 +60,11 @@ class CrewSorted:
         cc_list = [x for _, x in L]
         for c in cc_list:
             if c.category == 'AP':
-                return c.crewid
-            elif self.isCimberSCC(c):
-                return c.crewid
+                return c.crewid               
         if cc_list:
             return cc_list[0].crewid
         # Will return None otherwise
 
-    def isCimberSCC(self, crew):
-        if crew.is_cimber_cc:
-            if crew.is_appointed_in_charge:
-                return True
-        return False
 
 
     def sorted_crew(self, crewlist):
@@ -159,7 +152,6 @@ class CrewIter(RaveIterator):
             'ac_qual': 'report_crewlists.%%crew_ac_qlns%%(%s)' % searchdate,
             'category': 'crew_pos.%assigned_function%',
             'crewid': 'crew.%id%',
-            'is_cimber_cc': 'crew.%%has_agmt_group_qa_cc_at_date%%(%s)' % searchdate,
             'duty_code': 'duty_code.%leg_code%',
             'empno': 'report_crewlists.%crew_empno%',
             'has_scc_qual': 'report_crewlists.%%crew_scc%%(%s)' % searchdate,
