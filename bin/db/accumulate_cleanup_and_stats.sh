@@ -21,6 +21,8 @@ echo "[$(date)] Starting script accumulate_and_cleanup.sh" > $logfile
 ${CARMUSR}/bin/accumulators/accumulator.sh
 echo "[$(date)] Accumulate done" >> $logfile ) &
 
+wait
+
 #Manpower jobs removed from chain. They run separately.
 #${CARMUSR}/bin/manpower/accumulate_cmp.sh -t C &
 #${CARMUSR}/bin/manpower/accumulate_cmp.sh -t F &
@@ -29,9 +31,11 @@ echo "[$(date)] Accumulate done" >> $logfile ) &
 ${CARMUSR}/bin/db/truncate_schema_archiving.sh 
 echo "[$(date)] Truncate archiving tables done" >> $logfile ) &
 
+wait
+
 (echo "[$(date)] Cleanup archiving tables" >> $logfile
 ${CARMUSR}/bin/db/cleanup_schema_archiving.sh
-echo "[$(date)] Claneup archibing tables done" >> $logfile) &
+echo "[$(date)] Claneup archiving tables done" >> $logfile) &
 
 wait
 
@@ -39,17 +43,21 @@ echo "[$(date)] Nightly cleanup" >> $logfile
 ${CARMUSR}/bin/db/nightly_cleanups.sh
 echo "[$(date)] Nightly cleanup done" >> $logfile
 
+wait 
+
 echo "[$(date)] Truncate schema regular" >> $logfile
 ${CARMUSR}/bin/db/truncate_schema_regular.sh 
 echo "[$(date)] Truncate schema regular done" >> $logfile
 
+wait
+
 echo "[$(date)] Cleanup schema regular" >> $logfile
 ${CARMUSR}/bin/db/cleanup_schema_regular.sh  
-echo "[$(date)] Claneup schema regular done" >> $logfile
+echo "[$(date)] Cleanup schema regular done" >> $logfile
 
-echo "[$(date)] Schema stats" >> $logfile
-${CARMUSR}/bin/cmsshell db schemastats | tee -a ${CARMTMP}/logfiles/cmd_gather_schema_stats.log
-echo "[$(date)] Schema stats done" >> $logfile
+#echo "[$(date)] Schema stats" >> $logfile
+#${CARMUSR}/bin/cmsshell db schemastats | tee -a ${CARMTMP}/logfiles/cmd_gather_schema_stats.log
+#echo "[$(date)] Schema stats done" >> $logfile
 
 
 echo "[$(date)] Script finished" >> $logfile

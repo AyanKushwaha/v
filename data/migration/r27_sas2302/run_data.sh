@@ -41,13 +41,9 @@ echo " - Processing migration tasks"
 #echo "  * SKCMS-XXXX: Importing crc/etable/dave_filter/*.etab into database"
 #$CARMUSR/bin/admin/setup/setup_filters.sh -c -d | tee -a $LOG_DIR/SKCMS-XXXX.log
 
-echo "  * SKCMS-2822: Bought types for Link"
-python $CARMUSR/data/migration/$RELEASE/skcms-2822.py 2>&1 | tee $LOG_DIR/skcms-2822.log
-
 
 echo "********************************************"
 echo "Migration finished"
 echo "  Check for eventual problems in:"
 echo "  $LOG_DIR"
 echo "********************************************"
-

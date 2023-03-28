@@ -34,10 +34,6 @@ import parameters;
 import calendar;
 import theme_prod;
 
-%is_qa_feb16_valid% =
-  crew.%has_agmt_group_qa% 
-  and parameters.%k15qa_feb16_valid%(%pp_start%);
-  
 %crew_freedays_in_period%(Abstime start, Abstime stop) =
   let sd = round_up(start, 24:00), ed = round_down(stop, 24:00); 
   sum(wop(roster), nmax(0, wop.%freedays_in_period%(sd, ed)))
@@ -169,14 +165,7 @@ redefine %trip_notification_deadline_common% =
   nmin(default(%trip_notification_deadline_resched_earlier_check_in_homebase_sh%,
                31Dec2099),
        default(%trip_notification_deadline_resched_earlier_check_in_homebase_lh%,
-               31Dec2099),
-       default(%trip_notification_deadline_resched_earlier_standby_start_deadline_qa%,
-               31dec2099),
-       default(%trip_notification_deadline_resched_later_standby_start_deadline_qa%,
-               31dec2099)
-       ,default(%trip_notification_deadline_resched_earlier_checkin_deadline_qa%, 31dec2099)
-       ,default(%trip_notification_deadline_resched_later_checkout_deadline_qa%, 31dec2099)
-       );
+               31Dec2099));
 
 /*******************************************************************************
 * RULES
@@ -201,10 +190,8 @@ redefine %trip_notification_deadline_common% =
  * is now valid for all crew
 */
 rule sby_limit_on_time_between_check_in_and_callout_SKS_SKD_SKI =
-  valid (crew.%k4exng_cc_sp5_1_valid%(leg.%start_hb%) or
-        parameters.%k4exng_fc_sp5_1_valid%(leg.%start_hb%)) and
-        %is_roster%
-        and not (crew.%is_cabin% and crew.%is_skd% and crew.%is_temporary_trip_start%)
+  valid %is_roster%
+        and not %cc_temp_skd_or_asian%
         and duty.%in_pp_extended%
         and not crew.%is_leased_duty_start%
         and leg.%is_standby_callout%;
@@ -245,18 +232,9 @@ end
 %trip_is_followed_by_BLS% =
   default(last(leg(trip), next(leg(chain), leg.%is_BLS%)), false);
 
-/*
-* Variables for valid-statements in rules that apply for both FC and CC.
-* (To be redefined in rules_resched_cct_fc/cc.)
-* /
-**%crew_is_FC_or_CAU% = void_bool;
-*/
-
-export rule resched_R136_ALL =
+export rule resched_to_co_on_dayoff_ALL =
   valid not void(rescheduling.%trip_scheduled_checkout_hb%)
-    and not (%cabin_crew% and
-             ((crew.%is_skd% and crew.%is_temporary_trip_start%) or
-              crew.%is_skj% or crew.%is_skk%))
+    and not (%cabin_crew% and crew.%is_temporary_trip_start% and crew.%is_skd%)
     and not (%flight_crew_wop_SH_LH_SBY% and %is_LH_from_standby_callout%) /* Opposite of rules_resched_cct_cct.resched_SH_LH_FC_SBY_on_informed_timeoff */
     and not crew.%is_leased_trip_start%
     and not %trip_end_is_bought%
@@ -264,7 +242,7 @@ export rule resched_R136_ALL =
     and not %rescheduled_after_illness%
     and rule_exceptions.%rule_on%(trip.%start_UTC%);
 
-  not %R136_trip_has_checkout_on_informed_timeoff_day%;
+  not %trip_has_checkout_on_informed_timeoff_day%;
 
   startdate = trip.%start_UTC%;
   severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
@@ -275,7 +253,7 @@ export rule resched_R136_ALL =
           " a check-out on a planned time-off day.";
 end
 
-%R136_trip_has_checkout_on_informed_timeoff_day% =
+%trip_has_checkout_on_informed_timeoff_day% =
   %_scheduled_timeoff_co_hb_informed% and
   rescheduling.%trip_scheduled_checkout_hb% >
   %first_date_not_allowed_to_resched_prod_on_planned_off_duty%;
@@ -337,18 +315,16 @@ end
   %cabin_crew% and crew.%is_SKI%;
 
 
-export rule resched_R138_ALL =
+export rule resched_to_ci_on_dayoff_ALL =
   valid not void(rescheduling.%trip_checkin_hb%)
-    and not (%cabin_crew% and
-             ((crew.%is_skd% and crew.%is_temporary_trip_start%) or
-              crew.%is_skj% or crew.%is_skk%))
+    and not %cc_temp_skd_or_asian%
     and not crew.%is_leased_trip_start%
     and not %trip_start_is_bought%
     and %trip_is_rescheduled_timeoff%
     and not %rescheduled_after_illness%
     and rule_exceptions.%rule_on%(trip.%start_UTC%);
 
-  not %_R138_trip_has_checkin_on_informed_timeoff_day%;
+  not %_trip_has_checkin_on_informed_timeoff_day%;
 
   startdate = trip.%start_UTC%;
   severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
@@ -359,13 +335,13 @@ export rule resched_R138_ALL =
           " a check-in on a planned time-off day.";
 end
 
-%_R138_trip_has_checkin_on_informed_timeoff_day% =
+%_trip_has_checkin_on_informed_timeoff_day% =
   rescheduling.%pcat_is_timeoff%(
     rescheduling.%dt_inf_pcat%(rescheduling.%trip_checkin_hb%));
 
 export rule resched_R145_ALL =
   valid %is_roster%
-    and not (crew.%is_cabin% and crew.%is_skd% and crew.%is_temporary_trip_start%)
+    and not %cc_temp_skd_or_asian%
     and not leg.%is_last_in_duty%
     and not leg.%is_standby_callout%
     and not crew.%is_leased_duty_start%
@@ -391,16 +367,12 @@ end
 
 rule sby_airport_sby_after_callout_R249_R250 =
   valid %is_roster% and
-        (crew.%k4exng_cc_sp5_1_valid%(trip.%start_utc%) or
-         parameters.%k4exng_fc_resched_sp5_1_valid%(trip.%start_utc%) or
-         (crew.%is_skd% and crew.%is_cabin%)) and
         duty.%in_pp_extended% and
         not crew.%is_temporary_trip_start% and
         not duty.%is_long_haul% and
         %valid_ap_standby_rescheduling% and
         not crew.%is_leased_duty_start% and
-        %leg_preceeded_by_flight_duty%
-        and not (crew.%agmt_group_id%="QA_CC_AG" or (trip.%is_ac_employer_qa% and crew.%is_pilot% and parameters.%k15qa_feb16_valid%(trip.%start_month_start%) ) );
+        %leg_preceeded_by_flight_duty%;
 
         sby_limit_on_airport_sby_after_callout_and_fd_CC_SKD    is legal;
         sby_duration_of_airport_sby_after_callout_and_fd_CC_SKD is legal;
@@ -410,9 +382,7 @@ rule sby_airport_sby_after_callout_R249_R250 =
   planner "This rule checks that the limit on flight duty not to be more than"
           " 6:00 after home/hotel sby callout followed by Waiting at Airport, and"
           " that the duration of Waiting at Airport following a"
-          " home/hotel standby callout and flight production does not exceed 2 hours."
-          "The rule is valid for CC CAU CCSH.";
-
+          " home/hotel standby callout and flight production does not exceed 2 hours.";
 end
 
 %valid_ap_standby_rescheduling% =
@@ -429,7 +399,7 @@ end
 
 /* R249 */
 rule sby_limit_on_airport_sby_after_callout_and_fd_CC_SKD =
-  valid not (crew.%agmt_group_id%="QA_CC_AG" or (trip.%is_ac_employer_qa% and crew.%is_pilot% and parameters.%k15qa_feb16_valid%(trip.%start_month_start%) ) );
+  valid crew.%has_agmt_group_sk_fd_at_date%(duty.%start_utc%);
   %leg_flight_duty_time_before_leg% <=
     %max_duty_after_sby_call_out_before_asby% +
     rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%);
@@ -440,8 +410,7 @@ rule sby_limit_on_airport_sby_after_callout_and_fd_CC_SKD =
   failtext(Reltime value, Reltime limit) =
     rules.%failtext_rel%("SBY/WAIT: Flt-duty before Waiting at Airport",value,limit);
   remark "(CCT) SBY/WAIT: Limit on flight duty after SBY callout followed by Waiting at Airport",
-  planner "Limit on flight duty after callout followed by Waiting at Airport. "
-          "The rule is valid for CC CAU CCSH.";
+  planner "Limit on flight duty after callout followed by Waiting at Airport. ";
 end
 
 %leg_start_ci_utc% =
@@ -474,7 +443,7 @@ end
 
 /* R250 */
 rule sby_duration_of_airport_sby_after_callout_and_fd_CC_SKD =
-  valid not (crew.%agmt_group_id%="QA_CC_AG" or (trip.%is_ac_employer_qa% and crew.%is_pilot% and parameters.%k15qa_feb16_valid%(trip.%start_month_start%) ) );
+  valid crew.%has_agmt_group_sk_fd_at_date%(duty.%start_utc%);
 
   leg.%time% <= 2:00 +
                 rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_utc%);
@@ -486,8 +455,7 @@ rule sby_duration_of_airport_sby_after_callout_and_fd_CC_SKD =
   remark "(CCT) SBY/WAIT: Max 2h Waiting at Airport after standby callout.",
   planner "This rule checks that the duration of Waiting at Airport"
           " when following standby callout and"
-          " flight production does not exceed 2 hours."
-          " The rule is only valid for CCSH CAU.";
+          " flight production does not exceed 2 hours.";
 end
 
 %leg_preceeded_by_flight_duty% =
@@ -495,35 +463,6 @@ end
   any(leg(duty), true)
   where (leg.%start_UTC% < this_start
          and (leg.%is_flight_duty% or leg.%is_ground_transport%));
-
-
-/***** SKCMS-740 *****/
-rule sby_no_airport_sby_after_callout_QA =
-valid %_sby_no_airport_sby_after_callout_QA_valid%;
-
-        leg.%time% <= %_no_airport_standby_allowed_QA_limit% +
-                rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_utc%);
-  startdate = leg.%activity_scheduled_start_time_utc%;
-  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
-  failobject = leg.%failobject_departure%;
-  failtext(Reltime value, Reltime limit) =
-    rules.%failtext_rel%("SBY: Airport sby after callout not allowed for QA",value,limit);
-  remark "(CCT) SBY: Max 0h airport standby after standby callout (QA).",
-  planner "This rule prevents airport standby"
-          " when scheduled following a standby callout and"
-          " flight production."
-          " The rule is only valid for QA.";
-end
-
-%_no_airport_standby_allowed_QA_limit% = 0:00;
-
-%_sby_no_airport_sby_after_callout_QA_valid% =
-  %is_roster%
-  and (crew.%agmt_group_id%="QA_CC_AG" or (trip.%is_ac_employer_qa% and crew.%is_pilot% and parameters.%k15qa_feb16_valid%(trip.%start_month_start%) ) )
-  and duty.%in_pp_extended%
-  and %valid_ap_standby_rescheduling%
-  and %leg_preceeded_by_flight_duty%;
-
 
 /*
 ** Rule:
@@ -545,11 +484,9 @@ end
 **   4ExNG FC: Pr�vetaftal omdisponering SH 3.
 */
 
-export rule resched_R471_ALL =
+export rule resched_bl_to_stb_forbidden_ALL =
   valid trip.%is_on_duty%
-    and not (%cabin_crew% and
-             ((crew.%is_skd% and crew.%is_temporary_trip_start%) or
-              crew.%is_skj% or crew.%is_skk%))
+    and not %cc_temp_skd_or_asian%
     and trip.%has_standby%
     and not trip.%is_bought%
     and not crew.%is_leased_trip_start%
@@ -634,19 +571,16 @@ end
 
 /*
 ** 4ExNG: 6.4.1 SK SH check-in at homebase
-** Oct 2015: not used by QA any longer
 */
 
 export rule resched_check_in_homebase_sh_ALL =
   valid (crew.%k4exng_cc_sp5_1_valid%(trip.%start_day%) or
          parameters.%k4exng_fc_resched_sp5_1_valid%(trip.%start_day%)) and
-        not %is_qa_feb16_valid% and
         not %trip_inf_is_blank_day_at_start% and
         not crew.%is_temporary_trip_start% and
         not crew.%is_leased_trip_start% and
         rescheduling.%trip_has_rescheduled_checkin% and
-        not %is_duty_inf_long_haul%
-        and not ( ((crew.%agmt_group_id% = "QA_CC_AG") or (parameters.%k15qa_feb16_valid%(trip.%start_month_start%) and trip.%is_ac_employer_qa% and crew.%is_pilot%) )) /* SKCMS-590 */;
+        not %is_duty_inf_long_haul%;
 
   resched_earlier_check_in_homebase_sh_ALL is legal;
   resched_check_in_homebase_after_timeoff_sh_ALL is legal;
@@ -662,19 +596,9 @@ end
 %is_duty_inf_long_haul% =
   any(duty(trip), rescheduling.%duty_inf_long_haul%);
 
-/*
-** 4ExNG CC: 6.4.3 Blank day
-**       FD: 6.2.7.4.2 Blank day
-*/
-
-rule resched_blank_day_ALL =
-  valid %resched_bl_valid%;
-  resched_bl_after_timeoff_earliest_check_in_ALL is legal;
-end
-
 %resched_bl_valid% =
-  (crew.%k4exng_cc_sp5_1_valid%(trip.%start_day%) or %flight_crew%) and
-  trip.%is_on_duty% and
+  (crew.%k4exng_cc_sp5_1_valid%(trip.%start_day%) or %flight_crew%)
+  and trip.%is_on_duty% and
   not crew.%is_leased_trip_start% and
   %trip_is_rescheduled_blank_day%;
 
@@ -690,25 +614,35 @@ end
 **   4ExNG CC: 6.4.3.2
 **   4ExNG FC: Pr�vetaftal omdisponering SH 3.
 **   4ExNG FC: 6.2.7.4.2
+**   K22 FD and SKN CC: excluded from rule SKCMS-3066/3232
 */
 
-rule (off) resched_bl_after_timeoff_earliest_check_in_ALL =
-  valid prev(trip(roster),trip.%is_off_duty%)
-    and not %trip_standby_callout_with_overnight_into_bl%
-    and not first(duty(trip), standby.%duty_is_airport_callout%)
-    and not first(duty(trip),rescheduling.%duty_inf_flag_had_sba%);
+rule resched_bl_after_timeoff_earliest_check_in_ALL =
+  valid %resched_bl_after_timeoff_earliest_check_in_valid%;
 
   trip.%start_hb% >= %earliest_check_in_resched_bl_after_timeoff%  +
     rule_exceptions.%overshoot_rel%(trip.%start_UTC%);
 
   startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_utc%,%duty_lh_region%));
   failobject = trip.%failobject_start%;
   failtext  "Coll: Earliest check-in when resched of BL-day after time-off";
   remark "(CCT) Resched: Earliest check-in when resched of BL-day after time-off",
   planner "The rule checks that when a BL-day preceded by time-off is"
           " rescheduled, then check-in is no earlier than 0600.";
 end
+
+%resched_bl_after_timeoff_earliest_check_in_valid% =
+    (crew.%k4exng_cc_sp5_1_valid%(trip.%start_day%)
+    or (system_db_parameters.%k22_fd_ci_limit_bl_after_f%(trip.%start_day%) and %flight_crew%))
+    and not crew.%has_agmt_group_skn_cc%
+    and trip.%is_on_duty% 
+    and not crew.%is_leased_trip_start% 
+    and %trip_is_rescheduled_blank_day%
+    and prev(trip(roster),trip.%is_off_duty%)
+    and not %trip_standby_callout_with_overnight_into_bl%
+    and not first(duty(trip), standby.%duty_is_airport_callout%)
+    and not first(duty(trip),rescheduling.%duty_inf_flag_had_sba%);
 
 %earliest_check_in_resched_bl_after_timeoff% =
     trip.%start_day% + 06:00;
@@ -725,7 +659,6 @@ end
         > this_duty_start);
 
 
-
 /*
 ** Rule:
 **   Check rescheduled SH check-in at home base not more than 1:00 earlier.
@@ -740,8 +673,7 @@ end
 
 export rule resched_earlier_check_in_homebase_sh_ALL =
   valid not %trip_inf_is_standby_at_checkin% and
-        not %trip_inf_is_first_in_wop%
-        and not ( ((crew.%agmt_group_id% = "QA_CC_AG") or (parameters.%k15qa_feb16_valid%(trip.%start_month_start%) and trip.%is_ac_employer_qa% and crew.%is_pilot%) )) /* SKCMS-590*/;
+        not %trip_inf_is_first_in_wop%;
 
   rescheduling.%trip_checkin_hb% >= %earliest_resched_check_in_homebase_sh% -
     rule_exceptions.%overshoot_rel%(trip.%start_UTC%);
@@ -772,7 +704,6 @@ end
 
 rule resched_check_in_homebase_after_timeoff_sh_ALL =
   valid %trip_inf_is_first_in_wop%
-  and not ( ((crew.%agmt_group_id% = "QA_CC_AG") or (parameters.%k15qa_feb16_valid%(trip.%start_month_start%) and trip.%is_ac_employer_qa% and crew.%is_pilot%) )) /* SKCMS-590 SKCMS-589*/
   and %trip_has_not_started%;
 
   rescheduling.%trip_inf_checkin_diff% >= 0:00 -
@@ -802,7 +733,6 @@ end
 rule resched_earlier_check_in_homebase_deadline_sh_ALL =
   valid %resched_earlier_check_in_homebase_deadline_sh_valid% and
         rule_exceptions.%rule_on%(trip.%start_UTC%)
-        and not (crew.%agmt_group_id%="QA_CC_AG" or (parameters.%k15qa_feb16_valid%(trip.%start_month_start%) and trip.%is_ac_employer_qa% and crew.%is_pilot%)) /* SKCMS-590 */
         and %trip_has_not_started%;
 
   %resched_earlier_check_in_homebase_sh_inform_in_time%;
@@ -846,212 +776,20 @@ end
   else void_abstime;
 
 %trip_notification_deadline_resched_earlier_check_in_homebase_sh% =
-  if (%resched_earlier_check_in_homebase_deadline_sh_valid%
-      and not (crew.%agmt_group_id% = "QA_CC_AG" or (parameters.%k15qa_feb16_valid%(trip.%start_month_start%) and trip.%is_ac_employer_qa% and not crew.%is_cabin%)) ) /* SKCMS-768 (SKCMS-590, SKCMS-589)*/
-  then
-    %resched_earlier_check_in_homebase_sh_inform_at_latest_hb%
-  else
-    void_abstime;
-
-/******************************************************************************/
-/**
-*** SKCMS-589
-***
-*** Creates a notification alert if no mandatory c/i or c/o between reschedule time c/i
-***
-**/
-
-rule resched_earlier_checkin_qa_alert =
-  valid %_resched_earlier_checkin_deadline_qa_valid%;
-
-  %_resched_earlier_checkin_qa_inform_in_time%;
-
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext "Coll: Earlier checkin not informed before mandatory C/I or C/O (alert rule)";
-  remark "(CCT) Resched: Earlier checkin must be informed before 96h (alert rule)",
-  planner "The rule checks that crew is informed no later than the previous"
-          " c/i or c/o when rescheduling to earlier checkin."
-          " The rule is only valid for QA";
-end
-
-%_resched_earlier_checkin_deadline_qa_valid% =
-        rescheduling.%trip_inf_checkin_diff% < 0:00
-        and (crew.%agmt_group_id%="QA_CC_AG" or (parameters.%k15qa_feb16_valid%(trip.%start_month_start%) and trip.%is_ac_employer_qa% and crew.%is_pilot%))
-        and not %trip_inf_is_standby_at_checkout%;
-
-%trip_notification_deadline_resched_earlier_checkin_deadline_qa% =
- if %_resched_earlier_checkin_deadline_qa_valid%
- then %resched_earlier_check_in_homebase_qa_inform_at_latest%
- else void_abstime;
-
-%_resched_earlier_checkin_qa_inform_in_time% =
-   %_resched_earlier_qa_checkin_start_numb_of_mandadory_ci_co_btwn_now_and_notification_deadline% > 0;
-
-%_resched_earlier_qa_checkin_start_numb_of_mandadory_ci_co_btwn_now_and_notification_deadline% =
-   let end_tm = %resched_earlier_check_in_homebase_qa_inform_at_latest%,
-   start_tm = %now_hb%;
-   count(leg(chain)) where ((checkinout.%leg_has_mandatory_co% or checkinout.%leg_has_mandatory_ci%) and leg.%start_hb% >= start_tm and leg.%start_hb% < end_tm);
-
-
-/* later c/o */
-
-rule resched_later_checkout_qa_alert =
-  valid %_resched_later_checkout_deadline_qa_valid%;
-
-  %_resched_later_checkout_qa_inform_in_time%;
-
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext "Coll: Later checkout not informed before mandatory C/I or C/O (alert rule)";
-  remark "(CCT) Resched: Later checkout must be informed before 96h (alert rule)",
-  planner "The rule checks that crew is informed no later than the previous"
-          " c/i or c/o when rescheduling to later checkout."
-          " The rule is only valid for QA";
-end
-
-
-%_resched_later_checkout_deadline_qa_valid% =
-        rescheduling.%trip_inf_checkout_diff% > 0:00
-        and (crew.%agmt_group_id%="QA_CC_AG" or (parameters.%k15qa_feb16_valid%(trip.%start_month_start%) and trip.%is_ac_employer_qa% and not crew.%is_cabin%))
-        and not %trip_inf_is_standby_at_checkout%;
-
-%trip_notification_deadline_resched_later_checkout_deadline_qa% =
- if %_resched_later_checkout_deadline_qa_valid%
- then %resched_earlier_check_out_homebase_qa_inform_at_latest%
- else void_abstime;
-
-%_resched_later_checkout_qa_inform_in_time% =
-   %_resched_later_qa_checkout_start_numb_of_mandadory_ci_co_btwn_now_and_notification_deadline% > 0;
-
-%_resched_later_qa_checkout_start_numb_of_mandadory_ci_co_btwn_now_and_notification_deadline% =
-   let end_tm = %resched_earlier_check_out_homebase_qa_inform_at_latest%,
-   start_tm = %now_hb%;
-   count(leg(chain)) where ((checkinout.%leg_has_mandatory_co% or checkinout.%leg_has_mandatory_ci%) and leg.%start_hb% >= start_tm and leg.%start_hb% < end_tm);
-
-
-/******************************************************************************/
-/**
-*** SKCMS-590
-***
-*** Creates a notification alert if no c/o between reschedule time and sby start...
-***
-**/
-
-rule (off) resched_later_standby_start_qa =
-  valid %_resched_later_standby_start_deadline_qa_valid%
-        and %now_hb% < %resched_standby_later_start_time_qa_inform_at_latest% /* SKCMS-768 */
-        and rule_exceptions.%rule_on%(trip.%start_UTC%);
-
-  %_resched_later_sby_start_time_qa_inform_in_time%;
-
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext "Coll: Later standby start not informed before mandatory C/I or C/O";
-  remark "(CCT) Resched: Later standby start must be informed before previous check-out",
-  planner "The rule checks that crew is informed no later than the previous"
-          " check-out when rescheduling to later standby start."
-          " The rule is only valid for QA";
-end
-
-%_resched_later_standby_start_deadline_qa_valid% =
-        rescheduling.%trip_inf_checkin_diff% > 0:00
-        and (crew.%agmt_group_id%="QA_CC_AG" or (parameters.%k15qa_feb16_valid%(trip.%start_month_start%) and trip.%is_ac_employer_qa% and not crew.%is_cabin%))
-        and %trip_inf_is_standby_at_checkout%;
-
-%trip_notification_deadline_resched_later_standby_start_deadline_qa% =
- if %_resched_later_standby_start_deadline_qa_valid%
- then %resched_standby_later_start_time_qa_inform_at_latest%
- else void_abstime;
-
-%_resched_later_sby_start_time_qa_inform_in_time% =
-   %_resched_later_qa_sby_start_numb_of_mandadory_ci_co_btwn_now_and_notification_deadline% > 0;
-
-%_resched_later_qa_sby_start_numb_of_mandadory_ci_co_btwn_now_and_notification_deadline% =
-   let end_tm = %resched_standby_later_start_time_qa_inform_at_latest%,
-   start_tm = %now_hb%;
-   count(leg(chain)) where ((checkinout.%leg_has_mandatory_co% or checkinout.%leg_has_mandatory_ci%) and leg.%start_hb% >= start_tm and leg.%start_hb% < end_tm);
-
-rule (off) resched_earlier_standby_start_qa =
-  valid %_resched_earlier_standby_start_deadline_qa_valid%
-        and %now_hb% < %resched_standby_earlier_start_qa_inform_at_latest% /* SKCMS-768 */
-        and rule_exceptions.%rule_on%(trip.%start_UTC%);
-
-  %_resched_earlier_sby_start_time_qa_inform_in_time%;
-
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext "Coll: Earlier standby start not informed before mandatory C/I or C/O";
-  remark "(CCT) Resched: Earlier standby start must be informed before previous check-out",
-  planner "The rule checks that crew is informed no later than the previous"
-          " check-out when rescheduling to earlier standby start."
-          " The rule is only valid for QA";
-end
-
-%_resched_earlier_standby_start_deadline_qa_valid% =
-   rescheduling.%trip_inf_checkin_diff% < 0:00
-   and (crew.%agmt_group_id%="QA_CC_AG" or (parameters.%k15qa_feb16_valid%(trip.%start_month_start%) and trip.%is_ac_employer_qa% and not crew.%is_cabin%))
-   and %trip_inf_is_standby_at_checkout%;
-
-%trip_notification_deadline_resched_earlier_standby_start_deadline_qa% =
- if %_resched_earlier_standby_start_deadline_qa_valid%
- then %resched_standby_earlier_start_qa_inform_at_latest%
- else void_abstime;
-
-/**/
-
-%_resched_earlier_sby_start_time_qa_inform_in_time% =
-   %_resched_earlier_qa_sby_start_numb_of_mandadory_ci_co_btwn_now_and_notification_deadline% > 0;
-
-%_qw% = %_resched_earlier_sby_start_time_qa_inform_in_time%;
-
-%_resched_earlier_qa_sby_start_numb_of_mandadory_ci_co_btwn_now_and_notification_deadline% =
-   let end_tm = %resched_standby_earlier_start_qa_inform_at_latest%,
-   start_tm = %now_hb%;
-   count(leg(chain)) where ((checkinout.%leg_has_mandatory_co% or checkinout.%leg_has_mandatory_ci%) and leg.%start_hb% >= start_tm and leg.%start_hb% < end_tm);
-
-/*
-** QA Oct 2015
-**
-*/
-
-%qa_notice_before_limit% =
-  void_abstime;
-
-%resched_earlier_check_in_homebase_qa_inform_at_latest% =
-  trip.%start_hb% - %qa_notice_before_limit%;
-
-%resched_earlier_check_out_homebase_qa_inform_at_latest% =
-  rescheduling.%trip_inf_checkout% - %qa_notice_before_limit%;
-
-/* JIRA: SKCMS-590. QA CC & FD Earlier and Later standby start notice*/
-%_min_standby_reschedule_notice_QA% = 18:00;
-%resched_standby_earlier_start_qa_inform_at_latest% =
-  trip.%start_hb% - %_min_standby_reschedule_notice_QA%;
-%resched_standby_later_start_time_qa_inform_at_latest% =
-  trip.%start_hb% -  rescheduling.%trip_inf_checkin_diff% - %_min_standby_reschedule_notice_QA%;
-
-%_qa_hb% = %resched_standby_earlier_start_qa_inform_at_latest%;
-%_qa_utc% = station_utctime(crew.%homebase%,%_qa_hb%);
+  if %resched_earlier_check_in_homebase_deadline_sh_valid%
+    then %resched_earlier_check_in_homebase_sh_inform_at_latest_hb%
+  else void_abstime;
 
 /*
 ** 4ExNG: 6.4.1 SH check-out at homebase
 */
 export rule resched_check_out_homebase_sh_ALL =
-  valid (crew.%k4exng_cc_sp5_1_valid%(trip.%start_day%) or
-        parameters.%k4exng_fc_resched_sp5_1_valid%(trip.%start_day%)) and
-        not %is_qa_feb16_valid% and
-        not %is_duty_inf_long_haul% and
+  valid not %is_duty_inf_long_haul% and
         not crew.%is_temporary_trip_start% and
         not crew.%is_leased_trip_start% and
         %later_checkout_homebase% and
         not rescheduling.%wp_fat_legality_500_trip_inf_checkout_is_suspicious% and
-        %cancellation_standby_callout% and
-        not (crew.%agmt_group_id% = "QA_CC_AG" or (parameters.%k15qa_feb16_valid%(trip.%start_month_start%) and trip.%is_ac_employer_qa% and not crew.%is_cabin%) ) /* SKCMS-590 */;
+        %cancellation_standby_callout%;
 
   resched_later_check_out_homebase_sh_ALL is legal;
   resched_check_out_homebase_before_timeoff_sh_ALL is legal;
@@ -1099,22 +837,22 @@ export rule resched_later_check_out_homebase_sh_ALL =
 end
 
 %resched_later_check_out_homebase_ALL_valid% =
-  %_ag_not_exempt_resched_sh_sb_before_timeoff%
-  and not %resched_later_check_out_agmt_QA%
-  and not %is_qa_feb16_valid%
+  (%_ag_not_exempt_resched_sh_sb_before_timeoff%
   and not rescheduling.%trip_inf_flag_standby_at_airport%
-  and not %trip_inf_is_last_in_wop_with_co%;
-
+  and not %trip_inf_is_last_in_wop_with_co%)
+  or
+  (crew.%has_agmt_group_skn_cc% and
+  rescheduling.%trip_is_short_haul% and
+  not %trip_inf_is_standby_at_checkout% and
+  not rescheduling.%trip_inf_hist_blank_day% and
+  not %trip_inf_is_last_in_wop_with_co%);
+    
 %resched_later_check_out_homebase_ALL_failobject% =
   last(leg(trip),leg.%failobject_departure%) where
     (leg.%co_end_scheduled_hb% > %latest_resched_check_out_homebase%);
 
 %latest_resched_check_out_homebase% =
   rescheduling.%trip_inf_prev_checkout% + 2:00;
-
-%resched_later_check_out_agmt_QA% =
-  (crew.%agmt_group_id% = "QA_CC_AG" or (parameters.%k15qa_feb16_valid%(trip.%start_month_start%) and trip.%is_ac_employer_qa% and not crew.%is_cabin%) );
-
 
 /*
 ** Rule:
@@ -1142,7 +880,7 @@ export rule resched_check_out_homebase_before_timeoff_sh_ALL =
   startdate = trip.%start_UTC%;
   severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
   failobject = %resched_check_out_homebase_before_timeoff_ALL_failobject%;
-  failtext rules.%failtext_abs%("Coll: Rescheduled later C/O before T/O not allowed",
+  failtext rules.%failtext_abs%("Coll: Rescheduled later C/O before time-off not allowed",
                                 rescheduling.%trip_scheduled_checkout_hb%,
                                 rescheduling.%trip_inf_checkout%);
   remark "(CCT) Resched: Later check-out before time-off not allowed";
@@ -1153,8 +891,10 @@ end
     (leg.%co_end_scheduled_hb% > rescheduling.%trip_inf_prev_checkout%) ;
 
 %_ag_not_exempt_resched_sh_sb_before_timeoff% =
-  (crew.%agmt_group_id% = "SKS_CC_AG"
-  or crew.%agmt_group_id% = "SKD_CC_AG") or %trip_is_RC%;
+  crew.%agmt_group_id% = "SKS_CC_AG"
+  or crew.%agmt_group_id% = "SKD_CC_AG"
+  or crew.%has_agmt_group_sk_sh_fd%
+  or %trip_is_RC%;
 
 %_valid_when_resched_sb_is_live%(bool validation, Abstime date) =
   if system_db_parameters.%resched_sb_changes_active%(date) then
@@ -1177,10 +917,7 @@ export rule resched_standby_before_time_off_sh_ALL =
 /* Verifies that SKCMS-2068 changes are allowed to go live, otherwise ignore them */
   valid %_valid_when_resched_sb_is_live%(%_ag_not_exempt_resched_sh_sb_before_timeoff%,
                                          trip.%start_UTC%)
-    and (crew.%k4exng_cc_sp5_1_valid%(trip.%start_day%)
-        or parameters.%k4exng_fc_resched_sp5_1_valid%(trip.%start_day%))
-    and ((not crew.%is_cabin% and crew.%is_short_haul_trip_start%)
-        or (crew.%is_cabin% and (crew.%is_sks% or crew.%is_skd%)))
+    and (not crew.%is_cabin% and crew.%is_short_haul_trip_start%)
     and not crew.%is_temporary_trip_start%
     and not crew.%is_leased_trip_start%
     and not %is_duty_inf_long_haul%
@@ -1188,10 +925,7 @@ export rule resched_standby_before_time_off_sh_ALL =
     and %trip_inf_is_last_in_wop_with_co%
     and %trip_inf_is_standby_at_checkout%
     and %later_checkout_homebase%
-    and not rescheduling.%wp_fat_legality_500_trip_inf_checkout_is_suspicious%
-    and not (crew.%agmt_group_id% = "QA_CC_AG"
-            or (parameters.%k15qa_feb16_valid%(trip.%start_month_start%)
-                and trip.%is_ac_employer_qa% and not crew.%is_cabin%)) /* SKCMS-590 */ ;
+    and not rescheduling.%wp_fat_legality_500_trip_inf_checkout_is_suspicious%;
 
   %_trip_inf_checkout_diff% <= 0:00 +
     rule_exceptions.%overshoot_rel%(trip.%start_UTC%);
@@ -1199,7 +933,7 @@ export rule resched_standby_before_time_off_sh_ALL =
   startdate = trip.%start_UTC%;
   severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
   failobject = %resched_standby_before_timeoff_ALL_failobject%;
-  failtext rules.%failtext_abs%("Coll: Rescheduled later SBY before T/O not allowed",
+  failtext rules.%failtext_abs%("Coll: Rescheduled later SBY before time-off not allowed",
                                 rescheduling.%trip_scheduled_checkout_hb%,
                                 rescheduling.%trip_inf_checkout%);
   remark "(CCT) Resched: Later SBY before time-off not allowed",

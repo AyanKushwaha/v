@@ -358,6 +358,7 @@ class AccumulatorTimeCleaner(MiradorCleaner):
         self._reset2 = set(['accumulators.last_course_office_acc'])
         
         self._reset3 = set(['accumulators.last_landing_a320',
+                           'accumulators.last_landing_a320_LH',
                            'accumulators.last_landing_a330',
                            'accumulators.last_landing_a340',
                            'accumulators.last_landing_a350',
@@ -369,6 +370,7 @@ class AccumulatorTimeCleaner(MiradorCleaner):
                            'accumulators.lh_flight_acc'])
 
         self._reset6 = set(['accumulators.last_flown_a320',
+                            'accumulators.last_flown_a320_LH',
                            'accumulators.last_flown_a330',
                            'accumulators.last_flown_a340',
                            'accumulators.last_flown_a350',

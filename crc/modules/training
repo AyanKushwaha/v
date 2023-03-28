@@ -430,7 +430,7 @@ end
 set recurrent_emg_training_set = "REC", "PGT";
 set recurrent_sim_training_set = "PC", "PCA3", "PCA3A5", "PCA4","PCA5","OPC", "OPCA3", "OPCA3A5", "OPCA4","OPCA5";
 set recurrent_crm_training_set = "CRM";
-set recurrent_flight_training_set = "LC";
+set recurrent_flight_training_set = "LC","LCC";
 set recurrent_crmc_training_set = "CRMC";
 
 /* Table: pgt_need */
@@ -807,14 +807,15 @@ export %recurrent_type_performed%(Int ix, Abstime date) =
       default(date < %recurrent_type_expiry_date_incl_performed%(rec_type, %any_ac_qual%, date, false), false);
 
 export %recurrent_type_performed_MFF%(Int ix, Abstime date) =
-    let rec_type = %_recurrent_group%(ix, date);
+    let rec_type = %_recurrent_group%(ix, date),
+        trip_qual = if trip.%qual% = "---" then %any_ac_qual% else trip.%qual%;
 
     /* First we do a quick check against table.
        If that fails we do the more complex roster lookup that includes rec doc
        creators. */
     if (rec_type in rec_doc_per_qual or rec_type in pcopc_doc_per_qual) then
-      default(date < %recurrent_type_expiry_date%(rec_type, trip.%qual%, date), false) or
-      default(date < %recurrent_type_expiry_date_incl_performed_MFF%(rec_type, trip.%qual% , date, false), false)
+      default(date < %recurrent_type_expiry_date%(rec_type, trip_qual, date), false) or
+      default(date < %recurrent_type_expiry_date_incl_performed_MFF%(rec_type, trip_qual , date, false), false)
     else
       default(date < %recurrent_type_expiry_date%(rec_type, %any_ac_qual%, date), false) or
       default(date < %recurrent_type_expiry_date_incl_performed%(rec_type, %any_ac_qual%, date, false), false);
@@ -1408,6 +1409,7 @@ table correct_recurrent_sim(String type) =
     -, "PCA5", "OPCA3" -> true; /* Not sure if this is needed */
     -, "PCA5", "OPCA3A5" -> true;
     -, "PCA5", "OPCA4" -> true;
+    -, "PCA5", "PCA5" -> true;
     /* An OPC on A3/A4 includes an OPC on other type */
     -, "OPCA3", "OPCA3" -> true;
     -, "OPCA3", "OPCA3A5" -> true;
@@ -1418,6 +1420,7 @@ table correct_recurrent_sim(String type) =
     -, "OPCA5", "OPCA3" -> true; /* Not sure if this is needed */
     -, "OPCA5", "OPCA3A5" -> true;
     -, "OPCA5", "OPCA4" -> true;
+    -, "OPCA5", "OPCA5" -> true;
     /* A PC includes an OPC */
     true, -, "PC" -> %check_qual%(type);
     true, -, "OPC" -> true;
@@ -1865,7 +1868,7 @@ export %recurrent_type_expiry_date_incl_performed%(String type, String ac_qual, 
   if %planned_rec_doc_creator%(type, ac_qual, date) then
     add_months(round_up_month(date), validity)
   else if recurrent_performed  then
-    add_months((if expiry_date = %abstimemin% then %pp_start% else expiry_date), validity)
+    add_months((if expiry_date = %abstimemin% then %pp_start% else nmax(expiry_date,%pp_start%)), validity)
   else
     expiry_date;
 
@@ -2468,7 +2471,7 @@ export %leg_ofdx_attended% =
 
 
 export %ofdx_id_valid_for_crew%(Int ofdx_id, Abstime d) =
-  let agmt_qual_group = crew.%agmt_qual_basic_group_at_date%(d);
+  let agmt_qual_group = crew.%agmt_group_id_at_date%(d);
 
   base_utils.%semicol_sep_exact_match%(agmt_qual_group, task.%ofdx_agmt_group%(ofdx_id, d)) and
   %ofdx_id_valid_for_crew_quals%(ofdx_id, d);
@@ -2741,8 +2744,8 @@ export %trainee_number_lifus_trainings_below_minimum_extra_fu_need% =
 
   
 export %number_lifus_legs_extra_guidance_need_for_trainee_tri_instructor% =
-  parameter 15
-  remark "Unexperienced FP require TRI instructor at first LIFUS legs(default 15)";
+  parameter 20
+  remark "Unexperienced FP require TRI instructor at first LIFUS legs(default 20)";
 
 export %trainee_number_lifus_trainings_below_minimum_tri_needed% =
   %is_nth_non_zftt_lifus%(%number_lifus_legs_extra_guidance_need_for_trainee_tri_instructor%);
@@ -2900,14 +2903,20 @@ export %last_perf_date_for_act_of_type%(String type, Abstime date) =
   else
     %_last_perf_date_for_act_of_type%(type, date);
 
+/**********************
+ IMPORTANT!!
+ Training lookup returns start_utc for activity.
+ So if looking in log, start count 17 hours after ILC (to not include ILC itself).
+ Assumed here that ILC flight is no longer than 17:00 (PVG usually 17:00h).
+ **********************/
 export %end_hb_last_perf_act_of_type%(String type, Abstime date) =
   if %type_is_flight_duty%(type) then
     default(last(leg(roster), leg.%end_hb%)
               where (%leg_training_code_safe% = type and
                      leg.%start_UTC% < date),
-      %last_logged_date_for_type%(type, %pp_start%))
+      %last_logged_date_for_type%(type, %pp_start%)+17:00)
   else
-    %_last_perf_date_for_act_of_type%(type, date);
+    %_last_perf_date_for_act_of_type%(type, date)+17:00;
 
 export %last_perf_date_for_act_of_type_as_student%(String type, Abstime date) =
     %_last_perf_date_for_act_of_type_as_student%(type, date);
@@ -3602,6 +3611,7 @@ export %must_have_lc_a2% = %must_have_in_pp_w_acqual%("LC", "A2");
 export %must_have_lc_a3% = %must_have_in_pp_w_acqual%("LC", "A3");
 export %must_have_lc_a4% = %must_have_in_pp_w_acqual%("LC", "A4");
 export %must_have_lc_a5% = %must_have_in_pp_w_acqual%("LC", "A5");
+export %must_have_lcc% = %must_have_in_pp%("LCC");
 
 /* Cabin crew.
 only used in select, must have REC. Warning 'H' is not included */
@@ -3699,6 +3709,7 @@ export %may_have_lc_a2% = %may_have_in_pp_w_acqual%("LC", "A2");
 export %may_have_lc_a3% = %may_have_in_pp_w_acqual%("LC", "A3");
 export %may_have_lc_a4% = %may_have_in_pp_w_acqual%("LC", "A4");
 export %may_have_lc_a5% = %may_have_in_pp_w_acqual%("LC", "A5");
+export %may_have_lcc% = %may_have_in_pp%("LCC");
 
 export %needs_lc_after_fam% = default(%expiry_date_lc_after_fam% <> "", false);
 
@@ -3911,7 +3922,7 @@ table etops_training_lookup =
   %etops_training_ac_qual% -> export %etops_training_accumulator_type%,
                               export %etops_training_course_type%;
 
-  "A2" -> "A2LH", "LRP2";
+  "A2" -> "A2LH", "ETOPS LC";
   -    -> void_string, void_string;
 end
 
@@ -3920,7 +3931,7 @@ export %leg_needs_etops_training% =
   %leg_is_long_haul%;
 
 export %etops_training_ac_qual% =
-  if %latest_lrp2_date% > %abstimemin% then
+  if %latest_etops_lc_date% > %abstimemin% then
     "A2"
   else
     "";
@@ -3928,72 +3939,72 @@ export %etops_training_ac_qual% =
 %latest_lrp2_date% =
   %last_perf_date_for_act_of_type_and_code%("COURSE", "LRP2", %pp_end%);
 
-export %etops_training_period_start_hb% = round_up(%utc2hb%(%latest_lrp2_date%) + 0:01, 24:00);
+%latest_etops_lc_date% =
+  %last_perf_date_for_act_of_type_and_code%("ETOPS LC", "A2", %pp_end%);
+
+export %etops_training_period_start_hb% = round_up(%utc2hb%(%latest_etops_lc_date%) + 0:01, 24:00);
 export %etops_training_period_end_hb% =
   if %consider_lr_refresh% then
     %etops_training_period_end_lr_refresh_hb%
   else
-    if %consider_lrsb% then
-      %etops_training_period_end_lrsb_hb%
+    if %consider_lrp2r% then
+      %etops_training_period_end_lrp2r_hb%
     else
-      %etops_training_period_end_180d_hb%;
+      %etops_training_period_end_150d_hb%;
 
 export %nr_etops_training_sectors_required% = 8;
-export %nr_etops_training_sectors_required_before_lrsb% = 6;
+export %nr_etops_training_sectors_required_before_lrp2r% = 6;
 
-export %consider_lrsb% =
-  %nr_etops_training_sectors_in_180d% < %nr_etops_training_sectors_required% and
-  %last_lrsb_date_hb% > %etops_training_period_start_hb% and
-  %nr_etops_training_sectors_before_lrsb% >= %nr_etops_training_sectors_required_before_lrsb%;
+export %consider_lrp2r% =
+  %nr_etops_training_sectors_in_150d% < %nr_etops_training_sectors_required% and
+  %last_lrp2r_date_hb% > %etops_training_period_start_hb% and
+  %nr_etops_training_sectors_before_lrp2r% >= %nr_etops_training_sectors_required_before_lrp2r%;
 
 export %consider_lr_refresh% =
-  %nr_etops_training_sectors_in_180d% < %nr_etops_training_sectors_required_before_lrsb% and
+  %nr_etops_training_sectors_in_150d% < %nr_etops_training_sectors_required_before_lrp2r% and
   %last_lr_refresh_date_hb% > %etops_training_period_start_hb%;
 
-export %etops_training_period_end_180d_hb% =
-  %etops_training_period_start_hb% + 180 * 24:00;
-
-export %etops_training_period_end_lrsb_hb% =
-  %last_lrsb_date_hb% + 7 * 24:00;
+export %etops_training_period_end_150d_hb% =
+  %etops_training_period_start_hb% + 150 * 24:00;
+export %etops_training_period_end_lrp2r_hb% =
+  %last_lrp2r_date_hb% + 60 * 24:00;
 %etops_training_period_end_lr_refresh_hb% =
   %last_lr_refresh_date_hb% + 30 * 24:00;
 
-export %last_lrsb_date_hb% =
-    round_down(%utc2hb%(%last_perf_date_for_act_of_type_and_code%("COURSE", "LRSB", %pp_end%)), 24:00);
+export %last_lrp2r_date_hb% =
+    round_down(%utc2hb%(%last_perf_date_for_act_of_type_and_code%("COURSE", "LRP2R", %pp_end%)), 24:00);
+
 
 %last_lr_refresh_date_hb% =
     round_down(%utc2hb%(%last_perf_date_for_flight_of_type_and_code%("LR REFRESH", %etops_training_ac_qual%, %pp_end%)), 24:00);
 
-export %nr_etops_training_sectors_in_180d% = 
-  accumulators.%nr_active_flights_in_period%(%etops_training_accumulator_type%, %etops_training_period_start_hb%, %etops_training_period_end_180d_hb%)
-  - %training_log_ETOPS_lifus_count%(%etops_training_period_start_hb%, %etops_training_period_end_180d_hb%);
-export %nr_etops_training_sectors_considering_lrsb% = 
-  accumulators.%nr_active_flights_in_period%(%etops_training_accumulator_type%, %etops_training_period_start_hb%, %etops_training_period_end_lrsb_hb%)
-  - %training_log_ETOPS_lifus_count%(%etops_training_period_start_hb%, %etops_training_period_end_lrsb_hb%);
+export %nr_etops_training_sectors_in_150d% = 
+  accumulators.%nr_all_flights_in_period%(%etops_training_accumulator_type%, %etops_training_period_start_hb%, %etops_training_period_end_150d_hb%)
+  - %training_log_ETOPS_lifus_count%(%etops_training_period_start_hb%, %etops_training_period_end_150d_hb%);
+export %nr_etops_training_sectors_considering_lrp2r% = 
+  accumulators.%nr_all_flights_in_period%(%etops_training_accumulator_type%, %etops_training_period_start_hb%, %etops_training_period_end_lrp2r_hb%)
+  - %training_log_ETOPS_lifus_count%(%etops_training_period_start_hb%, %etops_training_period_end_lrp2r_hb%);
 export %nr_etops_training_sectors_considering_lr_refresh% = 
-  accumulators.%nr_active_flights_in_period%(%etops_training_accumulator_type%, %etops_training_period_start_hb%, %etops_training_period_end_lr_refresh_hb%)
+  accumulators.%nr_all_flights_in_period%(%etops_training_accumulator_type%, %etops_training_period_start_hb%, %etops_training_period_end_lr_refresh_hb%)
   - %training_log_ETOPS_lifus_count%(%etops_training_period_start_hb%, %etops_training_period_end_lr_refresh_hb%);
 
-export %nr_etops_training_sectors_before_leg% =
-  accumulators.%nr_active_flights_in_period%(%etops_training_accumulator_type%, %etops_training_period_start_hb%, %leg_start_hb%);
+%nr_etops_training_sectors_before_lrp2r% =
+  accumulators.%nr_all_flights_in_period%(%etops_training_accumulator_type%, %etops_training_period_start_hb%, %last_lrp2r_date_hb%)
+  - %training_log_ETOPS_lifus_count%(%etops_training_period_start_hb%, %last_lrp2r_date_hb%);
 
-%nr_etops_training_sectors_before_lrsb% =
-  accumulators.%nr_active_flights_in_period%(%etops_training_accumulator_type%, %etops_training_period_start_hb%, %last_lrsb_date_hb%)
-  - %training_log_ETOPS_lifus_count%(%etops_training_period_start_hb%, %last_lrsb_date_hb%);
-
-export %nr_etops_training_sectors_after_lrsb_before_pp% =
-  accumulators.%nr_active_flights_in_period%(%etops_training_accumulator_type%, %last_lrsb_date_hb%, %pp_start%);
+export %nr_etops_training_sectors_after_lrp2r_within_60days% =
+  accumulators.%nr_all_flights_in_period%(%etops_training_accumulator_type%, %last_lrp2r_date_hb%, %last_lrp2r_date_hb% + 60 * 24:00);
 
 
 export %nr_etops_training_sectors_perf% =
-  accumulators.%nr_active_flights_in_period%(%etops_training_accumulator_type%, %etops_training_period_start_hb%, %etops_training_perf_publ_limit%)
+  accumulators.%nr_all_flights_in_period%(%etops_training_accumulator_type%, %etops_training_period_start_hb%, %etops_training_perf_publ_limit%)
   - %training_log_ETOPS_lifus_count%(%etops_training_period_start_hb%, %etops_training_period_end_hb%);
 export %nr_etops_training_sectors_publ% =
-  accumulators.%nr_active_flights_in_period%(%etops_training_ac_qual%, %etops_training_perf_publ_limit%, %etops_training_publ_plan_limit%);
+  accumulators.%nr_all_flights_in_period%(%etops_training_ac_qual%, %etops_training_perf_publ_limit%, %etops_training_publ_plan_limit%);
 export %nr_etops_training_sectors_plan% =
-  accumulators.%nr_active_flights_in_period%(%etops_training_ac_qual%, %etops_training_publ_plan_limit%, %etops_training_period_end_hb%);
+  accumulators.%nr_all_flights_in_period%(%etops_training_ac_qual%, %etops_training_publ_plan_limit%, %etops_training_period_end_hb%);
 export %nr_etops_training_sectors_in_period%(Abstime start_hb, Abstime end_hb) =
-  accumulators.%nr_active_flights_in_period%(%etops_training_ac_qual%,
+  accumulators.%nr_all_flights_in_period%(%etops_training_ac_qual%,
                                              nmax(start_hb, %etops_training_period_start_hb%),
                                              nmin(end_hb, %etops_training_period_end_hb%));
 
@@ -4016,8 +4027,9 @@ Warning 'H' and 'E' is not included ('E' is handled by %must_have_rec%)
                  %must_have_in_pp%("REC") and not
                  %has_warning_code_h%;
 
-/* Sorts */
-export %lc_date% = %recurrent_type_expiry_date%("LC", %lc_date_ac_qual_selector%, %now%);
+export %lc_date% = 
+    if %flight_crew% then %recurrent_type_expiry_date%("LC", %lc_date_ac_qual_selector%, %now%)
+    else %recurrent_type_expiry_date%("LCC", %any_ac_qual%, %now%);
 
 %lc_date_ac_qual_selector% =
   if crew.%is_double_qualified% or
@@ -4311,8 +4323,7 @@ export %pc_opc_match_trip_start% =
 %needs_ast% = 
   crew.%is_pilot% and
   not (crew.%is_a2a3_qualified% or crew.%is_a2a5_qualified%) and
-  not %has_ast_in_ast_period% and
-  not %has_skill_test_in_ast_period%;
+  not %has_ast_in_ast_period% ;
 
 %needs_ast_for_qual_group_38% =
   %needs_ast_for_qual_group%("38");
@@ -4320,31 +4331,20 @@ export %pc_opc_match_trip_start% =
 %needs_ast_for_qual_group_A2% =
   %needs_ast_for_qual_group%("A2");
 
-%needs_ast_for_qual_group_A3A4% =
-  %needs_ast_for_qual_group%("A3A4");
-
 %needs_ast_for_qual_group_A3A5% =
   %needs_ast_for_qual_group%("A3A5");
-
-%needs_ast_for_qual_group_A5% =
-  %needs_ast_for_qual_group%("A5");
 
 %needs_ast_for_qual_group%(String qual_group) = 
   crew.%is_pilot% and
   not (crew.%is_a2a3_qualified% or crew.%is_a2a5_qualified%) and
   (%ast_qual_group_of_crew% = qual_group) and
-  not %has_ast_in_ast_period% and
-  not %has_skill_test_in_ast_period%;
+  not %has_ast_in_ast_period%;
 
 %ast_qual_group_of_crew% =
   if %crew_has_ac_qln_in_ast_period%("38", "38") then
     "38"
   else if %crew_has_ac_qln_in_ast_period%("A2", "A2") then
     "A2"
-  else if %crew_has_ac_qln_in_ast_period%("A5", "A5") and %crew_has_A5_qual_group_extras% then
-    "A5"
-  else if %crew_has_ac_qln_in_ast_period%("A3", "A3A4") or %crew_has_ac_qln_in_ast_period%("A4", "A3A4") then
-    "A3A4"
   else if %crew_has_ac_qln_in_ast_period%("A3", "A3A5") or %crew_has_ac_qln_in_ast_period%("A5", "A3A5") then
     "A3A5"
   else
@@ -4355,22 +4355,7 @@ export %pc_opc_match_trip_start% =
 
 %qual_in_ast_qual_group_of_crew%(String qual) =
   (qual = %ast_qual_group_of_crew%) or
-  (("A3A4" = %ast_qual_group_of_crew% or "A3A5" = %ast_qual_group_of_crew% ) and (qual = "A3" or qual = "A4" or qual = "A5"));
-
-%crew_has_a5_qual_group_extras% =
-  let qual_course_end_date = default(%qual_course_end_date%("A5"), 1JAN1986),
-      ast_period_start = system_db_parameters.%ast_period_start%(%pp_end%, "A5");
-
-  qual_course_end_date <= %ast_latest_ctr_a3a5_course_completion_date_p% or qual_course_end_date < ast_period_start;
-
-export %ast_latest_ctr_a3a5_course_completion_date_p% = 
-  parameter 01DEC2020
-  remark "AST: Latest CTR-A3A5 course completion date to be included in AST period.";
-
-%qual_course_end_date%(String ac_qual) =
-  let a5_validfrom_date = crew.%qln_entry_date%("ACQUAL", "A5", %pp_end%);
-  
-  %course_end%(a5_validfrom_date + 0:01);
+  (("A3A5" = %ast_qual_group_of_crew% ) and (qual = "A3" or qual = "A5"));
 
 export %has_ast_in_ast_period% = 
     (%ast_date% >= %ast_period_begin_date% and 
@@ -4399,13 +4384,6 @@ export %inst_on_simulator% =
   or leg.%is_sim_supervis%
   or leg.%is_sim_instr%;
 
-%has_conv_typerating_skill_test_in_roster% =
-   any(leg(roster), leg.%is_skill_test% and (training.%course_name%(leg.%start_utc%) = "CONV TYPERATING"))
-     where((leg.%start_utc% >= %ast_period_begin_date%) and (leg.%end_utc% <= %ast_period_end_date%));
-
-%has_conv_typerating_skill_test_in_training_log% =
-   any(times(20), %is_conv_typerating_skill_test%(base_utils.%ti0%));
-
 %is_conv_typerating_skill_test%(Int idx) =
     %pc_course_name%(idx) = "CONV TYPERATING";
 
@@ -4415,30 +4393,42 @@ export %inst_on_simulator% =
 %pc_course_name%(Int idx) =
     training.%course_name%(%pc_date%(idx));
 
-%has_skill_test_in_ast_period% =
-    %has_conv_typerating_skill_test_in_roster% or
-    %has_conv_typerating_skill_test_in_training_log%;
-
-%num_skill_tests_in_ast_period% =
-    if %has_skill_test_in_ast_period% then
-      1
-    else
-      0;
 
 export %too_many_ast_in_ast_period% =
   let num_planned_asts = %num_planned_asts%;
   if not (crew.%is_a2a3_qualified% or crew.%is_a2a5_qualified%) then
     if num_planned_asts > 1 then
       true
-    else if num_planned_asts + %num_performed_asts% + %num_skill_tests_in_ast_period% > 1 then
+    else if num_planned_asts + %num_performed_asts% > 1 then
       true
     else
       false
   else
-    num_planned_asts + %num_performed_asts% + %num_skill_tests_in_ast_period% > 0;
+    num_planned_asts + %num_performed_asts% > 0;
 
-%num_planned_asts% = count(trip(roster)) where (trip.%is_ast% and
-                                                %assigned_as_student_on_any_ast_duty_in_trip%);
+/*
+* SKCMS-3218
+* A3A5 Crew --> 1 K5 or K6
+* A3 Crew --> 1 K6
+* A5 Crew --> 1 K5
+*/
+%num_planned_asts% = 
+  if crew.%is_a3a5_qualified% then
+    count(trip(roster)) where (trip.%is_ast% and 
+    (trip.%code% = "K5" or trip.%code%= "K6") and 
+    %assigned_as_student_on_any_ast_duty_in_trip%)
+  else if crew.%has_acqln_in_pp%("A3") then
+    count(trip(roster)) where (trip.%is_ast% and 
+    trip.%code%= "K6" and 
+    %assigned_as_student_on_any_ast_duty_in_trip%)
+  else if crew.%has_acqln_in_pp%("A5") then
+    count(trip(roster)) where (trip.%is_ast% and 
+    trip.%code%= "K5" and 
+    %assigned_as_student_on_any_ast_duty_in_trip%)
+  else 
+    count(trip(roster)) where (trip.%is_ast% and
+    %assigned_as_student_on_any_ast_duty_in_trip%);
+  
 
 export %assigned_as_student_on_any_ast_duty_in_trip% =
   any(duty(trip), %assigned_as_student_on_any_ast_leg_in_duty%);
@@ -4469,10 +4459,20 @@ export %any_new_actype_restr_planned_in_year% =
 
     crew.%has_restr_subtype_in_ival%("NEW", "ACTYPE", start_date, end_date);
 
+/*
+* SKCMS-3218
+* Only crew belonging to SKI_FD_AG shall be affected by  ast_period_start/end_a3a5
+*/
 export %ast_period_begin_date% = 
+  if %ast_qual_group_of_crew% = "A3A5" and not crew.%has_agmt_group_ski_fd% then 
+    31dec2035
+  else 
     system_db_parameters.%ast_period_start%(trip.%start_hb%, %ast_qual_group_of_crew%);  
 
 export %ast_period_end_date% =
+  if %ast_qual_group_of_crew% = "A3A5" and not crew.%has_agmt_group_ski_fd% then 
+    1jan1986
+  else 
     system_db_parameters.%ast_period_end%(trip.%start_hb%, %ast_qual_group_of_crew%); 
 
 /* Countings */
@@ -4866,10 +4866,6 @@ export %duty_is_in_long_course_period% =
 
 export %long_course_period_days_in_period_pt%(Abstime start_date, Abstime end_date) =
   let days = (round_up(end_date, 24:00) - round_down(start_date, 24:00)) / 24:00; 
-    
-  if crew.%max_production_days_rule_FC_SKN_valid% then
-    0
-  else
     sum(times(days), %long_course_period_in_day_pt%(%_next_day%(start_date)));   
 
 %_next_day%(Abstime start_date) = start_date + (%times_index_0% - 1) * 24:00;                                        

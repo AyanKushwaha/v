@@ -109,6 +109,7 @@ export %is_cc_rec_instr% = task.%is_cc_rec_instr%(%code%);
 export %is_fc_rec_instr% = task.%is_fc_rec_instr%(%code%);
 export %is_fmst% = task.%is_fmst%(%code%);
 export %is_lrsb% = task.%is_lrsb%(%code%);
+export %is_lrp2r% = task.%is_lrp2r%(%code%);
 
 export %is_pact% = false;
 export %is_ground_duty% = false;
@@ -120,6 +121,8 @@ export %is_gd_duty% =  %code% = "GD";
 export %is_kd_duty% =  %code% = "KD";
 export %is_sd_duty% =  %code% = "SD";
 /* End Jira SKPROJ-446 */
+
+export %name% = first(leg(trip),keywords.%crr_name%);
 
 export %is_standby% = task.%is_standby%(%code%);
 export %is_standby_with_rest% =
@@ -873,9 +876,6 @@ export %has_qual%(string qual) =
   (%is_active_flight% and %qual_fc% = qual) or
   (%is_simulator% and %qual% = qual);
 
-export %is_RC_aircraft% =
-  %ac_family% = "CRJ";
-
 /*
 ** First / Last
 */
@@ -1123,8 +1123,8 @@ set SAS_hub_set =
   parameter ""
   remark "Airport considered connectionwise hubs";
 
-export set SAS_base_set = "OSL", "CPH", "ARN";
-export set SH_base_set = "OSL","CPH","ARN","SVG","TRD";
+export set SAS_base_set = "OSL", "CPH", "ARN"; /* This set should remain as the "basic SK" bases, the capital cities triangle*/
+export set SH_base_set = "OSL","CPH","ARN";
 
 export %country_is_domestic%(String country) =
   %param_table%("scandinavian_countries", country, %start_utc%);
@@ -1187,13 +1187,10 @@ export %area_schengen% =
   else
      area;
 
-
 /* Split duty exception */
 
 export %is_split_duty_exception% =
   %param_table%("split_duty_exception", %flight_nr_min_3_digits%, %start_utc%);
-
-
 
 /*
 ** AOC - operation certificate
@@ -1272,7 +1269,7 @@ export %cockpit_employer_from_base% =
     else aircraft_owner;
 
 export %employer_fix_tracking_p% =
-  parameter true
+  parameter false
   remark "Temporary fix for employer in Tracking";
 
 export %employer% =
@@ -1288,25 +1285,18 @@ export %employer% =
     else "";
 
 /* Leg employer region */
-set qa_employer_set = "QA";
-
-
-
-export set svs_employer_set = "SVS";
-
 set skn_employer_set = parameter "BU", "SKN";
 set ski_employer_set = parameter "SK", "SKI";
 set skd_employer_set = parameter "SKD", "SKC";
 set sks_employer_set = parameter "SKS";
-set default_employer_set = "SKS", "SKD", "SKN"; /* Used to catch the common case fast */
+set default_employer_set = "SKS", "SKD", "SKN", "SVS", "SZS"; /* Used to catch the common case fast */
 /* Employer region is undefined if employer is not a SAS employer */
 export %employer_region% =
     if %employer% in default_employer_set then %employer%
     else if %employer% in ski_employer_set then "SKI"
     else if %employer% in skn_employer_set then "SKN"
     else if %employer% in sks_employer_set then "SKS"
-    else if %employer% in skd_employer_set or %employer% in qa_employer_set then "SKD"
-    else if %employer% in svs_employer_set then "SVS"
+    else if %employer% in skd_employer_set then "SKD"
     else "";
 
 export %employer_planning_group% =
@@ -1317,8 +1307,6 @@ export %employer_planning_group% =
     else if %employer% in skn_employer_set then "SKN"
     else if %employer% in sks_employer_set then "SKS"
     else if %employer% in skd_employer_set then "SKD"
-    else if %employer% in qa_employer_set then "QA"
-    else if %employer% in svs_employer_set then "SVS"
     else "";
 
 export %fd_employer% =
@@ -1326,9 +1314,7 @@ export %fd_employer% =
     else if %employer% in ski_employer_set then "SKI"
     else if %employer% in skn_employer_set then "SKN"
     else if %employer% in sks_employer_set then "SKS"
-    else if %employer% in skd_employer_set or
-            %employer% in qa_employer_set then "SKD"
-    else if %employer% in svs_employer_set then "SVS"
+    else if %employer% in skd_employer_set then "SKD"
     else "";
 
 export %fd_employer_is_SAS% =
@@ -1336,18 +1322,14 @@ export %fd_employer_is_SAS% =
     %employer% in ski_employer_set or
     %employer% in skn_employer_set or
     %employer% in sks_employer_set or
-    %employer% in skd_employer_set or
-    %employer% in qa_employer_set or
-    %employer% in svs_employer_set;
+    %employer% in skd_employer_set;
 
 export %cc_employer_is_SAS% =
     %employer% in default_employer_set or
     %employer% in ski_employer_set or
     %employer% in skn_employer_set or
     %employer% in sks_employer_set or
-    %employer% in skd_employer_set or
-    %employer% in qa_employer_set or
-    %employer% in svs_employer_set;
+    %employer% in skd_employer_set;
 
 /* Region of open time legs */
 export %region_open_time% =
@@ -1395,29 +1377,33 @@ export %is_SKI% = %region% = "SKI" or %region% = "";
 %is_SKJ% = %region% = "SKJ" or %region% = "";
 %is_SKK% = %region% = "SKK" or %region% = "";
 %is_SVS% = %region% = "SVS" or %region% = "";
+%is_SZS% = %region% = "SZS" or %region% = "";
 %is_asian% =
   %is_SKJ% or %is_SKK%;
 
 export %homebase_region% = %homebase_planning_group%;
 
-
 /* Default value for region used when data missing from flight_owner table.*/
 export %homebase_planning_group% =
-  if %trip_homebase% = "CPH" then
-    "SKD"
-  else if %trip_homebase% = "BLL" then
-    "SKD"
-  else if %trip_homecountry% = "NO" then
-    "SKN"
-  else if %trip_homebase% = "STO" then
-    "SKS"
-  else if %trip_homecountry% = "JP" then
-    "SKJ"
-  else if %trip_homecountry% = "CN" then
-    "SKK"
+  if %aircraft_owner% = "SK" then
+    if %trip_homecountry% = "DK" then
+          "SKD"
+    else if %trip_homecountry% = "NO" then
+        "SKN"
+    else if %trip_homecountry% = "SE" then
+        "SKS"
+    else if %trip_homecountry% = "JP" then
+        "SKJ"
+    else if %trip_homecountry% = "CN" then
+        "SKK"
+    else
+        "" /* No specific region */
+  else if %aircraft_owner% = "SVS" then
+    "SVS"
+  else if %aircraft_owner% = "SZS" then
+    "SZS"
   else
     ""; /* No specific region */
-
 
 table region_table(int leg_num, int weekday)  =
  %flight_id%,
@@ -1448,45 +1434,46 @@ export %ac_employer_id% =
 export %ac_employer_id_from_code%(String code) =
   if code="" then 0
 
-
-
-
-
-  else (locate(code,"SKS SKD SKN QA  SKI SVS ")+3)/4;
-
-
+  else (locate(code,"SKS SKD SKN SKI SZS SVS ")+3)/4;
 
 /* in tables the integer may be used (together with comment), as they don't allow for symbolic literals. The integer is invariant */
 export %ac_employer_unknown% = 0;
 export %ac_employer_sks%     = 1;
 export %ac_employer_skd%     = 2;
 export %ac_employer_skn%     = 3;
-export %ac_employer_qa%      = 4;
-export %ac_employer_ski%     = 5;
-
-
+export %ac_employer_ski%     = 4;
+export %ac_employer_szs%     = 5;
 export %ac_employer_svs%     = 6;
 
 export %is_ac_employer_sks% = %ac_employer_id% = %ac_employer_sks%;
 export %is_ac_employer_skd% = %ac_employer_id% = %ac_employer_skd%;
 export %is_ac_employer_skn% = %ac_employer_id% = %ac_employer_skn%;
-export %is_ac_employer_qa% = %ac_employer_id% = %ac_employer_qa%;
+export %is_ac_employer_szs% = %ac_employer_id% = %ac_employer_szs%;
 export %is_ac_employer_ski% = %ac_employer_id% = %ac_employer_ski%;
 export %is_ac_employer_sk% = %ac_employer_is_sk%(%ac_employer_id%);
 export %is_ac_employer_sk_sh% = %ac_employer_is_sk_sh%(%ac_employer_id%);
 export %is_ac_employer_svs% = %ac_employer_id% = %ac_employer_svs%;
+export %is_ac_employer_svsn% = %is_ac_employer_svs% and leg.%trip_homebase% = "BGO";
+export %is_ac_employer_svsd% = %is_ac_employer_svs% and leg.%trip_homebase% = "CPH";
+export %is_ac_employer_szsd% = %is_ac_employer_szs% and leg.%trip_homebase% = "CPH";
+export %is_ac_employer_szss% = %is_ac_employer_szs% and leg.%trip_homebase% = "STO";
 
 table ac_employer_tbl(int ac_employer_id) =
   ac_employer_id -> export %ac_employer%, export %ac_employer_text%, export %ac_employer_is_sk%, export %ac_employer_is_sk_sh%;
   1 -> "SKS_AE", "SAS Sweden",  true, true;
   2 -> "SKD_AE", "SAS Denmark", true, true;
   3 -> "SKN_AE", "SAS Norway",  true, true;
-  4 -> "QA_AE",  "Cimber",      false, false;
-  5 -> "SKI_AE", "SAS LH",      true, false;
-
-  6 -> "SVS_AE", "SAS Link",    false, false;
+  4 -> "SKI_AE", "SAS LH",      true, false;
+  5 -> "SZS_AE", "SAS Connect", %szs_fd_or_cc%,%szs_fd_or_cc%;
+  6 -> "SVS_AE", "SAS Link",    %svs_fd_or_cc%, %svs_fd_or_cc%;
   - -> "",    "Unknown",     false, false;
 end
+%svs_fd_or_cc% =
+    if %flight_crew% then true
+    else false;
+%szs_fd_or_cc% =
+    if %flight_crew% then true
+    else false;
 
 /* A zero as weekday means all weekdays */
 %_flight_owner_region%(int leg_num) =
@@ -1506,9 +1493,6 @@ export %flight_owner_region% =
     %_flight_owner_region%(3)
   else
     %_flight_owner_region%(4);
-
-/* CJ Flight Deck sign; (SKCMS-745) */
-export %is_qa_fd% = %is_ac_employer_qa% and fundamental.%flight_crew%;
 
 /*******************************************************************
 * Parameter for flight owner table
@@ -1559,28 +1543,19 @@ export %flight_is_long_haul% =
 set long_haul_airports = "DBX", "GRU";
 
 %_is_long_haul% =
-  if %k4exng_cc_sp5_1_valid%(%start_hb%) then
-    %is_long_haul_4exng%
-  else
-    if %start_station% in long_haul_airports or %end_station% in long_haul_airports then
-       true
-    else if %cabin_crew% then
-      if %is_SKD% then
-        %is_long_haul_SKD%
-      else if %is_SKN% then
-        %is_long_haul_SKN%
-      else if %is_SKS% then
-        %is_long_haul_SKS%
-      else
-        true /* Default - must be non-scandinavian CC - always LH */
-    else
-      %is_long_haul_FC%;
+  if %cabin_crew%
+     then if %is_asian%
+          then true
+     else %is_long_haul_4exng%
+  else if %start_station% in long_haul_airports or %end_station% in long_haul_airports 
+       then true
+  else %is_long_haul_FC%;
 
 /* Agreement: 4ExNG Definitions */
 %is_long_haul_4exng% =
-  (abs(%start_time_zone% - 1:00) > 3:00 or
-   abs(%end_time_zone% - 1:00) > 3:00 or
-   %_block_time_scheduled% > 8:00) and
+  (nmax(%start_time_zone%, %end_time_zone%) >3:00
+  or nmin(%start_time_zone%, %end_time_zone%) <-1:00 /* for the basic CBA definition all trips starting or landing outside timezones -1 and +3 are longhaul */
+  or %_block_time_scheduled% > 8:00) and
   not (%start_country% = "GL" or %end_country% = "GL");
 
 /* Agreement 4ExNG defintions, usable for flight legs only (but there only leg dependendent) */
@@ -1610,7 +1585,9 @@ export %is_long_haul_SKD% =
 
 /* Agreement: FC 1:7 "Planerad tjänstgöring... Anm." */
 %is_long_haul_FC% =
-  abs(%start_time_zone%) > 3:00 or abs(%end_time_zone%) > 3:00;
+  /*abs(%start_time_zone%) > 3:00 or abs(%end_time_zone%) > 3:00;*/
+  nmax(%start_time_zone%, %end_time_zone%) >3:00
+  or nmin(%start_time_zone%, %end_time_zone%) <-1:00;
 
 /* Airports excepted from the long haul definition */
 %lh_apt_exceptions_table% = %etab_path%(%lh_apt_exceptions_table_p%);
@@ -1645,9 +1622,9 @@ export %with_long_haul_ac% =
 export %is_west_bound% = %start_time_zone% - 4:00 > %end_time_zone%;
 export %is_east_bound% = %start_time_zone% + 4:00 < %end_time_zone%;
 
-/*
-** Check in/out
-*/
+/********************************************
+*               Check in/out
+********************************************/
 
 /*
  * Variables for determining if a leg has a check-in or check-out
@@ -1804,20 +1781,7 @@ table check_out_times =
 end
 
 /*
- * Check-in times for FC
- *
- * The table is clustered so to check for times in the following order:
- * non-charter SH, charter SH, LH
- *
- * There are some redundancy in the table to allow for regionalization
- * without having to change structure.
- *
- *
- * During development the following error-codes are used:
- *  2:01, missing non-charter SH time
- *  2:02, missing charter SH time
- *  2:30, missing time others
- *
+ * Check-in times
  */
 %check_in_default_fc_flight% =
   default(%_check_in_exception%,
@@ -1829,54 +1793,31 @@ export %deadhead_leg_ci% = 0:45;
 %leg_ac_employer_id% = %ac_employer_id%;
 
 table check_in_times_fc_flight =
-  %is_long_haul%, %next_leg_is_lh%, %is_charter%,
-  %leg_ac_employer_id%, %start_station%,
-  %departs_from_homebase%, %departs_from_scandinavian_base%, %is_deadhead%
+  /* use leg ac employer with care in table since it can change between trip and crew e.g. from SKI to SKD*/
+  %leg_ac_employer_id%, %is_long_haul%, %next_leg_is_lh%, %is_charter%, 
+  %start_station%, %departs_from_homebase%, 
+  %departs_from_scandinavian_base%, %is_deadhead%,not %arrival_is_schengen%
 
   -> Reltime %_check_in_default_fc_flight%;
-
-  /* Flight crew - long haul */
-  true,     -, -,    -, -, -,  true, false ->if %_validity_feb17% then 1:20 else 1:10;
-  true,     -, -,    -, -, -, false, false -> 1:00;
-  -,        -, -,    -, -,    -,  -,  true -> %deadhead_leg_ci%; /* 45 minutes */
+   >4,    -,    -,    -,      -,    -,    -,   - ,    - -> 0:45; /* SAS Link/Connect */
+  /* SK Flight crew - long haul */
+  <=4, true,    -,    -,      -,    -, true,   - ,    - -> 1:20;
+  <=4, true,    -,    -,      -,    -,false,   - ,    - -> 1:00;
+  <=4,false, true,    -,      -,    -,    -, true,    - -> 0:45; /* DH before LH */
   &
-
-
-
-  /* Flight crew - short haul - non charter */
-
-  false, -, false,  2,     -, true,    -,     -  -> if %_validity_feb17% then 0:50 else 0:55; /*SKD*/
-  false, -, false,  4,     -, true,    -,     -  -> 0:55; /*QA*/
-  false, -, false,  1,     -, true,    -,     -  -> 0:50; /*SKS*/
-  false, -, false,  3,     -, true,    -,     -  -> 0:50; /*SKN*/
-  false, -, false,  5,     -, true,    -,     -  -> 0:50; /*SKI*/
-  false, -, false,  -,     -,false,    -,     -  -> 0:45;
+  /* SK Flight crew - short haul */
+  <=4,false,    -,    -,  "LHR",    -,false,   - ,    - -> 1:00;
+  <=4,false,    -,    -,  "ARN",    -, true,   - ,true  -> if %extra_ci_sto_lh% then 0:55 else 0:50;
+  <=4,false,    -,false,<>"LHR",false,false,   - ,    - -> 0:45; /* outstation that's non Scandinavian base and non-charter */
   &
-  false, -, false,  6,     -,    -,    -,     -   -> 0:45; /* SAS Link */
+  <=4,false,    -,    -,      -,    -,    -,   - ,    - -> 0:50; /* everything else should be 50 min for SH */
   &
-  false, -, false,  -,     -,     -,     -,     -     -> %error_check_in_time%; /* obvious error code */
-  &
-
-  /* Flight crew - short haul - charter */
-  false, -, true,  1,     -,      -, -, - -> if %_validity_feb17% then 0:50 else 1:00; /*SKS*/
-  false, -, true,  2,     -,   true, -, - -> if %_validity_feb17% then 0:50 else 0:55; /*SKD*/
-  false, -, true,  4,     -,   true, -, - -> 0:55; /*QA*/
-  false, -, true,  2,     -,  false, -, - -> if %_validity_feb17% then 0:50 else 1:00; /*SKD*/
-  false, -, true,  4,     -,  false, -, - -> 1:00;/*QA*/
-
-  false, -, true,  3,     -,   true, -, - -> 0:50; /* SKN */
-  false, -, true,  3,     -,  false, -, - -> if %_validity_feb17% then 0:50 else 1:00;/* SKN */
-  false, -, true,  6,     -,    -,    -,     -   -> 0:45; /* SAS Link */
-
-  &
-  false, -, true,  -,     -,       -,     -, - -> %error_check_in_time%; /* obvious error code */
-  &
-   -,  -,  -, -, -, -, -,     -     -> %error_check_in_time%; /* obvious error code */
+   -, -, -, -, -, -, -, -, -  -> %error_check_in_time%; /* obvious error code */
 end
 
 export %error_check_in_time% =
     parameter 8:00
-    remark "Error handling used if a leg is not in the database for some reason";
+    remark "Error c/i time - in case leg not found in set-up scenarios";
 
 /* Redefined in leg_ccr */
 %check_in_region_fc% =
@@ -1900,166 +1841,43 @@ export %common_check_in_default_cc_flight%=
   default(%_check_in_exception%,
           %_check_in_default_cc_flight%);
 
-
-%_validity_feb17%=
-  system_db_parameters.%ci_time_sk_sh_feb2017%(leg.%start_utc%);
-
 table check_in_times_cc_flight =
-  %leg_ac_employer_id%,%is_asian%,%next_leg_is_lh%, %is_long_haul%, %is_domestic%, %with_long_haul_ac%,
-  %start_station%, %departs_from_homebase%, %departs_from_scandinavian_base%,
-  %is_deadhead%, %is_charter%
+ /* use leg ac employer with care in table since it can change between trip and crew e.g. from SKI to SKD*/  
+  %is_asian%,%leg_ac_employer_id%, %is_long_haul%, %next_leg_is_lh%, %is_charter%,
+  %start_station%, %departs_from_homebase%, 
+  %departs_from_scandinavian_base%, %is_deadhead%,not %arrival_is_schengen%
 
   -> Reltime %_check_in_default_cc_flight%;
 
-
-  /* Deadheads */
-   -,  - ,  -,    -, -, -,     -, -, -, true,     - -> 0:45; /* DH in trip and roster window*/
-&
-
-  /* Cabin crew - SKS - short haul */
-  1, false, -,    false, -, -,     -, -, -,     -,     true  -> if %_validity_feb17% then 0:50 else 1:00; /* Charter at all stations */
-
-  1,  false,    false,    false, -, false, "CPH", false, true,  -, false -> if %_validity_feb17% then 0:45 else 0:50; /* At the bases (CPH, ARN, OSL) with narrow-body ac and does not depart from home base*/
-  1,  false,    false,    false, -, false, "ARN", false, true,  -, false -> if %_validity_feb17% then 0:45 else 0:50; /* At the bases (CPH, ARN, OSL) with narrow-body ac and does not depart from home base*/
-  1,  false,    false,    false, -, false, "OSL", false, true,  -, false -> if %_validity_feb17% then 0:45 else 0:50; /* At the bases (CPH, ARN, OSL) with narrow-body ac */
-
-  1,  false,    false,    false, -, false, "CPH", true, true,  -, false -> 0:50; /*(CPH, ARN, OSL) with narrow-body ac and departs from home base*/
-  1,  false,    false,    false, -, false, "ARN", true, true,  -, false -> 0:50; /* (CPH, ARN, OSL) with narrow-body ac and departs from home base*/
-  1,  false,    false,    false, -, false, "OSL", true, true,  -, false -> 0:50; /* At the bases (CPH, ARN, OSL) with narrow-body ac and departs from home base*/
-
-
-  1,  false,    false,    false, -, true,  "CPH", -, true,  false, false -> 1:15; /* At the bases (CPH, ARN, OSL) with wide-body ac */
-  1,  false,    false,    false, -, true,  "OSL", -, true,  false, false -> 1:15; /* At the bases (CPH, ARN, OSL) with wide-body ac */
-  1,  false,    false,    false, -, true,  "ARN", -, true,  false, false -> 1:15; /* At the bases (CPH, ARN, OSL) with wide-body ac */
+  false,  >4,    -,    -,    -,      -,    -,    -,    -,    - -> 0:45; /* SAS Link/Connect */
+    /* Cabin crew - long haul */
+      -, <=4, true,    -,    -,  "NRT", true,false,    -,    - -> 1:15; /* SKJ from homebase NRT */
+      -, <=4, true,    -,    -,  "PEK", true,false,    -,    - -> 1:00; /* SKK from homebase*/
+      -, <=4, true,    -,    -,  "PVG", true,false,    -,    - -> 1:00; /* SKK from homebase*/
+      -, <=4, true,    -,    -,  "ARN",    -, true,    -,    - -> if %extra_ci_sto_lh% then 1:25 else 1:20; /* LH from ARN, c/i outside airside */
+      -, <=4, true,    -,    -,<>"ARN",    -, true,    -,    - -> 1:20; /* LH from scandinavian base */
+      -, <=4, true,    -,    -,      -,false,false,    -,    - -> 1:00; /* LH from outstation, not scandinavian base */
+      -, <=4,false, true,    -,      -,    -,    -, true,    - -> 0:50; /* DH before LH */
   &
-  1,  false,    false,    false, -, -,     -, -, -, -,     false -> 0:45; /* At any outstation */
-
-  /* Cabin crew - SKS - long haul */
-  1,  false,         -, true,  -, true,  "CPH", -, true,  false, - -> if %_validity_feb17% then 1:20 else 1:30; /* At the bases (CPH, ARN, OSL) with wide-body ac */
-  1,  false,         -, true,  -, true,  "ARN", -, true,  false, - -> if %_validity_feb17% then 1:20 else 1:30; /* At the bases (CPH, ARN, OSL) with wide-body ac */
-  1,  false,         -, true,  -, true,  "OSL", -, true,  false, - -> if %_validity_feb17% then 1:20 else 1:30; /* At the bases (CPH, ARN, OSL) with wide-body ac */
+   /* SK Cabin crew -  short haul */
+  false, <=4,false,    -,    -,  "LHR",    -,    -,    -,    - -> 1:00;
+  false, <=4,false,    -,    -,  "ARN",    -, true,    -, true -> if %extra_ci_sto_non_schengen% then 0:55 else 0:50;
+  false, <=4,false,    -,false,<>"LHR",false,false,    -,    - -> 0:45; /* outstation that's non Scandinavian base and non charter */
   &
-  1,  false,     false, true,  -,     -, -, -,    -,     -, - -> 1:00; /* At any outstation, also DH */
-  1,  false,      true,    -,  -,     -, -, -,    -,     -, - -> 1:00; /* Passive before LH */
-
-  /* Cabin crew - SKD - short haul */
-  2,  false,     false, false, -, false, "CPH", false, true,  -,        - -> if %_validity_feb17% then 0:45 else 1:00; /* At the bases with narrow-body ac and does not depart from home base*/
-  2,  false,     false, false, -, false, "ARN", false, true,  -,        - -> if %_validity_feb17% then 0:45 else 1:00; /* At the bases with narrow-body ac and does not depart from home base*/
-  2,  false,     false, false, -, false, "OSL", false, true,  -,        - -> if %_validity_feb17% then 0:45 else 1:00; /* At the bases with narrow-body ac and does not depart from home base*/
-  2,  false,     false, false, -, false, "CPH", true, true,  -,        - ->  if %_validity_feb17% then 0:50 else 1:00; /* At the bases with narrow-body ac  and departs from home base*/
-  2,  false,     false, false, -, false, "ARN", true, true,  -,        - ->  if %_validity_feb17% then 0:50 else 1:00; /* At the bases with narrow-body ac and departs from home base*/
-  2,  false,     false, false, -, false, "OSL", true, true,  -,        - ->  if %_validity_feb17% then 0:50 else 1:00; /* At the bases with narrow-body ac and departs from home base*/
-
-
-  2,  false,     false, false, -, true,  "CPH", -, true,  false,    - -> 1:15; /* At the bases with wide-body ac */
-  2,  false,     false, false, -, true,  "ARN", -, true,  false,    - -> 1:15; /* At the bases with wide-body ac */
-  2,  false,     false, false, -, true,  "OSL", -, true,  false,    - -> 1:15; /* At the bases with wide-body ac */
-  2,  false,     false, false, -, true,  "CPH", -, true,   true,    - -> 1:00; /* DH from bases with wide-body ac */
-  2,  false,     false, false, -, true,  "ARN", -, true,   true,    - -> 1:00; /* DH from bases with wide-body ac */
-  2,  false,     false, false, -, true,  "OSL", -, true,   true,    - -> 1:00; /* DH from bases with wide-body ac */
+  false, <=4,false,    -,    -,      -,    -,    -,    -,    - -> 0:50; /* Everything else should be 50 min for SH, active or dh */
+   true,   -,    -,    -,    -,      -,    -,    -,    -,    - -> 1:01; /* Default for asian crew */
   &
-  2,  false,        -, false, -,    -,     -,  -,   -,      -,  true -> if %_validity_feb17%  then 0:50 else 1:00; /*Charter from any outstation */
-  2,  false,    false, false, -,    -,     -,  -,   -,      -, false -> 0:45; /* At any outstation, not charter, also DH */
-
-  /* Cabin crew - SKD - long haul */
-  2,  false,     -, true,  -,  true, "CPH", -,  true,  false, -    -> if %_validity_feb17% then 1:20 else 1:30; /* At any base (CPH, ARN, OSL) */
-  2,  false,     -, true,  -,  true, "ARN", -,  true,  false, -    -> if %_validity_feb17% then 1:20 else 1:30; /* At any base (CPH, ARN, OSL) */
-  2,  false,     -, true,  -,  true, "OSL", -,  true,  false, -    -> if %_validity_feb17% then 1:20 else 1:30; /* At any base (CPH, ARN, OSL) */
-  2,  false,     -, true,  -, false, "CPH", -,  true,  false, -    -> 1:00; /* At any base (CPH, ARN, OSL) */
-  2,  false,     -, true,  -, false, "ARN", -,  true,  false, -    -> 1:00; /* At any base (CPH, ARN, OSL) */
-  2,  false,     -, true,  -, false, "OSL", -,  true,  false, -    -> 1:00; /* At any base (CPH, ARN, OSL) */
-  &
-  2,  false,     true,     -,  -,  -, -, -,  -,  -, - -> 1:00; /* All other cases */
-  2,  false,     false, true,  -,  -, -, -,  -,  -, - -> 1:00; /* All other cases */
-
-   /* Cabin crew - QA - short haul */
-  4,  false,     false, false, -, false, "CPH", false, true,  -,        - -> 1:00; /* At the bases with narrow-body ac and does not depart from home base*/
-  4,  false,     false, false, -, false, "ARN", false, true,  -,        - -> 1:00; /* At the bases with narrow-body ac and does not depart from home base*/
-  4,  false,     false, false, -, false, "OSL", false, true,  -,        - -> 1:00; /* At the bases with narrow-body ac and does not depart from home base*/
-  4,  false,     false, false, -, false, "CPH", true, true,  -,        - ->  1:00; /* At the bases with narrow-body ac  and departs from home base*/
-  4,  false,     false, false, -, false, "ARN", true, true,  -,        - ->  1:00; /* At the bases with narrow-body ac and departs from home base*/
-  4,  false,     false, false, -, false, "OSL", true, true,  -,        - ->  1:00; /* At the bases with narrow-body ac and departs from home base*/
-
-
-  4,  false,     false, false, -, true,  "CPH", -, true,  false,    - -> 1:15; /* At the bases with wide-body ac */
-  4,  false,     false, false, -, true,  "ARN", -, true,  false,    - -> 1:15; /* At the bases with wide-body ac */
-  4,  false,     false, false, -, true,  "OSL", -, true,  false,    - -> 1:15; /* At the bases with wide-body ac */
-  &
-  4,  false,        -, false, -,    -,     -,  -,   -,      -,  true -> 1:00; /*Charter from any outstation */
-  4,  false,    false, false, -,    -,     -,  -,   -,      -, false -> 0:45; /* At any outstation, not charter */
-
-  /* Cabin crew - QA - long haul */
-  4,  false,     -, true,  -,  true, "CPH", -,  true,  false, -    -> 1:30; /* At any base (CPH, ARN, OSL) */
-  4,  false,     -, true,  -,  true, "ARN", -,  true,  false, -    -> 1:30; /* At any base (CPH, ARN, OSL) */
-  4,  false,     -, true,  -,  true, "OSL", -,  true,  false, -    -> 1:30; /* At any base (CPH, ARN, OSL) */
-  4,  false,     -, true,  -, false, "CPH", -,  true,  false, -    -> 1:00; /* At any base (CPH, ARN, OSL) */
-  4,  false,     -, true,  -, false, "ARN", -,  true,  false, -    -> 1:00; /* At any base (CPH, ARN, OSL) */
-  4,  false,     -, true,  -, false, "OSL", -,  true,  false, -    -> 1:00; /* At any base (CPH, ARN, OSL) */
-  &
-  4,  false,     true,     -,  -,  -, -, -,  -,  -, - -> 1:00; /* All other cases */
-  4,  false,     false, true,  -,  -, -, -,  -,  -, - -> 1:00; /* All other cases */
-
-
-  /* Cabin crew SKN charter */
-  3,  false,     -,    false,     -, -, -,     -,    -, -,  true -> if %_validity_feb17% then 0:50 else 1:00; /* All charter */
-  &
-  /* Cabin crew - SKN - short haul */
-  3,  false,     -,    false,     -, -, "OSL",     false,    -, -,  - -> if %_validity_feb17% then 0:45 else 0:50; /* All flights from OSL, ARN, CPH and does not depart from home base*/
-  3,  false,     -,    false,     -, -, "ARN",     false,    -, -,  - -> if %_validity_feb17% then 0:45 else 0:50; /* All flights from OSL, ARN, CPH and does not depart from home base*/
-  3,  false,     -,    false,     -, -, "CPH",     false,    -, -,  - -> if %_validity_feb17% then 0:45 else 0:50; /* All flights from OSL, ARN, CPH and does not depart from home base*/
-  3,  false,     -,    false,     -, -, "OSL",     true,    -, -,  - ->  0:50; /* All flights from OSL, ARN, CPH and departs from home base*/
-  3,  false,     -,    false,     -, -, "ARN",     true,    -, -,  - ->  0:50; /* All flights from OSL, ARN, CPH and departs from home base*/
-  3,  false,     -,    false,     -, -, "CPH",     true,    -, -,  - ->  0:50; /* All flights from OSL, ARN, CPH and departs from home base*/
-
-
-  3,  false,     -,    false,     -, -, "SVG",  true,    -, -,  - -> 0:50; /* SVG crew from homebase */
-  3,  false,    -,    false,     -, -, "TRD",  true,    -, -,  - -> 0:50; /* TRD crew from homebase */
-  &
-  3,false,       -, false, -, -,   -,     -,    -,     -,  -  -> 0:45; /* At any outstation, also DH */
-  /* Cabin crew - SKN - long haul */
-  3,  false,         -, true,  -, -, "OSL",     -,      -,    -, - -> if %_validity_feb17% then 1:20 else 1:30; /* At any SAS base (CPH, ARN, OSL) */
-  3,  false,        -, true,  -, -, "CPH",     -,      -,    -, -  -> if %_validity_feb17% then 1:20 else 1:30; /* At any SAS base (CPH, ARN, OSL) */
-  3,  false,        -, true,  -, -, "ARN",     -,      -,    -, -  -> if %_validity_feb17% then 1:20 else 1:30; /* At any SAS base (CPH, ARN, OSL) */
-  &
-  3,  false,         -, true,  -, -,     -,     -,      -,    -, - -> 1:00; /* At outstation */
-  5,  false,         -,    -,  -, -,     -,     -,    false,  false, - -> 1:00; /* At outstation */
-  5,  false,         -,    -,  -, -,     -,     -,    true,  false, - -> 1:20; /* At homebase */
- &
-
-  /* Cabin crew - SKJ (Japanese) and SKK (Chinese) */
-  -,  true,  -,  true,    -,  -, "NRT",    -,    -,    -,  - -> 1:15; /* Tokyo SKJ*/
-  -,  true,   -,  true,    -, -, "CPH",    -,    -,    -,  - -> 1:30; /* CPH SKJ,SKK*/
-
-  -,  true,   -,  true,    -, -, "PEK",    -,    -,    -,  - -> 1:00; /* Beijing (SKK)*/
-  -,  true,   -,  true,    -, -, "PVG",    -,    -,    -,  - -> 1:00; /* Shanghai (SKK)*/
-  -,  true,   -,  true,    -, -, "ARN",   -,      -,    -, - -> 1:35; /* ARN (SKK)*/
-
-  &
-  -,  true,   -,     -,    -, -,     -,    -,    -,    -,  - -> 1:00; /* all other airports (SKJ,SKK)*/
-  &
-  -,  true,       -,  true,    -, -, "NRT", true,    -,false,  - -> 1:15; /* SKJ out of NRT homebase */
-
-  &
-  -,  true,       -,  true,    -, -,     -,    -, true,false,  - -> 1:30; /* SKI, LH from scandinavian base */
-  -,  false,       -,  true,    -, -,     -,    -, true,false,  - -> 1:30; /* SKI, LH from scandinavian base */
-
-  &
-  -,  true,       -,  true,    -, -,     -,    -,    -,false,  - -> 1:00; /* remaining SKI and LH when no region */
-  -,  false,       -,  true,    -, -,     -,    -,    -,false,  - -> 1:00; /* remaining SKI and LH when no region */
-  &
-
-  /* Cabin crew - SAS Link */
-  6,  false,   -,    false,     -,     -, -,     -, -,     -, - -> 0:45;
-
-  /* Obvious error code */
-  -,  -,   -,    -,     -,     -, -,     -, -,     -, - -> %error_check_in_time%;
+  -, -, -, -, -, -, -, -, -, -  -> %error_check_in_time%; /* Obvious error code */
 end
 
-/*
- * Old comment: Update when training is being implemented
- *              Alternatively move this to task_groups attributes
- *              (briefing, debriefing, requires_cio)
- */
+%extra_ci_sto_lh% =
+    system_db_parameters.%extra_ci_sto_lh_valid%(leg.%start_utc%);
+%extra_ci_sto_non_schengen% =
+    system_db_parameters.%extra_ci_sto_non_schengen_valid%(leg.%start_utc%);
+/* Old comment: 
+ * Update when training is being implemented. Alternatively move this to task_groups attributes
+ * (briefing, debriefing, requires_cio) */
+
 table check_in_times_fc_gd =
   %group_code%, %code%, %start_station%
 
@@ -2071,54 +1889,43 @@ table check_in_times_fc_gd =
 end
 
 /*
- * Check-out times for FC
+ * Check-out times
  *
  * During development the following error-codes are used:
  *  1:01, missing time, shall not happen
  *
  */
 table check_out_times_fc_flight =
-  %is_ac_employer_svs%,
-  parameters.%K15_jan16_valid%(%start_utc%),
-  %is_ac_employer_qa%,
   %is_long_haul%,
   %ac_family%,
-  %arrives_at_homebase%,
-  %arrives_at_SAS_base% and
-  not (%homebase% = "SVG" or %homebase% = "TRD")->  Reltime %check_out_default_fc_flight%;
-
-  /* Flight crew - short haul K15_JAN16 not valid*/
-  false, false,  -,    false,    -,  true,    -    -> 0:30;
-  false, false,  -,    false,    -,  false, true   -> 0:30;
-  false, false,  -,    false,    -,  false, false  -> 0:15;
-  /* Flight crew - long haulK15_JAN16 not valid */
-  false, false,  -,    true,     -,     -,    -  -> 0:30;
-
-  /* Flight crew - short haul K15_JAN16 valid NOT Ac emp qa*/
-   false, true,  false,  false,    -,  true,    -   -> 0:30;
-   false, true,  false,  false,    -,  false,   -   -> 0:15;
-
-  /* Flight crew - short haul K15_JAN16 valid  Ac emp qa*/
-  false, true,  true,    false,    -,  true,    -   -> 0:30;
-  false, true,  true,    false,   -,  false, true   -> 0:30;
-  false, true,  true,    false,   -,  false, false  -> 0:15;
-
-  /* Flight crew - long haul K15_JAN16 valid*/
-   false, true,  -,      true,     -,    true,    - -> 0:30;
-   false, true,  -,      true,    -,    false,   -  -> %_co_for_LH_non_homebase%;
-   
-
-  /* Flight crew - short haul SAS Link */
-   true, -,  false, false, -, -, -  -> 0:15;
-
-   -,-,  -, -, -, -, - -> 1:01;
+  %arrives_at_homebase% ->  Reltime %check_out_default_fc_flight%;
+  /* Flight crew - short haul */
+     false,    -, true -> 0:30;
+     false,    -,false -> 0:15;
+  /* Flight crew - long haul */
+      true,    -,    - -> 0:30;
+      -, -, - -> 1:01;
 end
 
-%_co_for_LH_non_homebase% =
-   if parameters.%co_times_for_LH_valid%(%start_utc%) then
-      0:30
-   else
-      0:15;
+/* Special case for CC STO LH DH */
+%_leg_is_dh_after_long_haul% =
+  default(%is_deadhead% and
+          %is_last_in_duty% and
+          prev(leg(trip), %is_long_haul%),
+          false);
+  
+table check_out_times_cc_flight =
+  %region%, %is_long_haul%, %_leg_is_dh_after_long_haul%
+  -> Reltime %check_out_default_cc_flight%;
+  "SKN",     -,   true -> 0:15;
+  "SVS",     -,    -   -> 0:15; /* SAS Link*/
+  "SZS",     -,    -   -> 0:15; /* SAS Connect*/
+  &
+      -, false,  true -> 0:30; /* Passive after longhaul */
+      -, false, false -> 0:15; /* Shorthaul */
+      -,  true,     - -> 0:30; /* Longhaul */
+      -,     -,     - -> 1:01;
+end
 
 /* Old comment: Update when coding training or move to task_groups
  * Put simulator check out times in this table
@@ -2132,6 +1939,8 @@ table check_out_times_fc_gd =
   "SII", -, - -> 0:30;
   -, -, - -> 0:00;
 end
+
+/***********************************************************************************/
 
 %simulator_set_table% = %etab_path%(%simulator_set_table_p%);
 %simulator_set_table_p% =
@@ -2329,28 +2138,6 @@ end
 
 /*******************************************************************************
 *******************************************************************************/
-
-/*
- * Check-out times for CC
- */
-/* Special case for CC STO LH DH */
-%_leg_is_dh_after_long_haul% =
-  default(%is_deadhead% and
-          %is_last_in_duty% and
-          prev(leg(trip), %is_long_haul%),
-          false);
-
-table check_out_times_cc_flight =
-  %region%, %is_long_haul%, %_leg_is_dh_after_long_haul%
-  -> Reltime %check_out_default_cc_flight%;
-  "SKN",     -,   true -> 0:15;
-  "SVS",     -,    -   -> 0:15; /* SAS Link*/
-  &
-      -, false,  true -> 0:30; /* Passive after longhaul */
-      -, false, false -> 0:15; /* Shorthaul */
-      -,  true,     - -> 0:30; /* Longhaul */
-      -,     -,     - -> 0:30;
-end
 
 /*
 ** Allowed as deadhead
@@ -3093,7 +2880,7 @@ table ground_duty_code_acqual_map(String code, String location) =
   "0" -> "MD90", "M0";
   "1" -> "EMJ", "EJ";
   "2" -> "A320", "A2";
-  "3" -> "B737", if location = "OSL" or system_db_parameters.%converted_36_38% then "38" else "36";
+  "3" -> "B737", "38";
   "4" -> "A340", "A4";
   "5" -> "A350", "A5";
   "6" -> "A330", "A3";

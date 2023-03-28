@@ -4,7 +4,6 @@
 """
 Crew Training Application
 """
-
 import time
 import traceback
 
@@ -46,6 +45,7 @@ if not utils.wave.STANDALONE:
     
 global crewId
 crewId = None
+listA320LH = []
 
 # These accumulators will be found and listed in the
 # tab 'Crew Landings'. This view is constructed from
@@ -536,19 +536,57 @@ class LandingTable(TempTable):
         self.getDataFromDB(ecSearch)
         if not utils.wave.STANDALONE:
             self.getDataFromStudio(crewId)
-
+    
+    
     def getDataFromDB(self, ecSearch):
         ec = None
+        listA320LH=[]
         try:
             ec = EC(TM.getConnStr(), TM.getSchemaStr())
             for row in ec.accumulator_time.search(ecSearch):
                 try:
-                    (typ, code) = LANDING_DICT[row.name]
-                    key = (typ, code, row.tim)
-                    self.createRow(key, False, typ)
+                    if row.name == 'accumulators.last_flown_a320_lh':
+                        typ = 'FLOWN'
+                        code = 'A320 LH'
+                        key = (typ, code, row.tim)
+                        key_list = typ + str(row.tim)
+                        if key_list not in listA320LH:
+                            listA320LH.append(key_list)
+                            self.createRow(key, False, typ)
+
+                    elif row.name == 'accumulators.last_landing_a320_lh':
+                        typ = 'LANDING'
+                        code = 'A320 LH'
+                        key = (typ, code, row.tim)
+                        key_list = typ + str(row.tim)
+                        if key_list not in listA320LH:
+                            listA320LH.append(key_list)
+                            self.createRow(key, False, typ)
+                    else:
+                        continue
                 except KeyError:
                     # This means the accumulator row wasn't of interest
                     continue
+            
+            for row in ec.accumulator_time.search(ecSearch):
+                #print "row->",row
+                #pEnd, = R.eval('pp_end_time')
+                try:
+                    (typ, code) = LANDING_DICT[row.name]
+                    key = (typ, code, row.tim)
+                    key_list = typ + str(row.tim)
+                    if key_list not in listA320LH:
+                        listA320LH.append(key_list)
+                        self.createRow(key, False, typ)
+                    else:
+                        pass
+                       
+    
+                except KeyError:
+                    # This means the accumulator row wasn't of interest
+                    continue        
+            
+                 
         finally:
             if ec:
                 ec.close()
@@ -562,17 +600,32 @@ class LandingTable(TempTable):
             "recency.%leg_qualifies_for_recency%",
             "leg.%ac_family%",
             "leg.%end_UTC%",
+            "leg.%is_LH_with_NX_ac%",
             )
         legs, = crew_object.eval(leg_expr)
-        for (ix, landing, acfam, tim) in legs:
+        
+        for (ix, landing, acfam, tim,isLHNX) in legs:
             # First we add a simple FLOWN row, true for all active legs
-            key = ("FLOWN", acfam, tim)
-            self.createRow(key, True, "FLOWN")
+            temp = "A320 LH" if isLHNX else acfam   
+            key = ("FLOWN", temp, tim)
+            key_list = 'FLOWN' + str(tim)
+            if key_list not in listA320LH:
+                listA320LH.append(key_list)
+                self.createRow(key, True, "FLOWN")
+            else:
+                pass 
+                
             # Next we add the landings
             if landing:
-                key = ("LANDING", acfam, tim)
-                self.createRow(key, True, "LANDING")
+                key = ("LANDING", temp, tim)
+                key_list = 'LANDING' + str(tim)
+                if key_list not in listA320LH:
+                    listA320LH.append(key_list)
+                    self.createRow(key, True, "LANDING")
+                else:
+                    pass
         
+
     def createRow(self, key, onroster, grp):
         landRow = None
         try:
