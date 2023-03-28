@@ -443,12 +443,12 @@ def getNextRunId():
                 next_run_id = max_run_id + 1
     return next_run_id
 
-def planninggroup_from_id(crew_id, dt):
-    planninggroup = r.eval('model_crew.%planning_group_at_date_by_id%("{crew_id}", {dt})'.format(
+def company_from_id(crew_id, dt):
+    crew_company= r.eval('model_crew.%company_at_date_by_id%("{crew_id}", {dt})'.format(
         crew_id=crew_id, 
         dt=dt)
         )[0]
-    return planninggroup
+    return crew_company
 
 def base_from_id(crew_id, dt):
     crew_base= r.eval('model_crew.%base_at_date_by_id%("{crew_id}", {dt})'.format(
