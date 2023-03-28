@@ -90,8 +90,9 @@ class TimeEntryReport(WFSReport):
         data.extend(self._roster_events(crew_id))
         data.extend(self._account_transactions(crew_id))
         #To be executed only for SAS  Link
-        planning_group = planninggroup_from_id(crew_id, self.start)
-        if planning_group == "SVS":
+        crew_company = company_from_id(crew_id, self.start)
+        print("###############CREW COMPANY####################",crew_company, self.start)
+        if crew_company == "SVS":
             data.extend(self._bought_link_transactions(crew_id))
         return data
     '''
@@ -1179,6 +1180,7 @@ class TimeEntryReport(WFSReport):
                     'amount'        : hours_reltime,
                     'days_off'       : None})
             log.info('NORDLYS: Found {0} account for crew {1} on date {2} with hours {3}'.format(tnx.account_name,tnx.crew.id,curr_abs,hours_reltime))
+        log.info('NORDLYS: {0} nr of crew extracted with Bought Link data'.format(len(dict_t)))
         return dict_t
 
 

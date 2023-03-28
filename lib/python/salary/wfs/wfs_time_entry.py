@@ -85,8 +85,8 @@ class TimeEntry(WFSReport):
         data.extend(self._account_transactions(crew_id))
         # To be executed only for SAS  Link
         # collects data from bought_days_svs table for amount i.e hrs and min
-        planning_group = planninggroup_from_id(crew_id, self.start)
-        if planning_group == "SVS":
+        crew_company = company_from_id(crew_id, self.start)
+        if crew_company == "SVS":
             data.extend(self._bought_link_transactions(crew_id))
         # collects all the records that are removed from roster
         data.extend(self._removed_records(crew_id, data))
@@ -1871,6 +1871,7 @@ class TimeEntry(WFSReport):
                     'amount'        : hours_reltime,
                     'days_off'       : None})
             log.info('NORDLYS: Found {0} account for crew {1} on date {2} with hours {3}'.format(tnx.account_name,tnx.crew.id,curr_abs,hours_reltime))
+        log.info('NORDLYS: {0} nr of crew extracted with Bought Link data'.format(len(dict_t)))
         return dict_t
 
 
