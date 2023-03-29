@@ -25,11 +25,11 @@ import utils.Names as Names
 import carmensystems.rave.api as R
 import time
 import carmusr.HelperFunctions as HF
-
-
-
 import application
 from salary.reasoncodes import REASONCODES
+
+
+
 
 ### This functionality only works while on DB-plans
 try:
@@ -54,12 +54,15 @@ try:
         "bought_days.%bought_f3_account_name%",
         "bought_days.%bought_f3_2_account_name%",
         "bought_days.%co_on_f_account_name%",
+        "bought_days.%bought_sby_account_name%",
+        "bought_days.%bought_prod_account_name%",
+        "bought_days.%bought_duty_account_name%",
         "bought_days.%bought_pr_account_name%",
     )]
 except:
     # Best guesses
     BOUGHT_ACCOUNT_NAME = 'BOUGHT'
-    BOUGHT_ACCOUNT_NAMES = ['BOUGHT', 'BOUGHT_BL', 'BOUGHT_COMP', 'BOUGHT_8', 'BOUGHT_COMP_F3S', 'BOUGHT_F3', 'BOUGHT_F3_2', 'BOUGHT_FORCED', 'BOUGHT_PR']
+    BOUGHT_ACCOUNT_NAMES = ['BOUGHT','BOUGHT_SBY','BOUGHT_PROD','BOUGHT_DUTY','BOUGHT_BL', 'BOUGHT_COMP', 'BOUGHT_8', 'BOUGHT_COMP_F3S', 'BOUGHT_F3', 'BOUGHT_F3_2', 'BOUGHT_FORCED', 'BOUGHT_PR']
 
 ##################################################################
 # Function for updating the publication status for transactions
@@ -558,27 +561,35 @@ def _check_unbooked_bought_periods(crew_list, ppstart, ppend, entry_info, accoun
     code updates account matching bought periods
     """
     migration_date, = R.eval('default_context', 'compdays.%account_migration_date%')
+
     bought_period_cache = []
 
     bought_periods_to_check = []
     for crew_id in crew_list:
         try:
             crew = TM.crew[(crew_id,)]
+
+            for bought_period in crew.referers('bought_days_svs', 'crew'):
+                # Check period and migration date, migration date is a safe check!
+                if bought_period.start_time < migration_date or \
+                    not (bought_period.start_time <= ppend and bought_period.end_time >= ppstart):
+                    continue
+                bought_periods_to_check.append(bought_period)         
             for bought_period in crew.referers('bought_days', 'crew'):
                 # Check period and migration date, migration date is a safe check!
                 if bought_period.start_time < migration_date or \
-                       not (bought_period.start_time <= ppend and bought_period.end_time >= ppstart):
+                    not (bought_period.start_time <= ppend and bought_period.end_time >= ppstart):
                     continue
                 bought_periods_to_check.append(bought_period)
+            
         except EntityNotFoundError:
             Errlog.log("AccountHandler.py:: Warning: " +
                        "Table bought_day has reference to no-existing" +
                        " crew id:%s" % str(bought_period.getRefI('crew')))
-    
+
     for bought_period in bought_periods_to_check:
         crew_id = bought_period.crew.id
         # Check if already booked
-
         # If we bought some other activity then we need to mimic that leg lookup
         account = bought_period.day_type  # The account for the other activity
         if account is not None and account in account_list:
@@ -630,7 +641,6 @@ def _create_activity_account_entry_from_bought_period(bought_period,
     Bought account activities still affecte their accounts
     """
     affect_account_info = _bought_period_account_effect(bought_period,account)
-    
     entry={'crew':bought_period.crew.id,
            'amount':affect_account_info['amount'],
            'account':account,
@@ -651,12 +661,10 @@ def _create_bought_account_entry_from_bought_period(bought_period, published, no
     """
     Create BOUGHT(_BL) account entry from bought period
     """
-
     source, = R.eval('default_context',
                      'compdays.%%bought_day_source%%("%s")'%bought_period.day_type)
     account = bought_period.account_name
     amount = 100*int((bought_period.end_time-bought_period.start_time)/RelTime.RelTime('24:00'))
-    
     # Bought F3_2 activites should be booked as 2 F3 in F3 account
     if account == "BOUGHT_F3_2":
         amount = 2*amount
