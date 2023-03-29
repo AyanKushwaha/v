@@ -519,7 +519,7 @@ def markDaysAsBought(buy):
                     if comment == "":
                         try:
                             if is_svs:
-                                comment, time_hh_sby,time_mm_sby,time_hh_prod,time_mm_prod,time_hh,time_mm,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, start_time, end_time, "Buy_Day_Form")()     
+                                comment, time_hh_sby,time_mm_sby,time_hh_prod,time_mm_prod,time_hh,time_mm,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_svs, is_emj, is_valid, start_time, end_time, "Buy_Day_Form")()     
                         except CancelBuyDay:
                             return
                     # Addition duty cann't be bought on F or similar types of days
@@ -567,7 +567,7 @@ def markDaysAsBought(buy):
                     if comment == "":
                         try:
                             if is_svs:
-                                comment,time_hh_sby,time_mm_sby,time_hh_prod,time_mm_prod,time_hh,time_mm,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_qa, is_svs, is_cj, is_emj, is_valid, start_time, end_time, "Buy_Day_Form")()
+                                comment,time_hh_sby,time_mm_sby,time_hh_prod,time_mm_prod,time_hh,time_mm,bought_type = BuyDayCommentForm(crew_id,is_cabin, is_svs, is_emj, is_valid, start_time, end_time, "Buy_Day_Form")()
                         except CancelBuyDay:
                             return                   
                     if bought_type is "BOUGHT_SBY" or bought_type is "BOUGHT_PROD":
@@ -703,23 +703,20 @@ class BuyDayCommentForm(Cfh.Box):
             self.comment = Cfh.String(self, "COMMENT", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(1, 0)), 20, "")
             self.button_area = Cfh.Area(Cfh.Loc(-1, -1))
             self.ok = CfhCheckDone(self, "OK", self.button_area, "Ok", "_Ok")
+            num_entries = LBL_COUNT_CC if is_cabin else LBL_COUNT_FD
+            self.bought_type = Cfh.String(self, "Compensation", Cfh.Area(Cfh.Dim(20, num_entries), Cfh.Loc(2, 0)), LBL_MAX_LEN, "Bought")
+            bought_type_options_str = "Select;" + ";".join(BOUGHT_LABELS[:num_entries])
+            self.bought_type.setMenuString(bought_type_options_str)
+            self.bought_type.setStyle(Cfh.CfhSChoiceRadioCol)
 
-       
+            def enforce_selection_fn():
+                # self.bought_type.compute()
+                if self.bought_type.getValue() not in BOUGHT_LABELS:
+                    cfhExtensions.show("Please select a bought type", title="Missing selection")
+                    return "Warning: No bought type selected"
+                return ""
 
-        num_entries = LBL_COUNT_CC if is_cabin else LBL_COUNT_FD
-        self.bought_type = Cfh.String(self, "Compensation", Cfh.Area(Cfh.Dim(20, num_entries), Cfh.Loc(2, 0)), LBL_MAX_LEN, "Bought")
-        bought_type_options_str = "Select;" + ";".join(BOUGHT_LABELS[:num_entries])
-        self.bought_type.setMenuString(bought_type_options_str)
-        self.bought_type.setStyle(Cfh.CfhSChoiceRadioCol)
-
-        def enforce_selection_fn():
-            # self.bought_type.compute()
-            if self.bought_type.getValue() not in BOUGHT_LABELS:
-                cfhExtensions.show("Please select a bought type", title="Missing selection")
-                return "Warning: No bought type selected"
-            return ""
-
-        self.ok.register_check(enforce_selection_fn)
+            self.ok.register_check(enforce_selection_fn)
 
         self.cancel = Cfh.Cancel(self, "CANCEL", self.button_area, "Cancel", "_Cancel")
         self.build()
