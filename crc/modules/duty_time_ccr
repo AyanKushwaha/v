@@ -426,16 +426,16 @@ end
 table max_duty_in_month_part_time(Abstime date) =
   crew.%is_region_scand%,
   crew.%part_time_factor_at_date%(date) ->
-    export %max_duty_in_calendar_month_pt_cc%;
+    export %max_duty_in_calendar_month_pt_cc%,
+    export %max_duty_in_3_months_pt_cc%;
+  true,   90 -> 149:24, 448:12;
+  true,   80 -> 132:48, 398:00;
+  true,   75 -> 124:30, 374:00;
+  true,   60 ->  99:36, 299:00;
+  true,   51 ->  84:39, 254:00;
+  true,   50 ->  83:00, 249:00;
     
-  true,   80 -> 132:48;
-  true,   75 -> 124:30;
-  true,   60 ->  99:36;
-  true,   50 ->  83:00;
-  true,   90 -> 149:24;
-  true,   51 ->  84:39;
-  
-    -  ,   - -> 999:00; /* Obvious error code */
+    -  ,   -  -> 999:00, 999:00; /* Obvious error code */
 end
 
 export %qualifying_days_in_month% =
@@ -645,6 +645,29 @@ export %duty_time_in_2_months_cc%(Abstime start_hb, Abstime end_hb) =
    else
      0:00);
 
+/* 3 month duty times */
+/* planned duty time calculation only works for the last month in a three month period. */
+export %planned_duty_time_in_3_months% = 
+  accumulators.%duty_time_planned_skd%(
+    %planned_3_month_period_start%, 
+    nmin(wop.%end_hb%, round_up_month(wop.%start_hb%)));
+
+export %actual_duty_time_in_3_months% = 
+  if duty_time.%_planned_months_into_quarter% = 2 then
+    accumulators.%actual_duty_time_cc%(
+      %actual_3_month_period_start%, 
+      %actual_3_month_period_end%)
+  else
+    0:00;
+    
+export %planned_3_month_period_start% = add_months(round_down_month(wop.%start_hb%), - %_planned_months_into_quarter%);
+export %actual_3_month_period_start% = add_months(round_down_month(trip.%start_utc%), - %_actual_months_into_quarter%);
+export %actual_3_month_period_end%   = add_months(%actual_3_month_period_start%, 3);
+  
+export %_planned_months_into_quarter% = (fundamental.%month_in_quarter%(format_time(wop.%start_hb%,"%m")) + 1) mod 3;
+export %_actual_months_into_quarter% = (fundamental.%month_in_quarter%(format_time(trip.%start_utc%,"%m")) + 1) mod 3;
+
+
 export %duty_time_cc_scheduled%(Abstime start_hb, Abstime end_hb) =
   let start_utc = crew.%utc_time%(start_hb),
       end_utc = crew.%utc_time%(end_hb);
@@ -678,11 +701,6 @@ export %nr_sim_duty_as_tr%(Abstime start_hb, Abstime stop_hb) =
            not duty.%is_bought% and
            duty.%start_hb% < stop_hb and
            duty.%end_hb% > start_hb);
-
-/* only used in salary/report_overtime for dummy values for no longer used OT over 3 months */
-export %actual_3_month_period_start% = add_months(round_down_month(trip.%start_utc%), - %_actual_months_into_quarter%);
-export %actual_3_month_period_end%   = add_months(%actual_3_month_period_start%, 3);
-export %_actual_months_into_quarter% = (fundamental.%month_in_quarter%(format_time(trip.%start_utc%,"%m")) + 1) mod 3;
 
 export %duty_time_agreement_sel%(Int agmt_sel, Abstime s, Abstime e) =
   sum(times(model_crew.%crew_chg_agm_max_index%),
