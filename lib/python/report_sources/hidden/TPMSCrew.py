@@ -202,7 +202,7 @@ class TPMSRoutines():
             iicmeq_examination_date         = cvt_dstr_to_YYYY_MM_DD(str(cd.validfrom))
 
             iicmeq_qual_code        = cd.doc.subtype
-            iicmeq_qual_code_type   = cd .doc.typ
+            iicmeq_qual_code_type   = cd.doc.typ
 
             if cd.doc.typ == "REC":
               if (cd.doc.subtype in ["OPCA3", "OPCA4","OPCA5", "OPCA3A5", "PCA3", "PCA4","PCA5", "PCA3A5"]):
@@ -210,7 +210,7 @@ class TPMSRoutines():
                 tmp2=tmp.split("C")
                 iicmeq_qual_code = tmp2[0] + "C"
                 iicmeq_act_group_name = tmp2[1]
-              elif (cd.doc.subtype in ["CRM", "CRMC"]):
+              elif (cd.doc.subtype in ["CRM", "CRMC", "PGT", "REC"]):
                 iicmeq_qual_code = cd.doc.subtype
             elif cd.doc.typ == "MEDICAL" :
                 iicmeq_qual_code= "MED"

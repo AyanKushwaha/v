@@ -199,7 +199,8 @@ class Response(object):
         """
         trips = []
 
-        filepath = os.path.join(os.environ['CARMDATA'],
+        filepath = os.path.join(os.environ['CARMUSR_JMP'],
+                                'current_carmdata',
                                 'crewportal',
                                 'datasource',
                                 'fixed_pattern',

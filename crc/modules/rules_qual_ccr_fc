@@ -23,6 +23,8 @@ import crew_pos;
 import accumulators;
 import training;
 import system_db_parameters;
+import base_product;
+import fdp;
 
 /****************************************************************
  * Section 1: Airport qualification
@@ -95,14 +97,15 @@ end
 export rule qln_dep_airport_ok_FC =
   valid roster.%check_rules% and
 	leg.%starts_in_pp% and
-        leg.%is_considered_as_flight_duty% and
+  leg.%is_considered_as_flight_duty% and
 	not leg.%is_deadhead% and
-        crew.%rank_leg_start% <> "FR" and
-        not crew.%is_leased%(leg.%start_hb%) and
-        /* Only check if airport with special requirements */        
-        (qualification.%dep_airport_is_restricted%  or
-         qualification.%leg_additionally_restricted_airport%(leg.%start_station%)) and 
-        rule_exceptions.%rule_on%(leg.%start_UTC%);
+  not leg.%is_etops_lc% and
+  crew.%rank_leg_start% <> "FR" and
+  not crew.%is_leased%(leg.%start_hb%) and
+  /* Only check if airport with special requirements */        
+  (qualification.%dep_airport_is_restricted%  or
+    qualification.%leg_additionally_restricted_airport%(leg.%start_station%)) and 
+  rule_exceptions.%rule_on%(leg.%start_UTC%);
     qualification.%airport_is_valid_for_crew_restriction%(leg.%start_station%);
 
   startdate  = leg.%start_UTC%;
@@ -131,14 +134,14 @@ end
 
 /* SKCMS-2555 */
 export rule alf_forbidden_for_skd_sks_fp =
-  valid roster.%check_rules% and
-        leg.%end_station% = "ALF" and
+valid roster.%check_rules% and
         system_db_parameters.%alf_forbidden_for_skd_sks_fp%(leg.%end_hb%) and
         (crew.%is_sks% or crew.%is_skd%) and
-	leg.%starts_in_pp% and
-        leg.%is_considered_as_flight_duty% and
-	not leg.%is_deadhead% and
+        trip.%in_pp% and
         crew_pos.%assigned_pos% = 2 and
+        trip.%has_destination%("ALF") and
+        (leg.%end_station% = "ALF" or leg.%start_station% = "ALF") and
+        not leg.%is_deadhead% and
         rule_exceptions.%rule_on%(leg.%end_UTC%);
   %alf_forbidden_for_skd_sks_fp_ok%;
 
@@ -637,12 +640,12 @@ any(leg(duty),%leg_touches_a2a5_airports_not_allowed%);
 
 set mff_a2a3_airports_not_allowed_set = 
 
-parameter "ALF", "KKN", "LYR", "BDU", "EVE", "LKL", "TOS", "SZG", "JKH", "SMI", "THU", "FLR"   
+parameter "ALF", "KKN", "LYR", "BDU", "EVE", "LKL", "TOS", "SZG", "JKH", "SMI", "THU", "FLR", "FAE", "GZP", "FNC", "INN"   
 remark  "Airports not allowed to operate for A2A3 MFF crew";
 
 set mff_a2a5_airports_not_allowed_set = 
 
-parameter "ALF", "KKN", "LYR", "BDU", "EVE", "LKL", "TOS", "SZG", "JKH", "SMI", "THU", "FLR"   
+parameter "ALF", "KKN", "LYR", "BDU", "EVE", "LKL", "TOS", "SZG", "JKH", "SMI", "THU", "FLR", "FAE", "GZP", "FNC", "INN"   
 remark  "Airports not allowed to operate for A2A5 MFF crew";
 
 %mff_airports_not_allowed_failtext% =
@@ -660,10 +663,12 @@ remark  "Airports not allowed to operate for A2A5 MFF crew";
 ** Rule:
 **    Mixed Fleet Flying (MFF) pilots may only operate one aircraft type per working period
 **    Rule handles A2A3 and A2A5 qualified pilots separate if restriction is eased on one of the types.
+**
 ** Description:
+**    OL new decision oct2022 -  MFF allowed to fly mixed actypes in wop,rule set to default off.
 **
 */
-export rule mff_not_mixed_actypes_in_wop_fc =
+export rule (off) mff_not_mixed_actypes_in_wop_fc =
   valid roster.%check_rules%
         and wop.%in_pp%
         and wop.%has_production%
@@ -688,9 +693,10 @@ end
 **    Mixed Fleet Flying (MFF) pilots not fly below rank. E.g FC is not allowed to operate in FP or FR position
 **    
 ** Description:
+**    OL new decision oct2022 -  MFF allowed to fly below rank,rule set to default off.
 **
 */
-export rule mff_not_below_rank_fc =
+export rule (off) mff_not_below_rank_fc =
   valid roster.%check_rules%
         and trip.%in_pp%
         and trip.%has_production%
@@ -709,6 +715,150 @@ export rule mff_not_below_rank_fc =
   remark "OMA: MFF pilots (FC) may not fly below rank",
   planner "According to CB-OMA-139a and CB-OMA-143a MFF pilots may not fly below rank, i.e. FC may not operate as FP or FR" ;
 end  
-  
-  
+
+/*
+** Rule:
+**    Max short haul production days before long haul
+**
+** Description:
+**    Check that long haul production is not preceded by more than 1 days short
+**    haul production for MFF crew.
+**    
+**    K19 FD MFF agreement
+**
+**    NB! Moved from rules_idust_ccr in - SKCMS-3215
+**    NB! There is also a "sister rule" for CC in rules_indust_ccr_cc - SKCMS-3215
+*/
+export rule mff_max_sh_duty_days_before_lh =
+  valid roster.%check_rules% and
+        (crew.%has_agmt_group_sk_fd_mff%
+          or (crew.%is_pilot% and %is_lrp2%)) and
+        trip.%in_pp_extended% and
+        duty.%is_long_haul% and
+        %lh_trip_is_preceded_by_short_haul_gd_not_bought_or_standby%;
+
+ %sh_days_before_lh% <= %max_sh_days_before_lh% + rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+ 
+  startdate  = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_sh_duty_days_before_lh_failobject%;
+  failtext (Int value, Int limit) =
+    rules.%failtext_int%("OMA: MFF SH production days before LH", value, limit); 
+  remark "OMA: MFF max short haul production days before long haul",
+  planner "The rule checks that LH production is not preceded by more than"
+          " 1 short haul production days for MFF crew";
+end
+
+
+
+%lh_trip_is_preceded_by_short_haul_gd_not_bought_or_standby% =
+  default(prev(duty(wop), duty.%is_standby%), false) or
+  %lh_trip_is_preceded_by_short_haul_or_gd_not_bought%;
+
+%lh_trip_is_preceded_by_short_haul_or_gd_not_bought% =
+  default(prev(duty(wop), %_trip_is_sh_or_gd_not_bought%), false);
+
+%_trip_is_sh_or_gd_not_bought% =
+  (duty.%is_short_haul% or
+   (duty.%is_ground_duty% and not duty.%is_off_duty_cmp%) or
+   %_k4exng_trip_is_sh_standby%);
+
+%_k4exng_trip_is_sh_standby% =
+  not base_product.%is_tracking% and
+  not duty.%is_long_haul% and
+  duty.%is_standby%;
+
+%ind_max_sh_duty_days_before_lh_failobject% =
+  first(duty(trip), duty.%failobject_start%)
+    where(duty.%is_long_haul%);
+
+%first_sh_trip_start% =
+  first(duty(wop), trip.%start_day%)
+    where (%_trip_is_sh_or_gd_not_bought%);
+
+%is_lrp2% = 
+  if %prev_lrp2_training_at_date% > 1JAN1986 then
+    true
+  else
+    false;
+ 
+export %prev_lrp2_training_at_date% = nmax(training.%last_perf_date_for_act_of_type_and_code%("COURSE", "LRP2", trip.%start_utc%),
+			         training.%last_perf_date_for_act_of_type_and_code%("COURSE", "LRSB", trip.%start_utc%));
+
+%first_lh_duty_start_hb% =
+  first(duty(wop), duty.%start_hb%)
+    where (duty.%is_long_haul% and not duty.%is_bought%);
+
+%first_lh_duty_start_day% =
+  first(duty(wop), duty.%start_day%)
+    where (duty.%is_long_haul%);
+
+%max_sh_days_before_lh% =
+  if %nr_of_sh_duty_days_in_wop% >= 2 then
+    1
+    else
+    2;
+
+%nr_of_sh_duty_days_in_wop% =
+sum(duty(wop), duty.%days%)
+    where (duty.%is_short_haul%);
+    
+%sh_days_before_lh% =
+  %days_since%(%first_lh_duty_start_day%, %first_sh_trip_start%);
+
+/*
+** Rule:
+**    Max short haul flight duty period before long haul
+**
+** Description:
+**    Check that the maximum flight duty period for short haul production before
+**    long haul production is not exceeded.
+**
+**   Agreement:
+**   The SH-day preceeding LH can not be scheduled with a FDP > 11:00 for MFF
+**
+**    SKCMS-2325. Valid also for MFF crew. Moved rule from _ccr_cc module to regular _ccr
+**    SKCMS-2542. Valid also for pilots qualified for A2LR who also can fly both SH+LH
+**    
+**    NB! Moved from rules_idust_ccr in - SKCMS-3215
+**    There is also a "sister rule" for CC in rules_indust_ccr_cc - SKCMS-3215
+**    
+*/ 
+export rule mff_max_sh_fdp_before_lh =
+  valid roster.%check_rules% and
+        (crew.%has_agmt_group_sk_fd_mff% or
+        (crew.%is_pilot% and %is_lrp2%)) and
+        trip.%in_pp_extended% and
+        trip.%is_long_haul% and
+        %lh_trip_is_preceded_by_short_haul_gd_not_bought_or_standby%;
+
+  %sh_fdp_before_lh% <= %max_sh_fdp_before_lh_mff% +
+    rule_exceptions.%overshoot_rel%(trip.%start_UTC%);
+
+  startdate  = trip.%start_UTC%;
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = %ind_max_sh_fdp_before_lh_failobject%;
+  failtext (Reltime value, Reltime limit) =
+    rules.%failtext_rel%("OMA: MFF SH FDP time before LH", value, limit);
+  remark "OMA: MFF max short haul flight duty period before long haul",
+  planner "The rule checks that the maximum allowed short haul flight duty period"
+          " before long haul is not exceeded.";
+end
+
+%ind_max_sh_fdp_before_lh_failobject% =
+  first(duty(trip), duty.%failobject_start%)
+    where(duty.%is_long_haul%);
+
+%sh_fdp_before_lh% = fdp.%scheduled_time_in_interval%(
+       crew.%utc_time%(%first_sh_trip_start%),
+       crew.%utc_time%(%first_lh_duty_start_day%));
+       
+%first_lh_fdp% =
+  first(duty(wop), fdp.%end_scheduled_utc% - fdp.%start_scheduled_utc%)
+    where (duty.%is_long_haul%);
+
+%max_sh_fdp_before_lh_mff% =
+    parameter 11:00
+    remark "Max FDP time day before LH";
+
 /* end of file */

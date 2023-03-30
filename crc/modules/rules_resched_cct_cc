@@ -30,8 +30,7 @@ import system_db_parameters;
 
 redefine %trip_notification_deadline_CC% =
   nmin(
-       default(%trip_notification_deadline_R309B%, 31Dec2099),
-       default(%trip_notification_deadline_R316%, 31Dec2099),
+       default(%trip_notification_deadline_resched_temp_cc_roster% , 31Dec2099),
        default(%trip_notification_deadline_resched_bl%,31Dec2099));
   
 /*******************************************************************************
@@ -44,119 +43,49 @@ redefine %trip_notification_deadline_CC% =
  * These rules are only dependent on the current roster
  ***************************************************************/
 
-export rule resched_R242_CC =
-  valid not (crew.%is_SKD% and crew.%is_temporary_trip_start%) and
-        not %is_qa_feb16_valid% and
-        not %trip_inf_is_standby_at_checkin% and
-        not %trip_inf_is_first_in_wop%;
-    
-  rescheduling.%trip_inf_checkin_diff% >= -2:00;
-  
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext(Reltime value, Reltime limit) =
-    rules.%failtext_rel%("Coll: C/I >2h earlier than informed",value,limit);    
-  remark "(CCT) Resched: Check-in must be < 2 hours earlier than informed";
-end
-
-rule resched_R243_CC =
-  valid not (crew.%is_SKD% and crew.%is_temporary_trip_start%) and
-        not %is_qa_feb16_valid% and
-        %trip_inf_is_first_in_wop%
-        and not (crew.%agmt_group_id% = "QA_CC_AG") /* SKCMS-590 and SKCMS-589 */
-        and %trip_has_not_started%;
-
-
-  rescheduling.%trip_inf_checkin_diff% >= 0:00;
-
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext rules.%failtext_abs%("Coll: C/I after T/O earlier than informed C/I",
-                                rescheduling.%trip_checkin_hb%,
-                                rescheduling.%trip_inf_checkin%);
-  remark "(CCT) Resched: Check-in after time-off must not be earlier than informed";
-end
-
-
-
-export rule resched_R246_CC =
-  valid not (crew.%is_SKD% and crew.%is_temporary_trip_start%) and
-    not %is_qa_feb16_valid% and
-    rescheduling.%trip_is_short_haul% and
-    not %trip_inf_is_standby_at_checkout% and
-    not rescheduling.%trip_inf_hist_blank_day% and
-    not %trip_inf_is_last_in_wop_with_co%;
-
-  rescheduling.%trip_inf_checkout_diff% <= 2:00;
-
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %resched_R246_CCSH_failobject%;
-  failtext(Reltime value, Reltime limit) =
-    rules.%failtext_rel%("Coll: C/O >2h later than informed C/O", value, limit);
-  remark "(CCT) Resched: Check-out must not be >2 hours after informed";
-end
-
 %resched_R246_CCSH_failobject% = 
   first(leg(trip),leg.%failobject_departure%) where
     (leg.%co_end_scheduled_hb% > rescheduling.%trip_inf_checkout% + 2:00);
 
-
-                                  
-/*
-** 4ExNG CC: 6.4.3 Blank day
-*/
-
-redefine rule resched_blank_day_ALL =
-  valid %resched_bl_valid%;
-  
-  resched_bl_deadline_ALL is legal;
-  resched_bl_after_timeoff_earliest_check_in_ALL is legal;  
-end
-
 /*
 ** Rule:
-**   Check rescheduled blank day informed before 1800 on previous peoduction day
+**   Check rescheduled blank day informed before limit for each agmt group
 **
 ** Description:
 **   Rescheduled blank day must must be performed no later than 1800 on the 
-**   previous production day.
+**   previous production day for CC SKS and SKD. 
+**   Before 1600 the calendar day before the BL for CC SKN.
 **
 ** Agreement:
 **   4ExNG CC: 6.4.3.1
+**   K22 CC SKN - SKCMS-3232
 */
 
-rule resched_bl_deadline_ALL =
+rule resched_bl_deadline_cc =
     valid rule_exceptions.%rule_on%(trip.%start_UTC%)
-        and not %_R309B_valid%
-        and not first(duty(trip), standby.%duty_is_airport_callout%);
+        and %resched_bl_deadline_valid%;
 
   %resched_bl_deadline_inform_in_time%;
 
   startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  severity = first(leg(trip), %severity_filter_int%(leg.%start_utc%,%duty_lh_region%));
   failobject = trip.%failobject_start%;
   failtext  concat("Coll: Resched of BL-day after ", format_time(%resched_bl_deadline_inform_limit%, "%02d%b%y %02H%02M"));
-  remark "(CCT) Resched: BL-day resch must be informed 1800 previous prod day",
-  planner "The rule checks that rescheduling of BL-day is informed no later than 1800 on the previous production day.";
+  remark "(CCT) Resched: BL-day resched must be informed before inform limit",
+  planner "The rule checks that rescheduling of BL-day is informed no later than"
+          "the limits set in etable property for entries bl_day_resched_limit_cc_XXX.";
 end
 
-/*
-** If there is a standby call-out to a multi day trip which covers an informed
-** BL-day, the BL notification deadline is considered to be the standby call-out
-** time if it is earlier than the normal BL- deadline, .
-*/
-%resched_bl_deadline_inform_limit% =
-   if %trip_standby_callout_with_overnight_into_bl% then
-     nmin(%trip_standby_callout_time_hb%,
-          first(duty(trip),prev(duty(trip),duty.%start_day% + 18:00))
-            where (first(leg(duty),rescheduling.%leg_inf_hist_blank_day%)))
-   else
-     prev(trip(roster),last(duty(trip),duty.%start_day% + 18:00))
-       where ((not trip.%has_no_duty_time_contribution%) or trip.%is_blank_day%);
-  
+%resched_bl_deadline_valid% =
+  crew.%k4exng_cc_sp5_1_valid%(trip.%start_day%)
+  and trip.%is_on_duty% and
+  not crew.%is_leased_trip_start% 
+  and %trip_is_rescheduled_blank_day%
+  and not (crew.%is_SKD% and crew.%is_temporary_trip_start%)
+  and not first(duty(trip), standby.%duty_is_airport_callout%)
+  and not trip.%is_illness%
+  and not crew.%is_leased_trip_start%;
+
 %resched_bl_deadline_inform_in_time% =
   %now_hb% <= %resched_bl_deadline_inform_limit%;
 
@@ -166,130 +95,60 @@ end
   else
     void_abstime;
 
-
 /*
-Callout on standby with overnight into BL  
-should generate alert on SB callout
+**  Deadline for rescheduling BL-day for cc.
+**
+**  The external table "property" is used to control the bl inform limit.
+**  entries for controlling the limits should be made as "bl_day_resched_limit_cc_XXX" 
+**  where XXX is the crew region in capital letters, e.g. "bl_day_resched_limit_cc_SKN".
+**  Columns value_int and value_rel needs to be set, these dictates how many calendar days previous the bl day that the 
+**  limit should be set,resp. what time of day the inform limit is.
+**  Column value_bool if set to true controls if the crew group instead have a time limit that should be on previous 
+**  production day, no matter how far back in time that is (overrules value_int).
+**
+**  There is no control for if inform limit is previous production day's check-out time.
+**  
 */
+
+%resched_bl_deadline_inform_limit% =
+   /*first see if there is a standby call-out to a multi day trip which covers an informed
+     BL-day, the BL notification deadline is considered to be the standby call-out
+     time if it is earlier than the normal BL- deadline*/
+    if %trip_standby_callout_with_overnight_into_bl% then
+        nmin(%trip_standby_callout_time_hb%,
+        first(duty(trip),prev(duty(trip),duty.%start_day% + system_db_parameters.%bl_day_resched_limit_cc_time_p%(crew.%region%,trip.%start_utc%)))
+        where (first(leg(duty),rescheduling.%leg_inf_hist_blank_day%)))
+    /*second look if parameter is set true = then we should look for last prod day and use time limit there.
+    If prev prod day is beyond what is found on roster we need a default value to get a warning, will not work if void values here*/
+    else if system_db_parameters.%bl_day_resched_limit_cc_not_calendar_days_bool_p%(crew.%region%,trip.%start_utc%)
+        then default(prev(trip(roster),last(duty(trip),duty.%start_day% + system_db_parameters.%bl_day_resched_limit_cc_time_p%(crew.%region%,trip.%start_utc%)))
+        where ((not trip.%has_no_duty_time_contribution%) or trip.%is_blank_day%), %pp_start%)
+    /*otherwise we look for x calendar past and set time limit there, no matter if it's a day with production or not*/
+    else (rescheduling.%trip_inf_blank_start_hb% - 
+    system_db_parameters.%bl_day_resched_limit_cc_calendar_days_before_p%(crew.%region%,trip.%start_utc%)*24:00 
+    + system_db_parameters.%bl_day_resched_limit_cc_time_p%(crew.%region%,trip.%start_utc%));
 
 %trip_standby_callout_time_hb% =
     first(leg(trip), leg.%end_hb%)
     where(leg.%is_standby_callout%);
 
 
-
-%_R309_inform_in_time% =
-  %now_hb% <= %_R309_inform_limit%;
-
-/*
-**  Deadline for rescheduling BL-day
-**
-**  SKS : 15:00 on day before published BL-day
-**
-**  SKN before K11: 15:00 on day before published BL-day
-**
-**  SKN after K11: previous trip's check-out
-**
-**  SKJ : 17:00 on day before published BL-day
-*/
-
-%_R309_inform_limit% = 
-  if crew.%is_skn% then
-    if parameters.%k11_skn_cc_sp10_9_valid%(trip.%start_day%) then
-        if %trip_standby_callout_with_overnight_into_bl% then
-            %trip_standby_callout_time_hb%
-        else
-            rescheduling.%check_out_previous_trip%
-    else
-      rescheduling.%trip_inf_blank_start_hb% - 
-      (24:00 - system_db_parameters.%BL_day_resched_limit_SKN_p%(trip.%start_hb%))
-  else
-    if crew.%is_sks% then
-      rescheduling.%trip_inf_blank_start_hb% - 9:00
-    else
-      rescheduling.%trip_inf_blank_start_hb% - 7:00;
-
-
-
-
-rule resched_R309B_CC =
-  valid %_R309B_valid%
-	  and rule_exceptions.%rule_on%(trip.%start_UTC%);
-    
-  %_R309B_inform_in_time%;
-  
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext concat ("Coll: BL-day resched after ", format_time(%_R309B_inform_limit%, "%02H:%02M %02d%03b"));
-  remark "(CCT) Resched: BL-day must not be rescheduled after certain times - depending on agreements.",
-  planner "The rule checks that rescheduling of a BL-day occurs no later than"
-          " 1500 local time on the day before the BL-day."
-          " For SKN-CC-AG: normally 4 days before BL. Xmas and Easter"
-          " 18:00 7 Calendar Days before BL"
-          " The rule is only valid for CC.";
-end
-
-
-%_R309B_valid% =
-  parameters.%rule_R441B_FC_valid%(trip.%start_day%)
-  and trip.%is_on_duty%
-  and not crew.%is_SKJ%
-  and not (crew.%is_SKD% and crew.%is_temporary_trip_start%)
-  and not crew.%is_SKK%
-  and not trip.%is_illness%
-  and not crew.%is_leased_trip_start%
-  and %trip_is_rescheduled_blank_day%;
-
-
-%_R309B_inform_limit% = %_R309B_inform_limit_testable%(
-    crew.%has_agmt_group_snk_cc%,
-    crew.%has_agmt_group_nkf_cc%);
-
-
-table R309B_inform_limit(
-    Bool has_agmt_group_snk_cc,
-        Bool has_agmt_group_nkf_cc) =
-
-    has_agmt_group_snk_cc,
-      has_agmt_group_nkf_cc
-            ->  %_R309B_inform_limit_testable%;
-
-    y,  n ->  rescheduling.%trip_inf_blank_start_hb% - 3 * 24:00 - 08:00;  /* SNK: 4 days before all others */
-    n,  y ->  rescheduling.%trip_inf_blank_start_hb% - 3 * 24:00 - 08:00;  /* NKF: 4 days before always */
-    n,  n ->  rescheduling.%trip_inf_blank_start_hb% - 6:00;  /* everyone else: 18:00 the day before */
-
-end
-
-
-
-%_R309B_inform_in_time% =
-  %now_hb% <= %_R309B_inform_limit%;
-
-
-  
-%trip_notification_deadline_R309B% =
- if %_R309B_valid%
- then %_R309B_inform_limit%
- else void_abstime;
-
-
 /*
 ** Rule: R316
 */
 
-%_R316_valid% =
+%resched_roster_removed_12h_before_temp_cc_valid% =
   crew.%is_SKD%
   and crew.%is_temporary_trip_start%
   and not crew.%is_leased_trip_start%
   and rescheduling.%trip_is_rescheduled%
   and %trip_free_is_rescheduled_checkin%;
 
-rule resched_R316_CC_SKD =
-  valid %_R316_valid%
+rule resched_roster_removed_12h_before_temp_cc_skd =
+  valid %resched_roster_removed_12h_before_temp_cc_valid%
     and rule_exceptions.%rule_on%(trip.%start_UTC%);
 
-  %_R316_inform_in_time%;
+  %resched_roster_temp_cc_inform_in_time%;
   
   startdate = trip.%start_UTC%;
   severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
@@ -301,11 +160,11 @@ rule resched_R316_CC_SKD =
           " The rule is only valid for CC CAU.";
 end
 
-%_R316_inform_in_time% =
+%resched_roster_temp_cc_inform_in_time% =
   %trip_free_inf_checkin% >= %now_hb% + 12:00;
   
-%trip_notification_deadline_R316% =
-  if %_R316_valid%
+%trip_notification_deadline_resched_temp_cc_roster% =
+  if %resched_roster_removed_12h_before_temp_cc_valid%
   then %trip_free_inf_checkin% - 12:00
   else void_abstime;
 
@@ -350,100 +209,6 @@ end
 %min_time_off_after_lh% = 72:00;
 
 
-
-/*
-** Agreement Group: QA_CC_AG
-**
-** JIRA: SKCMS-590. Sprint: SAS30 (OCT 2015)
-**
-*/
-export rule resched_earlier_standby_start_time_QA_CC_AG =
-  valid
-        crew.%agmt_group_id% = "QA_CC_AG"
-        and rescheduling.%trip_has_rescheduled_checkin%
-        and %resched_earlier_check_in_homebase_deadline_sh_valid%
-        and %trip_inf_is_standby_at_checkout%
-        and rule_exceptions.%rule_on%(trip.%start_UTC%);
-  %now_hb% <= %resched_standby_earlier_start_qa_inform_at_latest%;
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext(Abstime value, Abstime limit) =
-    rules.%failtext_abs%("Coll: Earlier standby start informed too late QA CC", value, limit);
-  remark "(CCT) Resched: Earlier standby check-in must be published 18h before",
-  planner "This rule is for Cimber. It checks that earlier standby start is published"
-          "minimum 18h prior to the new start time."
-          "Ref. Cimber CC agreements as of 01mar2014";
-end
-
-export rule resched_later_standby_start_time_QA_CC_AG =
-  valid
-        crew.%agmt_group_id% = "QA_CC_AG"
-        and rescheduling.%trip_has_rescheduled_checkin%
-        and (rescheduling.%trip_inf_checkin_diff% > 0:00)
-        and %trip_inf_is_standby_at_checkout%
-        and rule_exceptions.%rule_on%(trip.%start_UTC%);
-  %now_hb% <= %resched_standby_later_start_time_qa_inform_at_latest% ;
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext(Abstime value, Abstime limit) =
-    rules.%failtext_abs%("Coll: Later standby start informed too late QA CC", value, limit);
-  remark "(CCT) Resched: Later standby start must be published 18h before original start",
-  planner "This rule is for Cimber CC. It checks that later SBY start is published"
-          "minimum 18h prior to the original standby start time."
-          "Ref. Cimber CC agreements as of 01mar2014";
-end
-
-/*
-** QA Oct 2015
-**
-*/
-
-export rule resched_check_in_homebase_qa_CC =
-  valid %resched_earlier_check_in_homebase_deadline_sh_valid%
-        and crew.%has_agmt_group_qa_cc%
-        and not %trip_inf_is_blank_day_at_start%
-        and rescheduling.%trip_has_rescheduled_checkin%
-        and not %is_duty_inf_long_haul%
-        and not %trip_inf_is_standby_at_checkout%
-        and rule_exceptions.%rule_on%(trip.%start_UTC%);
-
-  %now_hb% <= %resched_earlier_check_in_homebase_qa_inform_at_latest%;
-
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext(Abstime value, Abstime limit) =
-    rules.%failtext_abs%("Coll: Earlier C/I published too late", value, limit);
-  remark "(CCT) Resched: Earlier check-in must be published 96h before",
-  planner "This rule is for Cimber. It checks that earlier check-in is published"
-          "minimum 96h prior to the new check-in time."
-          "Ref. Cimber agreements as of 01mar2015";
-end
-
-export rule resched_check_out_homebase_qa_CC =
-  valid crew.%has_agmt_group_qa_cc% and
-        %later_checkout_homebase% and
-        not trip.%has_standby_callout% and
-        not %trip_inf_is_standby_at_checkout%
-        and rule_exceptions.%rule_on%(trip.%start_UTC%);
-
-  %now_hb% <= %resched_earlier_check_out_homebase_qa_inform_at_latest%;
-
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = trip.%failobject_start%;
-  failtext(Abstime value, Abstime limit) =
-    rules.%failtext_abs%("Coll: Later C/O published too late", value, limit);
-  remark "(CCT) Resched: Later check-out must be published 96h before",
-  planner "This rule is for Cimber. It checks that later check-out is published"
-          "minimum 96h prior to the new check-out time."
-          "Ref. Cimber agreements as of 01mar2015";
-end
-
-redefine %qa_notice_before_limit% = 96:00;
-
 /*  Reduction for Danish crew according to agreement CAU 2014-12-22.
 
     These two rules check that any duty that has been re-scheduled to sick of free day after schedule release,
@@ -461,8 +226,7 @@ rule max_limit_reduction_CAU_7_day_window =
         (crew.%has_agmt_group_skd% or crew.%has_agmt_group_sks%) and
         %_has_hours_duty_reduction_7_days% and
         trip.%check_rules% and
-        ( crew.%k4exng_cc_sp5_1_valid%(duty.%start_day%) or
-          parameters.%k4exng_fc_sp5_1_valid%(duty.%start_day%)) and
+        crew.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and
         duty.%in_pp_extended% and
         (duty_period.%is_on_duty% or %_is_CAU_reducing%) and
         duty_period.%is_last_duty_period_on_start_day%;

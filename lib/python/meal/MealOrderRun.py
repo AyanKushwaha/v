@@ -140,9 +140,7 @@ def _processReports(mealOrdersIterator, update = False, create=False, cancel=Fal
                                                                     'telex',
                                                                     sendToListTelex,
                                                                     subject))
-                        elif reportType in "xml" and update:
-                            # The XML report shall not be sent for updates
-                            pass
+
                         else:
                             resultsThisOrder.append(_makeReportDict(fileName,
                                                                     typeExtension[reportType],

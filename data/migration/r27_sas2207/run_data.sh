@@ -36,7 +36,14 @@ echo " - Processing migration tasks"
 # echo "  * SKCMS-1234: Some description"
 # python $CARMUSR/data/migration/$RELEASE/skcms-1234.py 2>&1 | tee $LOG_DIR/skcms-1234.log
 
+echo "  * SKCMS-2998: Link CC SCC course set up"
+python $CARMUSR/data/migration/$RELEASE/skcms-2998.py 2>&1 | tee $LOG_DIR/skcms-2998.log
 
+echo "  * SKCMS-2975: Add LC AP-POS to table training_log_set and crew_training_t_set"
+python $CARMUSR/data/migration/$RELEASE/skcms-2975.py 2>&1 | tee $LOG_DIR/skcms-2975.log
+
+echo "  * SKCMS-2996: Changed instructor pay at A2NX ETOPS flights "
+python $CARMUSR/data/migration/$RELEASE/skcms-2996.py 2>&1 | tee $LOG_DIR/skcms-2996.log
 
 
 # Uncomment this in case dave filters shall be modified, remember to update JIRA number

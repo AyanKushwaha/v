@@ -494,7 +494,7 @@ def crewlist(fd=None, udor=None, adep=None, country=None, with_nop=False):
             leg.__dict__ = _unnullify(leg.__dict__)
             for crew in leg.chain('crew'):
                 # Homebound flt, use dep country
-                _country = country if country else (leg.end_country if leg.out_bound else leg.start_country)
+                _country = country if country else (leg.end_country if leg.out_bound or leg.end_country=="US" else leg.start_country)
                 _modify_object(crew, _country)
                 crew.__dict__ = _unnullify(crew.__dict__)
             for nop_leg in nop_legs:

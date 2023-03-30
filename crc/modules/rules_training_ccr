@@ -250,18 +250,17 @@ end
 
 /*
 ** SKCMS-2383
+** SKCMS-3039
+** SKCMS-3217
 ** Rule:
-**    A2LR JCRT: Min 10 sectors within 180 days after A2LR ETOPS course
+**    A2LR JCRT: Min 8 sectors within 150 days after A2LR ETOPS course
 **    
 ** Description:
-**    The rule checks that crew has completed 10 active A2 LH
-**    sectors within 180 days of their A2LR ETOPS course (LRP2),
-**    or 8 active A2 LH sectors within 180 days, 
-**    followed by one (1) LRSB (long range self briefing) day,
-**    followed by 2 active A2 LH sectors immediately after,
-**    or 6 active A2 LH sectors within 180 days, followed by
-**    2 LR REFRESH sectors and then 2 A2LH sectors within
-**    another 30 days.
+**    The rule checks that crew has completed 8 active A2 LH
+**    sectors within 150 days of their A2LR ETOPS course (LRP2),
+**    or 6 active A2 LH sectors within 150 days, 
+**    followed by one (1) LRP2R day, followed by 2 active A2 LH 
+**    sectors within another 60 days.
 */
 
 export rule trng_min_active_sectors_after_etops_training =
@@ -275,12 +274,13 @@ export rule trng_min_active_sectors_after_etops_training =
   failobject = leg.%failobject_departure%;
   failtext(Int value, Int limit) = %trng_min_active_sectors_after_etops_training_failtext%(value, limit);
   remark "Min number of active A2LR sectors after ETOPS training",
-  planner "The rule checks that a minimum number of active A2LR sectors are performed in the LH area after A2LR ETOPS course LRP2. To be completed within 180 days after LRP2 training";
+  planner "This rule checks that a minimum number of active A2NX sectors are performed in the LH area after an ETOPS A2NX course. To be completed within 150 days after ETOPS LC";
 end
 
 %valid_trng_min_active_sectors_after_etops_training% =
     %leg_needs_etops_training% and
     leg.%is_active_flight% and
+    crew.%has_qln%("POSITION", "A2NX", trip.%start_hb%) and
     leg.%start_hb% > %etops_training_period_end_hb% and
     roster.%check_rules% and
     trip.%in_pp_extended% and
@@ -288,67 +288,52 @@ end
     qualification.%crew_has_qln_leg_start%;
 
 %trng_min_active_sectors_after_etops_training_failtext%(Int value, Int limit) =
-  if %nr_etops_training_sectors_in_180d% >= training.%nr_etops_training_sectors_required_before_lrsb% then
+  if %nr_etops_training_sectors_in_150d% >= training.%nr_etops_training_sectors_required_before_lrp2r% then
     rules.%failtext_int%(concat("OMA: Min ",
                                 %etops_training_ac_qual%,
-                                " LH sectors within 180 days after LRP2 needs LRSB followed by last sectors:"), value, limit)
+                                " LH sectors within 150 days after ETOPS LC needs LRP2R followed by last sectors within 60 days"), value, limit)
   else
     rules.%failtext_int%(concat("OMA: Min ",
                                 %etops_training_ac_qual%,
-                                " LH sectors within 180 days after LRP2 training needs LR REFRESH flight followed by last sectors within 30 days:"), value, limit);
+                                " LH sectors within 150 days after ETOPS LC training needs LR REFRESH flight followed by last sectors within 30 days:"), value, limit);
 
 
 /*
 ** SKCMS-2383
+** SKCMS-3217
 ** Rule:
-**    A2LR JCRT: Warn if LRSB is not immediately followed by A2 LH sectors.
+**    A2LR JCRT: Warn if LRP2R is not followed by 2 A2 LH sectors within 60 days.
 **    
 ** Description:
-**    If the crew has not yet completed 10 sectors within the first 180 days after ETOPS training
-**    and has LRSB, the rule checks that two sectors immediately follows the activity.
+**    If the crew has not yet completed 6 sectors within the first 150 days after ETOPS training
+**    and has LRP2R, the rule checks that two sectors are present within 60 days of LRP2R.
 */
-export rule trng_lrsb_followed_by_active_sectors =
-  valid %leg_is_lrsb% and
+export rule trng_lrp2r_followed_by_active_sectors =
+  valid %leg_is_lrp2r% and
         roster.%check_rules% and
         trip.%in_pp_extended%;
 
-  %consecutive_etops_training_sectors_forward% >= nmin(%nr_etops_training_sectors_needed%, 2) -
+  training.%nr_etops_training_sectors_after_lrp2r_within_60days% >= 2 -
     rule_exceptions.%overshoot_int%(leg.%activity_scheduled_start_time_UTC%);
 
   startdate  = leg.%activity_scheduled_start_time_UTC%;
   severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
   failobject = leg.%failobject_departure%;
-  failtext(Int value, Int limit) = %trng_lrsb_followed_by_active_sectors_failtext%(value, limit);
-  remark "LRSB must be immediately followed by active sectors",
-  planner "The rule checks that LRSB is immediately followed by active A2 LH sectors";
+  failtext(Int value, Int limit) = %trng_lrp2r_followed_by_active_sectors_failtext%(value, limit);
+  remark "LRP2R must be followed by 2 active sectors within 60 days",
+  planner "The rule checks that there are 2 active A2LH sectors within 60 days of LRP2R";
 end
-/*counts consecutive sectors. Skips leg if passive transfer. A2LH sectors might be in wop after LRSB*/
-%consecutive_etops_training_sectors_forward% =
-  count(leg(chain))
-  from (next) forwards
-    while ((%leg_needs_etops_training% and %leg_is_active_flight%) or leg.%is_deadhead% or not leg.%is_on_duty%)
-    where((%leg_needs_etops_training% and %leg_is_active_flight%));
 
-%nr_etops_training_sectors_needed% = %nr_etops_training_sectors_required% - %nr_etops_training_sectors_before_leg%;
-
-%trng_lrsb_followed_by_active_sectors_failtext%(Int value, Int limit) =
-      rules.%failtext_int%("OMA: LRSB followed by active sectors:", value, limit);
-
-
-%is_first_leg_after_lrsb% =
-  is_first(leg(roster)) where(leg.%start_hb% > %last_lrsb_date_hb% and
-                              leg.%is_active_flight% and
-                              %leg_needs_etops_training%);
+%trng_lrp2r_followed_by_active_sectors_failtext%(Int value, Int limit) =
+      rules.%failtext_int%("OMA: LRP2R followed by 2 active sectors within 60 days:", value, limit);
 
 %nr_etops_training_sectors_required% = training.%nr_etops_training_sectors_required%;
-%nr_etops_training_sectors_in_180d% = training.%nr_etops_training_sectors_in_180d%;
-%nr_etops_training_sectors_considering_lrsb% = training.%nr_etops_training_sectors_considering_lrsb%;
+%nr_etops_training_sectors_in_150d% = training.%nr_etops_training_sectors_in_150d%;
+%nr_etops_training_sectors_considering_lrp2r% = training.%nr_etops_training_sectors_considering_lrp2r%;
 %nr_etops_training_sectors_considering_lr_refresh% = training.%nr_etops_training_sectors_considering_lr_refresh%;
-%nr_etops_training_sectors_before_leg% = training.%nr_etops_training_sectors_before_leg%;
-%nr_etops_training_sectors_after_lrsb_before_pp% = training.%nr_etops_training_sectors_after_lrsb_before_pp%;
 
-%consider_lrsb% = training.%consider_lrsb%;
-%last_lrsb_date_hb% = training.%last_lrsb_date_hb%;
+%consider_lrp2r% = training.%consider_lrp2r%;
+%last_lrp2r_date_hb% = training.%last_lrp2r_date_hb%;
 
 %consider_lr_refresh% = training.%consider_lr_refresh%;
 
@@ -356,10 +341,10 @@ end
   if %consider_lr_refresh% then
     %nr_etops_training_sectors_considering_lr_refresh%
   else
-    if %consider_lrsb% then
-      %nr_etops_training_sectors_considering_lrsb%
+    if %consider_lrp2r% then
+      %nr_etops_training_sectors_considering_lrp2r%
     else
-      %nr_etops_training_sectors_in_180d%;
+      %nr_etops_training_sectors_in_150d%;
 
 %etops_training_period_end_hb% = training.%etops_training_period_end_hb%;
 
@@ -782,7 +767,7 @@ end
     concat("OMA: ", training.%training_type%, " needs a ", 
            if training.%instr_tag_required% then "tagged "
            else "",
-           if %acceptable_companion_str% = "ETOPS LIFUS/LC"
+           if %acceptable_companion_str% = "ETOPS LIFUS/LC" or %acceptable_companion_str% = "ETOPS LIFUS" or %acceptable_companion_str% = "ETOPS LC"
            then "LC or LIFUS instructor"
            else %acceptable_companion_str%);
 
@@ -954,11 +939,10 @@ export %valid_comp_crew_with_training_flight_is_good_companion_ALL% =
           else "",
            if leg.%is_fc% 
            then "LC or LIFUS instructor"
-           else %acceptable_companion_str%);
-           
-            
+           else training.%acceptable_companion_str%(%failed_training_type%));
 
-          
+           
+                    
 /* Rule:
 **    Instructor for release flights to SMI must have
 **    TRI, TRE, SFI, SFE or LIFUS qualification.
@@ -1123,7 +1107,8 @@ export %valid_comp_trainee_assigned_in_correct_position_ALL% =
   roster.%check_rules% and 
   leg.%in_pp_extended% and 
   leg.%is_active_flight% and 
-  leg.%has_training_code%;
+  leg.%has_training_code% and 
+  not leg.%is_etops_lc%;
   
 export %trigger_comp_trainee_assigned_in_correct_position_ALL% =
   not void(training.%leg_trainee_pos%);
@@ -1268,7 +1253,7 @@ export %trigger_trng_min_release_flight_length_CC% = false;
 
 /* Cached expressions */
 %leg_is_active_flight% = leg.%is_active_flight%;
-%leg_is_lrsb% = leg.%is_lrsb%;
+%leg_is_lrp2r% = leg.%is_lrp2r%;
 %leg_qual% = leg.%qual%;
 %leg_needs_etops_training% = training.%leg_needs_etops_training%;
 %etops_training_ac_qual% = training.%etops_training_ac_qual%;

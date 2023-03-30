@@ -13,7 +13,7 @@
  *
  */
 
-root module rules_soft_ccr_cct
+root module rules_soft_ccr_cct 
 
 import roster;
 import fundamental;
@@ -44,7 +44,6 @@ import base_product;
 */
 rule sft_no_midnight_overlap_ALL =
   valid roster.%check_rules% and
-        fundamental.%is_roster% and 
         trip.%in_pp_extended% and
         trip.%is_complete% and
         trip.%has_flight_duty% and 
@@ -135,6 +134,7 @@ rule sft_spec_sched_forbidden_lower_rank_FC =
         wop.%is_on_duty% and
         trip.%has_flight_duty% and
         crew.%has_spec_sched_in_trip%("ForbiddenAct") and
+        not crew.%has_rhs_qual_at_date%(trip.%start_utc%) and
         crew_pos.%trip_lower_rank% and
         not crew.%is_leased_trip_start% and
         rule_exceptions.%rule_on%(trip.%start_UTC%);
@@ -151,8 +151,10 @@ rule sft_spec_sched_forbidden_lower_rank_FC =
 end
 
 %spec_sched_lower_rank_ok% = 
-  void(crew.%spec_sched_limit_str%("ForbiddenAct", "LOWER", trip.%start_hb%));
+  void(crew.%spec_sched_limit_str%("ForbiddenAct", "LOWER", trip.%start_hb%))
+  or default(crew.%has_rhs_qual_at_date%(trip.%start_hb%),false);
 
+  
 /*
 ** Rule:
 **    Special schedule forbidden aircraft family
@@ -443,7 +445,7 @@ end
   default(duty.%end_od% <= %spec_sched_co_time_limit%, false);
   
 %spec_sched_co_time_limit% = 
-  crew.%spec_sched_limit_time%("CheckOut", duty.%start_weekday%, duty.%start_day%);
+  crew.%spec_sched_limit_time%("CheckOut", duty.%start_weekday%, duty.%end_day%);
   
 %spec_sched_co_trip_does_not_span_limit% =
   void(%spec_sched_co_trip_spans_limit_time%);
@@ -684,6 +686,7 @@ end
 rule sft_not_two_trips_in_same_day_in_wop_ALL =
   valid roster.%check_rules% and
         wop.%in_pp% and
+        not crew.%has_agmt_group_fpu% and
         wop.%is_on_duty% and
         not %_trip_skip_illness% and
         not trip.%has_late_check_out% and
@@ -709,10 +712,11 @@ end
 %_trip_skip_illness% =
   first(duty(trip), duty.%is_illness% or duty.%is_child_illness%);
 
-/* Old Comment: Is this really needed? Isn't this covered in freeday rules? */
+/* rule to check that an off-duty wop and an following/previous on-duty wop is not overlapping */
 export rule sft_not_two_trips_in_same_day_btw_wop_ALL =
   valid roster.%check_rules% and
-        wop.%in_pp% and
+        wop.%in_pp% and not
+        crew.%has_agmt_group_fpu% and
         (wop.%is_off_duty% and
          next(wop(chain), wop.%is_on_duty%) or
          wop.%is_on_duty% and
@@ -725,7 +729,9 @@ export rule sft_not_two_trips_in_same_day_btw_wop_ALL =
   failobject = next(wop(roster), wop.%failobject_start%);
   startdate = wop.%start_UTC%;
   failtext "Soft: Not two duties in the same day (btwn wop's)";
-  remark "(CCR) Soft: Not two duties in the same day (btwn wop's)";
+  remark "(CCR) Soft: Not two duties in the same day (btwn wop's)",
+  planner "Rule to check that an off-duty wop and a "
+          "following/previous on-duty wop is not overlapping";
 end
 
 /*
@@ -887,7 +893,8 @@ end
 
 rule sft_max_legs_per_day_first_20_lifus_legs = 
     valid roster.%check_rules% and
-        duty.%in_pp% and
+        duty.%in_pp% and not
+        crew.%has_agmt_group_fpu% and
         duty.%has_any_lifus% and
         duty.%has_active_flight% and
         first(leg(duty), training.%is_nth_any_lifus%(20));
@@ -911,7 +918,8 @@ end
 
 rule sft_no_fdp_extension_during_20_first_lifus_legs = 
     valid roster.%check_rules% and
-        duty.%in_pp% and
+        duty.%in_pp% and not
+        crew.%has_agmt_group_fpu% and
         duty.%has_any_lifus% and duty.%has_active_flight% and
         not crew.%has_agmt_group_ski_fd% and
         first(leg(duty), training.%is_nth_any_lifus%(20));
@@ -928,62 +936,6 @@ rule sft_no_fdp_extension_during_20_first_lifus_legs =
         "during the first 20 LIFUS legs (SKCMS-297)";
 end
 
-/*
-** Rule:
-**    Max heavy destination trips in calendar month
-**
-** Description:
-**    Soft rule to limit heavy destinations for crew.
-**    Assuming arrival to airport equals departure from 
-**    airport. Then it is only needed to check for a trip to these
-**    airports.
-*/
-rule (off) sft_max_heavy_destination_in_calendar_month =
-  valid roster.%check_rules% and
-        base_product.%is_rostering% and
-        not crew.%is_temporary% and
-        trip.%has_flight_duty% and
-        trip.%start_hb% >= %pp_start% and
-        trip.%start_hb% <= %publ_period_end% and
-        %trip_to_heavy_destination%;
-        
-        
-  %number_trips_to_heavy_destinations_in_month% <= %limit_heavy_destinations_per_month_p% + 
-						   rule_exceptions.%overshoot_int%(trip.%start_UTC%);
-  startdate = trip.%start_UTC%;
-  severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
-  failobject = %sft_heavy_destination_failobject%; 
-  failtext(Int value, Int limit) =
-    rules.%failtext_int%("Soft: Max heavy destination in month", value, limit);
-  remark "Soft: Max trips to heavy destination in calendar month";
-end
-
-%sft_heavy_destination_failobject% =
-  first(leg(trip), leg.%failobject_departure%) where
-    (%leg_to_heavy_destination%);
-            
-%trip_to_heavy_destination% = any(duty(trip), %duty_to_heavy_destination%);
-%duty_to_heavy_destination% = any(leg(duty), %leg_to_heavy_destination%);
-%leg_to_heavy_destination% = leg.%end_station% in heavy_destinations and %heavy_dest_round_trip_not_lh%;
-set heavy_destinations = parameter "LPA", "TFS"
-  remark "Soft: Heavy destinations to limit per month:";
-
-%limit_heavy_destinations_per_month_p% =
-parameter 2
-remark "Soft: Number of heavy destinations limit per month";
-  
-%number_trips_to_heavy_destinations_in_month% =
-  count(trip(roster))
-  from (current) backwards
-  while (trip.%start_hb% >= %pp_start%)
-  where (%trip_to_heavy_destination%);
-  
-/* For short haul heavy destinations, we should only consider the ones that are planned as round trips/back-2-back flights. 
-For long haul heavy destinations we don't care about this */
-%heavy_dest_round_trip_not_lh% =
-if default(leg.%is_long_haul%, false) 
-then true 
-else default(leg.%end_station% = next(leg(duty), leg.%start_station%),false);
 
 /* end of file */
 
