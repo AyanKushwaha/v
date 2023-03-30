@@ -25,7 +25,7 @@ test_crew_emp_no = ['999991']
 class LMSQualReport:
     def __init__(self, test=False):
         self.test = test
-        self.default_delta_date = today_in_abstime().adddays(-1)
+        self.default_delta_date = today_in_abstime()
         self.assignment_writer = AssignmentReportWriter()
         self.deassignment_writer = DeassignmentReportWriter()
         self._stats = {
@@ -34,7 +34,8 @@ class LMSQualReport:
             'updated_rank_count'    : 0,
             'skipped_same_rank_count'   : 0,
             'skipped_upgrade_rank_count'    : 0,
-            'skipped_degrade_rank_count'    : 0
+            'skipped_degrade_rank_count'    : 0,
+            'emp_change_count'    : 0
         }
         if self.test:
             log.setLevel(logging.DEBUG)
@@ -46,14 +47,15 @@ class LMSQualReport:
     def generate(self, crew_ids=[], delta_date=None):
         exec_start = time.time()
         if delta_date is None:
-            delta_date = today_in_abstime().adddays(-1)
+            delta_date = today_in_abstime()
         else:
-            delta_date = AbsTime(delta_date).adddays(-1)
+            delta_date = AbsTime(delta_date)
         
         log.info('Generating qualifications for LMS at {dt}...'.format(dt=delta_date))
 
         self._qualification_deltas(delta_date)
         self._crew_employment_deltas(delta_date)
+        self._crew_employment_change(delta_date)
         exec_end = time.time()
         exec_time = round(exec_end - exec_start, 2)
         self._info_dump(exec_time)
@@ -66,10 +68,10 @@ class LMSQualReport:
     def _qualification_deltas(self,delta_date):
         
         crew_qual_table = tm.table('crew_qualification')
-        prev_day = delta_date 
+        curr_day = delta_date 
 
-        assignment_filter = crew_qual_table.search("(validfrom={0})".format(prev_day))
-        deassignment_filter = crew_qual_table.search("(validto={0})".format(prev_day))
+        assignment_filter = crew_qual_table.search("(validfrom={0})".format(curr_day))
+        deassignment_filter = crew_qual_table.search("(validto={0})".format(curr_day))
 
         # checking for assignment qualification data 
         for rec in assignment_filter:
@@ -136,10 +138,10 @@ class LMSQualReport:
     def _crew_employment_deltas(self, delta_date):
         
         crew_emp_table = tm.table('crew_employment')
-        prev_day = delta_date
+        curr_day = delta_date
 
-        assignment_filter = crew_emp_table.search("(validfrom={0})".format(prev_day))
-        deassignment_filter = crew_emp_table.search("(validto={0})".format(prev_day))
+        assignment_filter = crew_emp_table.search("(validfrom={0})".format(curr_day))
+        deassignment_filter = crew_emp_table.search("(validto={0})".format(curr_day))
 
         total_assignment_data = []
         total_deassignment_data = []
@@ -291,6 +293,7 @@ class LMSQualReport:
         # Skipped Same Rank count       : {skipped_srank}
         # Skipped Upgrade Rank count    : {skipped_urank}
         # Skipped Degrade Rank count    : {skipped_drank}
+        # Extperkey Change Count        : {emp_qual}
         # -----
         # Assignments created           : {assignment_rows}
         # Deassignments created         : {deassignment_rows}
@@ -308,6 +311,7 @@ class LMSQualReport:
             skipped_srank=self._stats['skipped_same_rank_count'],
             skipped_urank=self._stats['skipped_upgrade_rank_count']//2,
             skipped_drank=self._stats['skipped_degrade_rank_count']//2,
+            emp_qual = self._stats['emp_change_count'],
             assignment_rows=self.assignment_writer.row_count,
             deassignment_rows=self.deassignment_writer.row_count,
             exec_time=exec_time,
@@ -316,6 +320,78 @@ class LMSQualReport:
             released='True' if not self.test else 'False'       
         ))
        
+    def _crew_employment_change(self, curr_date):
+
+        crew_emp_table = tm.table('crew_employment')
+        assignment_data = crew_emp_table.search("(validfrom={0})".format(curr_date))
+        list_crew_empchange = []
+        # Checking for extperkey change from crew employment table 
+        for rec in assignment_data:
+            crew = rec.crew.id
+            rank = rec.crewrank.id
+            extperkey = rec.extperkey 
+            validfrom = rec.validfrom
+            validto = rec.validto
+            log.info('Crew having validfrom as today date: {crew}'.format(crew=crew))
+            if is_retired(crew) or (extperkey_from_id(crew, today_in_abstime()) in test_crew_emp_no):
+                log.info('Skipping sending update for retired crew {crew}'.format(crew=crew))
+                continue
+           
+           # Search in crew_employment table is same crew exists with validto as either today or old date
+            deassignment_data = crew_emp_table.search('(&(crew={crew})(validto<={validto}))'.format(
+            crew=crew,
+            validto=curr_date
+            ))
+            for rec_end in deassignment_data:
+                #If crew found in the crew_employment table having validto as either current date or less
+                if rec_end.crew.id == crew:
+                    if rec_end.extperkey != extperkey:
+                        self._stats['emp_change_count'] += 1
+                        log.info('''
+                        Crew {crew} - Old Emp {oldextperkey} New Emp {newextperkey} 
+                        Valid from {validfrom}
+                        Valid to {validto}
+                        '''.format(
+                            crew=crew,
+                            oldextperkey=rec_end.extperkey,
+                            newextperkey=extperkey,
+                            validfrom=validfrom,
+                            validto=validto
+                            ))                   
+                        list_crew_empchange.append(crew)
+                        break
+        # Fetching all qualification for the crew with employee number i.e. extperkey change
+        for rec in list_crew_empchange:
+            crew = rec
+            crew_qual_table = tm.table('crew_qualification')
+            assignment_data = crew_qual_table.search('(&(crew={crew})(validto>{validto}))'.format(
+            crew=crew,
+            validto=curr_date
+            ))
+            # Creating assignment entries for all qualification belonging to a crew 
+            for rec in assignment_data:
+                crew = rec.crew.id
+                qual = rec.qual.subtype
+                validfrom = rec.validfrom
+                validto = rec.validto
+                # Check if crew qualification is applicable for interface
+                if self._applicable_qual(qual, crew):
+                    self._stats['total_delta_count'] += 1
+                    self._stats['updated_qual_count'] += 1
+                    log.info('''
+                    Qualification for crew {crew} - {qual}
+                    Valid from {validfrom}
+                    Valid to {validto}
+                    '''.format(
+                        crew=crew,
+                        qual=qual,
+                        validfrom=validfrom,
+                        validto=validto
+                        ))
+                    # Create assignment entries
+                    assignment_data = self._create_entries(crew, validfrom, validto, qual, None, "assignment_data")
+                    self.assignment_writer.write(assignment_data)
+
 
 class ReportWriter:
     def __init__(self):
@@ -441,7 +517,6 @@ def abs_to_datetime(abstime):
 
 
 def extperkey_from_id(crew_id, date):
-    date = date.adddays(-2)
     extperkey = rave.eval('model_crew.%extperkey_at_date_by_id%("{crew_id}", {dt})'.format(
         crew_id=crew_id,
         dt=date)

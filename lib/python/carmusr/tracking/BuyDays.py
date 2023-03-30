@@ -281,19 +281,16 @@ def markDaysAsBought(buy):
         R.selected('levels.leg'),
         'crew.%is_temporary%',
         'crew.%is_cabin%',
-        'crew.%has_agmt_group_qa%',
-        "salary_overtime.%is_CJ%",
         "parameters.%%fxx_boughtday_comp_valid_at_date%%(%s)" % start_time,
         'crew.%has_agmt_group_skd_cc%',
         "system_db_parameters.%%f3_compensation_skd_cc%%(%s)" % start_time,
         )
     print "  ## eval_result:", eval_result
-    is_temp, is_cabin, is_qa, is_cj, is_valid, has_agmt_skd_cc, is_f3_valid = eval_result
+    is_temp, is_cabin, is_valid, has_agmt_skd_cc, is_f3_valid = eval_result
 
     # for easy dev/test, set to True:
     if False:
-        sel = cfhExtensions.choices("Crew type:", title="TESTING", choices=["QA_FD", "QA_CC", "SK_FD", "SK_CC"])
-        is_qa = sel[:2] == "QA"
+        sel = cfhExtensions.choices("Crew type:", title="TESTING", choices=["SK_FD", "SK_CC"])
         is_cabin = sel[-2:] == "CC"
 
     if is_temp and is_cabin:
@@ -302,10 +299,6 @@ def markDaysAsBought(buy):
             "Coll: FX not allowed for resource cabin crew",
             title="No change")
         return 1
-
-    if is_qa and not is_cabin and not is_valid:
-        # tread QA FD as SK FD before valid date
-        is_qa = False
 
     if is_buy:
         # Get crew activities in period
@@ -333,7 +326,7 @@ def markDaysAsBought(buy):
             if code:
                 if comment == "":
                     try:
-                        comment, bought_type = BuyDayCommentForm(is_cabin, is_qa, is_cj, is_valid, "Buy_Day_Form")()
+                        comment, bought_type = BuyDayCommentForm(is_cabin, is_valid, "Buy_Day_Form")()
                     except CancelBuyDay:
                         return
                 # Do the actual "buy"
@@ -361,7 +354,7 @@ def markDaysAsBought(buy):
 
 class BuyDayCommentForm(Cfh.Box):
 
-    def __init__(self, is_cabin, is_qa, is_cj, is_valid, *args):
+    def __init__(self, is_cabin, is_valid, *args):
         Cfh.Box.__init__(self, *args)
         self.setText('Buy Day / Overtime checkout on Fday')
 
@@ -370,24 +363,21 @@ class BuyDayCommentForm(Cfh.Box):
         self.button_area = Cfh.Area(Cfh.Loc(-1, -1))
         self.ok = CfhCheckDone(self, "OK", self.button_area, "Ok", "_Ok")
 
-        if is_qa or (is_cj and is_valid):
-            description = "Bought day %s" % ("QA CC" if is_cabin else "QA FD" if is_qa else "CJ FD (QA)")
-            self.qa_type_label = Cfh.Label(self, "QA_TYPE_LABEL", Cfh.Area(Cfh.Dim(20, 1), Cfh.Loc(2, 0)), description)
-        else:
-            num_entries = LBL_COUNT_CC if is_cabin else LBL_COUNT_FD
-            self.bought_type = Cfh.String(self, "Compensation", Cfh.Area(Cfh.Dim(20, num_entries), Cfh.Loc(2, 0)), LBL_MAX_LEN, "Bought")
-            bought_type_options_str = "Select;" + ";".join(BOUGHT_LABELS[:num_entries])
-            self.bought_type.setMenuString(bought_type_options_str)
-            self.bought_type.setStyle(Cfh.CfhSChoiceRadioCol)
+       
+        num_entries = LBL_COUNT_CC if is_cabin else LBL_COUNT_FD
+        self.bought_type = Cfh.String(self, "Compensation", Cfh.Area(Cfh.Dim(20, num_entries), Cfh.Loc(2, 0)), LBL_MAX_LEN, "Bought")
+        bought_type_options_str = "Select;" + ";".join(BOUGHT_LABELS[:num_entries])
+        self.bought_type.setMenuString(bought_type_options_str)
+        self.bought_type.setStyle(Cfh.CfhSChoiceRadioCol)
 
-            def enforce_selection_fn():
-                # self.bought_type.compute()
-                if self.bought_type.getValue() not in BOUGHT_LABELS:
-                    cfhExtensions.show("Please select a bought type", title="Missing selection")
-                    return "Warning: No bought type selected"
-                return ""
+        def enforce_selection_fn():
+            # self.bought_type.compute()
+            if self.bought_type.getValue() not in BOUGHT_LABELS:
+                cfhExtensions.show("Please select a bought type", title="Missing selection")
+                return "Warning: No bought type selected"
+            return ""
 
-            self.ok.register_check(enforce_selection_fn)
+        self.ok.register_check(enforce_selection_fn)
 
         self.cancel = Cfh.Cancel(self, "CANCEL", self.button_area, "Cancel", "_Cancel")
         self.build()
@@ -399,8 +389,7 @@ class BuyDayCommentForm(Cfh.Box):
         self.show(1)
         if self.loop() != Cfh.CfhOk:
             raise CancelBuyDay
-        is_qa = hasattr(self, "qa_type_label")
-        selected_index = 0 if is_qa else BOUGHT_LABELS.index(self.bought_type.getValue())
+        selected_index = BOUGHT_LABELS.index(self.bought_type.getValue())
         return self.comment.valof(), ACCOUNTS[selected_index]
 
 

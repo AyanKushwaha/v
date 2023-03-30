@@ -29,7 +29,7 @@ INSTALLER=$CARMUSR/bin/bids/installBids.sh
 
 BIDSFILE=bids
 RUNONSTART=16
-RUNONEND=6
+RUNONEND=8
 
 while getopts f:h:u:p:d:n:t:b:s:e: option; do
   case "$option" in

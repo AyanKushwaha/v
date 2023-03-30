@@ -32,9 +32,9 @@ salary_perdim_article = {
     'JP': ['PERDIEM_SALDO']
 }
 salary_supervis_article = {
-    'DK': ['INST_LCI_LH', 'INST_LCI', 'INST_CLASS', 'INST_SKILL_TEST', 'INST_SIM', 'INST_SIM_SKILL_BR', 'INST_LIFUS_ACT', 'INST_NEW_HIRE', 'INST_CC'],
-    'NO': ['SIM_INSTR_FIXED', 'INST_NEW_HIRE', 'INST_SIM_SKILL_BR', 'INST_LIFUS_ACT', 'INST_CLASS', 'INST_SIM', 'INST_SKILL_TEST', 'INST_CC', 'INST_LCI', 'INST_LCI_LH'],
-    'SE': ['INST_CLASS', 'INST_LCI', 'INST_CC', 'INST_LCI_LH', 'INST_LIFUS_ACT', 'INST_NEW_HIRE', 'INST_SIM', 'INST_SIM_SKILL_BR', 'INST_SKILL_TEST', 'SIM_INSTR_FIXED'],
+    'DK': ['INST_LCI_LH', 'INST_LCI', 'INST_CLASS', 'INST_SKILL_TEST', 'INST_SIM', 'INST_SIM_SKILL_BR', 'INST_LIFUS_ACT', 'INST_NEW_HIRE', 'INST_CC', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT', 'INST_CC_LCS_LINK'],
+    'NO': ['SIM_INSTR_FIXED', 'INST_NEW_HIRE', 'INST_SIM_SKILL_BR', 'INST_LIFUS_ACT', 'INST_CLASS', 'INST_SIM', 'INST_SKILL_TEST', 'INST_CC', 'INST_LCI', 'INST_LCI_LH', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT', 'INST_CC_LCS_LINK'],
+    'SE': ['INST_CLASS', 'INST_LCI', 'INST_CC', 'INST_LCI_LH', 'INST_LIFUS_ACT', 'INST_NEW_HIRE', 'INST_SIM', 'INST_SIM_SKILL_BR', 'INST_SKILL_TEST', 'SIM_INSTR_FIXED', 'INST_ETOPS_LIFUS_ACT', 'INST_ETOPS_LC_ACT'],
     'CN': [],
     'HK': [],
     'JP': []
@@ -298,8 +298,8 @@ class PerDiemRun(ECGenericRun):
         return 0
 
     def MEAL(self, rec):
-        # SE: 841, negative in normal cases
-        return -times100(rec.getMealReduction())
+        #SE: Now reported positive as requested in SKPROJ-499
+        return times100(rec.getMealReduction())
 
     def PERDIEM_SALDO(self, rec):
         # DK: 1550
@@ -394,6 +394,11 @@ class SupervisRun(ECGenericRun):
         return times100(rec.lifus_act)
         #return hours100(rec.lifus_act)
 
+    def INST_ETOPS_LIFUS_ACT(self, rec):
+        return times100(rec.etops_lifus_act)
+    def INST_ETOPS_LC_ACT(self, rec):
+        return times100(rec.etops_lc_act)
+
     def INST_PC_OPC(self, rec):
         return hours100(rec.pc_opc)
 
@@ -431,6 +436,8 @@ class SupervisRun(ECGenericRun):
     def SIM_INSTR_FIXED(self, rec):
         return times100(rec.sim_instr_fixed)
 
+    def INST_CC_LCS_LINK(self, rec):
+        return times100(rec.cc_lcs_link)
 
 class OvertimeRun(ECGenericRun):
     def __init__(self, salary_system=None, crew_ids=[], salary_article_tm=None, report_start_date=None, report_first_absdate=None, report_end_date=None, report_last_absdate=None, release=True, test=False):

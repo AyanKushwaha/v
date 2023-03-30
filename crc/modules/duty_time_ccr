@@ -62,69 +62,8 @@ redefine export %is_any_sim_instr_scand_dp% =
           duty.%is_any_sim_instr_scand%),
           false);
 
-/*
-**  7x24 
-*/
-
-
-redefine %_max_in_7x24_hrs_fc% =
-    let
-        is_sks =
-            (crew.%has_agmt_group_sks_fd%
-                or (crew.%has_agmt_group_ski_fd% and crew.%homebase% = "STO"))
-            and not duty.%is_ac_employer_qa%,
-        is_winter =
-            %within_01oct_30apr%(duty.%start_UTC%),
-        is_valid =
-            parameters.%K15_jan16_valid%(duty.%start_UTC%);
-
-        if is_sks and is_winter and is_valid then
-            47:00
-        else
-            47:30;
-
-
-%within_01oct_30apr%(Abstime date) =
-    let
-        month_number = calendar.%month_number%(date);
-    month_number >= 10 or month_number <= 4;
-
-
-
-
-
-
-redefine %max_in_7x24_hrs_fc% = 
-  if %crew_has_training_restr_trip_start% and training.%trip_is_in_school_period_min_7x24% then
-    42:00 /* Pilot education */
-  else
-    %_max_in_7x24_hrs_fc%;
 redefine export %crew_has_training_restr_trip_start% = 
   default(crew.%has_restr_training_trip_start%, false);
-
-redefine %production_is_intercont% = %all_trips_are_intercont%;
-redefine %production_with_long_haul_ac% = 
-  default(crew.%is_long_haul_trip_start%, trip.%with_long_haul_ac%);
-
-/* The rule check is nmax of fwd and bwd value. Thus, the check is
- * performed for the period the rule is going to use. HenrikA 07-Jul-2006 */
-%all_trips_are_intercont% =
-  (%7x24_hrs_fwd% >= %7x24_hrs_bwd% and 
-  %all_trips_are_intercont_fwd%) or
-  (%7x24_hrs_fwd% < %7x24_hrs_bwd% and
-  %all_trips_are_intercont_bwd%);
-
-%all_trips_are_intercont_fwd% =
-  let stop = duty.%start_UTC% + 7*24:00;
-  all(trip(roster), trip.%is_intercont%)
-  from (current) forwards
-  while (trip.%start_UTC% < stop);
-
-%all_trips_are_intercont_bwd% =
-  let stop = duty.%end_UTC% - 7*24:00;
-  all(trip(roster), trip.%is_intercont%)
-  from (current) backwards
-  while (trip.%end_UTC% > stop);
 
 /* 
 ** 4 weeks 
@@ -133,48 +72,9 @@ redefine %max_in_4_weeks_fc% = 160:00; /* Pilot education */
 
 /*
 ** Month
-** Reduced proportionally with part time factor and qualifying days
-** Part time crew has a max of 9:15/9:30 average per day
-** Full time crew has a max of 160 hrs per month
-** Part time 80% SKS crew has a max of 128 hrs per month
 */
 redefine %max_in_month_fc% =
-  if crew.%has_some_part_time_in_month% then
-    if crew.%is_sks% and crew.%is_part_time_in_pp%(80) then 
-        %max_duty_in_month_fc_pt_vg%
-    else
-        %_max_in_month_fc_pt%
-  else
-    %max_duty_in_month_fc%;
-      
-%_max_in_month_fc_pt% =
-  let grpchange1 = crew.%first_group_change_date%(wop.%start_month_start%),
-      grpchange2 = crew.%first_group_change_date%(crew.%first_group_change_date%(wop.%start_month_start%)+0:01);
-    if grpchange1 < wop.%start_month_end% and grpchange1 > wop.%start_month_start% then
-      nmin(%max_duty_in_month_fc%,
-        %max_in_month_fc_pt_period%(wop.%start_month_start%, grpchange1) + 
-		(if grpchange2 < wop.%start_month_end% and grpchange2 > wop.%start_month_start% then
-          %max_in_month_fc_pt_period%(grpchange1, grpchange2) +
-          %max_in_month_fc_pt_period%(grpchange2, wop.%start_month_end%)
-        else
-      	  %max_in_month_fc_pt_period%(grpchange1, wop.%start_month_end%))
-      )
-    else
-      %max_in_month_fc_pt_period%(wop.%start_month_start%,
-                                  wop.%start_month_end%);
-              
-
-%max_in_month_fc_pt_period%(Abstime start, Abstime stop) =
-  if crew.%in_fixed_group%(start) then
-    %nr_available_days_in_period_fg%(start, stop) *
-    %avg_duty_per_day_in_month_fg%
-  else
-   if ((not crew.%is_passive_plus%(start) and crew.%is_sks%) or
-       (crew.%is_passive_plus%(start) and crew.%is_homebase_sks%)) then
-    %max_duty_in_month_fc_pt_vg%
-   else
-	 %nr_available_days_in_period_vg%(start, stop) * 
-     %avg_duty_per_day_in_month_vg%;
+  160:00;
 
 export %nr_available_days_in_period_fg%(Abstime start_hb, Abstime stop_hb) =
   (stop_hb - start_hb) / 24:00 -
@@ -256,7 +156,7 @@ export %nr_p_days_vg%(Abstime start, Abstime stop, Bool includeLA8days,
       group2 = default(crew.%group_at_date%(validto1),"X"),
       validto2 = %first_group_changed%(validto1), 
       group3 = default(crew.%group_at_date%(validto2),"X");
-  if ((crew.%is_SKN_at_date%(start) or crew.%is_SKD_at_date%(start)) and crew.%is_cabin%) then
+  if (crew.%has_agmt_group_skn_cc_at_date%(start) or crew.%has_agmt_group_skd_cc_at_date%(start)) then
     /* V-> */
     /* V -> FG */
     /* V -> FG -> V */
@@ -403,7 +303,7 @@ export %nr_sb_ln_days_in_period%(Abstime start, Abstime stop) =
            wop.%start_utc% < stop);
 
 export %nr_sb_ln_days_planned_in_period%(Abstime start, Abstime stop) =
-    sum(wop(roster), %nr_sb_ln_days_planned_in_wop_in_period%(start, stop))
+    sum(wop(roster), %nr_sb_ln_days_in_wop_in_period%(start, stop))
     where (wop.%end_utc% >= start and wop.%start_utc% < stop);
 
 export %nr_sb_ln_days_in_wop_in_period%(Abstime start, Abstime stop) =
@@ -412,215 +312,15 @@ export %nr_sb_ln_days_in_wop_in_period%(Abstime start, Abstime stop) =
            duty.%end_utc% >= start and
            duty.%start_utc% < stop);
 
-
-export %nr_sb_ln_days_planned_in_wop_in_period%(Abstime start, Abstime stop) =
-  sum(duty(wop), duty.%days%)
-    where (duty.%is_standby_line% and
-           duty.%end_utc% >= start and
-           duty.%start_utc% < stop);
-
-
 export %nr_far_single_slipping_in_period%(Abstime start, Abstime stop) =
     sum(trip(roster), 1)
     where (trip.%is_far_single_slipping_longhaul% and
            trip.%start_utc% >= start and
            trip.%start_utc% < stop);
 
-/*
-*********************************************************************
-** Max production days rules for FD SKN 2011 (Can be removed in 2012)
-*********************************************************************
-** START
-*********************************************************************
-*/
-/* scaled 1000 */
-
-%m_start%(Abstime m_start) = m_start + (24:00 * (%times_index_0% -1));
-%m_end%(Abstime m_start) = m_start + (24:00 * %times_index_0%);
-
-%scale% = 1000;
-
-%nr_p_days_in_publ_period_skn% =  
-  sum(wop(roster), %days_in_period_skn%(%publ_period_start%, %publ_period_end%))
-           
-  where (crew.%is_SKN_at_date%(wop.%start_hb%) and
-         wop.%end_hb% >= %publ_period_start% and
-         wop.%start_hb% < %publ_period_end%)
-		 
- - %not_production_days_skn%(%publ_period_start%, %publ_period_end%)
- - %not_production_days_wf_sg_skn%(%publ_period_start%, %publ_period_end%);
-                
-/* scaled 1000 */
-%days_in_period_skn%(Abstime start_hb, Abstime stop_hb) = 
-    wop.%days_in_period%(start_hb, stop_hb) * %scale%;                      
-                       
-/* scaled 1000 */
-%not_production_days_skn%(Abstime start_hb, Abstime stop_hb) = 		   
-  let d_days = (stop_hb - start_hb) / 24:00;
-
-  sum(times(d_days), 
-    if crew.%is_SKN_at_date%(%m_start%(start_hb)) and
-	   any(duty(roster), overlap(duty.%start_hb%, duty.%end_hb%, %m_start%(start_hb), %m_end%(start_hb)) > 0:00)
-	     where ((duty.%group_code% in p_days_fd_not_production_days_group
-                and not (duty.%code% in p_days_fd_production_fre_activity)) or
-                duty.%code% in p_days_fd_not_production_fte_activity)
-
-    then 1 * %scale% else 0);
-
-/* scaled 1000 */
-%not_production_days_wf_sg_skn%(Abstime start_hb, Abstime stop_hb) = 
-  let d_days = (stop_hb - start_hb) / 24:00;
-
-  sum(times(d_days),
-    if crew.%is_SKN_at_date%(%m_start%(start_hb)) and
-       any(duty(roster), overlap(duty.%start_hb%, duty.%end_hb%, %m_start%(start_hb), %m_end%(start_hb)) > 0:00) 
-	     where (duty.%code% in p_days_fd_long_term_ill or duty.%group_code% = "SGD")
-	
-    then 1 * (%scale% - ((568 * crew.%part_time_factor%) / 100)) else 0);
-
-/*
-*********************************************************************
-** END
-*********************************************************************
-*/
-
-/* Max production days in year FD */
-
-/* scaled 1000 */
-/*export %nr_p_days_in_publ_period_fd% =  
-    if (crew.%max_production_days_rule_FC_SKN_valid%) then
-        %nr_p_days_in_publ_period_skn%
-    else
-        sum(wop(roster), %days_in_period_fd%(%publ_period_start%, %publ_period_end%) -
-            %not_production_days_fd%(%publ_period_start%, %publ_period_end%) - 
-            %not_production_days_wf_sg_fd%(%publ_period_start%, %publ_period_end%))
-    
-        where (wop.%end_hb% >= %publ_period_start% and
-               wop.%start_hb% < %publ_period_end%); */
-			   
-export %nr_p_days_in_publ_period_fd% =  
-    if (crew.%max_production_days_rule_FC_SKN_valid%) then
-        %nr_p_days_in_publ_period_skn%
-    else
-        sum(wop(roster), %days_in_period_fd%(%publ_period_start%, %publ_period_end%))
-
-        where (wop.%end_hb% >= %publ_period_start% and
-               wop.%start_hb% < %publ_period_end%)
-		
-		- %not_production_days_fd%(%publ_period_start%, %publ_period_end%)
-		- %not_production_days_wf_sg_fd%(%publ_period_start%, %publ_period_end%);
-			   
-                
-/* scaled 1000 */
-%days_in_period_fd%(Abstime start_hb, Abstime stop_hb) = 
-    (wop.%days_in_period%(start_hb, stop_hb) - freedays.%wop_possible_single_freedays%(start_hb, stop_hb)) * %scale%;                      
-                       
-/* scaled 1000 */
-%not_production_days_fd%(Abstime start_hb, Abstime stop_hb) = 
-  let d_days = (stop_hb - start_hb) / 24:00;
-
-  sum(times(d_days), 
-    if any(duty(roster), overlap(duty.%start_hb%, duty.%end_hb%, %m_start%(start_hb), %m_end%(start_hb)) > 0:00)
-	   where((duty.%group_code% in p_days_fd_not_production_days_group) and not
-             (duty.%code% in p_days_fd_production_fre_activity) or
-             (duty.%code% in p_days_fd_not_production_fte_activity) or
-              training.%duty_is_in_long_course_period%)
-	
-    then 1 * %scale% else 0);
-	
-/* scaled 1000 */
-%not_production_days_wf_sg_fd%(Abstime start_hb, Abstime stop_hb) = 
-  let d_days = (stop_hb - start_hb) / 24:00;
-
-  sum(times(d_days), 
-    if any(duty(roster), overlap(duty.%start_hb%, duty.%end_hb%, %m_start%(start_hb), %m_end%(start_hb)) > 0:00)
-	   where((duty.%code% in p_days_fd_long_term_ill) or 
-              duty.%group_code% = "SGD" or 
-              duty.%code% = "RL") then
-	
-       1 * (%scale% - crew.%work_factor_pt_at_date%(%m_start%(start_hb)))
-	else 0);
-
-set p_days_fd_long_term_ill = parameter
-    "IL12", "IL12R"
-    remark "FDPDAYS: Long term illness codes.";
-   
-set p_days_fd_not_production_days_group =  parameter
-    "PFR", "PPF", "VAC", "FRE"
-    remark "FDPDAYS: Groups not contributing to production.";
-    
-set p_days_fd_production_fre_activity =  parameter 
-    ""
-    remark "FDPDAYS: Codes contributing to production.";
-    
-set p_days_fd_not_production_fte_activity = parameter 
-    "LA12", "LA15", "LA7", "LA60", "LA58",
-    "LA13", "LA31", "LA20", "LA70", "LA59",
-    "LA14", "LA32", "LA22", "LA71", "LA21",
-    "LA80", "LA33", "F88", "LA72", 
-    "MI", "LA36", "IL8", "LA73", 
-    "LA61", "LA41", "LA84",
-    "LA62", "LA42", "LA85", 
-    "LA63", "LA43", "DF8", "LA5", 
-    "LA64", "LA44", "F8", "LA35", 
-    "LA65", "LA45", "F81", "LA53",
-    "LA66", "LA46", "F82", "LA4", 
-    "LA67", "LA47", "F85", "LA37",
-    "LA68", "LA48", "FB8", "LA39",
-    "LA76", "LA56", "FF8", "LA51",
-    "LA77", "LA57", "LA8", "LA52", "F31"     
-    remark "FDPDAYS: Codes not contributing to production.";
- 
-%nr_available_days_in_period_vg%(Abstime start, Abstime stop) =
-  %nr_p_days_in_period%(start, stop, false, false, true, false, true);
-
-%avg_duty_per_day_in_month_fg% =
-  if crew.%is_sks% then
-    9:30
-  else 
-    9:00;
-
-%avg_duty_per_day_in_month_vg% = 
-    if freedays.%parttime_code_pp_start% = "LA8" then
-        9:15
-    else
-        %avg_duty_per_day_in_month_vg_para%;
-
-%avg_duty_per_day_in_month_vg_para% =
-  parameter 9:15 remark "FC: Average duty per day for variable group";
-
-export %max_duty_in_month_fc% = 
-   160:00;
-
-export %max_duty_in_month_fc_pt_vg% =
-  %max_duty_time_pt_factor_vg_sks%(wop.%start_day%);
-
-table max_duty_in_month_fc_sks(Abstime date) =
-  crew.%part_time_factor_at_date%(date) -> 
-    %max_duty_time_pt_factor_vg_sks%;
- 100 -> 160:00;
-  90 -> 144:00;
-  80 -> 128:00;
-  75 -> 120:00;
-  50 -> 80:00;
-  -  -> 999:00; /* Obvious error code */
-end
-
-/* 
-** Valid statements used for rule (duty in month) and for cost 
-*/
-  
-export %cost_valid_duty_time_calendar_month% =
-  (crew.%is_short_haul_pp_start% or
-  crew.%is_short_haul%(%publ_period_end%)) and
-  (crew.%part_time_factor_at_date%(%pp_start%) = 80 or
-   crew.%part_time_factor_at_date%(round_up_month(%pp_start% + 0:01)) = 80) and
-  %flight_crew% and not crew.%is_sks%;
-  
 /****************************************************************
  * Section 2: Duty time limits - Cabin crew
  ***************************************************************/
-
 /* 
 ** SKS Cabin Crew:
 ** Calendar week. 
@@ -638,7 +338,6 @@ export %max_in_duty_pass_sh_sks% = %max_in_duty_period_sh_sks%;
 ** Duty pass for long haul or charter or legs > 4:00
 */
 export %max_in_duty_pass_lh_sks% = %max_in_duty_period_lh_sks%;
-
 /*
 ** 4 weeks
 */
@@ -727,17 +426,16 @@ end
 table max_duty_in_month_part_time(Abstime date) =
   crew.%is_region_scand%,
   crew.%part_time_factor_at_date%(date) ->
-    export %max_duty_in_calendar_month_pt_cc%,
-    export %max_duty_in_3_months_pt_cc%;
+    export %max_duty_in_calendar_month_pt_cc%;
     
-  true,   80 -> 132:48, 398:00;
-  true,   75 -> 124:30, 374:00;
-  true,   60 ->  99:36, 299:00;
-  true,   50 ->  83:00, 249:00;
-  true,   90 -> 149:24, 448:12;
-  true,   51 ->  84:39, 253:58;
+  true,   80 -> 132:48;
+  true,   75 -> 124:30;
+  true,   60 ->  99:36;
+  true,   50 ->  83:00;
+  true,   90 -> 149:24;
+  true,   51 ->  84:39;
   
-    -  ,   -  -> 999:00, 999:00; /* Obvious error code */
+    -  ,   - -> 999:00; /* Obvious error code */
 end
 
 export %qualifying_days_in_month% =
@@ -778,219 +476,28 @@ export %qualifying_days_in_month% =
   (trip.%is_illness% and not crew.%is_skn%) or
   any(leg(trip), task.%code% = "F31");
 
-export %lh_charter_in_previous_or_next_wop_freedays_ok% = 
-  let has_lh_charter_before =
-      default(prev(wop(roster),last(duty(wop),freedays.%wop_has_long_haul_charter_duty%))
-                where (wop.%is_on_duty%),
-              false),
-      has_lh_charter_after = 
-      default(next(wop(roster),last(duty(wop),freedays.%wop_has_long_haul_charter_duty%))
-                where (wop.%is_on_duty%),
-              false);
-      
-  not (has_lh_charter_before or has_lh_charter_after) or
-  (crew.%in_variable_group_duty_end% and
-   (not has_lh_charter_before or
-    prev(wop(roster),last(duty(wop),freedays.%freedays_after_duty%))
-      where (wop.%is_on_duty%) > 
-    freedays.%min_required_freedays_after_duty_total%) and
-   (not has_lh_charter_after or
-    freedays.%freedays_after_duty% > freedays.%min_required_freedays_after_duty_total%));
-
 /****************************************************************
  * Section 3: Duty time calculations
  ***************************************************************/
-/*
-** 1x24 hrs
-*/
-redefine export %1x24_hrs_fwd% =
-  roster.%duty_time_in_period%(duty.%start_UTC%, duty.%start_UTC% + 1*24:00,
-                               fundamental.%night_upg%, duty.union) -
+/* 24h period */
+export %duty_time_24h_fwd% =
+  oma16.%duty_time_in_interval_indust%(duty.%start_UTC%, duty.%start_UTC% + 1*24:00) -
   %passive_plus_reduction%(duty.%start_UTC%, duty.%start_UTC% + 1*24:00);
-redefine export %1x24_hrs_bwd% =
-  roster.%duty_time_in_period%(duty.%end_UTC% - 1*24:00, duty.%end_UTC%,
-                               fundamental.%night_upg%, duty.union) -
+export %duty_time_24h_bwd% =
+  oma16.%duty_time_in_interval_indust%(duty.%end_UTC% - 1*24:00, duty.%end_UTC%) -
   %passive_plus_reduction%(duty.%end_UTC% - 1*24:00, duty.%end_UTC%);
-
-
-
-redefine export %1x24_hrs% = nmax(%1x24_hrs_bwd%, %1x24_hrs_fwd%);
-
-redefine export %duty_time_calendar_day_end_day% =
-  oma16.%duty_time_in_interval_indust%(duty.%end_day_hb_utc%, duty.%end_day_hb_utc% + 24:00) -
-  %passive_plus_reduction%(duty.%end_day_hb_utc%,duty.%end_day_hb_utc% + 24:00);
-
-redefine export %duty_time_calendar_day_start_day% =
-  oma16.%duty_time_in_interval_indust%(duty.%start_day_hb_utc%, duty.%start_day_hb_utc% + 24:00) -
-  %passive_plus_reduction%(duty.%start_day_hb_utc%,
-                           duty.%start_day_hb_utc% + 24:00);
-
-
-
-redefine export %1x24_hrs_fwd_no_night_upg% =
-  roster.%duty_time_in_period%(duty.%start_UTC%, duty.%start_UTC% + 1*24:00, false, duty.union);
-redefine export %1x24_hrs_bwd_no_night_upg% =
-  roster.%duty_time_in_period%(duty.%end_UTC% - 1*24:00, duty.%end_UTC%, false, duty.union);
-redefine export %1x24_hrs_no_night_upg% = nmax(%1x24_hrs_bwd_no_night_upg%, %1x24_hrs_fwd_no_night_upg%);
-
-/*redefine export %1x24_hrs_fwd_caa% =
-  roster.%duty_time_in_period_caa%(duty.%start_UTC%, duty.%start_UTC% + 1*24:00, fundamental.%night_upg%, duty.union);
-redefine export %1x24_hrs_bwd_caa% =
-  roster.%duty_time_in_period_caa%(duty.%end_UTC% - 1*24:00, duty.%end_UTC%, fundamental.%night_upg%, duty.union);
-redefine export %1x24_hrs_caa% = nmax(%1x24_hrs_bwd_caa%, %1x24_hrs_fwd_caa%);
-*/
+export %duty_time_24h_hrs% = nmax(%duty_time_24h_bwd%, %duty_time_24h_fwd%);
 /*
 ** 2x24 hrs
 */
 export %2x24_hrs_bwd% =
   roster.%duty_time_in_period%(trip.%end_UTC% - 2*24:00, trip.%end_UTC%, fundamental.%night_upg%, duty.union);
 
-/*
-** 7x24 hrs
-*/
-
-redefine export %7_calendar_days% =
-  %7x24_hrs_in_period%(duty.%end_day_hb_utc% - 6*24:00,
-                       duty.%end_day_hb_utc% + 24:00,
-                       %7x24_hrs_has_night_upg%,
-                       duty.net_skj);
-
-
-redefine export %7x24_hrs_bwd% =
-  if %use_7x24_bwd% then
-    %7x24_hrs_in_period%(%7x24_hrs_bwd_start%,
-                         %7x24_hrs_bwd_start% + 7*24:00,
-                         %7x24_hrs_has_night_upg%,
-                         duty.union) -
-    %passive_plus_reduction%(%7x24_hrs_bwd_start%,
-                             %7x24_hrs_bwd_start% + 7*24:00)
-  else
-    0:00;
-
-redefine export %7x24_hrs_fwd% =
-  if %use_7x24_fwd% then
-    %7x24_hrs_in_period%(%7x24_hrs_fwd_start%,
-                         %7x24_hrs_fwd_start% + 7*24:00,
-                         %7x24_hrs_has_night_upg%,
-                         duty.union) -
-    %passive_plus_reduction%(%7x24_hrs_fwd_start%,
-                             %7x24_hrs_fwd_start%  + 7*24:00)
-  else
-    0:00;
-    
-export %7x24_hrs_bwd_no_cmp_day% =
-  if %use_7x24_bwd% then
-    %7x24_hrs_in_period_no_cmp_day%(%7x24_hrs_bwd_start%,
-                                    %7x24_hrs_bwd_start% + 7*24:00,
-                                    %7x24_hrs_has_night_upg%,
-                                    duty.union)
-  else
-    0:00;
-    
-export %7x24_hrs_fwd_no_cmp_day% =
-  if %use_7x24_fwd% then
-    %7x24_hrs_in_period_no_cmp_day%(%7x24_hrs_fwd_start%,
-                                    %7x24_hrs_fwd_start% + 7*24:00,
-                                    %7x24_hrs_has_night_upg%,
-                                    duty.union)
-  else
-    0:00;
-
-table duty_time_7x24_hrs =
-  %cabin_crew%, crew.%region% ->
-    export %use_7x24_bwd%,
-    export %7x24_hrs_bwd_start%,
-    export %use_7x24_fwd%,
-    export %7x24_hrs_fwd_start%,
-    export %7x24_hrs_has_night_upg%;
-
-  false, "SKS" -> true,
-                  if %agreement_valid%("7x24_fd_sks", duty.%start_UTC%) then
-                     duty.%end_UTC% - 7*24:00
-                  else
-                    duty.%end_day_hb_utc% + 24:00 - 7 * 24:00,
-                  true,
-                  if %agreement_valid%("7x24_fd_sks", duty.%start_UTC%) then 
-                     duty.%start_UTC% 
-                  else 
-                    duty.%start_day_hb_utc%,
-                  false;
-  false, "SKN" -> true,
-                  if %agreement_valid%("7x24_fd_sks", duty.%start_UTC%) then
-                     duty.%end_UTC% - 7*24:00
-                  else
-                    duty.%end_day_hb_utc% + 24:00 - 7 * 24:00,
-                  true,
-                  if %agreement_valid%("7x24_fd_sks", duty.%start_UTC%) then 
-                     duty.%start_UTC% 
-                  else 
-                    duty.%start_day_hb_utc%,
-                  false;
-  &
-  false,  -    -> true,
-                  duty.%end_UTC% - 7*24:00,
-                  true,
-                  duty.%start_UTC%,
-                  false;
-  true, "SKD"  -> if parameters.%k12_skd_cc_sp4_3_valid%(duty.%start_hb%) then
-                    true
-                  else
-                    false,
-                  if parameters.%k12_skd_cc_sp4_3_valid%(duty.%start_hb%) then
-                    duty.%end_UTC% - 7*24:00
-                  else
-                    void_abstime,
-                  if parameters.%k12_skd_cc_sp4_3_valid%(duty.%start_hb%) then
-                    true
-                  else
-                    (is_first(trip(wop)) and not duty.%is_bought% and 
-                     is_first(duty(trip)) and
-                     %duty_is_first_in_wop%) or
-                    prev(duty(wop), duty.%is_bought% or duty.%is_off_duty_cmp%),
-                  %duty_start_7x24_SKD_CC%,
-                  fundamental.%night_upg%;
-  true, "SKN"  -> parameters.%k11_skn_cc_sp10_9_valid%(trip.%start_day%) or
-                  not %any_duty_is_long_haul_in_7x24_bwd_not_bought_day%,
-                  duty.%end_day% + 24:00 - 7*24:00,
-                  parameters.%k11_skn_cc_sp10_9_valid%(trip.%start_day%) or
-                  not %any_duty_is_long_haul_in_7x24_fwd_not_bought_day%,
-                  duty.%start_day%,
-                  fundamental.%night_upg%;
-  true, "SKS"  -> false,
-                  void_abstime,
-                  true,
-                  duty.%start_day_hb_utc%,
-                  false;
-  true, "SKJ"  -> true,
-                  duty.%end_UTC% - 7*24:00,
-                  true,
-                  duty.%start_UTC%,
-                  false;
-  -, - -> false, void_abstime, false, void_abstime, false;
-end
-
 /* Duty is first in wop
 **   Redefined in CCT module where rescheduling info is used 
 */
 export %duty_is_first_in_wop% =
   is_first(duty(wop));
-
-/*Redefined in CCT using resheduling info*/ 
-%duty_start_7x24_SKD_CC% = 
-  duty.%start_UTC%;
-
-redefine export %7x24_hrs_in_period%(Abstime start_utc, Abstime stop_utc, Bool night_upg, DutyCalculation dutycalc) =
-  let t = roster.%duty_time_in_period%(start_utc, stop_utc, night_upg, dutycalc);
-            
-  if compdays.%use_compday_duty_time%(default(crew.%hb_time%(start_utc), trip.%hb_time%(start_utc))) then
-    %compdays_duty_time_in_period%(start_utc, stop_utc) + 
-    t
-  else
-    t;
-
-export %7x24_hrs_in_period_no_cmp_day%(Abstime start_utc, Abstime stop_utc, Bool night_upg, DutyCalculation dutycalc) =
-  roster.%duty_time_in_period%(start_utc, stop_utc, night_upg, dutycalc);
-
 
 %skd_duty_time_in_period%(Abstime start_utc, Abstime stop_utc, Bool night_upg, DutyCalculation dutycalc) = 
   roster.%duty_time_in_period%(start_utc, stop_utc, night_upg, dutycalc)
@@ -1011,19 +518,6 @@ redefine export %passive_plus_reduction%(Abstime start_utc, Abstime stop_utc) =
     where (overlap(duty.%start_utc%,duty.%end_utc%,
                    start_utc,stop_utc) > 0:00 and
            crew.%is_passive_plus%(trip.%start_day%));
-  
-/* Agreement: FC 1:17 2.3.Ba */
-export %any_delayed_check_out_in_7x24_hrs_bwd% =
-  let this = duty.%start_UTC%;
-  any(wop(roster), wop.%has_delayed_check_out%)
-  from (current) backwards
-  while (wop.%start_UTC% >= this - 7*24:00);
-
-redefine export %any_delayed_check_out_in_7x24_hrs_fwd% =
-  let this = wop.%start_UTC%;
-  any(duty(roster), duty.%has_delayed_check_out%)
-  from (current) forwards
-  while (duty.%start_UTC% <= this + 7*24:00);    
 
 /* Redefined for CCT */
 export %skn_bought_va_duty_time%(Abstime start, Abstime stop) = 0:00;
@@ -1063,16 +557,6 @@ export %calendar_month_no_night_upg% =
                                crew.%utc_time%(wop.%start_month_end%),
                                false, 
                                duty_calc);
-
-/* Redefined for CCT% */
-export %duty_time_fc_in_period%(Abstime start_hb, Abstime stop_hb) =
-    accumulators.%planned_duty_time_2_months_fc%(start_hb, stop_hb);
-  
-/* Redefined for CCT% */
-export %max_duty_time_2_months_fc% =
-    (accumulators.%nr_planned_p_days_2_months_fc%(%duty_time_2_months_start_check%,
-                                            round_up_month(wop.%start_hb% + 0:01)))
-    * %max_duty_time_factor%;
 
 export %max_duty_time_factor% =
    if crew.%in_variable_group_wop_start%
@@ -1195,28 +679,10 @@ export %nr_sim_duty_as_tr%(Abstime start_hb, Abstime stop_hb) =
            duty.%start_hb% < stop_hb and
            duty.%end_hb% > start_hb);
 
-/* 3 month duty times */
-/* planned duty time calculation only works for the last month in a three month period. */
-export %planned_duty_time_in_3_months% = 
-  accumulators.%duty_time_planned_skd%(
-    %planned_3_month_period_start%, 
-    nmin(wop.%end_hb%, round_up_month(wop.%start_hb%)));
-
-export %actual_duty_time_in_3_months% = 
-  if duty_time.%_planned_months_into_quarter% = 2 then
-    accumulators.%actual_duty_time_cc%(
-      %actual_3_month_period_start%, 
-      %actual_3_month_period_end%)
-  else
-    0:00;
-
-export %planned_3_month_period_start% = add_months(round_down_month(wop.%start_hb%), - %_planned_months_into_quarter%);
+/* only used in salary/report_overtime for dummy values for no longer used OT over 3 months */
 export %actual_3_month_period_start% = add_months(round_down_month(trip.%start_utc%), - %_actual_months_into_quarter%);
 export %actual_3_month_period_end%   = add_months(%actual_3_month_period_start%, 3);
-  
-export %_planned_months_into_quarter% = (fundamental.%month_in_quarter%(format_time(wop.%start_hb%,"%m")) + 1) mod 3;
 export %_actual_months_into_quarter% = (fundamental.%month_in_quarter%(format_time(trip.%start_utc%,"%m")) + 1) mod 3;
-
 
 export %duty_time_agreement_sel%(Int agmt_sel, Abstime s, Abstime e) =
   sum(times(model_crew.%crew_chg_agm_max_index%),
@@ -1262,37 +728,39 @@ redefine export %crew_or_duty_skn_fd% =
   crew.%has_agmt_group_skn_fd%;
 
 redefine export %crew_or_duty_skn_cc% =
-  crew.%has_agmt_group_nkf_cc% or crew.%has_agmt_group_snk_cc%;
+  crew.%has_agmt_group_skn_cc%;
+
+redefine export %crew_or_duty_szs_fd% =
+  crew.%has_agmt_group_szs_fd%;
+
+redefine export %crew_or_duty_szsd_fd% =
+  crew.%has_agmt_group_szsd_fd%;
+
+redefine export %crew_or_duty_szss_fd% =
+  crew.%has_agmt_group_szss_fd%;
+
+redefine export %crew_or_duty_szs_cc% =
+  crew.%has_agmt_group_szs_cc%;
 
 redefine export %crew_or_duty_ski_fd% =
   crew.%has_agmt_group_ski_fd%;
 
-redefine export %crew_or_duty_qa_cc% =
-  crew.%has_agmt_group_qa_cc%;
+redefine export %crew_or_duty_svs_fd% =
+  crew.%has_agmt_group_svs_fd%;
 
+redefine export %crew_or_duty_svs_cc% =
+  crew.%has_agmt_group_svs_cc%;
 
 /** Used in rules_indust_ccr.
     Redefined in duty_time_cct **/
-/* SKCMS-522*/
 export %max_fdp_extensions_month% =
-  let month_start = base_utils.%month_nr%(duty.%start_month_start%);
-  if %flight_crew% then
-              /* Different rules for April - October than from November-March */	 if not parameters.%k15sk_jan16_valid%(duty.%start_UTC%)
-	 then 3
-	 else if month_start >= 4 and month_start <=  10
-				 then 3
-				 else 2
-  else
-    if (parameters.%K15_feb16_valid%(duty.%start_utc%)
-       and crew.%has_agmt_group_skn_cc_at_date%(duty.%start_utc%)) then
+      if crew.%has_agmt_group_skn_cc_at_date%(duty.%start_utc%) then
           %_max_fdp_extensions_month_snk_nkf_p%
     else
           3;
 
 export %_max_fdp_extensions_month_snk_nkf_p% =
   parameter 2
-  remark "Number of extension per calendar month for SNK-CC-AG and NKF-CC-AG";
-
-
+  remark "Number of extension per calendar month for SKN CC";
 
 /* end of file */

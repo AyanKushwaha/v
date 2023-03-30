@@ -135,7 +135,7 @@ export rule trng_all_training_flights_performed_ALL =
         not %correct_training% and
         rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%)
         and training.%is_reqd_for_ac_qual_leg_start%/* added by mikaelje HiQ 18JUN15 JIRA: SKCMS-537*/
-        and (training.%required_type_on_leg% <> "ETOPS LIFUS/LC" or not leg.%is_short_haul%);
+        and (locate("ETOPS L", training.%required_type_on_leg%) <= 0 or not leg.%is_short_haul%);
         /* The real logic is in the valid statement. The trigger is to get better info
      in value and limit */
   training.%first_unplanned_course_planned_flights_leg% >= 
@@ -193,7 +193,10 @@ end
   %leg_training_code_safe% = "NONE" and
   is_first(leg(duty)) where (%_active_leg_in_pp%)
   or
-  training.%required_type_on_leg% = "ETOPS LIFUS/LC" and leg.%is_long_range_aircraft% and leg.%is_long_haul%;
+  (training.%required_type_on_leg% = "ETOPS LIFUS/LC" or
+    training.%required_type_on_leg% = "ETOPS LIFUS" or 
+    training.%required_type_on_leg% = "ETOPS LC") and leg.%is_long_range_aircraft% and leg.%is_long_haul%;
+
   
 %_training_code_qual% =
   concat(%leg_training_code_safe%, leg.%qual%);
@@ -203,7 +206,9 @@ end
   
 %trng_all_training_flights_performed_ALL_failtext% =
   if (%training_first_unplanned_course_attribute_leg% = "FAM FLT" or
-      %training_first_unplanned_course_attribute_leg% = "ETOPS LIFUS/LC") then
+      %training_first_unplanned_course_attribute_leg% = "ETOPS LIFUS/LC" or 
+      %training_first_unplanned_course_attribute_leg% = "ETOPS LIFUS" or 
+      %training_first_unplanned_course_attribute_leg% = "ETOPS LC") then
       if(%training_first_unplanned_course_attribute_leg% = "FAM FLT") then
         concat("OMA: Crew on ", 
            training.%first_unplanned_course_name_leg%,
@@ -406,24 +411,20 @@ end
   any(leg(trip), leg.%is_flt_sby_or_bl%)
   where(leg.%end_date% >= training.%first_recurrent_doc_expiry_date%),
   false);
-  
-     
+
 %qln_recurrent_training_performed_ALL_valid% =
   roster.%check_rules% and
-  any(leg(duty), leg.%is_flt_sby_or_bl%) and
-  not training.%crew_has_training_bl_during_restr% and
-  %active_duty_in_trip_after_rec_doc_expiry_date% and
   trip.%in_pp% and
-  (trip.%end_hb% >= training.%first_recurrent_doc_expiry_date% or
-  duty.%end_hb% >= training.%first_recurrent_doc_expiry_date%) and
-  
-  /* 1Jan1986 is unregistered docs, handled by other rule */
+  not training.%crew_has_training_bl_during_restr% and
+/* 1Jan1986 is unregistered docs, handled by other rule */
   training.%first_recurrent_doc_expiry_date% > 1Jan1986 and
+  (trip.%start_hb% >= training.%first_recurrent_doc_expiry_date% or
+  trip.%end_hb% >= training.%first_recurrent_doc_expiry_date%) and
+  duty.%has_production% and
   not (%crew_is_pilot% and any(leg(duty), (crew_pos.%is_supernum% and not %_LC_instructor_in_supernum%))) and
-
-  (any(leg(duty), training.%unperformed_recurrent_types_with_matching_qual%(duty.%start_hb%)) or
-  any(leg(duty), training.%unperformed_recurrent_types_with_matching_qual%(leg.%end_hb%)));
-
+  any(leg(duty), training.%unperformed_recurrent_types_with_matching_qual%(duty.%start_hb%) or 
+  training.%unperformed_recurrent_types_with_matching_qual%(leg.%end_hb%))
+  where (leg.%is_flt_sby_or_bl%);
 
 set inst_lc_codes = "LC", "ILC";
 %_LC_instructor_in_supernum% =
@@ -465,11 +466,10 @@ set inst_lc_codes = "LC", "ILC";
   default(%_missed_recurrent_trainings_str%, ""));
 
 %_missed_recurrent_trainings_str% =
-   
   if training.%unperformed_recurrent_types_with_matching_ac_qual_str%(duty.%start_hb%) <> ""  then
     training.%unperformed_recurrent_types_with_matching_ac_qual_str%(duty.%start_hb%)
   else
-    training.%unperformed_recurrent_types_with_matching_ac_qual_str%(trip.%end_hb%);
+     training.%unperformed_recurrent_types%(trip.%end_hb%);
 
 
 
@@ -767,6 +767,30 @@ export rule qln_pm_mentor_CC =
 end
 
 
+/*
+** Rule:
+**    An ETOPS LIFUS leg should be followed immediately by an ETOPS LC leg.
+**
+** Description:
+**
+*/
+
+export rule qln_etops_lifus_lc_correct_order =
+  valid roster.%check_rules%
+    and (leg.%is_etops_lifus% or leg.%is_etops_lc%)
+    and leg.%in_pp_extended%
+    and rule_exceptions.%rule_on%(leg.%start_hb%);
+  if leg.%is_etops_lifus% then 
+    default(next(leg(roster),leg.%is_etops_lc%) where (leg.%is_flight_duty%),false)
+  else
+    default(prev(leg(roster),leg.%is_etops_lifus%) where (leg.%is_flight_duty%),false);
+  startdate  = leg.%start_hb%;
+  severity = %severity_filter_int%(leg.%start_hb%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext "OMA: ETOPS LIFUS must be followed by ETOPS LC";
+  remark "OMA: ETOPS LIFUS must be followed by ETOPS LC",
+  planner "OMA: ETOPS LIFUS must be followed by ETOPS LC";
+end
 /* Cached expressions */
 %crew_is_pilot% = crew.%is_pilot%;
 %crew_is_cabin% = crew.%is_cabin%;

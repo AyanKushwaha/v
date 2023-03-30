@@ -106,9 +106,6 @@ import iterators;
   
 export %possible_pt_freedays_1_month% =
   %possible_pt_freedays_in_period%(wop.%start_month_start%, wop.%start_month_end%);
-  
-export %possible_pt_freedays_2_months% =
-  accumulators.%qual_pt_freedays_in_period%(%prev_month_start%, wop.%start_month_end%);
 
 export %possible_pt_freedays_1_month_pp% =
   %possible_pt_freedays_in_period%(%pp_start%, %publ_period_end%);
@@ -131,8 +128,6 @@ export %nr_qualifying_in_1_month% =
 export %nr_qualifying_in_1_given_month%(AbsTime start_t, AbsTime end_t) =
       %qual_freedays_in_period%(crew.%variable_group_start%(start_t, end_t),
                             crew.%variable_group_end%(start_t, end_t));
-
-
 
 /*
 ** Number of freedays in a month for FG
@@ -165,7 +160,8 @@ export %nr_qualifying_in_publ_period% =
 export %days_freedays_possible%(Abstime s, Abstime e) =
   duty.%days_with_selection_possible%(duty.%duty_sel_freeday%, s, e)
   + %fdc15_sbl_contribution%(s, e)
-  - %single_day_gaps_not_freedays%(s, e);
+  - %single_day_gaps_not_freedays%(s, e)
+  - %two_day_gaps_not_freedays%(s, e);
 
 export %days_freedays_possible_pp% =
   %days_freedays_possible%(round_down_month(%pp_start%),round_up_month(%pp_start% + 0:01));
@@ -176,14 +172,6 @@ export %days_freedays%(Abstime s, Abstime e) =
   
 export %days_freedays_pp% =
   duty.%days_with_selection_calendar_month%(duty.%duty_sel_freeday%, %pp_start%);
-  
-/****************************************************************************
- * Section 3: Freedays in two or more calendar months.
- * *************************************************************************/
-export %nr_qualifying_in_2_months% =
-  accumulators.%qual_freedays_in_period%(%prev_month_start%, wop.%start_month_end%);
-
-export %prev_month_start% = round_down_month(wop.%start_month_start% - 0:01);
 
 /***************************************************************************
  * Section 4: Freedays in an interval.
@@ -269,12 +257,17 @@ export %lh_non_qual_freedays_in_month_cc_skd%(AbsTime start, AbsTime stop) =
     0;
 
 export %days_excluding_bought_days% = 
-  wop.%days% - count(duty(wop)) where 
+  wop.%days% - sum(duty(wop), %nr_bought_days_in_duty%) where 
     (duty.%is_bought% and 
      not default((duty.%start_day% = next(duty(wop),duty.%end_day%)),false) and
      not first(leg(duty),bought_days.%leg_bought_type% = "F7") or
      (duty.%is_freeday% and not duty.%is_F0%)); /* SKCMS-2248: Special treatment of F0 since it is not in activity grp CMP anymore */
 
+/* SKCMS-3241 added a way to count the days that is bought in case bought duty spans over midnight = 1 duty, but 2 bought days */
+%nr_bought_days_in_duty% =
+  count(times(duty.%days%))
+  where(not void(bought_days.%type_on_day%(duty.%start_day% + (%times_index_0%-1)*24:00)));
+  
 /*
 ** Working days between freedays
 */
@@ -659,13 +652,10 @@ export %min_required_in_1_month_by_month_startdate%(Abstime start_t, Abstime end
          %target_days_in_period_1_month_fcsh_k11%(start, stop)
     else
       %normal_target_days_in_period_1_month%(start, stop);
-      
 
-      
 %normal_target_days_in_period_1_month%(Abstime start, Abstime stop) =
   %ind_min_nr_freedays_in_1_month%(start) * %qual_days_in_period%(start, stop) +
-  nmax(%target_pt_freedays_in_period_1_month%(start, stop),
-       %target_pt_freedays_in_period_2_month%(start, stop));
+  %target_pt_freedays_in_period_1_month%(start, stop);
         
 /*
 ** FC K11 SH: Maximum 2 reduced months per calendar year, and maximum 1 reduced
@@ -741,7 +731,7 @@ export %min_required_in_1_month_by_month_startdate%(Abstime start_t, Abstime end
 
 export %_target_days_in_period_1_month_fcsh_k11%(Abstime start, Abstime stop) =
     let pt_factor = model_crew.%crew_contract_part_time_factor_at_date%(crew.%id%, start);
-    model_freedays.%fdc15_month_entitled_basic_fd_qa%(pt_factor, crew.%id%, start)
+    model_freedays.%fdc15_month_entitled_basic_fd%(pt_factor, crew.%id%, start)
     * %qual_days_in_period%(start, stop);
         
 /*
@@ -752,7 +742,7 @@ export %_target_days_in_period_1_month_fcsh_k11%(Abstime start, Abstime stop) =
 
 %target_days_in_period_1_month_fclh_k11%(Abstime start, Abstime stop) =
     let pt_factor = model_crew.%crew_contract_part_time_factor_at_date%(crew.%id%, start);
-    model_freedays.%fdc15_month_entitled_basic_fd_qa%(pt_factor, crew.%id%, start)
+    model_freedays.%fdc15_month_entitled_basic_fd%(pt_factor, crew.%id%, start)
     * %qual_days_in_period%(start, stop);
 
 %fd_vg_with_two_freeday_reduced_months_in_calendar_year% =
@@ -797,9 +787,6 @@ export %_target_days_in_period_1_month_fcsh_k11%(Abstime start, Abstime stop) =
       * %pt_qual_days_in_period%(start, stop)
   else
     0;
-    
-export %min_required_in_3_months% =
-  (accumulators.%min_required_freedays_in_3_months%(%prev_prev_month_start%, wop.%start_month_end%) + 5) / 10;
 
 /* Lookup for 100% contract start */
 %_crew_ft_contract_start%(Abstime start, Abstime date) =
@@ -817,33 +804,7 @@ export %min_required_in_3_months% =
   else
     first(times((date-start)/24:00), date - ((%times_index_0% - 1) * 24:00))
     where(not %_crew_is_fulltime_vg%(date - %times_index_0% * 24:00));
-  
-/* Min required freedays in 3 months for fc sh 100% crew */
-export %min_required_in_3_months_fulltime_fc_sh% =
-  let stop = wop.%start_month_end%,
-      start_ft = %_crew_ft_contract_start%(%prev_prev_month_start%, stop),
-      start = %prev_prev_month_start%,
-      days_ft = (stop - start_ft) / 24:00,
-      days = (stop - start) / 24:00;
-  (((days - (days-days_ft) - 
-     accumulators.%nr_non_qualifying_days_in_period_fulltime_fc_sh%(start, 
-                                                                    stop)) 
-     * 10 * %ind_min_nr_freedays_3_months_fulltime_fc_sh%) /
-  days + 5) / 10;
 
-/* Min required freedays in 6 months for fc sh 100% crew */
-export %min_required_in_6_months_fulltime_fc_sh% =
-  let stop = wop.%start_month_end%,
-      start = add_months(stop, -6),
-      start_ft = %_crew_ft_contract_start%(start, stop),
-      days_ft = (stop - start_ft) / 24:00,
-      days = (stop - start) / 24:00;
-  (((days - (days-days_ft) - 
-     accumulators.%nr_non_qualifying_days_in_period_fulltime_fc_sh%(start, 
-                                                                    stop)) 
-     * 10 * %ind_min_nr_freedays_6_months_fulltime_fc_sh%) /
-  days + 5) / 10;
-  
 %req_freedays_in_interval%(abstime start, abstime stop) =
   let days = (round_up_month(stop) - round_down_month(start))/24:00;
   if start < stop then
@@ -863,17 +824,15 @@ export %min_required_in_6_months_fulltime_fc_sh% =
       %min_freedays_1_month%(start);
     
 table min_nr_freedays_in_3_6_months_fulltime_fc_sh_tab =
-  crew.%region%, crew.%is_fdrc_wop_start% -> 
+  crew.%region% -> 
     %ind_min_nr_freedays_3_months_fulltime_fc_sh%,
     %ind_min_nr_freedays_6_months_fulltime_fc_sh%;
-  "SKN",     - -> 35, 0;
+   "SKN"  -> 35, 0;
+ <>"SKN"  -> 35, 72;
   &
-      -, false -> 35, 72;
-      -,  true -> 34, 0;
-      -,     - -> 0, 0;
+       -  -> 0, 0;
 end
-  
-    
+
 /* The required number of freedays in a month specified by the agreements 
  * listed in the beginning of rule module. This is if all of the days in
  * a month are qualifying. */
@@ -911,7 +870,6 @@ end
 /* In general we check contract + special schedule for parttime, but in some
    specific cases we need to check one or the other. */
 %min_freedays_1_month%(Abstime date) = %_min_freedays_1_month%(date, false);
-%min_freedays_2_month%(Abstime date) = %_min_freedays_2_month%(date, false);
 %min_pt_freedays_1_month%(Abstime date) = 
     let start_date = round_down_month(date),
         end_date = round_up_month(date);
@@ -924,31 +882,6 @@ end
     else
         %_min_pt_freedays_1_month%(date, false);   
 
-%min_pt_freedays_2_month%(Abstime date) = 
-    let start_date = %start_date_pt_2_month%(date),
-        end_date = %end_date_pt_2_month%(date);
-            
-    if crew.%is_sks% and 
-       %flight_crew% and 
-       %part_time_change_date_in_period%(start_date, end_date) then
-       nmin(%_min_pt_freedays_2_month%(start_date, false),
-            %_min_pt_freedays_2_month%(end_date, false))      
-       
-    else
-        %_min_pt_freedays_2_month%(date, false);   
-        
-%start_date_pt_2_month%(Abstime date) = 
-    if fundamental.%even_month_by_month_start%(date) then 
-        add_months(round_down_month(date), -1)
-    else 
-        round_down_month(date);
-        
-%end_date_pt_2_month%(Abstime date) =     
-    if fundamental.%even_month_by_month_start%(date) then
-        round_up_month(date)
-    else 
-        add_months(round_up_month(date), 1);
-            
 %part_time_change_date_in_period%(Abstime start_date, Abstime end_date) = 
     not void(crew.%part_time_change_date_in_period%(start_date, 
                                                     end_date));   
@@ -982,49 +915,46 @@ table ind_min_nr_freedays(Abstime date, Bool contract) =
   %_part_time_factor%(date, contract),
   %_monthly_var_pt%(date) ->
     %_min_freedays_1_month%,
-    %_min_freedays_2_month%,
-    %_min_pt_freedays_1_month%,
-    %_min_pt_freedays_2_month%;
+    %_min_pt_freedays_1_month%;
 
   /* 4EXNG */
-  "FC_SH_4EXNG" , 100, -     -> %_min_freedays_1_month_fc_sh%(date),            0,  0,  0;
-  "FC_SH_4EXNG" ,  83, -     -> %min_f_and_la_days_pt_fc_4exng%(date) -  6,     0,  6,  0;
-  "FC_SH_4EXNG" ,  80, -     -> %min_f_and_la_days_pt_fc_4exng%(date) -  6,     0,  6,  0;
-  "FC_SH_4EXNG" ,  75, false -> %min_f_and_la_days_pt_fc_4exng%(date) -  7,     0,  7,  0;
-  "FC_SH_4EXNG" ,  75, true  -> %min_f_and_la_days_pt_fc_4exng%(date) -  8,     0,  8,  0;
-  "FC_SH_4EXNG" ,  60, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 12,     0,  12, 0; /********CORONA*******/  
-  "FC_SH_4EXNG" ,  50, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 15,     0,  15, 0;
-  "FC_SH_4EXNG" ,  45, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 17,     0,  17, 0; /********CORONA*******/  
-  "FC_SH_4EXNG" ,  40, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 18,     0,  18, 0; /********CORONA*******/
-  "FC_SH_4EXNG" ,  38, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 19,     0,  19, 0; /********CORONA*******/
-  "FC_SH_4EXNG" ,  35, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 20,     0,  20, 0; /********CORONA*******/   
-  "FC_SH_4EXNG" ,  30, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 21,     0,  21, 0; /********CORONA*******/
-  "FC_SH_4EXNG" ,  28, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 22,     0,  22, 0; /********CORONA*******/ 
-  "FC_SH_4EXNG" ,  25, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 23,     0,  23, 0; /********CORONA*******/
-  "FC_SH_4EXNG" ,  20, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 24,     0,  24, 0; /********CORONA*******/
-  "FC_SH_4EXNG" ,  15, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 26,     0,  26, 0; /********CORONA*******/
-  "FC_SH_4EXNG" ,  10, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 27,     0,  27, 0; /********CORONA*******/  
-  "FC_SKI_4EXNG", 100, -     -> %min_freedays_1_month_fclh_4exng%,              0,  0,  0;
-  "FC_SKI_4EXNG" , 83, -     -> %min_f_and_la_days_pt_fc%(date) -  6,     0,  6,  0; /********CORONA FD SKI September 2020*******/
-  "FC_SKI_4EXNG" , 80, -     -> %min_f_and_la_days_pt_fc%(date) -  6,     0,  6,  0; /********CORONA FD SKI September 2020*******/
-  "FC_SKI_4EXNG",  75, false -> %min_f_and_la_days_pt_fc%(date) - 7,      0,  7, 15;
-  "FC_SKI_4EXNG",  75, true  -> %min_f_and_la_days_pt_fc%(date) - 8,      0,  8, 15;
-  "FC_SKI_4EXNG" , 60, -     -> %min_f_and_la_days_pt_fc%(date) - 12,     0,  12, 0; /********CORONA FD SKI September 2020*******/  
-  "FC_SKI_4EXNG" , 50, -     -> %min_f_and_la_days_pt_fc%(date) - 15,     0,  15, 0; /********CORONA FD SKI September 2020*******/
-  "FC_SKI_4EXNG" , 45, -     -> %min_f_and_la_days_pt_fc%(date) - 17,     0,  17, 0; /********CORONA FD SKI September 2020*******/  
-  "FC_SKI_4EXNG" , 40, -     -> %min_f_and_la_days_pt_fc%(date) - 18,     0,  18, 0; /********CORONA FD SKI September 2020*******/
-  "FC_SKI_4EXNG" , 38, -     -> %min_f_and_la_days_pt_fc%(date) - 19,     0,  19, 0; /********CORONA FD SKI September 2020*******/
-  "FC_SKI_4EXNG" , 35, -     -> %min_f_and_la_days_pt_fc%(date) - 20,     0,  20, 0; /********CORONA FD SKI September 2020*******/   
-  "FC_SKI_4EXNG" , 30, -     -> %min_f_and_la_days_pt_fc%(date) - 21,     0,  21, 0; /********CORONA FD SKI September 2020*******/
-  "FC_SKI_4EXNG" , 28, -     -> %min_f_and_la_days_pt_fc%(date) - 22,     0,  22, 0; /********CORONA FD SKI September 2020*******/ 
-  "FC_SKI_4EXNG" , 25, -     -> %min_f_and_la_days_pt_fc%(date) - 23,     0,  23, 0; /********CORONA FD SKI September 2020*******/
-  "FC_SKI_4EXNG" , 20, -     -> %min_f_and_la_days_pt_fc%(date) - 24,     0,  24, 0; /********CORONA FD SKI September 2020*******/
-  "FC_SKI_4EXNG" , 15, -     -> %min_f_and_la_days_pt_fc%(date) - 26,     0,  26, 0; /********CORONA FD SKI September 2020*******/
-  "FC_SKI_4EXNG" , 10, -     -> %min_f_and_la_days_pt_fc%(date) - 27,     0,  27, 0; /********CORONA FD SKI September 2020*******/  
+  "FC_SH_4EXNG" , 100, -     -> %_min_freedays_1_month_fc_sh%(date),            0;
+  "FC_SH_4EXNG" ,  83, -     -> %min_f_and_la_days_pt_fc_4exng%(date) -  6,     6;
+  "FC_SH_4EXNG" ,  80, -     -> %min_f_and_la_days_pt_fc_4exng%(date) -  6,     6;
+  "FC_SH_4EXNG" ,  75, false -> %min_f_and_la_days_pt_fc_4exng%(date) -  7,     7;
+  "FC_SH_4EXNG" ,  75, true  -> %min_f_and_la_days_pt_fc_4exng%(date) -  8,     8;
+  "FC_SH_4EXNG" ,  60, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 12,     12; /********CORONA*******/  
+  "FC_SH_4EXNG" ,  50, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 15,     15;
+  "FC_SH_4EXNG" ,  45, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 17,     17; /********CORONA*******/  
+  "FC_SH_4EXNG" ,  40, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 18,     18; /********CORONA*******/
+  "FC_SH_4EXNG" ,  38, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 19,     19; /********CORONA*******/
+  "FC_SH_4EXNG" ,  35, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 20,     20; /********CORONA*******/   
+  "FC_SH_4EXNG" ,  30, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 21,     21; /********CORONA*******/
+  "FC_SH_4EXNG" ,  28, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 22,     22; /********CORONA*******/ 
+  "FC_SH_4EXNG" ,  25, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 23,     23; /********CORONA*******/
+  "FC_SH_4EXNG" ,  20, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 24,     24; /********CORONA*******/
+  "FC_SH_4EXNG" ,  15, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 26,     26; /********CORONA*******/
+  "FC_SH_4EXNG" ,  10, -     -> %min_f_and_la_days_pt_fc_4exng%(date) - 27,     27; /********CORONA*******/  
+  "FC_SKI_4EXNG", 100, -     -> %min_freedays_1_month_fclh_4exng%,              0;
+  "FC_SKI_4EXNG" , 83, -     -> %min_f_and_la_days_pt_fc%(date) -        6,     6; /********CORONA FD SKI September 2020*******/
+  "FC_SKI_4EXNG" , 80, -     -> %min_f_and_la_days_pt_fc%(date) -        6,     6; /********CORONA FD SKI September 2020*******/
+  "FC_SKI_4EXNG",  75, false -> %min_f_and_la_days_pt_fc%(date) -        7,     7;
+  "FC_SKI_4EXNG",  75, true  -> %min_f_and_la_days_pt_fc%(date) -        8,     8;
+  "FC_SKI_4EXNG" , 60, -     -> %min_f_and_la_days_pt_fc%(date) -       12,     12; /********CORONA FD SKI September 2020*******/  
+  "FC_SKI_4EXNG" , 50, -     -> %min_f_and_la_days_pt_fc%(date) -       15,     15; /********CORONA FD SKI September 2020*******/
+  "FC_SKI_4EXNG" , 45, -     -> %min_f_and_la_days_pt_fc%(date) -       17,     17; /********CORONA FD SKI September 2020*******/  
+  "FC_SKI_4EXNG" , 40, -     -> %min_f_and_la_days_pt_fc%(date) -       18,     18; /********CORONA FD SKI September 2020*******/
+  "FC_SKI_4EXNG" , 38, -     -> %min_f_and_la_days_pt_fc%(date) -       19,     19; /********CORONA FD SKI September 2020*******/
+  "FC_SKI_4EXNG" , 35, -     -> %min_f_and_la_days_pt_fc%(date) -       20,     20; /********CORONA FD SKI September 2020*******/   
+  "FC_SKI_4EXNG" , 30, -     -> %min_f_and_la_days_pt_fc%(date) -       21,     21; /********CORONA FD SKI September 2020*******/
+  "FC_SKI_4EXNG" , 28, -     -> %min_f_and_la_days_pt_fc%(date) -       22,     22; /********CORONA FD SKI September 2020*******/ 
+  "FC_SKI_4EXNG" , 25, -     -> %min_f_and_la_days_pt_fc%(date) -       23,     23; /********CORONA FD SKI September 2020*******/
+  "FC_SKI_4EXNG" , 20, -     -> %min_f_and_la_days_pt_fc%(date) -       24,     24; /********CORONA FD SKI September 2020*******/
+  "FC_SKI_4EXNG" , 15, -     -> %min_f_and_la_days_pt_fc%(date) -       26,     26; /********CORONA FD SKI September 2020*******/
+  "FC_SKI_4EXNG" , 10, -     -> %min_f_and_la_days_pt_fc%(date) -       27,     27; /********CORONA FD SKI September 2020*******/  
+  "CC_4EXNG"    ,  - , -     -> %min_freedays_1_month_4exng_cc%(date,contract),  0;
   
-  "CC_4EXNG"    ,  - , -     -> %min_freedays_1_month_4exng_cc%(date,contract), 0,  0,  0;
-  
-  -, -, -                    -> 0, 0, 0, 0;
+  -, -, -                    -> 0, 0;
 end
 
 %_min_freedays_1_month_fclh%(Abstime date) =
@@ -1067,13 +997,6 @@ table min_f_and_la_days_pt_fc (Abstime date) =
   false, 60 -> 19;
   false, 50 -> 21;
     -  ,  - -> 99;
-end
-
-/* Auxiliary formulas for F-days min values in 'internal' table */
-table gm_freeday_table(AbsTime date) =
-  %gm_agreement_valid%(date) -> %_rc_100%, %_sh_100_1m%, %_sh_100_2m%, %_sh_pt_2m%;
-  true -> %_min_freedays_1_month_fc_sh%(date), %_min_freedays_1_month_fc_sh%(date), 0, 0;
-  false -> 11, 12, 26, 11;
 end
 
 export %min_freedays_1_month_skn%(Abstime date) = 
@@ -1230,25 +1153,17 @@ export %part_time_factor_string% (Abstime date, Bool contract)=
 export %min_nr_freedays_parttime%(Abstime date) = default(%agreement_freedays_in_month%(model_crew.%agreement_at_date%(crew.%id%,date)) / 100, 0);
 
 table default_freeday_requirement_fc_sh(Abstime date) =
-  parameters.%k4exng_fc_sp5_1_valid%(date),
-  parameters.%k11_fc_sp10_9_valid%(date),
   system_db_parameters.%freedays_fd_corona%(date),
   %crew_has_corona_parttime%,
   crew.%region_at_date%(date),
-  not crew.%is_fdrc%(date),
   %crew_employed_before_25Jan2005% ->
     %_min_freedays_1_month_fc_sh_default%;
     
-  true,    - , -   , false,    -  ,     -,     - -> 11; /* 4ExNG */
-  true,    - , true, true,    -    ,     -,     - -> %corona_min_freedays_parameter_p%; /* CORONA */ 
-  false, true,  -  , false,   -  ,     -,     - -> 12; /* K11 */
-  false, false, -  , false, "SKN",     -,     - -> 13;
+     -    , false,   -  ,   - -> 11; /* 4ExNG */
+     true , true ,   -  ,   - -> %corona_min_freedays_parameter_p%; /* CORONA */ 
   &
-    -  ,  -  ,  -  ,false,    -, false,  true -> 12; /* Crew in RC employed before 25Jan2005 */
-    -  ,    -,  -  ,false,    -, false, false -> 11; /* Crew in RC employed after 25Jan2005 */
-    -  ,    -,  -  ,false,    -,  true,     - -> 13; /* Crew in MAIN */
-  
-    -  ,    -,    -,    -,    -,     -,     - -> 13;
+     -    , false,    - ,   - -> 13; /* Crew in MAIN */
+     -    ,     -,    - ,   - -> 13;
 end
 
 %crew_has_corona_parttime% =
@@ -1270,7 +1185,7 @@ remark "Minimum freedays parameter Corona";
 table freeday_requirement(Abstime date, String ac_fam) =
   round_down_month(date), 
   crew.%region_at_date%(date), 
-  not crew.%is_fdrc%(date),
+  crew.%has_agmt_group_sk%,
   ac_fam -> 
     Int %___min_freedays_1_month_fc_sh_standard%,
 	Int %___min_freedays_1_month_fc_sh_passive%;
@@ -1328,158 +1243,8 @@ table month_variation_freedays(Abstime date) =
   - -> true;
 end
 
-/* Only FC relevant - for accumulator module compile */
-/* Moved definitions below back here because of tracking rule set compile errors - JonasC 07076 */
-
-/* ONLY FC SH VG relevant - possible move to freedays_fc */
-export %ind_req_pt_freedays_2_months_1_month_part%(Abstime start, Abstime stop) =
-  if crew.%part_time_change_in_period%(start, stop) then
-    %ind_req_pt_freedays_2_months_with_month_as_two_intervals%(start, stop)
-  else
-    %ind_req_pt_freedays_2_months_with_month_as_one_interval%(start, stop);
-
-/* ONLY FC SH VG relevant - possible move to freedays_fc */
-%ind_req_pt_freedays_2_months_with_month_as_two_intervals%(Abstime start, Abstime stop)  =
-  let part_time_change_date = crew.%part_time_change_date_in_period%(start, stop),
-      days_in_month = (stop - start) / 24:00;
-  10 *
-  (%target_pt_freedays_in_period_2_month%(calendar.%month_start%, part_time_change_date) +
-   %target_pt_freedays_in_period_2_month%(part_time_change_date, calendar.%month_end%)) / days_in_month;
-
-/* ONLY FC SH VG relevant - possible move to freedays_fc */
-%ind_req_pt_freedays_2_months_with_month_as_one_interval%(Abstime start, Abstime stop) =
-  10 * %target_pt_freedays_in_period_2_month%(start, stop) / ((stop - start) / 24:00);
-  
-export %ind_req_3_months_1_month_part%(Abstime start, Abstime stop) =
-  let days = (stop-start) / 24:00;
-  if crew.%part_time_change_in_period%(start,stop) then
-    %ind_req_3_months_split%(start,stop)
-  else
-    (10 * %min_required_in_month%(start) * nmin(%qual_days_for_pt%(start,stop,days,days),days)) / days;
-
-%ind_req_3_months_split%(Abstime start,Abstime stop) = 
-  let days = (stop-start) / 24:00,
-      split_day = crew.%part_time_change_date_in_period%(start,stop),
-      first_days = (split_day-start) / 24:00;
-    ( %min_required_in_month%(start) * first_days * nmin(%qual_days_for_pt%(start,split_day,first_days,days),first_days)
-     + %min_required_in_month%(split_day) * (days-first_days) * nmin(%qual_days_for_pt%(split_day,stop,days-first_days,days),days-first_days)
-    ) * 10 / days/ days;
-  
-
 %qual_days_for_pt%(Abstime start,Abstime stop,Int first_days,Int days) = 
   %qual_days_in_period%(start, stop) + (first_days * %_min_pt_freedays_1_month%(start,true))/days;
-
-%min_required_in_month%(AbsTime date) = %min_required_in_quarter%(date) / 3;
-
-
-
-/*
-** NB! FC 4EXNG - accepting 100% and 75% only is a temporary solution,
-** because we don't have information for other part-time percents that will
-** still be in use, e.g. SKN Norwegian Vacation Law contracts.
-*/
-table min_required_in_quarter_table(AbsTime date) =
-  parameters.%k4exng_fc_sp5_1_valid%(date) and
-  (crew.%part_time_factor_at_date%(date) = 100 or
-   crew.%part_time_factor_at_date%(date) = 75),
-  crew.%part_time_factor_at_date%(date) 
-      -> export %min_required_in_quarter%;
-
-  True , 100 -> 34; /* 4ExNG */
-  True ,  80 -> 43;
-  True ,  75 -> 48;
-  True ,  50 -> 61;
-
-  False, 100 -> 36; /* K11 */
-  False,  90 -> 42;
-  False,  83 -> 48;
-  False,  80 -> 48;
-  False,  75 -> 51;
-  False,  60 -> 57;
-  False,  50 -> 63;
-
-    -  ,  -  -> 0; 
-end
-
-  
-/* Note: Need handling of excees freedays in first month of 2 !! - coordinate with cost */
-export %min_required_in_2_months% = 
-  (accumulators.%min_required_freedays_in_2_months%(%prev_month_start%, wop.%start_month_end%) + 5) / 10;
-export %min_required_in_2_months_wop_indep% = 
-  (accumulators.%min_required_freedays_in_2_months%(round_down_month(%pp_start%-00:01),
-                                                    %publ_period_end%) + 5) / 10;
-export %min_required_in_2_months_by_month_start%(abstime month_start_hbt) = 
-  (accumulators.%min_required_freedays_in_2_months%(round_down_month(month_start_hbt-00:01),
-                                                    round_up_month(month_start_hbt + 0:01)) + 5) / 10;
-/*
-** This variable calculates a 1 month minimum freeday requirement 
-** in proportion two a 2 months demand.a (2 months spanning rules)
-** 
-** Assumption is max one parttime change in a calendar month.
-** -> max two changes in two calendar months
-** 
-** Algorithm is:
-**   For each parttime subinterval in month
-**     reduce the 2 month freedays requirement for the relevant
-**     parttime factor with fraction 
-**     nr_qualifying_days_in_subinterval / days in 2 month  
-** If two subintervals in month sum them up.
-*/
-
-export %ind_req_2_months_1_month_part%(Abstime start, Abstime stop) = 
-  let days_in_month = (stop - start) / 24:00;
-  (if crew.%part_time_factor_at_date%(start) <>
-      crew.%part_time_factor_at_date%(stop-0:01) then
-     %ind_req_freedays_2_months_with_month_as_two_intervals%(start, stop)
-   else
-     %ind_req_freedays_2_months_with_month_as_one_interval%(start, stop)) / days_in_month;
-
-/*
-** Two subintervals in one month - sum up
-** The subinterval freeday requirement target must be averaged against
-** a month, so we divide the 2 months requirement by 2 even though this
-** is not 100% correct.  
-** This function is used for accumulators which is why it has 
-** signature with arguments.
-*/
-
-/* stop and start are assumed to span 1 month */
-%ind_req_freedays_2_months_with_month_as_two_intervals%(Abstime start, Abstime stop)  =
-
-  let part_time_change_date = crew.%part_time_change_date_in_period%(start, stop);
-
-  (%target_days_in_period_2_month%(start, part_time_change_date) +
-   %target_days_in_period_2_month%(part_time_change_date, stop));
-
-/* stop and start are assumed to span 1 month */
-%ind_req_freedays_2_months_with_month_as_one_interval%(Abstime start, Abstime stop) =
-  %target_days_in_period_2_month%(start, stop);
-
-/*
-** Accumulates the sum of freedays and parttime freedays pr month
-** in relation to 2 month spanning rules.
-** Despite the variable name's general character it will only work on
-** a monthly basis ! 
-*/
-%target_days_in_period_2_month%(Abstime start, Abstime stop) =
-  ((10 * %ind_min_nr_freedays_in_2_month%(start)) / 2) * 
-  %qual_days_in_period%(start, stop) +
-  10 * %target_pt_freedays_in_period_2_month%(start, stop);
-
-%target_pt_freedays_in_period_2_month%(Abstime start, Abstime stop) =
-  /* potential parttime f demand */
-  (if crew.%is_part_time_at_date%(start) then
-     ((100* %min_pt_freedays_2_month%(start)
-       * %pt_qual_days_in_period%(start, stop)) / 2 +50)/100 
-   else
-     0);
-
-/*
-** For SKN there are special vg categories
-** arbeids/fritidsordning 5/3
-*/
-%ind_min_nr_freedays_in_2_month%(Abstime start) =
-    %min_freedays_2_month%(start);
 
 export %req_lh_freedays_in_month_skd%(AbsTime start_t, AbsTime end_t) =
   if crew.%is_skd% and %cabin_crew% then
@@ -1843,24 +1608,15 @@ export %time_off_minimum_duration_fc_k11% = 62:00;
 ** Used to check the number of F-days before VA.
 */
 export %nr_freedays_before_wop% =
-    (
-        wop.%start_day% -
-
+    ( wop.%start_day% -
         default(
             first(duty(wop),
                  prev(duty(chain)
                     where (not (duty.%has_no_duty_time_contribution% and not duty.%is_blank_day%)),
-                    duty.%end_day% + 24:00
-                )
-            ),
-            first(wop(chain),wop.%start_day%)
-        )
-    ) / 24:00 -
-
-    %nr_non_freedays_before_wop%;
-  
-  
-  %nr_non_freedays_before_wop% =
+                    duty.%end_day% + 24:00)),
+        first(wop(chain),wop.%start_day%))) / 24:00 - %nr_non_freedays_before_wop%;
+    
+%nr_non_freedays_before_wop% =
   default(sum(duty(chain), duty.%days%) from (prev) backwards
           while (duty.%has_no_duty_time_contribution% and
                  not duty.%is_blank_day%)
@@ -1871,9 +1627,6 @@ export %nr_freedays_before_wop% =
 
 set off_duty_groups_count_as_freedays_before_va =
   "FRE", "ILL", "PFR", "PPF";
-
-
-
 
 
 /* 
@@ -1908,28 +1661,7 @@ export %off_duty_days_after_wop% =
           while (duty.%is_off_duty% or duty.%is_cmp% )
           where (duty.%is_cmp%),
           0);
-  
-/*
-**  FC SH VG parttime freedays must be assigned unreduced in relation
-**  nr of qualifying days in period. They must be reduced in relation
-**  to parttime changes in month though.  
-*/
-%ind_req_pt_freedays_with_month_as_two_intervals% =
-  /*
-  ** Required parttime freedays in 1 month based on  
-  ** requirements for relevant parttime factor
-  */
-  %ind_req_pt_freedays_with_month_as_two_intervals_by_dates%(wop.%start_month_start%, wop.%start_month_end%);
 
-%ind_req_pt_freedays_with_month_as_two_intervals_wop_indep% =
-  /*
-  ** Required parttime freedays in 1 month based on  
-  ** requirements for relevant parttime factor
-  */
-  let   month_start =  round_down_month(%pp_start%),
-        month_end = round_up_month(%pp_start%+00:01);
-    %ind_req_pt_freedays_with_month_as_two_intervals_by_dates%(month_start, month_end);
-    
 export %nr_LA_days% =
   sum(wop(roster), wop.%days%)
   from (current) forwards
@@ -2056,24 +1788,29 @@ export %possible_wop_pt_freedays_in_period%(Abstime start, Abstime stop) =
 
 /* The number of F-days required before vacation */
 table min_freedays_before_VA =
-  %flight_crew%, crew.%is_ski%, crew.%is_fc_no%,
+  crew.%has_agmt_group_fpu%, %flight_crew%,%va_period_6_days_or_shorter%, crew.%is_fc_no%,
   %wop_is_only_summer_vacation% ->
     export %min_before_VA%,
     export %nr_before_VA%;
   
   /* Flight crew */
-  true,  true,     -,  true -> 0, %nr_freedays_before_wop%; 
-  true,  true,     -, false -> 2, %nr_freedays_before_wop%; 
-  true, false,  true,  true -> 3, %nr_freedays_before_wop%; 
-  true, false,  true, false -> 2, %nr_freedays_before_wop%;
-  true, false, false,  true -> 0, %nr_freedays_before_wop%;
-  true, false, false, false -> 2, %nr_freedays_before_wop%;
+  false, true, -    ,  true,  true -> 3, %nr_freedays_before_wop%; 
+  false, true, false,  true, false -> 2, %nr_freedays_before_wop%;
+  false, true, true ,  -   , false -> 0, %nr_freedays_before_wop%;
+  false, true, -    , false,  true -> 0, %nr_freedays_before_wop%;
+  false, true, false, false, false -> 2, %nr_freedays_before_wop%;
+   true, true,     -,     -, false -> 0, %nr_freedays_before_wop%;
   
   /* Cabin crew */
-  false,    -,    -,     -  -> 2, %nr_freedays_before_wop%;
+  false,false,    -,    -,     -  -> 2, %nr_freedays_before_wop%;
+   true,false,    -,    -,     -  -> 0, %nr_freedays_before_wop%;
   
-  -, -, -, - -> 0, 0;
+  -, -, -, -, - -> 0, 0;
 end
+
+%va_period_6_days_or_shorter% =
+  system_db_parameters.%k22_fd_0_f_before_short_va%(wop.%start_day%)
+  and wop.%is_vacation% and wop.%days% < 7;
 
 export %nr_around_va_wop% =
   %off_duty_days_before_wop% +
@@ -2194,11 +1931,11 @@ export %vacation_start_day% =
    %vacation_start_skd_skn_sks%
  else if crew.%is_fc_dk% then
    %vacation_start_skd_skn_sks%
- else if crew.%is_fc_se% and 
- crew.%in_variable_group_wop_start% and 
- crew.%part_time_factor_wop_start% < 100 then
-   %vacation_start_vg_pt_sks%  
- else if crew.%is_fc_se% then 
+ else if crew.%is_fc_se% 
+    then if crew.%in_variable_group_wop_start% and 
+            crew.%part_time_factor_wop_start% < 100 
+    then %vacation_start_vg_pt_sks%  
+ else
     %vacation_start_skd_skn_sks%
  else
    wop.%start_day%;
@@ -2208,11 +1945,11 @@ export %vacation_start_day% =
    %vacation_end_skd_skn_sks%
  else if crew.%is_fc_dk% then
    %vacation_end_skd_skn_sks%
- else if crew.%is_fc_se% and
- crew.%in_variable_group_wop_start% and
- crew.%part_time_factor_wop_start% < 100 then
-   %vacation_end_vg_pt_sks%
- else if crew.%is_fc_se% then 
+ else if crew.%is_fc_se% 
+    then if crew.%in_variable_group_wop_start% and
+            crew.%part_time_factor_wop_start% < 100 
+    then %vacation_end_vg_pt_sks%
+ else
     %vacation_end_skd_skn_sks%
  else
   wop.%end_day% + 24:00;
@@ -2380,15 +2117,9 @@ export %wop_is_followed_by_summer_vacation_skn% =
 
 
 /* see rule rules_indust_ccr.ind_min_freedays_surrouding_summer_vacation  */
-/* TODO: when Cimber is removed, this should be valid for all FD */
 export %freedays_surrounding_summer_vacation_group_at_date%(Abstime date) =
     let start_day = round_down(date, 24:00);
-
-    crew.%has_agmt_group_ski_fd_at_date%(start_day) or
-    crew.%has_agmt_group_skn_fd_at_date%(start_day) or
-    crew.%has_agmt_group_skd_fd_at_date%(start_day) or
-    model_crew.%has_agmt_qual_sks_fd_oth_at_date%(crew.%id%, start_day);
-
+    crew.%has_agmt_group_sk_fd_at_date%(start_day);
 
 export %is_summer_vacation%(Bool co) =
        let
@@ -2420,8 +2151,7 @@ export %is_summer_vacation%(Bool co) =
           else 
          /* For late check-out 04 sep is counted as end_day */
            end_day <= day_for_05Sep));
-              
-        
+
 export %count_summer_vacation_days_from_date%(Abstime start) =
     count(times(30))
     while (%is_summer_vacation_day_at_date%(round_down(start + ((%times_index_0% - 1) * 24:00), 24:00)));
@@ -2431,7 +2161,6 @@ export %count_summer_vacation_days_from_date%(Abstime start) =
   any(leg(chain), overlap(date, date + 23:59, leg.%start_hb%, leg.%end_hb%) > 0:00)
   where (%leg_in_summer_vacation_codes%);
 
-
 export %leg_in_summer_vacation_codes% =
     leg.%in_summer_vacation_codes%;
 
@@ -2439,10 +2168,8 @@ export %duty_is_LOA100% =
     crew.%crew_contract_part_time_factor_at_date%(duty.%start_day%) = 100
     and %duty_is_LOA%;
 
-
 export %duty_is_LOA% =
    first(leg(duty), leg.%is_loa%);
-
 
 /************************************************
 * This table is used for FD VG part time crew,
@@ -2496,7 +2223,7 @@ export %has_empty_days_before_wop% =
  
 export %prev_not_freedays_wop_was_vacation% = 
   default(prev(wop(roster), wop.%is_vacation%)
-          where (wop.%is_on_duty% or wop.%is_vacation%),
+          where (wop.%is_off_duty%),
   false);
 
 export %prev_wop_is_vacation_with_no_freedays% = 
@@ -2581,6 +2308,7 @@ export %following_vacation_days% =
  *   CAU J.1.2c, J.2.1.5
  *   SCCA H.1.4a, H.2.5
  *   NKF 8 
+ *   FD: K22, SKCMS-3067
  */
 
 
@@ -2746,47 +2474,19 @@ export %trip_is_followed_by_free_weekend% =
                  where(not trip.%is_allowed_on_free_weekend%),
             true);
 
-/* For both QA_CC and SNK_CC (cimber and K15) blank day BL should not be part of the free weekend.
- ONly for SAS crew it is possible to have blank day BL in start and end day of free weekend */
+/* For e.g. SKN_CC and all FD SK blank day BL should not be part of the free weekend.
+** Controlled in %is_allowed_on_free_weekend% variable
+** Only for crew that do not have 3 whole calendar days defined as free weekend
+** it is possible to have blank day BL in start and end day of free weekend */
 %prev_trip_end_hb_free_we% =
     default(prev(trip(chain), %end_hb_free_we%)
-                 where(not trip.%is_allowed_on_free_weekend% or (not (crew.%has_agmt_group_skn_cc% or crew.%has_agmt_group_qa_cc%) and trip.%is_blank_day%)),
+                 where(not trip.%is_allowed_on_free_weekend% or ((crew.%has_agmt_group_sks_cc% or crew.%has_agmt_group_skd_cc%) and trip.%is_blank_day%)),
             01Jan1986);
 
 %next_trip_start_hb_free_we% = 
     default(next(trip(chain), %start_hb_free_we%)
-                 where(not trip.%is_allowed_on_free_weekend% or (not (crew.%has_agmt_group_skn_cc% or crew.%has_agmt_group_qa_cc%) and trip.%is_blank_day%)),
+                 where(not trip.%is_allowed_on_free_weekend% or ((crew.%has_agmt_group_sks_cc% or crew.%has_agmt_group_skd_cc%) and trip.%is_blank_day%)),
             %pp_end% + 999:00);
-
-
-/****************************************************
-**  The last free weekend in prev month
-**  The first free weekend in current pp
-*/
-
-export %last_fwe_in_prev_month% =
-    accumulators.%last_free_weekend%(%pp_start%);
-
-export %first_fwe_in_current_pp% =
-    let
-    calendar_1_we = %base_case_first_weekend_after_date%(%pp_start%),
-    calendar_2_we = %base_case_first_weekend_after_date%(calendar_1_we),
-    calendar_3_we = %base_case_first_weekend_after_date%(calendar_2_we),
-    calendar_4_we = %base_case_first_weekend_after_date%(calendar_3_we),
-    calendar_5_we = %base_case_first_weekend_after_date%(calendar_4_we);
-
-    if %base_case_first_weekend_after_date_is_free_corrected%(%pp_start%) and calendar_1_we < %pp_end% then
-        calendar_1_we
-    else if %base_case_first_weekend_after_date_is_free_corrected%(calendar_1_we) and calendar_2_we < %pp_end% then
-        calendar_2_we
-    else if %base_case_first_weekend_after_date_is_free_corrected%(calendar_2_we) and calendar_3_we < %pp_end% then
-        calendar_3_we
-    else if %base_case_first_weekend_after_date_is_free_corrected%(calendar_3_we) and calendar_4_we < %pp_end% then
-        calendar_4_we
-    else if %base_case_first_weekend_after_date_is_free_corrected%(calendar_4_we) and calendar_5_we < %pp_end% then
-        calendar_5_we
-    else
-        void_abstime;
 
 /****************************************************
 **  Free weekend code - Greenland special case
@@ -2877,10 +2577,13 @@ export %next_possible_free_weekend_start% =
 ** are allowed on free weekends.
 */
 
-/* For both QA_CC and SNK_CC (cimber and K15) blank day BL should not be part of the free weekend.
- ONly for SAS crew it is possible to have blank day BL in start and end day of free weekend */
+/* For e.g. both SKN_CC and all FD SK blank day BL should not be part of the free weekend.
+** Controlled in %is_allowed_on_free_weekend% variable.
+** Only for SAS crew that do not have 3 whole calendar days defined as free weekend
+** it is possible to have blank day BL in start and end day of free weekend */
+
 %start_hb_free_we% =
-  if (not (crew.%has_agmt_group_skn_cc% or crew.%has_agmt_group_qa_cc%) and trip.%is_blank_day%) or trip.%is_allowed_on_free_weekend% or
+  if ((crew.%has_agmt_group_sks_cc% or crew.%has_agmt_group_skd_cc%) and trip.%is_blank_day%) or trip.%is_allowed_on_free_weekend% or
   default(trip.%is_F36% and fundamental.%day_of_week%(trip.%start_hb%) = 1, false) then
       trip.%start_hb% + %free_we_earliest_end%
   else if (crew.%k4exng_cc_sp5_1_valid%(pp.%start_month%) or
@@ -2890,7 +2593,7 @@ export %next_possible_free_weekend_start% =
       first(duty(trip),duty.%start_hb%) where (not duty.%is_bought%);
 
 %end_hb_free_we% =
-    if (not (crew.%has_agmt_group_skn_cc% or crew.%has_agmt_group_qa_cc%) and trip.%is_blank_day%) or trip.%is_allowed_on_free_weekend% then
+    if ((crew.%has_agmt_group_sks_cc% or crew.%has_agmt_group_skd_cc%) and trip.%is_blank_day%) or trip.%is_allowed_on_free_weekend% then
         trip.%end_scheduled_hb% - 24:00 + %free_we_latest_start%
     else if (crew.%k4exng_cc_sp5_1_valid%(pp.%start_month%) or
              %flight_crew%) and trip.%is_freeday% then
@@ -2904,25 +2607,6 @@ export %next_possible_free_weekend_start% =
 /* Wrapper until crew.region is defined as SKI */
 %crew_region% =
   if %flight_crew% and crew.%is_long_haul_pp_start% then "SKI" else crew.%region%;
-
-/*table free_we_fundamentals =
-  %flight_crew% ->
-    export %free_we_period_is_month%,
-    export %free_we_period_start%,
-    export %free_we_period_end%;
-  / * Flight crew * /
-  true   -> true, %_free_we_period_start%(7), %_free_we_period_end%(7);
-  / * Cabin crew * /
-  false  -> true, %_free_we_period_start%(7), %_free_we_period_end%(7);
-end
-*/
-
-export %free_weekend_max_days% = 30; /* SAS QA FD only */
-
-/*
-%_free_we_period_start_rolling% =
-    %next_possible_free_weekend_start% - %free_weekend_max_days% * 24:00;
-*/
 
 /* Weekday is the day of the weekend that should be included for a free weekend
 ** If weekday is in PP we return Thursday before %pp_start% otherwise 
@@ -3090,21 +2774,14 @@ export %num_free_weekend_with_activity_monthly_sk%(abstime activity_start, strin
  */
 
 /* Weekend_type is depend on the agreement group
- * for example some union have multiple definition of weekend
+ * for example all FD SK and SKN CC have multiple definition of weekend
  * like FRI-SAT-SUN=type_1 and SAT-SUN-MON=type_2 and so on
  */
 table free_we_interval =
     %flight_crew%,
-
-    /* For CC */
-    crew.%is_homebase_scand%
-    and not (crew.%has_agmt_group_snk_cc_at_date%(%pp_start%)
-             or (crew.%has_agmt_group_nkf_cc_at_date%(%pp_start%)
-                 and system_db_parameters.%k20_skn_cc_weekend_is_3day%(%pp_start%))),
-
-    crew.%agmt_group_id_at_date%(%pp_start%),
-
-    crew.%has_agmt_group_sk_fd%
+    crew.%agmt_group_id%,
+    crew.%has_agmt_group_skn_cc%,
+    crew.%has_agmt_group_sk%
     ->
         export %free_we_latest_start%,
         export %free_we_earliest_end%,
@@ -3112,68 +2789,61 @@ table free_we_interval =
 
 
     /* FC */
-    true , -    , "SKN_FD_AG"   , true  -> %free_we_latest_start_skn_fd_ag%,
-                                           %free_we_earliest_end_skn_fd_ag%,
-                                           %free_we_minimum_duration_skn_fd_ag%;
-
-    true , -    , <>"SKN_FD_AG" , true  -> 16:00, 7:00, 63:00;
-
-    true , -    , -             , false -> %free_we_latest_start_fc%,
-                                           %free_we_earliest_end_fc%,
-                                           %free_we_length_fc%;
+    true , -           , -   ,  true  -> 24:00, 24:00, 72:00; /* SK FD Fri 00:00 - Sun 24:00 OR Sat 00:00 - Mon 24:00 */
+    true , -           , -   ,  false -> 24:00, 24:00, 72:00; /* FPU FD Fri 00:00 - Sun 24:00 OR Sat 00:00 - Mon 24:00 */
 
     /* CC */
-    false, true , -             , -     -> 18:00, 6:00, 60:00;  /* Scandinavian CC Default Fri 18:00 - Mon 06:00        */
+    false, -           , false, true  -> 18:00, 6:00, 60:00;  /* SKD+SKS CC Default Fri 18:00 - Mon 06:00  */
+    false, -           , true , true  -> 24:00, 24:00, 72:00; /* SKN CC Fri 00:00 - Sun 24:00 OR Sat 00:00 - Mon 24:00 */
+    false, -           , -    , false -> 24:00, 24:00, 72:00; /* FPU CC Fri 00:00 - Sun 24:00 OR Sat 00:00 - Mon 24:00 */
 
-    false, false, "NKF_CC_AG"   , -     -> 24:00, 24:00, 72:00; /* Fri 00:00 - Sun 24:00 OR Sat 00:00 - Mon 24:00 */
-    false, false, "SNK_CC_AG"   , -     -> 24:00, 24:00, 72:00; /* Fri 00:00 - Sun 24:00 OR Sat 00:00 - Mon 24:00 */
-
-    -    , -    , -             , -     -> 24:00, 24:00, 96:00; /* Default: Fri 00:00 - Mon 24:00 */
+    /* commented out as of now in case other crew groups appear in the future that this is needed for
+    &
+    true , -    , -            ,true  -> %free_we_latest_start_fc%,
+                                           %free_we_earliest_end_fc%,
+                                           %free_we_length_fc%; /*other SK FD crew*/
+    -    , -    , -            ,-     -> 24:00, 24:00, 96:00; /* Default: Fri 00:00 - Mon 24:00 */
 end
-
 
 table free_we_interval_tow(int weekend_types) =
     weekend_types,
-
     %flight_crew%,
-
-    /* For CC */
-    crew.%is_homebase_scand%
-    and not (crew.%has_agmt_group_snk_cc_at_date%(%pp_start%)
-             or (crew.%has_agmt_group_nkf_cc_at_date%(%pp_start%)
-                 and system_db_parameters.%k20_skn_cc_weekend_is_3day%(%pp_start%))),
-
-    crew.%agmt_group_id_at_date%(%pp_start%),
-    
-    crew.%has_agmt_group_sk_fd%
+    crew.%agmt_group_id%,
+    crew.%has_agmt_group_skn_cc%,
+    crew.%has_agmt_group_sk%
     ->
         %_free_we_interval_max_number_of_types%,
         export %free_we_start_tow%,
         export %free_we_end_tow%;
 
     /* FC */
-    1, true ,  -   , "SKN_FD_AG"   , true  -> 1, %free_we_start_tow_skn_fd_ag%, %free_we_end_tow_skn_fd_ag%;
-    1, true ,  -   , <>"SKN_FD_AG" , true  -> 1, 112:00, 7:00;
-    1, true ,  -   , -             , false -> 1, %free_we_start_tow_fc%, %free_we_end_tow_fc%;
+    1, true , -           ,-    ,true  -> 2, 96:00, 0:00;   /* SK FD Fri 00:00 - Sun 24:00 */
+    2, true , -           ,-    ,true  -> 2, 120:00, 24:00; /* SK FD Sat 00:00 - Mon 24:00 */
+    1, true , -           ,-    ,false -> 2, 96:00, 0:00;   /* FPU FD Fri 00:00 - Sun 24:00 */
+    2, true , -           ,-    ,false -> 2, 120:00, 24:00; /* FPU FD Sat 00:00 - Mon 24:00 */
 
     /* CC */
-    1, false, true , -             ,   -   -> 1, 114:00, 6:00;  /* Scandinavian CC Default  Fri 18:00 - Mon 06:00 */
-    1, false, false, "NKF_CC_AG"   ,   -   -> 2, 96:00, 0:00;   /* Fri 00:00 - Sun 24:00 */
-    2, false, false, "NKF_CC_AG"   ,   -   -> 2, 120:00, 24:00; /* Sat 00:00 - Mon 24:00 */
-    1, false, false, "SNK_CC_AG"   ,   -   -> 2, 96:00, 0:00;   /* Fri 00:00 - Sun 24:00 */
-    2, false, false, "SNK_CC_AG"   ,   -   -> 2, 120:00, 24:00; /* Sat 00:00 - Mon 24:00 */
-    -, -    , -    , -             ,   -   -> 1, 96:00, 24:00;  /* Default: Fri 00:00 - Mon 24:00 */
+    1, false, -     , false     ,true  -> 1, 114:00, 6:00;  /* SKD+SKS CC Default  Fri 18:00 - Mon 06:00 */
+    1, false, -     , true      ,true  -> 2, 96:00, 0:00;   /* SKN CC Fri 00:00 - Sun 24:00 */
+    2, false, -     , true      ,true  -> 2, 120:00, 24:00; /* SKN CC Sat 00:00 - Mon 24:00 */
+    1, false, -     , -         ,false -> 2, 96:00, 0:00;   /* FPU CC Fri 00:00 - Sun 24:00 */
+    2, false, -     , -         ,false -> 2, 120:00, 24:00; /* FPU CC Sat 00:00 - Mon 24:00 */
+
+    /*commented out as of now in case other crew groups appear in the future that this is needed for
+    &
+    1, true , -            , -    ,true -> 1, %free_we_start_tow_fc%, %free_we_end_tow_fc%; /*other SK FD crew*/
+    -, -    , -            , -    ,-    -> 1, 96:00, 24:00;  /* Default: Fri 00:00 - Mon 24:00 */
+    
 end
 
 export %free_we_interval_max_number_of_types% = %_free_we_interval_max_number_of_types%(1);
 
 /*
- *         Free weekend intervals - FC
+ *         Free weekend intervals - other FC groups
  *
  */
 
 table free_we_interval_fc =
-  crew.%is_fdrc%(%pp_start%),
   %crew_region% ->
     %free_we_latest_start_fc%,
     %free_we_earliest_end_fc%,
@@ -3181,198 +2851,10 @@ table free_we_interval_fc =
     %free_we_end_tow_fc%,
     %free_we_length_fc%;
     
-  true , <> "SKI" -> 16:00, 6:30, 112:00, 6:30, 62:30;   /* Fri 16:00 - Mon 06:30 K11 RC   */
-  false, <> "SKI" -> 16:00, 8:00, 112:00, 8:00, 64:00;   /* Fri 16:00 - Mon 08:00 K11 Main */
-  false,  "SKI"   -> %free_we_latest_start_ski_k11%,
-                           %free_we_earliest_end_ski_k11%,
-                           %free_we_start_tow_ski_k11%,
-                           %free_we_end_tow_ski_k11%,
-                           %free_we_minimum_duration_ski_k11%;
-                           
-    -  ,    -     -> 24:00, 24:00, 96:00, 24:00, 96:00;  /* Default: Fri 00:00 - Mon 24:00 */
+   <> "SKI"   -> 16:00, 6:30, 112:00, 6:30, 62:30;   /* Fri 16:00 - Mon 06:30 */
+        -     -> 24:00, 24:00, 96:00, 24:00, 96:00;  /* Default: Fri 00:00 - Mon 24:00 */
 end
 
-/*
- *                            K11 SKI
- *
- * SKI must have minimum 64:00 free in the period Friday 1600 to Monday 1000
- * That means that check-out can not be later than Friday 1800, and check-in
- * not earlier than Monday 0800.
- * It also means that we have to calculate the latest start and earliest end   
- * table values according to the actual start and end of the time-off period.
- *
- * E.g. Friday 1615 to Monday 0815 is a legal free weekend
- *      Friday 1545 to Monday 0800 is a legal free weekend
- *      Friday 1615 to Monday 0800 is not a legal free weekend
- *      Friday 1545 to Monday 0745 is not a legal free weekend
- *      Friday 1815 to Monday 1015 is not a legal free weekend
- */
-
-%free_we_latest_start_alt_1_ski_k11% = 16:00;
-%free_we_earliest_end_alt_1_ski_k11% = 08:00;
-%free_we_latest_start_alt_2_ski_k11% = 18:00;
-%free_we_earliest_end_alt_2_ski_k11% = 10:00;
-%free_we_minimum_duration_ski_k11% = 64:00;
-
-%free_we_latest_start_ski_k11% =
-  default(%_free_we_latest_start_ski_k11%, %free_we_latest_start_alt_1_ski_k11%);
-
-%_free_we_latest_start_ski_k11% =
-  if wop.%is_followed_by_empty_days% or
-     default(next(wop(roster),wop.%is_preceded_by_f4% or
-                              wop.%is_preceded_by_wop_allowed_on_we%)
-               where (not wop.%is_freeday%),
-             false) then
-    if fundamental.%day_of_week%(wop.%end_day%) <= 4 or
-       (if wop.%is_followed_by_empty_days% then
-          (wop.%end_day% - wop.%start_day%) / 24:00 > 2
-        else 
-          (next(wop(roster),wop.%start_day%) - wop.%start_day%) / 24:00 > 3) then
-      %free_we_latest_start_alt_1_ski_k11%
-    else
-      if next(wop(roster),wop.%start_od%) where (not wop.%is_freeday%)
-         >= %free_we_earliest_end_alt_2_ski_k11% then
-        %free_we_latest_start_alt_2_ski_k11%
-      else
-        if next(wop(roster),wop.%start_od%) where (not wop.%is_freeday%)
-           >= %free_we_earliest_end_alt_1_ski_k11% then
-          time_of_day(next(wop(roster),wop.%start_hb%) where (not wop.%is_freeday%)
-                      - %free_we_minimum_duration_ski_k11%)
-        else
-          %free_we_latest_start_alt_1_ski_k11%
-  else
-    %free_we_latest_start_alt_2_ski_k11%;
-
-%free_we_earliest_end_ski_k11% =
-  if default(prev(wop(roster),wop.%is_followed_by_f4% or
-                              wop.%is_followed_by_wop_allowed_on_we% or
-                              wop.%is_followed_by_empty_days%)
-               where (not wop.%is_freeday%),
-             false) then
-    if fundamental.%day_of_week%(wop.%end_day%) <= 4 then
-      %free_we_earliest_end_alt_1_ski_k11%
-    else
-      if prev(wop(roster),wop.%end_od%) where (not wop.%is_freeday%)
-         < %free_we_latest_start_alt_1_ski_k11% then
-        %free_we_earliest_end_alt_1_ski_k11%
-      else
-        if prev(wop(roster),wop.%end_od%) where (not wop.%is_freeday%)
-           < %free_we_latest_start_alt_2_ski_k11% then
-          time_of_day(prev(wop(roster),wop.%end_hb%) where (not wop.%is_freeday%)
-                      + %free_we_minimum_duration_ski_k11%)
-        else
-          %free_we_earliest_end_alt_2_ski_k11%
-  else
-    %free_we_earliest_end_alt_1_ski_k11%;
-
-%free_we_start_tow_ski_k11% =
-  if %free_we_latest_start_ski_k11% <= %free_we_latest_start_alt_2_ski_k11% then
-    96:00 + %free_we_latest_start_ski_k11%
-  else
-    96:00 + %free_we_latest_start_alt_2_ski_k11%;
-
-%free_we_end_tow_ski_k11% =
-  if %free_we_earliest_end_ski_k11% >= %free_we_earliest_end_alt_1_ski_k11% then
-    %free_we_earliest_end_ski_k11%
-  else
-    %free_we_earliest_end_alt_1_ski_k11%;
-
-/*
- *                        K17 - SKN_FD_AG Free weekend
- *
- * SKN_FD_AG must have minimum 64:00 free in the period Friday 1400 to Monday
- * 0900. That means that check-out can not be later than Friday 1700, and check-in
- * not earlier than Monday 0600. It also means that we have to calculate the
- * latest start and earliest end table values according to the actual start and
- * end of the time-off period.
- *
- * E.g. Friday 1415 to Monday 0615 is a legal free weekend
- *      Friday 1645 to Monday 0845 is a legal free weekend
- *      Friday 1615 to Monday 0800 is not a legal free weekend
- *      Friday 1345 to Monday 0600 is not a legal free weekend
- *      Friday 1715 to Monday 0915 is not a legal free weekend
- */
-
-%free_we_latest_start_alt_1_skn_fd_ag% = 14:00;
-%free_we_earliest_end_alt_1_skn_fd_ag% = 06:00;
-%free_we_latest_start_alt_2_skn_fd_ag% = 17:00;
-%free_we_earliest_end_alt_2_skn_fd_ag% = 09:00;
-%free_we_minimum_duration_skn_fd_ag% =
-  if system_db_parameters.%k17_skn_fc_valid%(wop.%start_hb%) then
-    64:00
-  else
-    63:00;
-
-%free_we_latest_start_skn_fd_ag% =
-  if system_db_parameters.%k17_skn_fc_valid%(wop.%start_hb%) then
-    default(%_free_we_latest_start_skn_fd_ag%, %free_we_latest_start_alt_1_skn_fd_ag%)
-  else
-    16:00;
-
-%_free_we_latest_start_skn_fd_ag% =
-  /* Set 17:00 if the WOP after the weekend ends after 09:00 Monday */
-  if %next_non_free_weekend_wop_starts_after_earliest_end_alt_2_skn_fd_ag% then
-    %free_we_latest_start_alt_2_skn_fd_ag%
-  /* Set [start time for the WOP after the weekend - 64:00] if that wop starts between 06:00 and 09:00 Monday */
-  else if next  (wop(roster), wop.%start_od% >= %free_we_earliest_end_alt_1_skn_fd_ag%)
-          where (not wop.%is_allowed_on_free_weekend%) then
-    time_of_day(next  (wop(roster), wop.%start_hb% - %free_we_minimum_duration_skn_fd_ag%)
-                where (not wop.%is_allowed_on_free_weekend%))
-  /* Set 14:00 if the WOP after the weekend starts earlier than 06:00 Monday */
-  else
-    %free_we_latest_start_alt_1_skn_fd_ag%;
-
-/* Check if the next WOP not allowed on free weekends starts after 09:00 the following Monday */
-%next_non_free_weekend_wop_starts_after_earliest_end_alt_2_skn_fd_ag% =
-  let end_hb_current_wop = wop.%end_hb%;
-  default(next  (wop(roster), fundamental.%day_of_week%(wop.%start_day%) > 1 or
-                              wop.%start_od% > %free_we_earliest_end_alt_2_skn_fd_ag% or
-                              (wop.%start_hb% >= end_hb_current_wop + %week_hours% and
-                               wop.%start_od% < %free_we_earliest_end_alt_1_skn_fd_ag%))
-          where (not wop.%is_allowed_on_free_weekend%),
-          true);
-
-%free_we_earliest_end_skn_fd_ag% =
-  if system_db_parameters.%k17_skn_fc_valid%(wop.%start_hb%) then
-    default(%_free_we_earliest_end_skn_fd_ag%, %free_we_earliest_end_alt_2_skn_fd_ag%)
-  else
-    07:00;
-
-%_free_we_earliest_end_skn_fd_ag% =
-  /* Set 06:00 if the WOP before the weekend ends before 14:00 Friday */
-  if %prev_non_free_weekend_wop_ends_before_latest_start_alt_1_skn_fd_ag% then
-    %free_we_earliest_end_alt_1_skn_fd_ag%
-  /* Set [end time for the WOP before the weekend + 64:00] if that wop ends between 14:00 and 17:00 Monday */
-  else if prev  (wop(roster), fundamental.%day_of_week%(wop.%end_day%) = 5 and
-                              wop.%end_od% <= %free_we_latest_start_alt_2_skn_fd_ag%)
-          where (not wop.%is_allowed_on_free_weekend%) then
-    time_of_day(prev  (wop(roster), wop.%end_hb% + %free_we_minimum_duration_skn_fd_ag%)
-                where (not wop.%is_allowed_on_free_weekend%))
-  /* Set 09:00 if the WOP before the weekend ends later than 17:00 Friday */
-  else
-    %free_we_earliest_end_alt_2_skn_fd_ag%;
-
-/* Check if the previous WOP not allowed on free weekends ends before 14:00 the previous Friday */
-%prev_non_free_weekend_wop_ends_before_latest_start_alt_1_skn_fd_ag% =
-  let start_hb_current_wop = wop.%start_hb%;
-  default(prev(wop(roster), wop.%end_hb% <= start_hb_current_wop - %week_hours% or
-                            fundamental.%day_of_week%(wop.%end_day%) < 5 or
-                            (fundamental.%day_of_week%(wop.%end_day%) = 5 and
-                             wop.%end_od% < %free_we_latest_start_alt_1_skn_fd_ag%))
-          where (not wop.%is_allowed_on_free_weekend%),
-          true);
-
-%free_we_start_tow_skn_fd_ag% =
-  if %free_we_latest_start_skn_fd_ag% <= %free_we_latest_start_alt_2_skn_fd_ag% then
-    96:00 + %free_we_latest_start_skn_fd_ag%
-  else
-    96:00 + %free_we_latest_start_alt_2_skn_fd_ag%;
-
-%free_we_end_tow_skn_fd_ag% =
-  if %free_we_earliest_end_skn_fd_ag% >= %free_we_earliest_end_alt_1_skn_fd_ag% then
-    %free_we_earliest_end_skn_fd_ag%
-  else
-    %free_we_earliest_end_alt_1_skn_fd_ag%;
 
 %trip_is_single_day_greenland% =
   is_first(trip(wop)) and is_last(trip(wop)) and
@@ -3405,8 +2887,6 @@ export %free_we_period_start% = %_free_we_period_start%(base_calendar.%sunday%);
 export %free_we_period_end% = %_free_we_period_end%(base_calendar.%sunday%);
 export %free_we_period_start_by_date%(Abstime d) = %_free_we_period_start_by_date%(base_calendar.%sunday%, d);
 export %free_we_period_end_by_date%(Abstime d)  = %_free_we_period_end_by_date%(base_calendar.%sunday%, d);
-
-
 
 export %has_free_weekend_in_period% =
   %has_free_weekend_monthly_by_date%(fundamental.%publ_period_start%);
@@ -3470,24 +2950,12 @@ table free_we_interval_wop_indep =
     
   true,    - ,    -    -> 114:00, 60:00;   /* 4ExNG Fri 18:00 - Mon 06:00 */
 
-  false, true,    -    -> %f4_start_tow_fc%, %f4_length_fc%;   
+  false, true,    -    -> 96:00 , 96:00;   /* Fri 00:00 - Mon 24:00 K22 main */
   false, false, "SKD"  -> 112:00, 62:00;   /* Fri 16:00 - Mon 06:00 */
   false, false, "SKN"  -> %f4_start_tow_cc_skn%, %f4_length_cc_skn%; 
   false, false, "SKS"  -> 114:00, 60:00;   /* Fri 18:00 - Mon 06:00 */
 
     -  ,    -,   -     ->  96:00, 96:00;   /* Default: Fri 00:00 - Mon 24:00 */
-end
-
-table free_we_interval_wop_indep_fc =
-  crew.%is_fdrc%(%pp_start%),
-  %crew_region% ->
-    %f4_start_tow_fc%,
-    %f4_length_fc%;
-    
-  true ,   -    -> 112:00, 62:30;   /* Fri 16:00 - Mon 06:30 K11 RC   */
-  false,   -    -> 112:00, 64:00;   /* Fri 16:00 - Mon 08:00 K11 Main */
-
-    -  ,   -    -> 96:00,  96:00;   /* Default: Fri 00:00 - Mon 24:00 */
 end
 
 table free_we_interval_wop_indep_cc_skn =
@@ -3503,31 +2971,6 @@ end
 /*
  * For use in free weekend rudob and F4 assignment
  */
-%1st_required_free_weekend% =
-  let free_we_start = accumulators.%last_free_weekend%(%pp_start%);
-  if free_we_start + %free_we_length% > %pp_start% then
-    free_we_start
-  else
-    accumulators.%last_free_weekend%(free_we_start + %free_weekend_max_days% * 24:00);
-
-%2nd_required_free_weekend% =
-  accumulators.%last_free_weekend%(
-    %1st_required_free_weekend%
-    + %free_weekend_max_days% * 24:00);
-
-export %required_free_weekend% =
-  if %free_we_period_is_month% then
-    accumulators.%last_free_weekend%(%free_we_period_end%)
-  else if %free_we_period_end% > %pp_start% then
-    %2nd_required_free_weekend%
-  else
-    %1st_required_free_weekend%;
-
-/* Start of the next possible free weekend, i.e. last legal free weekend
- * closest to %free_weekend_max_days% from the previous free weekend
- * or from month end (depending on agreement). */
-export %next_last_free_weekend% =
-  accumulators.%last_free_weekend%(%latest_possible_free_weekend%);
 
 /* We need to do magic since latest_possible_free_weekend returns
 ** 00:00 of the saturday or sunday that the free weekend should be included in */
@@ -3570,34 +3013,11 @@ export %latest_possible_rudob_start% =
         void_abstime;
 
 export %latest_possible_free_weekend% =
-  if %free_we_period_is_month% then
-    %free_we_period_end%
-  else
-    %last_free_weekend_pp_start% + %free_weekend_interval%;
-
-/* Add multiples of whole weeks of max days, HenrikA 25may2007 */
-%free_weekend_interval% =
-  %free_weekend_max_days%/7 * %week_hours%;
+   %free_we_period_end%;
 
 /* End of last free weekend at pp start */
 %last_free_weekend_pp_start% = 
   accumulators.%last_free_weekend%(%pp_start%) + %free_we_length%;
-
-
-
-/* Start of the next last possible free weekend counting from pp start 
-export %next_next_last_free_weekend% =
-  accumulators.%last_free_weekend%(%next_last_free_weekend% + %free_we_length% + 
-                                   %free_weekend_interval%);
-
-/* Used for assigning F4 */
-export %trip_should_have_f4_assigned_after% =
-  %trip_is_followed_by_free_weekend% and
-  crew.%in_variable_group%(%next_possible_free_weekend_start%);
-
-export %f4_should_follow_trip% = 
-  %next_last_free_weekend% >= trip.%start_hb% and
-  %next_last_free_weekend% < default(next(trip(roster), trip.%start_hb%), %pp_end%);
 
 /*
 ** During the last planning period there might have been accumulated a
@@ -3760,359 +3180,14 @@ count(leg(chain)
       where (leg.%is_fs% and
       leg.%start_hb% >=%free_fs_weekend_month_start_skn_nkf%(leg_start) and
       leg.%end_hb% < %free_fs_weekend_month_end_skn_nkf%(leg_start)));   
-  
-/****************************************************************
- * Section 15: Freeday assign script variables
- 
- A period of FG inside publ-pp is not supported.
- A period of VG inside publ-pp is only supported for group change freedays.
- 
- ***************************************************************/
 
-export %freeday_assigner_task_code% =
-  parameter "FN"
-  remark "Fill with specific freeday code: code to use",
-  planner "This parameter defines which freeday code which is to be assigned by the script 'Fill with specific freeday code', e.g. FN (SKCMS-56)";
-
-export %freeday_assigner_assign_24_hour_blocks% = 
-  parameter true
-  remark "Fill with specific freeday code: fill with 24 hour blocks",
-  planner "This parameter defines if the freedays in the script 'Fill with specific freeday code' are assigned in 24 hour blocks or in larger blocks (SKCMS-56";
-
-export %freeday_assigner_task_code_valid% =
-  task.%is_freeday%(%freeday_assigner_task_code%);
- 
-%_required_pt_freedays_in_month_wop_indep% =
-  nmax(%required_pt_freedays_1_month_wop_indep%,
-       %required_pt_freedays_2_month_in_month_wop_indep%);
-
-%required_pt_freedays_1_month% =
-  if %r_valid_pt_freedays% then
-    %min_required_pt_freedays_1_month%
-  else
-    0;
-    
-/* ONLY FC SH VG relevant */
-export %min_required_pt_freedays_1_month% =
-  %min_required_pt_freedays_1_month_by_dates%(wop.%start_month_start%, wop.%start_month_end%);
-  
-export %min_required_pt_freedays_1_month_pp% = %min_required_pt_freedays_1_month_wop_indep%;
-  
-export %min_required_pt_freedays_1_month_wop_indep% =
-  %min_required_pt_freedays_1_month_by_dates%(%pp_start%, %publ_period_end%);
-
-
-/*
-**  Number of part-time LA-days required in a month
-**
-** K11: The normal requirement is reduced only in proportion to the number of
-**      part-time days in the month, when there is a change of part-time percent
-**      in the month. It is not reduced by non-qualifying days (eg. VA etc.), 
-**      except for FD SKD for which VA/VA1 reduces part-time days in month (SKCMS-2641)
-*/
-
-export %min_required_pt_freedays_1_month_by_dates%(abstime start_t, abstime end_t) =
-  let period_days = (end_t - start_t) / 24:00,
-      base_at_date = crew.%base_at_date%(start_t);
-  if crew.%part_time_change_in_period%(start_t,end_t) then
-    %ind_req_pt_freedays_with_month_as_two_intervals_by_dates%(start_t, end_t)
-  else if period_days > 0 then
-    if %flight_crew% and base_at_date = "CPH" then
-      (%_min_pt_freedays_1_month%(start_t,true) * (period_days - %freedays_reducing_days_vacation%(start_t,end_t))) / period_days
-    else
-      %_min_pt_freedays_1_month%(start_t,true)
-  else 0;
-    
-%ind_req_pt_freedays_with_month_as_two_intervals_by_dates%(abstime start_t, abstime end_t) =
-  let   part_time_change_date = crew.%part_time_change_date_in_period%(start_t, end_t),
-        month_days = (end_t-start_t)/24:00;
-  if %flight_crew% and parameters.%k11_fc_sp10_9_valid%(start_t) then
-    (%min_req_pt_freedays_in_month_interval%(start_t,part_time_change_date,month_days) +
-     %min_req_pt_freedays_in_month_interval%(part_time_change_date,end_t,month_days) + 5) /10
-  else
-    (10 *
-     (%target_pt_freedays_in_period_1_month%(start_t, part_time_change_date) +
-      %target_pt_freedays_in_period_1_month%(part_time_change_date, end_t)) /month_days + 5) / 10;
-
-%min_req_pt_freedays_in_month_interval%(abstime i_start, abstime i_end, int month_days) =
-  let i_days = (i_end - i_start) / 24:00;
-
-  10 * ((i_days * %_min_pt_freedays_1_month%(i_start,true)) / month_days);
-
-export %required_pt_freedays_1_month_pp% = 
-  %required_pt_freedays_1_month_wop_indep%; /*clarify the this is pp controlled */
-  
-%required_pt_freedays_1_month_wop_indep% =
-  if %r_valid_pt_freedays_wop_indep% then
-    %min_required_pt_freedays_1_month_wop_indep%
-  else
-    0;
-%required_pt_freedays_2_month_in_month% =
-  if %r_valid_pt_freedays% then
-    %min_required_pt_freedays_2_months% -
-    accumulators.%qual_pt_freedays_in_period%(%prev_month_start%, wop.%start_month_start%)
-  else
-    0;
-    
-export %min_required_pt_freedays_2_months% =
-    %min_required_pt_freedays_2_months_by_dates%(%prev_month_start%, wop.%start_month_end%);
-    
-export %min_required_pt_freedays_2_months_by_dates%(abstime start_t, abstime end_t) = 
-  (accumulators.%min_required_pt_freedays_2_months%(start_t, end_t)) / 10;
-
-%required_pt_freedays_2_month_in_month_wop_indep% =
-  let start_t = round_down_month(%pp_start%-00:01),
-      end_t = %pp_start%;
-
-  if %r_valid_pt_freedays_wop_indep%  then
-    %min_required_pt_freedays_2_months_wop_indep% -
-    accumulators.%qual_pt_freedays_in_period%(start_t, end_t)
-  else
-    0;
-    
-export %min_required_pt_freedays_2_months_wop_indep% =
-  %min_required_pt_freedays_2_months_by_dates%(round_down_month(%pp_start%-00:01), 
-                                               round_up_month(%pp_start%+00:01));
-
-%r_valid_pt_freedays_wop_indep% =
-  %r_valid_pt_freedays_by_dates%(round_down_month(%pp_start%),
-                                 round_up_month(%pp_start%+00:01)) ; 
-%r_valid_pt_freedays% =
-  %r_valid_pt_freedays_by_dates%(wop.%start_month_start%,
-                                 wop.%start_month_end%) ; 
-  
-%r_valid_pt_freedays_by_dates%(abstime start_t, abstime end_t) =
-  (crew.%is_short_haul%(start_t) or 
-   (%flight_crew% and crew.%is_ski_at_date%(start_t))) and
-  crew.%has_some_variable_group_in_period%(start_t,end_t)  and
-  (crew.%part_time_factor_at_date%(start_t) <> 100 or 
-   crew.%part_time_factor_at_date%(end_t - 0:01) <> 100 );
-   
-  
-export %nr_extra_F_days_in_calendar_month% =
-  if crew.%part_time_factor_wop_start% = 80 then
-    freedays.%nr_qualifying_in_2_months%
-  else
-    freedays.%nr_qualifying_in_3_months%;
-    
-export %nr_qualifying_in_3_months% =
-  accumulators.%qual_freedays_in_period%(%prev_prev_month_start%, wop.%start_month_end%);
-  
-export %nr_qualifying_in_3_months_fulltime_fc_sh% =
-  accumulators.%nr_freedays_in_period_fulltime_fc_sh%(%prev_prev_month_start%,
-                                                      wop.%start_month_end%);
-  
-export %nr_qualifying_in_6_months_fulltime_fc_sh% =
-  accumulators.%nr_freedays_in_period_fulltime_fc_sh%(add_months(wop.%start_month_end%, -6),
-                                                      wop.%start_month_end%);
-  
-export %prev_prev_month_start% = round_down_month(wop.%start_month_start% - 35*24:00);
-
-export %r_valid_freedays_in_2_months_by_month_start%(abstime month_start_hbt) =
-  (crew.%is_SKD_at_date%(month_start_hbt) or
-   (crew.%is_SKN_at_date%(month_start_hbt) and not 
-    crew.%is_fulltime_temp_SKN_at_date%(month_start_hbt))) and
-  fundamental.%even_month_by_month_start%(month_start_hbt);
-  
-%required_freedays_3_month_in_month% = 
-  if crew.%is_fdrc_wop_start% and
-     fundamental.%last_month_in_quarter% then
-    %ind_req_3_months_1_month_part%(calendar.%month_start%, calendar.%month_end%)
-  else
-    0;
- 
-/* 
- * Pre-op freedays (fixed)
- */
-export %assign_fixed_freedays% = 
-  crew.%in_fixed_group_pp_start_or_pp_end%;
-  
-/* A carry-out window is used to support group-change freedays in the next pp.
-   We also check att publ-end,
-   but we only need to worry about changes from VG to FG. */
-export %group_change_date% =
-  if crew.%in_fixed_group%(%pp_end% + 48:00) or
-     crew.%in_fixed_group_pp_end% then
-     crew.%change_to_fg_in_period_date%(%pp_start%, %pp_end% + 48:00)
-  else
-    1jan1986;
-
-/* 
- * Post-op freedays. 
- */
-/* Postop freedays should only be assigned when crew is in variable group.
-   The following variables might misbehave when crew changes multiple times in
-   publ period. /EKG 090920 */
-%vg_start% = default(%_vg_start%, 31dec2035);
-%vg_end% = default(%_vg_end%, 1jan1986);
-
-%_vg_start% = 
-    if crew.%has_some_variable_group_in_publ% then
-        if crew.%in_variable_group_pp_start% then %pp_start%
-        else crew.%first_group_change_date_pp_start%
-    else void_abstime;
-
-%_vg_end% = 
-    if crew.%has_some_variable_group_in_publ% then
-        if crew.%in_variable_group%(%publ_period_end%) then add_months(%publ_period_end%, 1)
-        else crew.%change_to_fg_in_period_date%(%pp_start%, %publ_period_end%)
-    else void_abstime;
-    
-export %assign_flex_freedays% =
-  crew.%has_some_5_4_flex_group_in_pp%;
-  
-/* Only one parttime change is allowed in one month. 
-   Since the requirement is per month we only check 
-   publ-pp. */
-export %assign_parttime_freedays% = 
-  crew.%part_time_factor_pp_start% < 100 or
-  crew.%part_time_factor_publ_end% < 100;
-
-export %assign_parttime_freedays_midnight% =
-  crew.%part_time_factor_pp_start% < 100 or
-  crew.%part_time_factor_at_date%(%pp_end%-0:01) < 100;
-  
-/* VG freedays are F4 on free weekend, and carry-out freedays to support
-   pre-rostering in next pp. */
-export %assign_vg_freedays% =
-  crew.%in_variable_group_pp_start_or_pp_end%;
-
-
-/*
-**  Maximum accumulated freedays and parttime freedays requirement
-**  in one month.  (FC: F + LA8, CC: F + F88).
-*/
-export %required_freedays_in_month% = 
-  if %cabin_crew% then
-    nmax(%required_freedays_1_month%,
-         %required_freedays_2_months_in_month%)
-  else
-    nmax(%required_freedays_1_month%,
-         %required_freedays_2_months_in_month%,
-         %required_freedays_3_month_in_month%);    
-
-/* common FC / CC support variable */
-%required_freedays_1_month% =
-  if %r_valid_freedays_in_1_month% then
-    %min_required_in_1_month%
-  else
-    0;
-
-/*
-**  Maximum parttime freedays requirement
-**  in one month.
-*/
+/******************************************/
 export %parttime_code%(abstime date) = 
     crew.%contract_parttime_code%(date);
-  
-/* WPCCR 315 Changed from utc to hb */
-export %parttime_code_wop_start% =
-    %parttime_code%(wop.%start_hb%);
 
 export %parttime_code_pp_start% =
     %parttime_code%(%pp_start%);
-    
-%first_parttime_code_in_pp% =
-  default(%parttime_code_pp_start%,
-          %parttime_code%(crew.%agreement_pp_start_valid_to%));
-
-export %required_pt_freedays_in_month% = 
-  if %cabin_crew% then
-    default(
-            first(wop(chain), %_required_pt_freedays_in_month%)
-            where (wop.%starts_in_pp%), 0)
-  else
-    default(
-            first(wop(chain), %_required_pt_freedays_in_month%)
-            where (wop.%starts_in_pp%), 
-            %_required_pt_freedays_in_month_wop_indep%);
-
-
-%_required_pt_freedays_in_month% =
-  if crew.%is_crew_monthly_parttime_at_date%(calendar.%month_start%) then 0
-  else if crew.%k4exng_cc_sp5_1_valid%(calendar.%month_start%) then
-    %req_pt_freedays_in_period_1_month%(calendar.%month_start%, calendar.%month_end%) / month.%pp_days% + 1
-  else if %cabin_crew% then
-    if crew.%part_time_change_in_month% then
-      %required_pt_freedays_with_month_as_two_intervals%
-    else
-      (10 *
-       %req_pt_freedays_in_period_1_month%(calendar.%month_start%, calendar.%month_end%) / month.%pp_days% + 5) / 10
-  else
-    nmax(%required_pt_freedays_1_month%,
-         %required_pt_freedays_2_month_in_month%);
-
-/*
-** F88 days requirement are calculated as:
-**  The total freedays demand for the parttime crew (F + F88) subtracted by
-**  the corresponding demand for a fulltime crew reduced by the parttimefactor.
-**
-** The algorithm only utilizes 1 month limits, and the assumption is that we
-** have no fixed F88 requirements. 
-*/
-
-%req_pt_freedays_in_period_1_month%(Abstime start, Abstime stop) =
-  /* potential parttime f demand in a period */
-    %_min_pt_freedays_in_month%(start, false) * %qual_days_in_period%(start, stop) - 1;
-
-%required_pt_freedays_with_month_as_two_intervals% =
-  /*
-  ** Required parttime freedays in 1 month based on  
-  ** requirements for relevant parttime factor
-  */
-  let part_time_change_date = crew.%part_time_change_date_in_period%(calendar.%month_start%, calendar.%month_end%);
-
-  (10 *
-  (%req_pt_freedays_in_period_1_month%(calendar.%month_start%, part_time_change_date) +
-   %req_pt_freedays_in_period_1_month%(part_time_change_date, calendar.%month_end%)) / month.%pp_days% + 5) / 10;
-
-/* Variable names are not good, but flight crew have specific PT need. 
-   Cabin on the other hand doesn't, but should get F88 to fill up the total
-   F-need after required freedays after wop has been assigned. */
-export %parttime_freedays_left_to_assign% = 
-    if crew.%is_pilot% then
-        nmax(0, %required_pt_freedays_in_month% - %variable_parttime_freedays_in_month%)
-    else
-        nmax(0, %required_pt_freedays_in_month% - %nr_pt_freedays_in_publ_period%);
-  
-/* WPCCR 315 Freedays and vacations starting 1<month><year> 00:00 will be missed as
-             well as if they start in previous month. Wee need to check the overlap
-             in same time base. 2008-05-29 Janne C
-             One extra hour to work with daylight saving shift.
-             This will work since 25:00/24:00 = 1 day
-*/
-%days_in_publ_period% =
-    let pp_daylight_save_hour =  
-        %period_daylight_save_hour%(%publ_period_start_utc%,
-                                    %publ_period_end_utc%),
-        trip_daylight_save_hour =  
-        %period_daylight_save_hour%(trip.%start_utc%,
-                                    trip.%end_utc%);
-  overlap(%publ_period_start_utc%, %publ_period_end_utc%+pp_daylight_save_hour,
-          trip.%start_utc%, trip.%end_utc%+trip_daylight_save_hour) / 24:00;
-  
-/* WPCCR 315 Some VG crew doesn't have a parttime code (Eija is checking into this)
-             %default_parttime_code% solves this until solved.
-             This can be used for assigning needed ptf days checking assigned days via its group_code. */
-%default_parttime_code% = 
-  if %cabin_crew% and crew.%is_sks% then 
-    "F88"
-  else
-    "LA8";
-
-/* WPCCR 315 It seems to be common that crew are assigned with LA codes other than their own parttime code.
-             Check also group_code if no match on code. 2008-06-03 Janne C*/
-%variable_parttime_freedays_in_month% =                    
-  sum(trip(roster), %days_in_publ_period%)
-  where (trip.%is_group_valid_pt_freeday%
-          and 
-          crew.%part_timer_and_not_fixed_at_date%(trip.%start_hb%) and
-          trip.%start_utc% < %publ_period_end_utc%);
-/*  sum(trip(roster), trip.%days%)
-  where (trip.%starts_in_pp% and 
-         trip.%code% = %parttime_code_wop_start% and 
-         trip.%start_UTC% >= %pp_start% and
-         trip.%start_UTC% < %publ_period_end%);*/
+/******************************************/
 
 /*
 ** Crew validity for freeday relevancy - accessed from rules as well
@@ -4122,321 +3197,6 @@ export %r_valid_freedays_in_1_month% =
   crew.%is_short_haul_wop_start% or
   /* No rule check for LH crew if less than 10 available days */
   freedays.%qual_days_in_month% >= 10;
-
-export %r_valid_freedays_in_2_months% = 
-  if %cabin_crew% then
-    (crew.%is_SKD% or
-     (crew.%is_SKN% and not 
-      crew.%is_fulltime_temp_SKN%)) and
-    fundamental.%even_month%
-  else
-    crew.%is_short_haul_wop_start% and
-    not crew.%is_fdrc_wop_start%;
-
-/*
-**  Less than optimum performance accepted since variables is for script usage
-*/ 
-
-/* Note: F7S CAU handling needed here */
-/*export %possible_pt_freeday_at_date%(abstime date) =
-  not any(wop(roster), overlap(wop.%start_day%, wop.%end_day%, date, date + 23:59) > 0:00) 
-      where(not wop.%is_pt_freeday%) and
-  any(wop(roster), %possible_pt_freedays_after_wop_at_date%(date))
-  where(wop.%is_on_duty% and
-        wop.%end_day% < date);*/
-  
- 
-export %possible_pt_freeday_at_date%(abstime date) =
-  not %overlaps_non_pt%(date) and
-  crew.%part_timer_and_not_fixed_at_date%(date) and
-  %valid_pt_date%(date);
-
-%overlaps_non_pt%(abstime date) =
-  any(wop(roster), overlap(wop.%start_day%, wop.%end_day%, date, date + 23:59) > 0:00) 
-  where(not wop.%is_pt_freeday%);
- /*is_vacation is a best guess from freedays_fc.%possible_pt_freedays_in_period% 
-  and WP CCR 315*/
-
-%valid_pt_date%(abstime date) =
-  any(wop(roster), %possible_pt_freedays_after_wop_at_date%(date))
-  where(%wop_valid_for_pt%(date) and
-        wop.%end_day% < date and
-        wop.%end_day% >= %publ_period_start%-24:00);
-
-%wop_valid_for_pt%(abstime date) = 
-   wop.%is_on_duty% or 
-   wop.%is_vacation% or 
-   wop.%is_freeday%;
-
-  /*Two freedays after production before PT-days */
-%possible_pt_freedays_after_wop_at_date%(Abstime date) = 
-    let min_after_wop = last(duty(wop), %min_required_freedays_after_duty%),
-        duty_is_offduty = last(duty(wop), duty.%is_off_duty%),
-        limit = if duty_is_offduty
-                then nmin(min_after_wop,2)
-                else min_after_wop;
-                    
-  %possible_wop_pt_freedays_in_period%(%pp_start%, %pp_end%) > 0 and
-  ((date > (wop.%end_day% + limit * 24:00) and not wop.%is_freeday%) or
-   (wop.%is_freeday% and wop.%days% >= 1)) and /*Two freedays in row can have pt-days immediately after. Changed to 1 SKCMS-1458 in accordance with SASs */
-  date < default(next(wop(roster), wop.%start_day%) where (wop.%is_on_duty%), 01Jan2036);
-
-%possible_pt_freeday_at_date_ix% =
-  if crew.%has_some_part_time_in_pp% and 
-     %possible_pt_freeday_at_date%(%date_index%)
-  then
-    %parttime_code%(%date_index%)
-  else
-    void_string;
-
-%trip_code_at_date_ix% =
-  if crew.%has_some_part_time_in_pp%
-  then
-     roster.%trip_code_at_date%(%date_index%)
-  else
-    void_string;
-    
-/*
-** IL8 parttime days demands in a month are relevant for crew that have a
-** temporary parttime period (typically illness), implemented via special schedule.
-** In this case a number of 'freedays' are given as IL8 to signal
-** parttime ill.
-** The monthly IL8 demand is given as the difference between the, normal (original)  
-** parttime related freeday demand (sum of freedays an pt_freedays) 
-** This IL8 logic assumes that the original (contract parttime factor) is the same 
-** throughout the whole month.
-*/
-export %required_IL8_as_pt_freedays_in_month% = 
-  if crew.%is_parttime_ill% then
-    first(wop(chain),
-          %required_freedays_in_1_month_temp_parttime% -
-          %required_freedays_in_1_month_contract_parttime%)
-    where (wop.%starts_in_pp%)
-  else 
-    0;
-
-export %IL8_left_to_assign% = 
-  nmax(0, %required_IL8_as_pt_freedays_in_month% - %IL8_in_month%);
-  
-%IL8_in_month% =
-  sum(trip(roster), trip.%days%)
-  where (trip.%starts_in_pp% and 
-         trip.%code% = "IL8" and 
-         trip.%start_hb% >= %pp_start% and
-         trip.%start_hb% < %publ_period_end%);
-
-/*
-**  Required freedays in 1 month based on relevant contract parttime factor
-*/
-%required_freedays_in_1_month_contract_parttime% = 
-  ((10 * 
-    %target_days_in_period_1_month_contract%(calendar.%month_start%, calendar.%month_end%) / wop.%month_days%) + 5) / 10;
-
-/*
-**  Required freedays in 1 month based on relevant temp (parttime IL) parttime factor
-*/
-%required_freedays_in_1_month_temp_parttime% = 
-  ((10 * 
-    %target_days_in_period_1_month%(calendar.%month_start%, calendar.%month_end%) / wop.%month_days%) + 5) / 10;
-
-/* Blankday assignment 
-  We assign until roster becomes illegal, but since assigning one day
-  could be illegal while the next is legal, we have to try all days in 
-  publ. If we have already maxed out the roster this will create a lot
-  of uneccessary work. */
-  /*Redone with times-loop, not very fast 
-  * but only calculated assign blank days 
-  */
-export %max_blankdays_to_assign% =
-  count(times((%publ_period_end%-%pp_start%)/24:00)) where  
-        (roster.%trip_code_at_date%(%pp_start%+(%times_index_0%-1)*24:00) = "open"); 
-
-export %balance% = 
-  %freedays_in_month% 
-    - (%req_freedays_in_month%
-       + (if crew.%k4exng_cc_sp5_1_valid%(fundamental.%pp_start%) then %required_pt_freedays_in_month% else 0));
-  
-export %freedays_in_month% =
-  default(%nr_qualifying_in_publ_period%, pp.%days_in_published%);
-  
-export %req_freedays_in_month% = %req_freedays_in_month_incl_prev_month%;
-
-export %req_freedays_in_month_incl_prev_month% = 
-       nmax(%min_required_in_1_month_wop_indep%,
-            %required_freedays_2_months_in_month_wop_indep%)
-       - (if crew.%k4exng_cc_sp5_1_valid%(fundamental.%pp_start%) then %required_pt_freedays_in_month% else 0);
-
-export %req_freedays_in_month_incl_prev_by_month_start%(abstime month_start, bool incl_non_qual_days) = 
-    let start_t = round_down_month(month_start),
-        end_t = round_up_month(start_t + 0:01);
-    nmax(%required_freedays_2_months_in_month_by_month_start%(month_start),
-         %min_required_in_1_month_by_month_startdate%(crew.%variable_group_start%(start_t,end_t),
-                                                      crew.%variable_group_end%(start_t,end_t)) +
-         (if incl_non_qual_days then %req_lh_freedays_in_month_skd%(start_t, end_t) else 0));
-      
-/*
-** Two months requirement validity - also used from rule 
-*/
-export %required_freedays_2_months_in_month% = 
-  if %cabin_crew% then
-    if %r_valid_freedays_in_2_months% then
-      %min_required_in_2_months% -
-      accumulators.%qual_freedays_in_period%(%prev_month_start%, wop.%start_month_start%)
-    else
-      0
-  else
-    if %r_valid_freedays_in_2_months% then
-      %min_required_in_2_months% -
-      accumulators.%qual_freedays_in_period%(%prev_month_start%, wop.%start_month_start%)
-    else
-     0;
-     
-export %required_freedays_2_months_in_month_wop_indep% = 
-  if %cabin_crew% then
-    if %r_valid_freedays_in_2_months_wop_indep% then
-      %min_required_in_2_months_wop_indep% -
-      accumulators.%qual_freedays_in_period%(round_down_month(%pp_start%-00:01), %pp_start%)
-    else
-      0
-  else
-    if %r_valid_freedays_in_2_months_wop_indep% then
-      %min_required_in_2_months_wop_indep% -
-      accumulators.%qual_freedays_in_period%(round_down_month(%pp_start%-00:01), %pp_start%)
-    else
-      0;
-
-export %r_valid_freedays_in_2_months_wop_indep% =
-  %r_valid_freedays_in_2_months_by_date%(%pp_start%);
-  
-export %r_valid_freedays_in_2_months_by_date%(abstime date_hbt) =
-  if %cabin_crew% then
-    (crew.%is_SKD% or
-     (crew.%is_skn% and not crew.%is_fulltime_temp_SKN%)) and
-    fundamental.%even_month%
-  else
-    crew.%is_short_haul%(date_hbt) and
-    not crew.%is_fdrc%(date_hbt);
-
-export %required_freedays_2_months_in_month_by_month_start%(abstime month_start_hbt) = 
-  if %cabin_crew% then
-    if %r_valid_freedays_in_2_months_by_month_start%(month_start_hbt) then
-         %min_required_in_2_months_by_month_start%(month_start_hbt) -
-         accumulators.%qual_freedays_in_period%(round_down_month(month_start_hbt-00:01), month_start_hbt)
-    else
-      0
-  else
-    if %r_valid_freedays_in_2_months_by_date%(month_start_hbt) then
-      %min_required_in_2_months_by_month_start%(month_start_hbt) -
-      accumulators.%qual_freedays_in_period%(round_down_month(month_start_hbt-00:01), month_start_hbt)
-    else
-      0;
-
-export %nr_freedays_in_publ_period% =
-    sum(trip(chain), trip.%days_in_period%(%pp_start%, %publ_period_end%))
-    where (trip.%is_freeday% and
-           trip.%in_publ_period%);/*
-            overlap(leg.%start_hb%, leg.%end_hb%,%pp_start%, %publ_period_end%)/24:00)
-        where
-        ( task.%is_freeday%(leg.%code%)/*(leg.%code% = "F" or leg.%code% = "F4")*/ /*and
-         overlap(leg.%start_hb%, leg.%end_hb%,%pp_start%, %publ_period_end%) > 00:00
-        );*/
-
-export %nr_pt_freedays_in_publ_period% =
-  sum(trip(chain), trip.%days_in_period%(%pp_start%, %publ_period_end%))
-  where(trip.%is_pt_freeday% and
-        trip.%in_publ_period%);
-        
-/* Free weekend assignment */
-%first_weekend_in_pp% = round_down_week(%pp_start%) + %f4_start_tow%;
-
-%weekends_in_pp% =
-  (round_up_week(%pp_end%) - round_down_week(%pp_start%))/(7*24:00) -
-  %border_correction%;
-
-%border_correction% =
-  if fundamental.%day_of_week%(%pp_end%) < 7 then 1
-  else 0;
-
-%weekend_ix% =
-  %first_weekend_in_pp% + (%py_index%-1)*7*24:00;
-  
-%saturday_ix% =
-  round_up_week(%weekend_ix%) - 48:00;
-  
-%f4_ok_on_weekend_ix% =
-  if crew.%has_agmt_group_ski_fd% then
-    %f4_ok_on_weekend%(%weekend_ix%) and not %prior_f4_ok_on_weekend%(%weekend_ix%)
-  else False;
-
-%_prior_f4_ok%(Abstime d) =
-  if d<%pp_start% then False
-  else %f4_ok_on_weekend%(d);
-
-%prior_f4_ok_on_weekend%(Abstime d) =
-  %_prior_f4_ok%(d-7*24:00) or
-  %_prior_f4_ok%(d-14*24:00) or
-  %_prior_f4_ok%(d-21*24:00) or
-  %_prior_f4_ok%(d-28*24:00);
-
-%f4_ok_x%(Int ix) =
-   %f4_ok_on_weekend%(%first_weekend_in_pp% + (ix-1) * 7*24:00);
-%f4_ok_1% = %f4_ok_x%(1);
-%f4_ok_2% = %f4_ok_x%(2);
-%f4_ok_3% = %f4_ok_x%(3);
-%f4_ok_4% = %f4_ok_x%(4);
-%f4_ok_5% = %f4_ok_x%(5);
-
-
-%we_repr%(Abstime d) = 
-  round_down_week(d) + %f4_start_tow%;
- 
-export %f4_ok_on_duty% =
-  %f4_ok_on_weekend%(%we_repr%(duty.%start_hb%));
- 
-/* If Saturday is last in month, we might need to assign F4 outside
-*  PP since it is Saturday (for FC SKD only) that decides which month
-*  free weekend belongs to. 
-*  If crew has free weekend earlier in month, no carry out is needed 
-* 
-*  NB! first(wop(chain)) is used to get a chain dependant variable */
-%f4_carry_out_needed% =
-  %free_we_period_is_month% and %free_we_period_end% >= %pp_end% and
-  not default(accumulators.%last_free_weekend%(freedays.%free_we_period_end% - 7 * 24:00)
-              >= first(trip(chain), %free_we_period_start%), false);
-
-/* The supplied date should be the weekend start (typically friday),
-   but F4 should be assigned on saturday, so group affiliation is 
-   checked on saturday */
-%f4_ok_on_weekend%(Abstime weekendstart) =
-  crew.%in_variable_group%(round_up(weekendstart, 24:00)) and
-  not %non_available_weekend%(weekendstart) and
-  not recency.%all_quals_unrecent_at_date%(weekendstart);
-  
-%non_available_weekend%(Abstime weekendstart) =
-  default(first(trip(roster), true)
-          where (trip.%start_hb% < weekendstart + %free_we_length% and
-                 trip.%end_hb% > weekendstart and
-                 %trip_overlaps_weekend%(weekendstart) and
-                 trip.%is_on_duty%),
-          false);
-  
-%trip_overlaps_weekend%(Abstime weekendstart) =
-  let saturday = round_up(weekendstart, 24:00);
-  if trip.%is_allowed_on_free_weekend% then
-    overlap(trip.%start_hb%, trip.%end_hb%, saturday, saturday + 48:00) <> 0:00
-  else 
-    if trip.%is_blank_day% then
-      false
-    else
-      overlap(trip.%start_hb%, trip.%end_hb%, weekendstart, weekendstart + %f4_length%) <> 0:00;
-      
-/* new implementation per 2016-02-23 in base_calendar, filters on country in first step,
-   which actually makes spec_weekend_ok_ix useless.
-   Currently the code is not used; it was used by post op assignment script, but not any more
- */
-%crew_country% = 
-  crew.%country_at_date%(%pp_start%);
-
 
 /********************
 *** Super Freedays **
@@ -4506,9 +3266,12 @@ export %number_of_days_until_next_on_duty_wop% =
   else
     void(abstime);
 
+/*************************************************
+*       Single freeday
+**************************************************/
 /*
 ** Single freeday is allowed:
-** In case qa, always, if only oma16 rules fulfilled (2 local nights)
+** In case fpu, always, if only oma16 rules fulfilled (2 local nights)
 ** In caes sk or skn_cc:
 **  1. for sk_fd sh ( cc se for some time, now withdrawn), 
 **  2. on saturday, or on red letter days (but not non holiday sundays)
@@ -4521,7 +3284,7 @@ export %number_of_days_until_next_on_duty_wop% =
   let  work_period_days_before = (duty.%end_day% - wop.%start_day%) / 24:00 + 1,
     rest_start = duty.%end_hb%,
     f_day = duty.%end_day% + 24:00;
-  if not crew.%has_agmt_group_svs%  /* SVS can have single freeday on any day */
+  if not crew.%has_agmt_group_fpu%  /* FPU can have single freeday on any day */
      and not ((calendar.%wd_from_abs%(f_day) = calendar.%saturday%)
               or %sunday_skn%(f_day)
               or %is_single_freeday_holiday%(f_day)) then
@@ -4533,18 +3296,14 @@ export %number_of_days_until_next_on_duty_wop% =
 
 %is_qualifying_single_freeday% =
   let tm = duty.%end_hb_selection_possible_after%(duty.%duty_sel_freeday%) - round_up(duty.%end_hb%, 24:00);
-  if crew.%has_agmt_group_svs% and %freedays_after_duty% > 1 then "NO" /* SVS: catch >1 assigned freeday */
+  if crew.%has_agmt_group_fpu% and %freedays_after_duty% > 1 then "NO" /* FPU: catch >1 assigned freeday */
   else if not duty.%arrives_at_homebase% or prev(duty(roster), duty.%is_long_haul%) then "NO"
-  else if duty.%is_ac_employer_qa% then /* qa: two local nights required, not two days */
-      if tm>=30:00 and tm<48:00 then "OK" /* <30 = no local night, > 47:59: not single */
-      else "NO"
-  else if not crew.%has_agmt_group_sk_sh_fd%
-       and not (crew.%has_agmt_group_skn_cc% and system_db_parameters.%cba16_nov_valid%(wop.%start_day%))
-       and not crew.%has_agmt_group_svs% then
+  else if crew.%has_agmt_group_skd_cc% or
+          crew.%has_agmt_group_sks_cc% then
        "NO" /*"Agreement does not allow single freeday"*/
-  else if tm<24:00 or (not crew.%has_agmt_group_svs% and tm>=48:00) then
+  else if tm<24:00 or (not crew.%has_agmt_group_fpu% and tm>=48:00) then
        "NO" /* If the gap is too short or too long then not single day off.
-               SVS: gap can be long */
+               FPU: gap can be long */
   else %_is_qualifying_single_freeday_sk%;
 
 /* this calculates limits after single, according to SAS agreements: max 4 days after, max 6 days in total.
@@ -4560,11 +3319,10 @@ export %number_of_days_until_next_on_duty_wop% =
       wop.%end_hb% = start_prod and wop.%days% = 1 and wop.%is_freeday% and %_pre_pre_on_duty%(wop.%start_hb%)),
     false);
 
-
 export %max_days_after_singlef% =
   /*if default(prev(wop(chain), wop.%days%=1 and wop.%is_freeday%),False) then*/
   if %_pre_is_single_f%(wop.%start_day%) then
-      nmin(4,6 - %_pre_pre_prod_days%)
+      nmin(4,nmax(6 - %_pre_pre_prod_days%,1)) /* if crew has traded or been bought so pre pre wop is more than 6 days, the nmax evaluation will be a sanity check that a single F will always be followed by at least 1 prod day */
   else
       99; /* no limit */
 
@@ -4572,12 +3330,8 @@ export %max_days_after_singlef% =
   default(
     prev(wop(chain),
       prev(wop(chain),
-        if wop.%has_production% or wop.%has_ground_duty% then wop.%days% else 0
-      )
-    )
-  ,
-    0
-  );
+        if wop.%has_production% or wop.%has_ground_duty% then wop.%days% else 0))
+  , 0);
 
 %is_single_freeday_holiday%(AbsTime date) =
   base_calendar.%is_holiday_cat%(date, crew.%country_at_date%(date), base_calendar.%hol_cat_single_freedays%);
@@ -4589,14 +3343,31 @@ export %wop_possible_single_freedays%(Abstime start, Abstime stop) =
 
 /* check if duty is followed by a single day gap, and next duty is on duty */
 %has_single_day_gap%(Abstime cur_end_day) =
-  next(duty(chain), duty.%is_on_duty% and duty.%start_day%=cur_end_day + 48:00);
+  next(duty(chain), duty.%is_on_duty% and duty.%start_day% = cur_end_day + 48:00);
 
 /* counting single day gaps not qualifying as freedays */
 export %single_day_gaps_not_freedays%(Abstime s, Abstime e) =
   count(duty(chain))
-  where (duty.%is_on_duty% and (duty.%end_day% + 24:00 >= s) and (duty.%end_day% - 24:00 < e) and %has_single_day_gap%(duty.%end_day%)
+  where (duty.%is_on_duty% and (duty.%end_day% + 24:00 >= s) and (duty.%end_day% + 24:00 < e) and %has_single_day_gap%(duty.%end_day%)
     and not (%is_qualifying_single_freeday%="OK")); 
- 
+
+/*check if duty is followed by gap bigger than 2 days, and that the next duty is in same trip*/
+%has_two_day_gap%(Abstime cur_end_day) =
+  default(next(duty(trip), duty.%is_on_duty% and duty.%start_day% >= cur_end_day + 72:00), false);
+
+/* counting two day gaps not qualifying as freedays, e.g. SFO */
+export %two_day_gaps_not_freedays%(Abstime s, Abstime e) =
+  sum(duty(chain), %two_day_gaps_not_freedays_value%(s, e))
+    where (duty.%is_on_duty% and %has_two_day_gap%(duty.%end_day%) and not (%is_qualifying_single_freeday%="OK")); 
+
+/*first if-statement is for trips with 2 day gaps over the turn of the month where 1 F-day is placed in month 1 and the other in month 2*/
+export %two_day_gaps_not_freedays_value%(Abstime s, Abstime e) =
+  if (duty.%end_day% + 48:00 = e) or (duty.%end_day% + 48:00 = s) 
+    then 1
+       else if (duty.%end_day% + 24:00 >= s) and (duty.%end_day% + 24:00 < e) 
+       then 2
+ else 0;
+
 %wop_singlef_hole_allowed%(Abstime start, Abstime stop) =
   min(duty(wop), duty.%end_day% + 24:00)
   where (not is_last(duty(wop)) and  duty.%is_on_duty% and (duty.%end_day%+24:00>= start) and (duty.%end_day%+24:00< stop ) and (%is_qualifying_single_freeday%="OK") );       
@@ -4630,26 +3401,30 @@ export %wop_max_work_with_single_f%(Abstime start, Abstime stop) =
 %min_time_off_single_f% =
     if crew.%has_agmt_group_skn_cc% then
         38:00
-    else if crew.%has_agmt_group_svs% then
+    else if crew.%has_agmt_group_fpu% then
         36:00
     else
         40:00;
 
 
-/* SVS freeday does not worry about work period length */
+/* FPU freeday does not worry about work period length */
 %is_next_next_qualifying_single_freeday%(int prev_work_period_days, Abstime rest_start) =
   let work_period_days = (wop.%end_day% - duty.%start_day%) / 24:00 + 1;
   if (not duty.%is_blank_day% and not %prev_duty_is_fs1% and duty.%start_hb% - rest_start < %min_time_off_single_f%) then
     rules.%failtext_rel%("Min rest when single freeday",duty.%start_hb% - rest_start, %min_time_off_single_f%)
-  else if not crew.%has_agmt_group_svs% and prev_work_period_days>4 then
+  else if not crew.%has_agmt_group_fpu% and prev_work_period_days>4 then
     rules.%failtext_int%("Workdays before single freeday",prev_work_period_days,4)
-  else if not crew.%has_agmt_group_svs% and work_period_days>4 then
+  else if not crew.%has_agmt_group_fpu% and work_period_days>4 then
     rules.%failtext_int%("Workdays after single freeday",work_period_days,4)  
-  else if not crew.%has_agmt_group_svs% and (prev_work_period_days+work_period_days)>6 then
+  else if not crew.%has_agmt_group_fpu% and (prev_work_period_days+work_period_days)>6 then
     rules.%failtext_int%("Workdays around single freeday",prev_work_period_days+work_period_days,6)
   else "OK"; /* Qualifying */
 
 %prev_duty_is_fs1% = default(prev(duty(chain), duty.%is_fs1%), false);
+
+/*************************************************************
+*           Freedays after duty
+*************************************************************/
 
 export %min_required_freedays_after_duty% =
   if duty.%is_on_duty% then
@@ -4677,15 +3452,15 @@ export %min_required_freedays_after_duty% =
     	2
       else
         3
-    /* SVS wop length does not matter, but if not a qualifying single
+    /* FPU wop length does not matter, but if not a qualifying single
        freeday (handled above) it should be at least a 2 day 60:00 block */
-    else if crew.%has_agmt_group_svs% then
+    else if crew.%has_agmt_group_fpu% then
         2
     else
-      if crew.%k4exng_cc_sp5_1_valid%(wop.%start_day%) then
-        %min_required_freedays_after_duty_all%
-      else
-        %_min_required_freedays_after_duty%
+     if %cabin_crew% and crew.%is_homebase_scand% then
+        %min_required_freedays_after_duty_all%  /* = CC with scandinavian base*/
+       else
+        %_min_required_freedays_after_duty% /* = FD and asian CC */
   else
   	0;
 
@@ -4694,10 +3469,6 @@ export %min_required_freedays_after_duty_failtext%(Int value, Int limit) =
   if single_ft="OK" or single_ft="NO" then
     rules.%failtext_int%("Coll: F-days after prod(duty)", value, limit)
   else concat("Coll: ",single_ft);
-
-
-
-
 
 %standby_or_bl_ccr% =
   any(duty(wop),duty.%is_standby% or duty.%is_blank_day%); 
@@ -4712,13 +3483,13 @@ table min_required_after_duty_4exng =
                      -> export %min_required_freedays_after_duty_all%;
 
   "C", <5  , true , false,   -  ,   -    -> 2; /* SH 1-4 P-days */
-  "C",  5  , true , false,   -  , true   -> 2; /* SH 5 P-days, 3 time-off days */
-  "C",  5  , true , false,   -  , false  -> 3; /* SH 5 P-days, 2 time-off days */
+  "C",>=5  , true , false,   -  , true   -> 2; /* SH 5 P-days, 2 off duty days and 1 other time-off day */
+  "C",>=5  , true , false,   -  , false  -> 3; /* SH 5 P-days, 3 off duty days */
   "C",  -  , false, true ,   -  , true   -> 2; /* LH */
   "C",  -  , false, true ,   -  , false  -> 3; /* LH */
   "C", <5  , false, false, true ,   -    -> 2; /* 1-4P incl. sby or BL */
-  "C",  5  , false, false, true , true   -> 2; /* 5P incl. sby or BL, 3 time-off days */
-  "C",  5  , false, false, true , false  -> 3; /* 5P incl. sby or BL, 2 time-off days */
+  "C",>=5  , false, false, true , true   -> 2; /* 5P incl. sby or BL, 3 time-off days */
+  "C",>=5  , false, false, true , false  -> 3; /* 5P incl. sby or BL, 2 time-off days */
   "C",  -  , false, false, false,   -    -> 2; /* ground duty days */
 
   "F",  -  ,   -  ,   -  ,   -  ,   -    -> %_min_required_freedays_after_duty%;  
@@ -4726,6 +3497,94 @@ table min_required_after_duty_4exng =
    - ,  -  ,   -  ,   -  ,   -  ,   -    -> 99;  
 end  
 
+
+%min_required_pt_freedays_after_duty% =
+  if (crew.%is_skj% or crew.%is_skj%) and
+     duty.%is_on_duty% and
+     not duty.%is_off_duty_cmp% then
+    %_min_required_pt_freedays_after_duty% /* only for CC Asia, FD have all 0 as value in table */
+  else
+    0;
+
+/*
+ * SKS/SKN SH FC should normally have 3 F-days after 5 production days. but
+ * 2 F-days plus any other off-duty activity (e.g. VA, F7 etc.) is allowed.
+ */
+
+export %any_offduty_may_replace_one_freeday% =
+  %freedays_after_duty% = 2 and
+  default(next(wop(roster),wop.%is_off_duty%)
+            where (not wop.%is_freeday%),
+          false);
+ 
+table min_required_after_duty =
+  crew.%main_func%,
+  crew.%region%,
+  %wop_days%,
+  %wop_is_short_haul%,              /* Any trip is short haul but no trip is long haul */
+  %wop_is_long_haul%,               /* Any trip is long haul */
+  %wop_has_ground_duty%,            /* Any trip is ground duty */
+  %next_duty_is_isolated_FS%,       /* Production followed by super freeday */
+  %wop_has_standby%,                /* Any trip is standby */
+  %wop_has_short_standby_block% or wop.%is_blank_day%, /* Any trip is short standby */
+  training.%wop_is_in_school_period_min_7x24%,  /* Is part of course > 7 days duration */
+  %any_offduty_may_replace_one_freeday% ->  /* 5P=3F - any offduty may replace 1 F-day */
+    export %_min_required_freedays_after_duty%,
+    export %_min_required_pt_freedays_after_duty%;
+  /* FC on course > 7 days duration should always have 2F after 5 production days. */
+  "F" ,   -  , >4,   -   , -    , -    , -    , -    , -    , true ,  -   -> 2, 0;
+ &
+  "F",<>"SKI",  - ,  -   , -    , -    , true ,   -  , -    , -    ,  -   -> 1, 0; /* FC SH followed by isolated FS */
+ &
+ /* FC 1.11 G */
+  "F" ,   -  ,  >4, false, false, -    , false, false, -    , -   , true  -> 2, 0;
+  "F" ,   -  ,  >4, false, false, -    , false, false, -    , -   , false -> 3, 0;
+ /* FC SH should have 3F after 5 days production or standby */
+  "F" ,   -  ,  >4, -    , -    , -    , -    , true , -    , -   , true  -> 2, 0;
+  "F" ,   -  ,  >4, -    , -    , -    , -    , true , -    , -   , false -> 3, 0;
+  "F" ,   -  ,  >4, true , -    , -    , false, false, -    , -   , true  -> 2, 0;
+  "F" ,   -  ,  >4, true , -    , -    , false, false, -    , -   , false -> 3, 0;
+  "F" ,   -  ,  <5, true , -    , -    , false, -    , false, -   ,   -   -> 2, 0;
+  "F" ,   -  ,  - , false, true , -    , -    , false, false, -   ,   -   -> 3, 0;
+  &
+  /* Japanese CC 3.9 */
+  "C",  "SKJ", -  , false, true ,    - ,   -  , -    ,   -  , -   ,   -   -> %cc_lh_freedays_skj_duty%, %cc_lh_pt_freedays_skj_duty%;
+  /* Chines CC */
+  "C",  "SKK", -  , false, true ,    - ,   -  , -    ,   -  , -   ,   -   -> %cc_lh_freedays_skk_duty%, 0;
+  /* Only ground duty btw freedays */
+   -,       -,   -, false, false, true ,  -   , -    , false, -   ,   -   -> 2, 0;
+  
+  -, -, -, -, -, -, -, -, -, -, - -> 2, 0;
+end
+
+/* Required F-days after production for Japanese CC*/
+%cc_lh_freedays_skj_duty% = 4;
+
+/* Required F-days after production for Chinese CC*/
+%cc_lh_freedays_skk_duty% = 3;
+
+/*
+** Required part-time F88 days after production for Japanese CC
+**
+** 50% = Flight duty days + normal F-days
+**
+** 75% = (Flight duty days + normal F-days) / 2 rounded up.
+*/
+
+%cc_lh_pt_freedays_skj_duty% =
+  if crew.%part_time_factor_duty_start% = 50 then
+    %flight_duty_days_in_wop% + %cc_lh_freedays_skj_duty%
+  else
+    if crew.%part_time_factor_duty_start% = 75 then
+      ((10 * (%flight_duty_days_in_wop% + %cc_lh_freedays_skj_duty%) / 2) + 5)/ 10 
+    else
+      0;
+
+%flight_duty_days_in_wop% =
+  (last(trip(wop),trip.%end_day% + 24:00)
+     where (trip.%has_flight_duty% and not trip.%is_standby%) -
+   first(trip(wop),trip.%start_day%)
+     where (trip.%has_flight_duty% and not trip.%is_standby%)) / 24:00;
 
 /* count freedays following last duty in wop. In ccr gaps are allowed to be filled in later */
 export %count_mixed_freedays_following_last_duty_in_wop% =
@@ -4767,14 +3626,10 @@ export %is_last_duty_in_wop_cau1412_662% =
      * variable %req_freedays_after_trip%. If change, please apple this to report_common too.
      */
     if wop.%has_active_long_haul% then
-        if crew.%is_skj% then
-            4
-        else
-            3
-    else
-        2
-    ;
-
+        if crew.%is_skj% 
+        then 4
+        else 3
+    else 2;
 
 /** 
 *** Used for soft rule and assign script.
@@ -4928,339 +3783,6 @@ end
 set gd_not_qualifying_freeday_set = "KD", "GD";  
 set freeday_exception_set = "COD","OFD","REC","SGD","MET";
 
-%min_required_pt_freedays_after_duty% =
-  if not crew.%k4exng_cc_sp5_1_valid%(duty.%start_day%) and
-     duty.%is_on_duty% and
-     not duty.%is_off_duty_cmp% then
-    %_min_required_pt_freedays_after_duty%
-  else
-    0;
-
-/*
- * SKS/SKN SH FC should normally have 3 F-days after 5 production days. but
- * 2 F-days plus any other off-duty activity (e.g. VA, F7 etc.) is allowed.
- */
-
-export %any_offduty_may_replace_one_freeday% =
-  %freedays_after_duty% = 2 and
-  default(next(wop(roster),wop.%is_off_duty%)
-            where (not wop.%is_freeday%),
-          false);
- 
-table min_required_after_duty =
-  crew.%main_func%,
-  wop.%start_hb%,
-  crew.%region%,
-  %wop_days%,
-  %wop_is_short_haul%,              /* Any trip is short haul but no trip is long haul */
-  %wop_is_long_haul%,               /* Any trip is long haul */
-  %wop_has_ground_duty%,            /* Any trip is ground duty */
-  %next_duty_is_isolated_FS%,       /* Production followed by super freeday */
-  %wop_has_standby%,                /* Any trip is standby */
-  %wop_has_short_standby_block% or wop.%is_blank_day%, /* Any trip is short standby */
-  training.%wop_is_in_school_period_min_7x24%,  /* Is part of course > 7 days duration */
-  %any_offduty_may_replace_one_freeday% ->  /* 5P=3F - any offduty may replace 1 F-day */
-    export %_min_required_freedays_after_duty%,
-    export %_min_required_pt_freedays_after_duty%;
-  /* FC SKD SH should always have 2F after 5 production days. */
-  /* but from 01jun11, they must have 3F                      */
-  "F", < 01jun11,  "SKD", >4, -    , -    , -    , -    , -    , - , false, -      -> 2, 0;
-  /* FC on course > 7 days duration should always have 2F after 5 production days. */
-  "F",      -    ,   -  , >4, -    , -    , -    , -    , -    , - , true, -       -> 2, 0;
- &
-  "F",  -    , <> "SKI", - ,   -  , -    , -    , true ,   -  ,   -  , -, -   -> 1, 0; /* FC SH followed by isolated FS */
- &
- /* FC 1.11 G */
-  "F",  -    ,   -  , >4, false, false, -    , false, false, - , -, true      -> 2, 0;
-  "F",  -    ,   -  , >4, false, false, -    , false, false, - , -, false     -> 3, 0;
- /* FC SH (except SKD before 01jun11) should have 3F after 5 days production or standby */
-  "F",  -    ,   -  , >4, -    , -    , -    , -    , true , - , -, true      -> 2, 0;
-  "F",  -    ,   -  , >4, -    , -    , -    , -    , true , - , -, false     -> 3, 0;
-  "F",  -    ,   -  , >4, true , -    , -    , false, false, - , -, true      -> 2, 0;
-  "F",  -    ,   -  , >4, true , -    , -    , false, false, - , -, false     -> 3, 0;
-
-  "F",  -    ,   -  , <5, true , -    , -    , false, -    , false, -, -  -> 2, 0;
-  "F",  -    ,   -  , - , false, true , -    , -    , false, false, -, -  -> 3, 0;
- 
-  /* CAU J, L and P */
-  "C", -, "SKD", -,  true,     -,    -,   -, -,       -, -, -   -> %cc_sh_freedays_skd_duty%, %cc_sh_pt_freedays_skd_duty%;
-  "C", -, "SKD", -, false,  true,    -,   -, -,       -, -, -   -> %cc_lh_freedays_skd_duty%, 0;
-  "C", -, "SKD", -, false, false,    -,   -, -,    true, -, -   -> %cc_sh_freedays_skd_duty%, %cc_sh_pt_freedays_skd_duty%;
-  
-  /* NKF/SBK 2.4.3.4 */
-  "C", -, "SKN", >=5,  true,     -, false,    -, -,     -, -, true  -> %skn_cc_k11_freedays%, 0;
-  "C", -, "SKN", >=5,  true,     -, false,    -, -,     -, -, false -> 3, 0;
-  "C", -, "SKN", >=5, false, false, false,    -, -,  true, -, true  -> %skn_cc_k11_freedays%, 0;
-  "C", -, "SKN", >=5, false, false, false,    -, -,  true, -, false -> 3, 0;
-  "C", -, "SKN", >=5, true,    -,   true,  -, -,   false, -, true   -> %skn_cc_k11_freedays%, 0; /* Mix of ground duty and short haul */
-  "C", -, "SKN", >=5, true,  false, true,  -, -,   false, -, false  -> 3, 0; /* Mix of ground duty and SH */
-  "C", -, "SKN", >=5, false, false, true,  -, true, true, -, false  -> 3, 0; /* Mix of ground duty and SH standby block*/
-  "C", -, "SKN", >=5, false, false, true,  -, true, false, -, false -> 3, 0; /* Mix of ground duty and SH standby */
-  "C", -, "SKN", <5, true,    -,   false, -, -,   false, -, -   -> 2, 0;
-  "C", -, "SKN", <5,  true,    -,   true,  -, -,   false, -, -   -> 2, 0; /* Mix of ground duty and short haul */
-  "C", -, "SKN", -,  false, true,    -,   -, -,   false, -, -   -> %cc_lh_freedays_skn_duty%, 0;
-  
-  /* SCCA H and N.3a */
-  "C", -, "SKS", >4,    -,    -,     -,   -, -,   -, -, -       -> 3, 0;
-  &
-  "C", -, "SKS", -,  true,    -,     -,   -, -,       -, -, -   -> 2, 0;
-  "C", -, "SKS", -,  false, true,    -,   -, -,       -, -, -   -> 3, 0; /* SCCA K06 5.2 */
-  
-  /* Japanese CC 3.9 */
-  "C", -, "SKJ", -,  false, true,    -,   -, -,       -, -, -   -> %cc_lh_freedays_skj_duty%,
-                                                                   %cc_lh_pt_freedays_skj_duty%;
-  /* Chines CC */
-  "C", -, "SKK", -,  false, true,    -,   -, -,       -, -, -   -> %cc_lh_freedays_skk_duty%, 0;
-  
-  /* Only ground duty btw freedays */
-   -,  -,   -,   -,  false, false, true,  -, -,   false, -, -   -> 2, 0;
-  
-  -, -, -, -, -, -, -, -, -, -, -, - -> 2, 0;
-end
-
-
-/* Only CC SKD has a part time dependency */
-table cc_sh_freedays_skd_duty =
-  crew.%part_time_factor_duty_start%,
-  %wop_days%,
-  %wop_is_ground_duty%,
-  %next_duty_is_F_followed_by_SFJ% ->
-    %cc_sh_freedays_skd_duty%,
-    %cc_sh_pt_freedays_skd_duty%;
-  
-  -, 1, false, true    -> 1, 0;
-  
-  50, -,  true, false  -> 2, 0;
-
-  100, 5,   -, false   -> 3, 0;
-  100, <5,  -, false   -> 2, 0;
-  
-   89, 5,   -, false   -> 3, 1;
-   89, <5,  -, false   -> 2, 0;
-  
-   80, 5,   -, false   -> 3, 1;
-   80, 4,   -, false   -> 2, 1;
-   80, <4,  -, false   -> 2, 0;
-  
-   50, 5, false, false -> 3, 7;
-   50, 4, false, false -> 2, 5;
-   50, 3, false, false -> 2, 2;
-   50, 2, false, false -> 2, 2;
-   50, 1, false, false -> 2, 0;
-  
-   -,  -,  -, -  -> 0, 0;
-end
-
-table cc_min_required_after_lh_skd_duty =
-
-  %wop_has_long_haul_charter_duty%,
-  crew.%part_time_factor_duty_start% ->
-    export %cc_lh_freedays_skd_duty%;
-
-  true,   -    -> %cc_lh_charter_freedays_skd_duty%;
-  false,  80   -> %cc_parttime_80_lh_freedays_skd_duty%;
-
-    -  ,  -    -> %cc_fulltime_lh_freedays_skd_duty%;
-end
-
-/* Required F-days after production for Japanese CC*/
-
-%cc_lh_freedays_skj_duty% = 4;
-
-/* Required F-days after production for Chinese CC*/
-
-%cc_lh_freedays_skk_duty% = 3;
-
-/*
-** Required part-time F88 days after production for Japanese CC
-**
-** 50% = Flight duty days + normal F-days
-**
-** 75% = (Flight duty days + normal F-days) / 2 rounded up.
-*/
-
-%cc_lh_pt_freedays_skj_duty% =
-  if crew.%part_time_factor_duty_start% = 50 then
-    %flight_duty_days_in_wop% + %cc_lh_freedays_skj_duty%
-  else
-    if crew.%part_time_factor_duty_start% = 75 then
-      ((10 * (%flight_duty_days_in_wop% + %cc_lh_freedays_skj_duty%) / 2) + 5)/ 10 
-    else
-      0;
-
-%flight_duty_days_in_wop% =
-  (last(trip(wop),trip.%end_day% + 24:00)
-     where (trip.%has_flight_duty% and not trip.%is_standby%) -
-   first(trip(wop),trip.%start_day%)
-     where (trip.%has_flight_duty% and not trip.%is_standby%)) / 24:00;
-
-/* Agreement: NKF K11 */
-%skn_cc_k11_freedays% =
-  if parameters.%k11_skn_cc_valid%(%pp_start%) and
-     default(next(wop(roster), wop.%is_off_duty% and (wop.%end_UTC% - wop.%start_UTC%) / 24:00 > 1)
-             where (not wop.%is_freeday%), false)
-  then 2
-  else 3;
-
-/* Agreement: CAU J.5. */
-%cc_fulltime_lh_freedays_skd_duty% =
-  if %wop_is_east_bound% then
-    %cc_lh_freedays_skd_east_duty%
-  else
-    %cc_lh_freedays_skd_west_duty%;
-    
-/* Agreement: CAU J.5.a. Max of three alternatives. */
-%cc_lh_freedays_skd_east_duty% =
-  let A = if max(trip(wop), trip.%block_time%) from (current) backwards while(not trip.%is_bought%)
-          <= 20:00 then 3 else 4,
-      B = %roundup_div%(%wop_days%, 2),
-      C = if %wop_is_non_stop_105_longitude_duty% then 4 else 3;
-  nmax(A, B, C);
-  
-%wop_is_non_stop_105_longitude_duty% =
-  any(duty(wop) from (current) backwards while(not duty.%is_bought%), 
-      any(leg(duty), abs(leg.%leg_start_longitude% - 
-      leg.%leg_end_longitude%) > 6300));
-  
-/* Agreement: CAU J.5.b */
-%cc_lh_freedays_skd_west_duty% = nmax(3, %roundup_div%(%wop_days%, 2));
-
-/* Agreement: CAU P.3.4
-**
-** Demand for 80% parttime is fulltime demand multiplied by 1.5
-** if half freeday rest and outstanding half freeday from history
-** or earlier in chain round up demand 1 day, else
-** save the half freeday in 'half freeday' bank.
-*/
-%cc_parttime_80_lh_freedays_skd_duty% =
-  if %cc_parttime_80_lh_is_half_freeday_wop% and
-     not %cc_parttime_80_lh_half_freeday_round_down_is_valid% then
-    (%cc_parttime_80_lh_freedays_basic_skd_duty% + 5) / 10
-  else
-    %cc_parttime_80_lh_freedays_basic_skd_duty% / 10;
-
-/* Wop yields half freeday rest */
-%cc_parttime_80_lh_is_half_freeday_wop% =
-  crew.%is_skd% and
-  crew.%part_time_factor_wop_start% = 80 and
-  wop.%is_long_haul% and
-  last(duty(wop), %cc_fulltime_lh_freedays_skd_duty% mod 2 = 1);
-
-%cc_parttime_80_lh_freedays_basic_skd_duty% =
-  %cc_fulltime_lh_freedays_skd_duty% * 15;
-  
-/* End date for rounded up freeday period after half free day wop */
-%cc_parttime_80_lh_wop_freeday_period_end% =
-  last(duty(wop), duty.%end_day% +
-    24:00 * (1 + (%cc_parttime_80_lh_freedays_basic_skd_duty% + 5)/10));
-
-/* 
-** It is valid to round down number of freedays only if previous time was rounded up. 
-** If no previous "half freeday" wop with freeday period overlapping planning period
-** check instead for outstanding half freeday in history.
-*/
-%cc_parttime_80_lh_half_freeday_round_down_is_valid% =
-  default(prev(wop(roster), last(duty(wop),
-            %cc_parttime_80_lh_freedays_basic_skd_duty% < %freedays_after_wop% * 10))
-          where (%cc_parttime_80_lh_is_half_freeday_wop% and
-                 %cc_parttime_80_lh_wop_freeday_period_end% > %pp_start%),
-          not %half_freeday_in_history%(%pp_start%));
-
-/*
-** Check for outstanding half freeday in history.
-** True: Outstanding half freeday. False: No outstanding half freeday.
-*/
-
-%half_freeday_in_history%(Abstime date) = default(%half_freeday_lookup%(date), false);
-
-%half_freeday_carry_over_p% =  parameter "half_freeday_carry_over"
-  remark "ETAB: Half freeday carry over table";
-
-table half_freeday_carry_over_tab(Abstime date) =
-  crew.%id%, date -> bool %half_freeday_lookup%;
-  external %half_freeday_carry_over_p%;
-  crew, >= tim -> last(carry_over);
-end
-
-/*
- * Variables used by the script (roster publish) that updates
- * the tabel half_freeday_carry_over.
- */
-
-export %half_freeday_carry_over_is_valid% =
-  crew.%region% = "SKD" and
-  %cabin_crew% and
-  crew.%part_time_factor_pp_start% = 80;
-
-export %half_freeday_carry_over%(Abstime a1, Abstime a2) =
-  last(wop(roster), last(duty(wop),
-       %cc_parttime_80_lh_freedays_basic_skd_duty% > %freedays_after_wop% * 10))   
-  where (%cc_parttime_80_lh_is_half_freeday_wop% and
-         %cc_parttime_80_lh_wop_freeday_period_end% <= a2 and
-         wop.%end_day% > a1);
-
-/*
- *Agreement: CAU K06 L.1, L.2.c
- *
- * Freedays after LH charter
- */
-table cc_min_required_after_lh_charter_skd_duty =
-
-  %two_consec_lh_charter_duties_night_stop_not_homebase%,
-  crew.%part_time_factor_duty_start% ->
-    %cc_lh_charter_freedays_skd_duty%;
-
-  false,  100   -> 2;
-  false,   80   -> 3;
-  false,   50   -> 5;
-  true,   100   -> 3;
-  true,    80   -> 4;
-  true,    50   -> 8;
-
-    - ,    -    -> 99;
-end
-
-export %wop_has_long_haul_charter_duty% =
-  any(duty(wop) from (current) backwards while(not duty.%is_bought%), 
-      duty.%is_long_haul_charter_skd%);
-  
-/*
- *  True if there are 2 consecutive charter duty periods,
- *  where at least one is LH and the night stop between them
- *  is not at home base.
- */
- 
-%two_consec_lh_charter_duties_night_stop_not_homebase% =
-   %num_charter_duties_duty% > 1 and
-   any(duty(wop) from (current) backwards while (not duty.%is_bought%) 
-   where (duty.%is_long_haul_charter_skd%),
-     not duty.%arrives_at_homebase%);
-    
-%num_charter_duties_duty% =
-  count(duty(wop)) from (current) backwards while (not duty.%is_bought%)
-    where (duty.%is_charter% and
-           duty.%is_active_flight%);
-  
- 
-/* Agreement: NKF K11 2.4.5 */
-/* Slingfreedays are also regulated by Subpart Q rules */
-export %cc_lh_freedays_skn_duty% =
-  nmax(if %wop_lh_east_followed_by_west_or_vv% then
-         4
-       else
-         3,
-       %roundup_div%(%wop_days%, 2));
-    
-%wop_is_east_bound% =
-  any(duty(wop),duty.%is_east_bound%);
- 
-%wop_start_day% = 
-  if is_first(duty(wop)) then
-    duty.%start_day%
-  else
-    default(prev(duty(wop) where(duty.%is_bought%), next(duty(wop), duty.%start_day%)),
-            wop.%start_day%);
-
 export %wop_days% =
   wop.%days% -
   %f31_days_in_wop%  -
@@ -5326,41 +3848,9 @@ export %valid_freedays_after_duty% = %_valid_freedays_after_duty%;
   duty.%is_on_duty% and
    any(trip(wop), trip.%is_on_duty% and not trip.%is_off_duty_cmp%);
 
-
-  
 /* Freeday agreement validity */
 export %gm_agreement_valid%(Abstime date) =
   %agreement_valid%("gm_freedays", date);
-
-/*
- * Free weekends in two (2) months fixed. (i.e.: Jan-Feb; Mar-Apr; ... ).
- */
- 
-export %has_3_free_we_2_months% = 
-      not void(%free_we_2_months_1%) and
-      not void(%free_we_2_months_2%) and
-      not void(%free_we_2_months_3%);
-  
-%free_we_2_months_1% = accumulators.%last_free_weekend%(%free_we_2_months_fixed_end%);
-%free_we_2_months_2% = accumulators.%last_free_weekend%(%free_we_2_months_1%);
-%free_we_2_months_3% = 
-  if accumulators.%last_free_weekend%(%free_we_2_months_2%) < %free_we_2_months_fixed_start% then
-     void_abstime
-  else accumulators.%last_free_weekend%(%free_we_2_months_2%);
-
-%free_we_period_ref% = 
-    nmin(trip.%start_month_end% - 00:01, %pp_end%);
-export %free_we_2_months_fixed_end% = nmin(%_free_we_period_end%(7), %free_we_period_ref%);
-export %free_we_2_months_fixed_start% = round_down_month(round_down_month(%free_we_2_months_fixed_end%) - 24:00);
-
-/*
- * Free weekends in 3 months fixed, i.e.: Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec.
- */
-
-/* The rule "Free weekend in three months" now uses the Sunday as the 
-   starting point of the free weekend, SASCMS-3989 */
-
-%round_up_sunday%(Abstime date) = round_up_week(date) - 24:00;
 
 %season%(String main_cat) = 
     concat(main_cat, " AUTUMN");
@@ -5489,60 +3979,6 @@ export %r_nbr_of_xmas_freedays%(Abstime date, String crewid, String crewregion, 
     
 export %r_activity_type%(Abstime date, String crewid, String crewregion, String season, Abstime year) = 
     %_activity_type%(date, crewid, crewregion, %season%(season), %year%(year));
-
-/*
- * Variables to support temporary 2012 vacation rule
- */
-
-table required_number_of_freedays_temp_2012_ft(Abstime start_t, Abstime end_t) =
-  start_t,
-  crew.%is_fdrc%(start_t), 
-  %has_reduced_freeday_requirement_in_month_fc_sh%(start_t) -> int %minimum_number_of_freedays_ft%;
-  
-  01Feb2012, true,  -     -> 12;
-  01Apr2012, true,  -     -> 12;
-  &
-  -,         -,     true  -> %min_required_in_1_month_by_month_startdate%(start_t, end_t) + 1;
-  -,         -,     false -> 13;
-
-end
-
-%minimum_number_of_freedays_pt%(Abstime start_t, Abstime end_t) =
-  if (start_t = 01Jan2012) then 
-    %min_required_in_1_month_by_month_startdate%(start_t, end_t) + 1
-  else 
-    %min_required_in_1_month_by_month_startdate%(start_t, end_t);  
-
-table required_number_of_freedays_temp_2012(Abstime start_t, Abstime end_t) =
-    start_t,
-	crew.%homebase%, 
-    crew.%is_part_time_at_date%(start_t) -> int %_minimum_number_of_freedays_2012%;
-    
-    01May2011, "STO", false -> %minimum_number_of_freedays_ft%(start_t, end_t);
-    01May2011, "STO", true  -> %minimum_number_of_freedays_pt%(start_t, end_t);
-    &
-    01May2011, -,     -     -> 0;
-    &
-    -,         -,     false -> %minimum_number_of_freedays_ft%(start_t, end_t);
-    -,         -,     true  -> %minimum_number_of_freedays_pt%(start_t, end_t);
-end
-
-export %minimum_number_of_freedays_2012%(Abstime month_start) =
-  let start_t = round_down_month(month_start),
-      end_t = round_up_month(start_t + 0:01);
-
-  if %flight_crew% and
-     (crew.%homebase% = "CPH" or crew.%homebase% = "STO") and
-     %rule_min_freedays_before_2012_holiday_season_fc_cph_sto_on% then
-       default(%_minimum_number_of_freedays_2012%(crew.%variable_group_start%(start_t, end_t),
-                                                  crew.%variable_group_end%(start_t, end_t)),
-               0)
-  else
-    0;
-    
-export %rule_min_freedays_before_2012_holiday_season_fc_cph_sto_on% = 
-  parameter true
-  remark "Use rule min_freedays_before_2012_holiday_season_fc_cph_sto:";
 
 /***************************************************************************
  * F36 entitlement
@@ -5682,9 +4118,6 @@ export %f36_reduction_corr_diff%(AbsTime ivalstart, AbsTime ivalend) =
 ** calculation free day control as in K15 
 */
 
-%chain_has_ac_employer_qa% =
-  any(wop(chain), wop.%has_ac_employer_qa%);
-
 export %freedays_reducing_days%(Abstime s, Abstime e) =
   duty.%days_with_selection%(duty.%duty_sel_freedays_disqual%,s,e);
 
@@ -5769,64 +4202,77 @@ export %fdc15_month_entitled%(Abstime s, Abstime e, Int month_basic) =
 
 /* main table to decide type of calculations due to agreement */
 table crew_entitled(Abstime s, Abstime e) =
-	model_crew.%group_at_date%(crew.%id%, s), crew.%is_cabin%, crew.%flying_qa_ac_employer%(s),
+	model_crew.%group_at_date%(crew.%id%, s), crew.%is_cabin%,
         crew.%agmt_group_inv_enum%(s), crew.%is_temporary_at_date%(s) ->
-	  %_crew_fdc15_month_entitled%, 
-	  %_crew_fdc15_2_months_entitled%,
-          %_crew_fdc15_year_entitled%,
+	  %_crew_fdc15_month_entitled%,
+      %_crew_fdc15_year_entitled%,
 	  %_crew_fdc15_possibly_scheduled%;
-	"V", False,  False,   3, - -> /* fd not flying cimber, SH DK */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
-                                      void_int,
+	"V", False,     3, -    -> /* SKD FD */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
-        "V", False,  False,  15, - ->  /* fd not flying cimber, LH DK */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
-                                      void_int,
+    "V", False,   15, -     ->  /* SKID FD */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
-	"V", False,  False,   5, - ->  /* fd not flying cimber, SH SE */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)), 
-                                      void_int,
+	"V", False,    5, -     ->  /*  SKS FD */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
+	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)),
+	                              %days_freedays_possible%(s, e);
+	"V", False,    16, -    ->  /* SKIS FD */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
-	"V", False,  False,  16, - ->  /* fd not flying cimber, LH SE */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)), 
-                                      void_int,
+	"V", False,    7, -     ->  /* SKN FD */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
-	"V", False,  False,   7, - ->  /* fd not flying cimber, SH NO */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)), 
-                                      void_int,
+	"V", False,   17, -     ->  /* SKIN FD */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
-	"V", False,  False,  17, - ->  /* fd not flying cimber, LH NO */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)), 
-                                      void_int,
+	"V", False,   20, -     ->  /* SZS DK FD */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
-	"V", False,  True,    -, - ->  /* fd flying cimber */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)), 
-                                      %fdc15_twin_months_entitled%(s, e, model_freedays.%fdc15_twin_entitled_basic_qa_by_crew% (crew.%id%, s)), 
+	"V", False,   22, -     ->  /* SZS SE FD */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
-	"V", True,   -,   2, False ->  /* cc QA */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)), 
-                                      %fdc15_twin_months_entitled%(s, e, model_freedays.%fdc15_twin_entitled_basic_qa_by_crew% (crew.%id%, s)),
+	"V", False,   18, -     ->  /* SVS FD */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
-	"V", True,   -,  11, False ->  /* cc SNK */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)), 
-                                      void_int,
+	"V", False,    1, -     ->  /* FPU FD*/
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)), 
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
-	"V", True,   -,  10, False ->  /* cc NKF */
-                                      %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)), 
-                                      void_int,
+	"V", True,     2, False ->  /* FPU CC */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
+	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
+	                              %days_freedays_possible%(s, e);
+	"V", True,    21, False ->  /* SZS DK CC */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
+	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
+	                              %days_freedays_possible%(s, e);
+	"V", True,    23, False ->  /* SZS SE CC */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
+	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
+	                              %days_freedays_possible%(s, e);
+	"V", True,    19, False ->  /* SVS CC */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
+	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
+	                              %days_freedays_possible%(s, e);
+	"V", True,    11, False ->  /* SNK CC */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
+	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
+	                              %days_freedays_possible%(s, e);
+	"V", True,     10, False ->  /* NKF CC */
+                                  %fdc15_month_entitled%(s, e, model_freedays.%month_entitled_basic%(crew.%id%, s, e)),
 	                              %fdc15_year_entitled_2%(s, e, model_freedays.%year_entitled_basic%(crew.%id%, s, e)), 
 	                              %days_freedays_possible%(s, e);
                                   
-	-,   -,      -,       -, - -> 0, void_int, 0, 0;
+	-,   -,         -,    -   -> 0, 0, 0;
 end
 
 
@@ -5878,13 +4324,6 @@ export %crew_year_target%(Abstime per_s, Abstime per_e) =
     where (not void(model_crew.%crew_chg_agreement_from%(crew.%id%, %times_index_0%, per_s, per_e)))
   else 0;
 
- 
-/* planning month contribution for yearly freeday entitlement for Cimber, based on part time and disqualifying activitites. Called from accumulators */
-export %crew_2_months_entitled%(Abstime per_s, Abstime per_e) = 
-  if model_freedays.%fdc_valid%(crew.%id%, per_s, per_e) then
-    sum(times(model_crew.%crew_chg_agm_max_index%), %_crew_fdc15_2_months_entitled%(model_crew.%crew_chg_agreement_from%(crew.%id%, %times_index_0%, per_s, per_e),model_crew.%crew_chg_agreement_to%(crew.%id%, %times_index_0%, per_s, per_e))) 
-    where (not void(model_crew.%crew_chg_agreement_from%(crew.%id%, %times_index_0%, per_s, per_e)))
-  else 0;
 /*   TODO: remove */
 export %acc_fdc15_year_target_per_month%(Abstime month_start) =
   accumulators.%fdc15_nr_acc_entitled_freedays%(month_start); 
@@ -5902,24 +4341,6 @@ export %acc_fdc15_balance%(Abstime month_start) =
 
 export %fdc15_month_margin%(Abstime month_start, Int balance) = 
   model_freedays.%fdc15_months_remaining%(crew.%id%, month_start) * parameters.%fdc15_endyear_margin%;
-
-/*
-export %is_last_twin_month%(Abstime month_start) =
-  model_freedays.%fdc_month_nr%(month_start) mod 2 = 0;
-*/
-
-export %twin_month_fdc15_entitled%(Abstime month_start) =
-  if model_freedays.%is_last_twin_month%(month_start) then 
-    accumulators.%fdc15_nr_acc_entitled_freedays_qa_2_months%(add_months(month_start,-1), round_up_month(month_start+0:01))
-  else 
-    accumulators.%fdc15_nr_acc_entitled_freedays_qa_2_months%(month_start,round_up_month(month_start+0:01) );
-
-export %twin_month_fdc15_scheduled%(Abstime month_start) =
-  if model_freedays.%is_last_twin_month%(month_start) then
-    accumulators.%fdc15_nr_twin_possibly_scheduled_freedays%(add_months(month_start,-1),round_up_month(month_start+0:01))
-  else
-    accumulators.%fdc15_nr_twin_possibly_scheduled_freedays%(month_start, round_up_month(month_start+0:01));
-
 
 %_fdc15_sbl_contribution%(Abstime per_s, Abstime per_e) =
   let s = wop.%start_day%,

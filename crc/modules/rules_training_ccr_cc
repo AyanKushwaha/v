@@ -688,9 +688,7 @@ export %limit_comp_max_temp_crew_on_flight_CC% =
 */
 
 %max_temp_crew_on_flight% =
-    if leg.%is_RC_aircraft% then
-      1
-    else if (crew.%has_agmt_group_skn_cc% and %has_enough_ordinary%) /*SKCMS-1081 */ 
+    if (crew.%has_agmt_group_skn_cc% and %has_enough_ordinary%) /*SKCMS-1081 */ 
             or %SKS_3RP_valid% /*SKCMS-2955*/ then
       3
     else if /* SKCMS-1891 */ base_product.%is_tracking%
@@ -799,6 +797,49 @@ end
 %any_deadhead_cc% = 
   any(equal_legs, %cabin_crew% and
                   leg.%is_deadhead%);
+/*
+** Rule:
+**    Check flights flying time is at least 1 hr duration for training of SVS CC
+**
+** Description:
+**    The rule checks that a training flight for SVS cabin crew
+**    is at least one hours long.
+**
+**  Agreement:
+**    Footprint SAS Link training
+*/
+rule trng_min_training_flight_length_svs_cc =
+  valid %trng_min_training_flight_length_svs_cc_valid% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
+        
+  leg.%scheduled_time% >=  %min_length_of_training_svs_cc% + rule_exceptions.%overshoot_rel%(leg.%activity_scheduled_start_time_UTC%);
+
+  startdate  = leg.%activity_scheduled_start_time_UTC%;
+  severity =  %severity_filter_int%(leg.%start_utc%,%duty_lh_region%);
+  failobject = leg.%failobject_departure%;
+  failtext %trng_min_training_flight_lenght_svs_cc_failtext% ;
+  remark "OMD: Training flight length SVS CC",
+  planner "Rule to check that duration of training flight"
+          "for SVS CC is long enough";
+end
+
+%trng_min_training_flight_length_svs_cc_valid% =
+  roster.%check_rules% and
+  crew.%is_svs% and
+  trip.%in_pp_extended% and
+  trip.%has_active_flight% and
+  leg.%has_training_code% and
+  not leg.%is_new% and
+  leg.%is_active_flight%;
+
+%min_length_of_training_svs_cc% = 
+    parameter 1:00
+    remark "Min duration for SVS CC training flight";
+
+%trng_min_training_flight_lenght_svs_cc_failtext% = 
+  rules.%failtext_rel%("OMD: Training flight for SVS CC too short", 
+                       leg.%scheduled_time%, 
+                       %min_length_of_training_svs_cc%);
 
 /*
 ** Rule:

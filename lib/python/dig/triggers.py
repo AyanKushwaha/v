@@ -13,14 +13,13 @@ __docformat__ = 'restructuredtext en'
 __metaclass__ = type
 
 # imports ================================================================{{{1
-import datetime, time, json
+import datetime, time, json, os
 from carmensystems.dig.framework import carmentime, utils
 from carmensystems.dig.framework.handler import MessageHandlerBase, ExitResult, SpawnChildrenAndCallNextHandlerResult, TextContentType
-from carmensystems.dig.framework.dave import DaveSearch
+from carmensystems.dig.framework.dave import DaveSearch, DaveConnector
 from carmensystems.dig.framework import errors
 from carmensystems.dig.framework import utils
 from carmensystems.dig.messagehandlers import reports
-
 
 # Trigger Handler classes ================================================{{{1
 
@@ -322,7 +321,7 @@ class FlightTimeTrigger(MessageHandlerBase):
                     self._services.logger.debug("Excluded flight DK<->Schengen: aco %s, fd %sss, adep %s" % (f['aco'], f['fd'], f['adep']))
                     skip5 += 1
                     continue
-
+                    
             result.append(f)
         self._services.logger.info("Count %d, skip1(%s,%s) = %d, skip2 = %d, skip3 = %d, skip4 = %d skip5 = %d" % (len(result), destCountry, depCountry, skip1, skip2, skip3, skip4, skip5))
         return result
@@ -415,6 +414,52 @@ class FlightScheduledTimeTrigger(FlightTimeTrigger):
             ])
         return self._services.getDaveConnector().runSearch(sSearch)
 
+# FlightScheduledTriggerSpc ============================================={{{2
+class FlightScheduledTriggerSpc(FlightTimeTrigger):
+    """Trigger n minutes before scheduled departure."""
+    def __init__(self, minutesBefore=None, outputClass=None, configFile=None,
+            destCountry=None, depCountry=None, name=None):
+        super(FlightScheduledTriggerSpc, self).__init__(minutesBefore, outputClass=outputClass, configFile=configFile,
+                destCountry=destCountry, depCountry=depCountry, name=name)
+
+    def _filterFlights(self, flights, mbd, destCountry, depCountry, fromTime, toTime, exceptionHandle=None):
+        # Remove any flights already reported for the given trigger criteria.
+        # If destCountry or depCountry is specified, also remove flights with
+        # other dest/departure country.
+        # if onlyOperatedBySAS is specified, also remove flights with other employer, flight_leg.aco != "SK"
+        result = []
+        now = self._services.now()
+        skip1 = 0
+        skip2 = 0
+        skip3 = 0
+        for f in flights:
+            if destCountry or depCountry:
+                if not self._matchesDepartureOrDestinationCountries(f, destCountry, depCountry):
+                    skip1 += 1
+                    continue
+            if self._reportedFlightsContains(f, mbd):
+                self._services.logger.debug("Already reported flight: udor %s, fd %s, adep %s (%s minutes before %s)" % (
+                    self._makeFlightKey(f,mbd) + (self._dep_arr,)))
+                skip2 += 1
+                continue
+            if self._onlyOperatedBySAS == "True":
+                if ((not f['aco'] == "SK") and (not f['aco'] == "SVS")):
+                    self._services.logger.debug("Excluded flight not operated by SAS: aco %s, fd %sss, adep %s" % (f['aco'], f['fd'], f['adep']))
+                    skip3 += 1
+                    continue
+
+            result.append(f)
+        return result
+
+    def _getFlights(self, fromTime, toTime, destCountry=None):
+        """Use scheduled time (STD)."""
+        # Use off-block time if departure, in-block time if arrival.
+        sched_time = ('sibt', 'sobt')[bool(self._isDeparture)]
+        sSearch = DaveSearch('flight_leg', [
+                (sched_time, '>', '%d' % fromTime),
+                (sched_time, '<', '%d' % toTime),
+            ])
+        return self._services.getDaveConnector().runSearch(sSearch)
 
 # FlightActualTimeTrigger ================================================{{{2
 class FlightActualTimeTrigger(FlightTimeTrigger):
@@ -923,6 +968,110 @@ class CrewManifestRequestBuilderMail:
 
         return (request, reports.ReportRequestContentType(), None)
 
+# CrewManifestRequestBuilderForArr  ============================================{{{2
+class CrewManifestRequestBuilderForArr:
+    """
+    Generates report request string for arrival flights for a country 
+    Crew Manifest IE
+    """
+
+    def __init__(self, destCountry=None, logger=None,
+            report='report_sources.report_server.rs_crew_manifest', fileName=None):
+        self.__destCountry = destCountry
+        self.__logger = logger
+        self.__report = report
+        self.__fileName = fileName
+      
+
+    def makeReportRequest(self, flight):
+        # Prepare request for the new report handler
+        schema =os.environ['DB_SCHEMA']
+        url =os.environ['DB_URL']
+        dc = DaveConnector(url, schema)
+        list_country = []
+        origsuffix = flight['origsuffix']
+        if origsuffix is None:
+            origsuffix = ''
+        
+        flt = str(flight['adep'])
+        for entry in dbsearch(dc, 'airport', ' AND '.join((
+               "id = '%s'" % flt,
+               "deleted = 'N'",
+               "next_revid = 0",
+           ))):
+           list_country.append(entry['country'])
+        
+        if self.__destCountry not in list_country:       
+            reportArgs = {
+                'fd': flight['fd'],
+                'origsuffix': origsuffix,
+                'udor': carmentime.fromCarmenTime(flight['udor']*1440).strftime("%Y%m%d"),
+                'adep': flight['adep'],
+                'country': self.__destCountry,
+                'fileName': self.__fileName,
+            }
+        else:
+            self.__report = 'report_sources.report_server.rs_crew_manifest_nonarr'
+            reportArgs = {
+                'fd': flight['fd'],
+                'origsuffix': origsuffix,
+                'udor': carmentime.fromCarmenTime(flight['udor']*1440).strftime("%Y%m%d"),
+                'adep': flight['adep'],
+                'country': self.__destCountry,
+                'fileName': "_API_for_flight_"  + flight['fd'].replace(" ", "_") + "_" + flight['adep'] + flight['ades'] + "_",
+        }
+        request = reports.ReportRequest(self.__report, reportArgs, delta=True)
+        return (request, reports.ReportRequestContentType(), None)         
+
+class CrewManifestRequestBuilderSpcNorway:
+    """
+    Generates report request string for departure and arrival flights for NO flights including LYR station
+    Crew Manifest NO
+    """
+
+    def __init__(self, destCountry=None, logger=None,
+            report='report_sources.report_server.rs_crew_manifest', fileName=None):
+        self.__destCountry = destCountry
+        self.__logger = logger
+        self.__report = report
+        self.__fileName = fileName
+
+    def makeReportRequest(self, flight):
+        # Prepare request for the new report handler
+        schema =os.environ['DB_SCHEMA']
+        url =os.environ['DB_URL']
+        dc = DaveConnector(url, schema)
+        origsuffix = flight['origsuffix']
+        if origsuffix is None:
+            origsuffix = ''
+
+        flt_dep = str(flight['adep'])
+        flt_des = str(flight['ades'])
+  
+        if flt_dep == 'LYR' or flt_des == 'LYR':
+            self.__report = 'report_sources.report_server.rs_crew_manifest'
+            reportArgs = {
+                'fd': flight['fd'],
+                'origsuffix': origsuffix,
+                'udor': carmentime.fromCarmenTime(flight['udor']*1440).strftime("%Y%m%d"),
+                'adep': flight['adep'],
+                'country': self.__destCountry,
+                'fileName': self.__fileName,
+            }
+        else:
+            self.__report = 'report_sources.report_server.rs_crew_manifest_nonarr'
+            reportArgs = {
+                'fd': flight['fd'],
+                'origsuffix': origsuffix,
+                'udor': carmentime.fromCarmenTime(flight['udor']*1440).strftime("%Y%m%d"),
+                'adep': flight['adep'],
+                'country': self.__destCountry,
+                'fileName': "_API_for_flight_"  + flight['fd'].replace(" ", "_") + "_" + flight['adep'] + flight['ades'] + "_",
+        }
+        request = reports.ReportRequest(self.__report, reportArgs, delta=True)
+        return (request, reports.ReportRequestContentType(), None)
+
+      
 
 # functions =============================================================={{{1
 
@@ -941,6 +1090,12 @@ def level_1_query(dc, query, columns):
         yield d
         R = l1conn.readRow()
     l1conn.endQuery()
+
+def dbsearch(dc, entity, expr=[], withDeleted=False):
+        """Search entity and return list of DCRecord objects."""
+        if isinstance(expr, str):
+            expr = [expr]
+        return list(dc.runSearch(DaveSearch(entity, expr, withDeleted)))
 
 
 # modeline ==============================================================={{{1

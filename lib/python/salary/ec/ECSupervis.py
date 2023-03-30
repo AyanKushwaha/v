@@ -31,6 +31,8 @@ class SupervisRosterManager:
             'crewid': 'crew.%id%',
             'empNo': 'crew.%employee_number%',
             'lifus_act': 'salary.%inst_lifus_act%',
+            'etops_lifus_act': 'salary.%inst_etops_lifus_act%',
+            'etops_lc_act': 'salary.%inst_etops_lc_act%',  
             'pc_opc': 'salary.%inst_pc_opc%',
             'pc_opc_bd': 'salary.%inst_pc_opc_bd%',
             'type_rating': 'salary.%inst_type_rating%',
@@ -48,6 +50,7 @@ class SupervisRosterManager:
             'sim_instr_fixed': 'salary.%sim_instr_fixed%',
             'salarySystem': 'salary.%salary_system%(salary.%salary_run_date%)',
             'homeCurrency': 'report_per_diem.%per_diem_home_currency%',
+            'cc_lcs_link' : 'salary.%inst_cc_lcs_link%',
         }
 
     def getSupervisRosters(self):
