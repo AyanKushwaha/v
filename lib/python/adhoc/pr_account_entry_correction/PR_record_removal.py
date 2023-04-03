@@ -22,7 +22,7 @@ def main():
     fixit()
  
 def delete_account_entry():
-     with open('/users/tcskuyadm/repo/CARMUSR/SAS-Tracking/lib/python/adhoc/pr_account_entry_correction/PR_remove_records.csv') as csvFile:
+     with open('./PR_remove_records.csv') as csvFile:
         data = csv.reader(csvFile, delimiter=';', quotechar='|')
         for row in data:
             accountList.append(dict({'revid': row[0],'prev_revid': row[1],'next_revid': row[2],'branchid': row[3],'id': row[4],'crew': row[5],'tim': row[6],'account': row[7]}))         

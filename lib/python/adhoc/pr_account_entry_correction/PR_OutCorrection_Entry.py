@@ -22,7 +22,7 @@ def main():
     fixit()
  
 def create_corrections():
-    with open('/users/tcskuyadm/repo/CARMUSR/SAS-Tracking/lib/python/adhoc/pr_account_entry_correction/PR_OutCorrection.csv') as csvFile:
+    with open('./PR_OutCorrection.csv') as csvFile:
         data = csv.reader(csvFile, delimiter=',', quotechar='|')
         for row in data:
             corrEntries.append(dict({'id': row[0],'NoOfPR':  row[1]}))         
