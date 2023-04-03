@@ -111,8 +111,6 @@ end
 **
 **    OMA and 4ExNG interpretations
 **
-**
-**
 */
 export rule ind_max_duty_time_in_cal_month_pt_cc_pt_SKS_monthly_pt_SKD =
   valid %ind_max_duty_time_in_calendar_month_pt_cc_parttime_SKS_monthly_parttime_SKD_valid%
@@ -129,17 +127,20 @@ export rule ind_max_duty_time_in_cal_month_pt_cc_pt_SKS_monthly_pt_SKD =
     %ind_max_duty_time_in_calendar_months_pt_cc_failtext%(value, limit);
   remark "(CCR) CPG: Max duty time in calendar month for parttime crew",
   planner "The rule checks that the maximum duty in calendar month"
-          " is not exceeded. The rule is valid for VG parttime SKS and SKD on monthly parttime"
-          " and for SKS FG part time when descshort match strings 'NNS F','Legal F', or 'Study F'"
+          " is not exceeded. The rule is valid for SKD on monthly parttime, VG parttime SKS/SKD,"
+          " and for SKS/SKD FG part time when descshort match strings 'NNS F','Legal F', or 'Study F'"
           " The limit is reduced by part time factor";
 end
 
 redefine export %ind_max_duty_time_in_calendar_month_pt_cc_parttime_SKS_monthly_parttime_SKD_valid% =
     roster.%check_rules%
-    and (crew.%has_agmt_group_sks_cc%
+    and ((crew.%has_agmt_group_sks_cc% or %valid_for_skd_cc%)
         and crew.%part_time_factor_at_date%(%_specific_date%) < 100
         and (crew.%in_variable_group_wop_start% or crew.%is_legal_pt_wop_start%)) 
     or (crew.%has_agmt_group_skd_cc% and crew.%is_crew_monthly_parttime_at_date%(wop.%start_utc%));
+
+%valid_for_skd_cc% =
+    crew.%has_agmt_group_skd_cc% and system_db_parameters.%skd_cc_provavtal_2023off%(wop.%end_utc%);
 
 %_specific_date% =
   let pp_month_start = round_down_month(wop.%start_utc%),
@@ -172,6 +173,40 @@ export %planned_duty_time_calendar_month% =
                      overshoot))
           where(round_down_month(leg.%start_hb%) = month),
           wop.%failobject_start%);
+
+/*
+**    Maximum planned in a 3-month-period duty time for CC FG part time
+**
+**    Part time factor at beginning of month determines Max duty time limit reduction
+**
+**    OMA and 4ExNG interpretations
+**
+*/
+export rule ind_max_duty_time_in_3_months_pt_cc =
+  valid roster.%check_rules% and
+        wop.%start_hb% >= %pp_start% and
+        wop.%is_last_on_duty_in_month% and
+        crew.%part_time_factor_at_date%(round_up_month(wop.%start_utc%)) < 100 and
+        crew.%part_time_factor_at_date%(round_up_month(wop.%start_utc%)) =
+        crew.%part_time_factor_at_date%(add_months(round_up_month(wop.%start_utc%),-3)) and
+        (crew.%in_fixed_group_wop_start% and
+         not crew.%is_legal_pt_wop_start%) and
+        crew.%in_fixed_group%(add_months(round_up_month(wop.%start_utc%),-3)) and
+        duty_time.%_planned_months_into_quarter% = 2
+        and not crew.%has_agmt_group_skn_cc%;
+  duty_time.%planned_duty_time_in_3_months% <= duty_time.%max_duty_in_3_months_pt_cc%(round_up_month(wop.%start_utc%)) +
+				rule_exceptions.%overshoot_rel%(wop.%start_UTC%);
+  startdate  = wop.%start_UTC%;
+  severity = first(leg(wop), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = wop.%failobject_start%;
+  failtext(Reltime value, Reltime limit) =
+    %ind_max_duty_time_in_calendar_months_pt_cc_failtext%(value, limit);
+  remark "(CCR) CPG: Max duty time in 3 calendar months for parttime crew",
+  planner "The rule checks that the maxmimum duty in a 3-months-period"
+          " is not exceeded. The rule is valid for FG parttime, but not FG when"
+          " descshort match strings 'NNS F','Legal F', or 'Study F'"
+          " The limit is reduced by part time factor";
+end
 
 /*
 ** Rule:
