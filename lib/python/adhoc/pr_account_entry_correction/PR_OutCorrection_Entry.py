@@ -59,19 +59,22 @@ def fixit(dc, *a, **k):
                  )))     
         if(existingAccEntry==[]):
             amount = int(corrEntry['NoOfPR']) * -100
-            ops.append(fixrunner.createOp('account_entry', 'N', {'id': uuid.makeUUID64(),
-                                                                'crew': crewId,
-                                                                'tim': int(tim),
-                                                                'account': 'PR',
-                                                                'source': 'OUT Correction',
-                                                                'amount': int(amount),
-                                                                'man': 'Y',
-                                                                'si': 'PR days Jan-Apr2023',
-                                                                'published': 'Y',
-                                                                'rate': int(-100),
-                                                                'reasoncode': reason_code,
-                                                                'entrytime': int(time),
-                                                                'username': utils.Names.username()}))
+            if(amount == 0):
+                continue
+            else:
+                ops.append(fixrunner.createOp('account_entry', 'N', {'id': uuid.makeUUID64(),
+                                                                    'crew': crewId,
+                                                                    'tim': int(tim),
+                                                                    'account': 'PR',
+                                                                    'source': 'OUT Correction',
+                                                                    'amount': int(amount),
+                                                                    'man': 'Y',
+                                                                    'si': 'PR days Jan-Apr2023',
+                                                                    'published': 'Y',
+                                                                    'rate': int(-100),
+                                                                    'reasoncode': reason_code,
+                                                                    'entrytime': int(time),
+                                                                    'username': utils.Names.username()}))
 
         else:
             amount = (int(corrEntry['NoOfPR'])-(int(existingAccEntry[0]['amount']))/100) * -100
