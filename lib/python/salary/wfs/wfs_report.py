@@ -82,7 +82,7 @@ class WFSReport():
             crew_ids = []
             log.info('NORDLYS: Generating {0} report for all crew'.format(self.type))
             roster_bag = r.context('sp_crew').bag()
-            for crew_bag in roster_bag.iterators.crewid_set(where=('crew.%is_homebase_SKS% or crew.%is_homebase_SKD% or crew.%is_homebase_SKN%')):
+            for crew_bag in roster_bag.iterators.crewid_set(where=('crew.%is_homebase_SKS% or crew.%is_homebase_SKD% or crew.%is_homebase_SKN% or crew.%is_homebase_svs%')):
                 crew_id = crew_bag.crew.id()
                 if r.eval('model_crew.%crewrank_at_date_by_id%("{crew_id}", {dt})'.format(crew_id=crew_id, dt=self.start))[0] == 'FS':
                     log.debug('NORDLYS: Skipping crew {c} with FS rank'.format(c=crew_id))
@@ -456,16 +456,6 @@ def base_from_id(crew_id, dt):
         dt=dt)
         )[0]
     return crew_base
-
-def crew_not_BGOFD(crew_id, dt):
-    crew_base= base_from_id(crew_id,dt)
-    crewid_rank = rank_from_id(crew_id, dt)
-    if crew_base != 'BGO':
-        return True
-    elif crewid_rank == 'FC':
-        return False
-    else:
-        return True
 
 def crew_excluded(crew_id, curr_date):
     if extperkey_from_id(crew_id,curr_date) in crew_exclusion_list:
