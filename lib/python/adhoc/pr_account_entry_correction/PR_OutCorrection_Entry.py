@@ -39,29 +39,34 @@ def fixit(dc, *a, **k):
     tim = AbsTime(ae_tim[:15])
     reason_code = 'OUT Correction'
     ops = list()
+    
     for corrEntry in corrEntries:
-        
-        temp=fixrunner.dbsearch(dc, 'crew', "id='%s'" % corrEntry['id'])
+        crewId = corrEntry['id']   
+        temp=fixrunner.dbsearch(dc, 'crew', "id='%s'" % crewId)
         if(temp == []):
-            print("CREW ID DOES NOT EXITS -->{0}".format(corrEntry['id']))
-        else:
-            existingAccEntry = fixrunner.dbsearch(dc, 'account_entry', 'AND ' .join((
-            "si= 'PR Correction(Jan-Apr)'",
-            "deleted = 'N'",
-            "next_revid = 0",
-                "crew='%s'" % corrEntry['id'],
-            )))
-        
+            print("CREW ID DOES NOT EXITS, CHECKING THE EXPERKEY  -->{0}".format(crewId))
+            fetchCrewId = fixrunner.dbsearch(dc, 'crew_employment', 'AND' .join((
+                "extperkey='%s'" % crewId,
+                " validto > %d" % time,
+                )))
+            print("CREW ID ->{0} FOR EMPLOYEE NO -> {1}".format(fetchCrewId[0]['crew'], crewId))
+            crewId = fetchCrewId[0]['crew']
+        existingAccEntry = fixrunner.dbsearch(dc, 'account_entry', 'AND ' .join((
+                "si= 'PR days Jan-Apr2023'",
+                "deleted = 'N'",
+                "next_revid = 0",
+                "crew='%s'" % crewId,
+                 )))     
         if(existingAccEntry==[]):
             amount = int(corrEntry['NoOfPR']) * -100
             ops.append(fixrunner.createOp('account_entry', 'N', {'id': uuid.makeUUID64(),
-                                                                'crew': corrEntry['id'],
+                                                                'crew': crewId,
                                                                 'tim': int(tim),
                                                                 'account': 'PR',
                                                                 'source': 'OUT Correction',
                                                                 'amount': int(amount),
                                                                 'man': 'Y',
-                                                                'si': 'PR Correction(Jan-Apr)',
+                                                                'si': 'PR days Jan-Apr2023',
                                                                 'published': 'Y',
                                                                 'rate': int(-100),
                                                                 'reasoncode': reason_code,
@@ -77,7 +82,7 @@ def fixit(dc, *a, **k):
         
     return ops
  
-__version__ = 'SKCMS-3210_20230403_09'
+__version__ = 'SKCMS-3210_20230404_03'
 fixit.program = 'acc_entr_corrections.py (%s)' % __version__
  
 main()
