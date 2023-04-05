@@ -81,7 +81,7 @@ class CrewDataDocument(XMLDocument):
         # Get data from database.
         crew_table = dbconn.runSearch(DaveSearch('crew', []))
         tbl_crew_employment = dbconn.runSearch(DaveSearch('crew_employment', [('validto', '>', from_time),
-                                                                    ('planning_group', '!=', 'SVS')])) 
+                                                                    ('company', '!=', 'SVS')])) 
         non_svs_crew = []                                                                    
         for ce in tbl_crew_employment:
             if ce['crew'] not in non_svs_crew:
@@ -460,13 +460,18 @@ class CrewElement(XMLElement):
         
         if employments and contracts and qualifications:
             maincat = employments[0].maincat
-            region = employments[0].region           
+            region = employments[0].region
+            base = employments[0].base
             contracttype = contracts[0].contracttype
             temp = contracts[0].temp
             
-            if maincat == 'F':           
+            if maincat == 'F':
                 if region in ['SKD', 'SKN', 'SKS']:
                     return 'FD SH ' + region + ' ' +  contracttype
+                elif region == 'SVS' and base == 'BGO':
+                    return 'FD SH SKN ' + contracttype
+                elif region == 'SVS' and base == 'CPH':
+                    return 'FD SH SKD ' + contracttype
                 else:
                     return 'FD LH'                    
             else:
