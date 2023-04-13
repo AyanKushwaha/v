@@ -10,7 +10,7 @@ import crewlists.status as status
 import utils.exception
 import utils.extiter as extiter
 import utils.briefdebrief as briefdebrief
-import salary.Overtime as Overtime
+import salary.ec.ECOvertime as Overtime
 
 from crewlists.replybody import Reply, ReplyError, getReportReply
 from AbsTime import AbsTime
@@ -369,7 +369,7 @@ def run(*a):
             context = SingleCrewFilter(i.crewid).context()
             rosters = ri.eval(context)
         
-            crewOtMembers = Overtime.OvertimeManager(context=context, crewlist=[i.crewid])
+            crewOtMembers = Overtime.OvertimeRosterManager(context=context, crewlist=[i.crewid])
             crewOtRosters = crewOtMembers.getOvertimeRosters()
         finally:
             # Restore parameters
