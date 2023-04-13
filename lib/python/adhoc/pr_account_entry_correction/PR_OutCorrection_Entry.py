@@ -23,7 +23,7 @@ def main():
  
 def create_corrections():
     with open('./PR_OutCorrection.csv') as csvFile:
-        data = csv.reader(csvFile, delimiter=',', quotechar='|')
+        data = csv.reader(csvFile, delimiter=';', quotechar='|')
         for row in data:
             corrEntries.append(dict({'id': row[0],'NoOfPR':  row[1]}))         
     
@@ -31,10 +31,11 @@ def create_corrections():
 @fixrunner.once
 @fixrunner.run
 def fixit(dc, *a, **k):
-    date = str(datetime.now()).replace('-', '')    
-    time = AbsTime(date[:14])
 
     format = "%d%b%Y %H:%M:%S:%f"
+    check_date = datetime(2023, 1, 1).strftime(format)   
+    time = AbsTime(check_date[:15])
+
     ae_tim = datetime(2023, 4, 30).strftime(format)
     tim = AbsTime(ae_tim[:15])
     reason_code = 'OUT Correction'
@@ -44,7 +45,7 @@ def fixit(dc, *a, **k):
         crewId = corrEntry['id']   
         temp=fixrunner.dbsearch(dc, 'crew', "id='%s'" % crewId)
         if(temp == []):
-            print("CREW ID DOES NOT EXITS, CHECKING THE EXPERKEY  -->{0}".format(crewId))
+            print("CREW ID DOES NOT EXITS, CHECKING THE EXTPERKEY  -->{0}".format(crewId))
             fetchCrewId = fixrunner.dbsearch(dc, 'crew_employment', 'AND' .join((
                 "extperkey='%s'" % crewId,
                 " validto > %d" % time,

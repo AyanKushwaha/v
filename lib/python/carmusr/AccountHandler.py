@@ -26,7 +26,7 @@ import carmensystems.rave.api as R
 import time
 import carmusr.HelperFunctions as HF
 from datetime import datetime
-from AbsTime import AbsTime
+#from AbsTime import AbsTime
 
 import application
 from salary.reasoncodes import REASONCODES
@@ -820,13 +820,13 @@ def _assert_update():
 def _ignoredEndTimePR():
     format = "%d%b%Y %H:%M:%S:%f"
     dateEnd = datetime(2023, 4, 30).strftime(format)
-    absDateEndPR= AbsTime(dateEnd[:15])
+    absDateEndPR= AbsTime.AbsTime(dateEnd[:15])
     return absDateEndPR
 
 def _ignoredStartTimePR():
     format = "%d%b%Y %H:%M:%S:%f"
     datestart = datetime(2023, 1, 1).strftime(format)
-    absDateStartPR= AbsTime(datestart[:15])
+    absDateStartPR= AbsTime.AbsTime(datestart[:15])
     return absDateStartPR
 
 def _debug_transaction_valid(crew_object, entry):
