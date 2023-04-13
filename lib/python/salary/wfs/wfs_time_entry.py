@@ -20,7 +20,7 @@ from RelTime import RelTime
 from salary.wfs.wfs_report import WFSReport 
 from salary.wfs.wfs_report import (abs_to_datetime, extperkey_from_id, country_from_id, 
     getNextRecordId, getNextRunId, add_to_salary_wfs_t, rank_from_id, actual_rank_from_id, reltime_to_decimal, default_reltime,
-    integer_to_reltime, crew_info_changed_in_period, crew_has_retired_at_date,company_from_id, end_month_extended,crew_not_BGOFD)
+    integer_to_reltime, crew_info_changed_in_period, crew_has_retired_at_date,company_from_id, end_month_extended,crew_not_BGOFD, get_crew_extperkey_changed)
 
 from salary.wfs.wfs_config import PaycodeHandler
 import time
@@ -44,6 +44,7 @@ class TimeEntry(WFSReport):
         self.cached_salary_wfs = self.generate_salary_wfs()
         self.cached_account_data = self.generate_account_data()
         self.paycode_handler = PaycodeHandler()
+        self.cached_changed_extperkey_data = self.generate_extperkey_data()
 
         # Setup salary month parameters. Some rave variables used
         # checks against these parameters for validity.
@@ -84,6 +85,8 @@ class TimeEntry(WFSReport):
         data.extend(self._account_transactions(crew_id))
         # collects all the records that are removed from roster 
         data.extend(self._removed_records(crew_id, data))
+        #collects all the records from salary_wfs that are to be resend for the new extperkey and the one with old extperkey is to marked as deleted
+        data.extend(self._resend_new_extperkey_data(crew_id))
         return data
     '''
     Overridden functions END
@@ -1505,6 +1508,48 @@ class TimeEntry(WFSReport):
             sick_hrs.append(saslink_sick[0]['rec'])
         return sick_hrs
 
+
+    def _resend_new_extperkey_data(self, crew_id):
+        curr_date = AbsTime(datetime.now().strftime('%d%b%Y'))
+        dict = generate_extperkey_data()
+
+       if len(dict) != 0:
+            while curr_date <= self.end_date_check:
+                if self.cached_salary_wfs.has_key(oldextperkey) and self.cached_salary_wfs[crew_id].has_key(curr_date):
+                    for rec in [r for r in self.cached_salary_wfs[crew_id][date_to_check] if r.flag == 'I']:
+                    # As new extperkey now present for these records, #create delete row for the old extperkey
+                        delete_row_data = {
+                                'extperkey' : pre.extperkey,
+                                'paycode' : pre.wfs_paycode,
+                                'hours' : pre.amount, 
+                                'days_off' : pre.days_off,
+                                'start_dt' : abs_to_datetime(rec.work_day),
+                                'record_id' : pre.recordid,
+                                'flag' : 'D'
+                            }
+                        flag = add_to_salary_wfs_t(delete_row_data, crew_id, self.runid)
+                        if flag == 0:
+                            continue
+                        row = self.format_row(delete_row_data)
+                        log.info(row)
+                        log.info("# testing delete")
+                        data.append(row)
+                        # Create new row with 'I' flag for New Extperkey
+                        insert_row_data = {
+                                'extperkey' : extperkey,
+                                'paycode' : wfs_paycode,
+                                'hours' : hours, 
+                                'days_off' : days_off,
+                                'start_dt' : abs_to_datetime(rec.work_day),
+                                'record_id' : getNextRecordId(),
+                                'flag' : 'I'
+                            }
+                        add_to_salary_wfs_t(insert_row_data, crew_id, self.runid)
+                        row = self.format_row(insert_row_data)
+                        log.info(row)
+                        log.info("# testing insert")
+                        data.append(row)
+
     '''
     Main data extraction END
     '''
@@ -1634,6 +1679,7 @@ class TimeEntry(WFSReport):
         return dict_r
    
     def generate_account_data(self):
+        
         account_entry_t = tm.table('account_entry')
         account_query = '(|(account=BOUGHT)(account=BOUGHT_BL)(account=BOUGHT_FORCED)(account=BOUGHT_8)(account=SOLD))'
         reasoncode_query = '(|(reasoncode=BOUGHT)(reasoncode=SOLD))'
@@ -1705,6 +1751,22 @@ class TimeEntry(WFSReport):
 
         log.info('NORDLYS: {0} total nr of crew with account data extracted with VA/VA1'.format(len(dict_t)))
         return dict_t
+   
+    def generate_extperkey_data(self):
+        curr_date = AbsTime(datetime.now().strftime('%d%b%Y'))
+        oldextperkey, newextperkey = get_crew_extperkey_changed(curr_date)
+        transactions = self.cached_account_data[crew_id]
+        dict_cache = {}
+        if newextperkey != []:
+            for tnx in transactions:
+                dict_cache.setdefault(tnx.crew.id, [])
+                dict_cache[tnx.crew.id].append({
+                    'tnx'           :tnx,
+                    'newextperkey'  :newextperkey,
+                    'oldextperkey'  :oldextperkey})
+        return dict_cache
+        print(dict_cache)
+   
     '''
     Cache functions END
     '''

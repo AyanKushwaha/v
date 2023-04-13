@@ -350,6 +350,48 @@ def crew_has_retired_at_date(crew_id, dt):
         return True
     return False
 
+def  get_crew_extperkey_changed(curr_date):
+    crew_emp_table = tm.table('crew_employment')
+    assignment_data = crew_emp_table.search("(validfrom={0})".format(curr_date))
+    list_crew_empchange = []
+    oldextperkey_data = []
+    newextperkey_data = []
+    print("This is assignment data",assignment_data)
+    # Checking for extperkey change from crew employment table 
+    for rec in assignment_data:
+        crew = rec.crew.id
+        rank = rec.crewrank.id
+        extperkey = rec.extperkey 
+        validfrom = rec.validfrom
+        validto = rec.validto
+        log.info('Crew having validfrom as today date: {crew}'.format(crew=crew))
+        # Search in crew_employment table is same crew exists with validto as either today or old date
+        deassignment_data = crew_emp_table.search('(&(crew={crew})(validto<={validfrom}))'.format(
+        crew=crew,
+        validto=curr_date
+        ))
+        for rec_end in deassignment_data:
+            #If crew found in the crew_employment table having validto as either current date or less
+            if rec_end.crew.id == crew:
+                if rec_end.extperkey != extperkey:
+                    log.error('''
+                    Crew {crew} - Old Emp {oldextperkey} New Emp {newextperkey} 
+                    Valid from {validfrom}
+                    Valid to {validto}
+                    '''.format(
+                        crew=crew,
+                        oldextperkey=rec_end.extperkey,
+                        newextperkey=extperkey,
+                        validfrom=validfrom,
+                        validto=validto
+                        ))                   
+                    list_crew_empchange.append(crew)
+                    oldextperkey_data.append(oldextperkey)
+                    newextperkey_data.append(newextperkey)
+                    break
+
+    return oldextperkey_data, newextperkey_data
+
 '''
 The format to report hours required either numbers in N or N.NN
 For clarity we always provide it in N.NN format with trailing zeroes
