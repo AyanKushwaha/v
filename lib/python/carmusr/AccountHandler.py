@@ -585,10 +585,12 @@ def _check_unbooked_bought_periods(crew_list, ppstart, ppend, entry_info, accoun
 
         # If we bought some other activity then we need to mimic that leg lookup
         account = bought_period.day_type  # The account for the other activity
-        if(account=='PR' and ignoredFromDatePR<=bought_period.start_time<= ignoredTillDatePR ):
-            continue
+        #if(account=='PR' and ignoredFromDatePR<=bought_period.start_time<= ignoredTillDatePR ):
+        #    print("Inside expected")
+        #    continue
         if account is not None and account in account_list:
             affect_account_info = _bought_period_account_effect(bought_period, account)
+            print("affect_account_info--->{0}".format(affect_account_info))
             if affect_account_info['effects']:  # this bought activity has to affect its account
                 amount = affect_account_info['amount']
 
@@ -598,6 +600,9 @@ def _check_unbooked_bought_periods(crew_list, ppstart, ppend, entry_info, accoun
                                      account,
                                      amount,
                                      bought_period.start_time))
+                if(account=='PR' and ignoredFromDatePR<=bought_period.start_time<= ignoredTillDatePR ):
+                    booked =True
+                    print("Inside expected")
                 if not booked:
                     bought_period_cache.append([account, bought_period])
                     account_count[account] += 1
@@ -615,6 +620,7 @@ def _check_unbooked_bought_periods(crew_list, ppstart, ppend, entry_info, accoun
                                 account,
                                 amount,
                                 bought_period.start_time))
+            print("Booked2222 ---->{0}, account---->{1}, bought_period.start_time--->{2}".format(booked, account, bought_period.start_time    ))
             if not booked:
                 bought_period_cache.append([account, bought_period])
                 account_count[account] += 1
@@ -623,8 +629,10 @@ def _check_unbooked_bought_periods(crew_list, ppstart, ppend, entry_info, accoun
     # Either in BOUGHT or activity account
     for account, bought_period in bought_period_cache:
         if account not in BOUGHT_ACCOUNT_NAMES:  # not BOUGHT, BOUGHT_BL, or BOUGHT_COMP
+            print("INSIDE _create_activity_account_entry_from_bought_period")
             _create_activity_account_entry_from_bought_period(bought_period, account, *entry_info)
         else:
+            print("ELSE INSIDE _create_bought_account_entry_from_bought_period")
             _create_bought_account_entry_from_bought_period(bought_period, *entry_info)
     return len(bought_period_cache) > 0  # There were unbooked tnxs
 
@@ -680,6 +688,7 @@ def _create_bought_account_entry_from_bought_period(bought_period, published, no
            'published':published
            }
     # create the actual account
+    print("Entries _------>{0}".format(entry))
     _create_account_entry(entry)
 
 
