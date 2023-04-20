@@ -585,8 +585,6 @@ def _check_unbooked_bought_periods(crew_list, ppstart, ppend, entry_info, accoun
 
         # If we bought some other activity then we need to mimic that leg lookup
         account = bought_period.day_type  # The account for the other activity
-        if(account=='PR' and ignoredFromDatePR<=bought_period.start_time<= ignoredTillDatePR ):
-            continue
         if account is not None and account in account_list:
             affect_account_info = _bought_period_account_effect(bought_period, account)
             if affect_account_info['effects']:  # this bought activity has to affect its account
@@ -598,6 +596,8 @@ def _check_unbooked_bought_periods(crew_list, ppstart, ppend, entry_info, accoun
                                      account,
                                      amount,
                                      bought_period.start_time))
+                if(account=='PR' and ignoredFromDatePR<=bought_period.start_time<= ignoredTillDatePR ):
+                    booked =True
                 if not booked:
                     bought_period_cache.append([account, bought_period])
                     account_count[account] += 1
