@@ -25,7 +25,8 @@ import utils.Names as Names
 import carmensystems.rave.api as R
 import time
 import carmusr.HelperFunctions as HF
-
+from datetime import datetime
+#from AbsTime import AbsTime
 
 
 import application
@@ -458,6 +459,8 @@ def updateAccountsForCrewInWindow(crewid_list, account_list, currentArea=Cui.Cui
     for account in account_list:
         account_count[account] = 0
     #################################################################
+    ignoredTillDatePR = _ignoredEndTimePR()
+    ignoredFromDatePR = _ignoredStartTimePR() 
     for crew_id in crewid_list:
         crew_object = _get_crew_object(crew_id)
         unbooked_where_expr = "compdays.%leg_has_online_transaction_unbooked%"
@@ -478,7 +481,7 @@ def updateAccountsForCrewInWindow(crewid_list, account_list, currentArea=Cui.Cui
         for _, tnxs_for_leg in unbooked_tnxs:
             for tnx_for_leg in tnxs_for_leg:
                 _, start_hb, account, amount, rate, reason, source, si = tnx_for_leg
-                if account not in account_list:
+                if account not in account_list or (account == 'PR' and ignoredFromDatePR<=start_hb<= ignoredTillDatePR):
                     continue
                 entry = {'crew': crew_id,
                          'amount': amount,
@@ -559,7 +562,8 @@ def _check_unbooked_bought_periods(crew_list, ppstart, ppend, entry_info, accoun
     """
     migration_date, = R.eval('default_context', 'compdays.%account_migration_date%')
     bought_period_cache = []
-
+    ignoredTillDatePR = _ignoredEndTimePR()
+    ignoredFromDatePR = _ignoredStartTimePR()
     bought_periods_to_check = []
     for crew_id in crew_list:
         try:
@@ -592,6 +596,8 @@ def _check_unbooked_bought_periods(crew_list, ppstart, ppend, entry_info, accoun
                                      account,
                                      amount,
                                      bought_period.start_time))
+                if(account=='PR' and ignoredFromDatePR<=bought_period.start_time<= ignoredTillDatePR ):
+                    booked =True
                 if not booked:
                     bought_period_cache.append([account, bought_period])
                     account_count[account] += 1
@@ -801,6 +807,17 @@ def _assert_update():
         return False
     return True
 
+def _ignoredEndTimePR():
+    format = "%d%b%Y %H:%M:%S:%f"
+    dateEnd = datetime(2023, 4, 30).strftime(format)
+    absDateEndPR= AbsTime.AbsTime(dateEnd[:15])
+    return absDateEndPR
+
+def _ignoredStartTimePR():
+    format = "%d%b%Y %H:%M:%S:%f"
+    datestart = datetime(2023, 1, 1).strftime(format)
+    absDateStartPR= AbsTime.AbsTime(datestart[:15])
+    return absDateStartPR
 
 def _debug_transaction_valid(crew_object, entry):
     try:
