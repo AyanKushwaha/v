@@ -51,6 +51,7 @@ class TimeEntryReport(WFSReport):
         log.info('NORDLYS: TimeEntryReport Generating report for the period {0} to {1}'.format(self.start, self.end))
 
         self.cached_account_data = self.generate_account_data()
+        self.cached_bought_link_data = self.generate_bought_link_data()
 
         self.paycode_handler = PaycodeHandler()
         
@@ -88,6 +89,11 @@ class TimeEntryReport(WFSReport):
         data.extend(self._wfs_corrected(crew_id))
         data.extend(self._roster_events(crew_id))
         data.extend(self._account_transactions(crew_id))
+        #To be executed only for SAS  Link
+        crew_company = company_from_id(crew_id, self.start)
+        print("###############CREW COMPANY####################",crew_company, self.start)
+        if crew_company == "SVS":
+            data.extend(self._bought_link_transactions(crew_id))
         return data
     '''
     Overridden functions END
@@ -945,6 +951,65 @@ class TimeEntryReport(WFSReport):
         log.info('NORDLYS: {0} new records created for Time Entry report'.format(len(data)))
         return data
 
+    def _bought_link_transactions(self, crew_id):
+        '''
+        Compares records from bought_days_svs table to eventual pre-existing
+        records in salary_wfs (already sent to WFS at previous date)
+
+        :param crew_id
+        needed for doing lookups in bought_days_svs
+        extperkey needed for doing the actual reporting to WFS
+        '''
+        data = []
+        curr_date = AbsTime(datetime.now().strftime('%d%b%Y'))
+        extperkey = extperkey_from_id(crew_id, self.start)
+        log.debug('NORDLYS: crew_id {0} converted to extperkey {1}'.format(crew_id, extperkey))
+        if extperkey == crew_id:
+            # Try converting crew_id as extperkey to actual crew_id
+            crew_id = rave.eval('model_crew.%crew_id_from_extperkey%("{0}", {1})'.format(crew_id, self.start))[0]
+        country = country_from_id(crew_id, self.start)
+        rank = rank_from_id(crew_id, self.start)
+        crew_info_changed = crew_info_changed_in_period(crew_id, self.start, self.end)
+        try:
+            transactions = self.cached_bought_link_data[crew_id]
+        except KeyError:
+            log.info('NORDLYS: No bought account entries found for {crew}'.format(crew=crew_id))
+            return []
+
+        for dated_tnx in transactions:
+          if dated_tnx['tnx_dt'] >= self.start:
+            tnx = dated_tnx['tnx']
+            tnx_dt = dated_tnx['tnx_dt']
+            account_id = dated_tnx['tnx_account_id']
+            amount = dated_tnx['amount']
+            days_off = dated_tnx['days_off']
+            if crew_info_changed:
+                # Check if crew is retired on this date, It yes, Skip the retired crew
+                if crew_has_retired_at_date(crew_id, tnx_dt):
+                    log.info('NORDLYS: Skipping retired crew {c} on {dt}'.format(c=crew_id, dt = tnx_dt))
+                    continue
+                extperkey, country, rank = self._update_crew_info(crew_id, tnx_dt)
+
+            log.debug('NORDLYS: Transaction on {account} for amount {amount} on {dt}'.format(account=tnx.account_name, amount = amount, dt=tnx_dt))
+            accountid = tnx.account_name
+            #Different paycodes are needed for FC and FP. So actual rank is being picked here
+            if rank == 'FC':
+                actual_rank = actual_rank_from_id(crew_id, curr_date)
+                wfs_paycode = self.paycode_handler.paycode_from_event(account_id, crew_id, country, actual_rank)
+            else:
+                wfs_paycode = self.paycode_handler.paycode_from_event(account_id, crew_id, country, rank)
+            log.debug('NORDLYS: wfs_paycode {0} mapped from account {1}'.format(wfs_paycode, account_id))
+            # Check if this transaction already has been sent
+            chk_wfs_corrected = self._check_in_wfs_corrected(crew_id, extperkey, wfs_paycode, abs_to_datetime(tnx_dt), amount, None)
+            if chk_wfs_corrected:
+                continue
+            new_recs = self._latest_record(crew_id, extperkey, wfs_paycode, abs_to_datetime(tnx_dt), amount, days_off)
+            data.extend(new_recs)
+        log.info('NORDLYS: Extracting data from bought_days_svs finished!')
+        log.info('NORDLYS: {0} new records created for Time Entry report'.format(len(data)))
+        return data
+    
+    
     def _update_crew_info(self, crew_id, dt):
         # Catch cases where crew has their information changed in period
         extperkey = extperkey_from_id(crew_id, dt)
@@ -961,9 +1026,8 @@ class TimeEntryReport(WFSReport):
 
     def _latest_record(self, crew_id, extperkey, wfs_paycode, curr_dt, hours, days_off):
         data = []
-        curr_abs = AbsTime(curr_dt.year, curr_dt.month, curr_dt.day, 0, 0)        
-	log.info('NORDLYS: Skipped pre-existing records... Adding new record')
-
+        curr_abs = AbsTime(curr_dt.year, curr_dt.month, curr_dt.day, 0, 0)
+        log.info('NORDLYS: Adding records')
         if (hours and hours > RelTime('0:00')) or (days_off and days_off != 0):
             insert_row_data = {
                 'extperkey' : extperkey,
@@ -972,7 +1036,7 @@ class TimeEntryReport(WFSReport):
                  'days_off' : days_off,
                  'start_dt' : curr_dt
             }
-       
+
             row = self.format_row(insert_row_data)
             log.info(row)
             data.append(row) 
@@ -1056,6 +1120,70 @@ class TimeEntryReport(WFSReport):
 
         log.info('NORDLYS: {0} nr of crew with account data extracted without VA/VA1'.format(len(dict_t)))
         return dict_t
+
+    def generate_bought_link_data(self):
+        # Fetch Bought account data for SAS link from bought_days_svs table
+        # tnx_account_id is used here as we have same paycode for the accounts
+        # CNLN_BOUGHT_FHOUR_DUTY is used for BOUGHT_PROD and BOUGHT_DUTY
+        # CNLN_BOUGHT_FDAY is used for days_off for  BOUGHT_SBY and BOUGHT_PROD
+        bought_days_svs_t = tm.table('bought_days_svs')
+        transactions_bought_link = bought_days_svs_t.search('(&(start_time>={st})(start_time<={end}))'.format(
+            st=self.start,
+            end=self.end
+        ))
+
+        dict_t = {}
+        for tnx in transactions_bought_link:
+            dict_t.setdefault(tnx.crew.id, [])
+            hr = tnx.hours
+            mins = tnx.minutes
+            hours= hr + mins
+            hours_reltime = default_reltime(hours)
+            curr_abs = tnx.start_time
+            
+            if curr_abs > self.end:
+                # Activity starts after set end date
+                break
+            if tnx.account_name == 'BOUGHT_SBY':
+                dict_t[tnx.crew.id].append({
+                    'tnx_dt'        : curr_abs,
+                    'tnx'           : tnx,
+                    'tnx_account_id': "CNLN_BOUGHT_FHOUR_SB",
+                    'amount'        : hours_reltime,
+                    'days_off'      : None})
+                # Add 1 day here for the bought free days
+                dict_t[tnx.crew.id].append({
+                    'tnx_dt'        : curr_abs,
+                    'tnx'           : tnx,
+                    'tnx_account_id': "CNLN_BOUGHT_FDAY",
+                    'amount'        : None,
+                    'days_off'      : 1})
+            elif tnx.account_name =='BOUGHT_PROD':
+                dict_t[tnx.crew.id].append({
+                    'tnx_dt'        : curr_abs,
+                    'tnx'           : tnx,
+                    'tnx_account_id': "CNLN_BOUGHT_FHOUR_DUTY",
+                    'amount'        : hours_reltime,
+                    'days_off'      : None})
+                # Add 1 day here for the bought free days
+                dict_t[tnx.crew.id].append({
+                    'tnx_dt'        : curr_abs,
+                    'tnx'           : tnx,
+                    'tnx_account_id': "CNLN_BOUGHT_FDAY",
+                    'amount'        : None,
+                    'days_off'      : 1})
+            else:
+                dict_t[tnx.crew.id].append({
+                    'tnx_dt'        : curr_abs,
+                    'tnx'           : tnx,
+                    'tnx_account_id': "CNLN_BOUGHT_FHOUR_DUTY",
+                    'amount'        : hours_reltime,
+                    'days_off'       : None})
+            log.info('NORDLYS: Found {0} account for crew {1} on date {2} with hours {3}'.format(tnx.account_name,tnx.crew.id,curr_abs,hours_reltime))
+        log.info('NORDLYS: {0} nr of crew extracted with Bought Link data'.format(len(dict_t)))
+        return dict_t
+
+
 
     '''
     Cache functions END

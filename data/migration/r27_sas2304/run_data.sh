@@ -34,11 +34,14 @@ echo " - Processing migration tasks"
 
 #### Insert migration tasks below ####
 # Example:
-# echo "  * SKCMS-1234:  Link CC SCC course set up"
+# echo "  * SKCMS-1234: Some description"
 # python $CARMUSR/data/migration/$RELEASE/skcms-1234.py 2>&1 | tee $LOG_DIR/skcms-1234.log
 
 echo "  * SKCMS-2822: Bought types for Link"
 python $CARMUSR/data/migration/$RELEASE/skcms-2822.py 2>&1 | tee $LOG_DIR/skcms-2822.log
+
+echo "  * SKCMS-2775: TE: Link Bought day paycodes for production, standby and additional duty"
+python $CARMUSR/data/migration/$RELEASE/skcms-2775.py 2>&1 | tee $LOG_DIR/skcms-2775.log
 
 
 # Uncomment this in case dave filters shall be modified, remember to update JIRA number
