@@ -350,47 +350,42 @@ def crew_has_retired_at_date(crew_id, dt):
         return True
     return False
 
-def  get_crew_extperkey_changed(curr_date):
+def  get_crew_extperkey_changed(curr_date,start_date):
     crew_emp_table = tm.table('crew_employment')
-    assignment_data = crew_emp_table.search("(validfrom={0})".format(curr_date))
-    list_crew_empchange = []
-    oldextperkey_data = []
-    newextperkey_data = []
-    print("This is assignment data",assignment_data)
-    # Checking for extperkey change from crew employment table 
-    for rec in assignment_data:
-        crew = rec.crew.id
-        rank = rec.crewrank.id
-        extperkey = rec.extperkey 
+    # Get the list of crew extperkey having validfrom date as current date
+    new_extperkey_list = crew_emp_table.search("(validfrom={0})".format(curr_date))
+    data_list = []
+    for rec in new_extperkey_list:
+        crew_id = rec.crew.id
+        extperkey = rec.extperkey
         validfrom = rec.validfrom
         validto = rec.validto
-        log.info('Crew having validfrom as today date: {crew}'.format(crew=crew))
-        # Search in crew_employment table is same crew exists with validto as either today or old date
-        deassignment_data = crew_emp_table.search('(&(crew={crew})(validto<={validfrom}))'.format(
-        crew=crew,
-        validto=curr_date
-        ))
-        for rec_end in deassignment_data:
-            #If crew found in the crew_employment table having validto as either current date or less
-            if rec_end.crew.id == crew:
-                if rec_end.extperkey != extperkey:
-                    log.error('''
+        log.info('Crew having validfrom as today date: {crew}'.format(crew=crew_id))
+        # Search in crew_employment table, if same crew exists with validto as either today or old date 
+        # but date should be greater than report start date
+        old_extperkey_list = crew_emp_table.search('(&(crew={crewid})(validto<={validfrom})(validto>={dt}))'.format(
+        crewid=crew_id,
+        validfrom=validfrom,
+        dt = start_date
+        ))        
+        for rec_old in old_extperkey_list:
+            # If crew found in the crew_employment table having validto as either current date or less
+            # check if the extperkey is different
+            if rec_old.crew.id == crew_id:
+                if rec_old.extperkey != extperkey:
+                    log.info('''
                     Crew {crew} - Old Emp {oldextperkey} New Emp {newextperkey} 
-                    Valid from {validfrom}
-                    Valid to {validto}
+                    Valid from {validfrom} Valid to {validto}
                     '''.format(
-                        crew=crew,
-                        oldextperkey=rec_end.extperkey,
+                        crew=crew_id,
+                        oldextperkey=rec_old.extperkey,
                         newextperkey=extperkey,
                         validfrom=validfrom,
                         validto=validto
-                        ))                   
-                    list_crew_empchange.append(crew)
-                    oldextperkey_data.append(oldextperkey)
-                    newextperkey_data.append(newextperkey)
+                        ))
+                    data_list.append((crew_id, rec_old.extperkey,extperkey))
                     break
-
-    return oldextperkey_data, newextperkey_data
+    return data_list
 
 '''
 The format to report hours required either numbers in N or N.NN

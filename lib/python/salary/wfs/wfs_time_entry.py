@@ -44,7 +44,7 @@ class TimeEntry(WFSReport):
         self.cached_salary_wfs = self.generate_salary_wfs()
         self.cached_account_data = self.generate_account_data()
         self.paycode_handler = PaycodeHandler()
-        self.cached_changed_extperkey_data = self.generate_extperkey_data()
+        self.cached_extperkey_list = self.generate_extperkey_list()
 
         # Setup salary month parameters. Some rave variables used
         # checks against these parameters for validity.
@@ -85,8 +85,9 @@ class TimeEntry(WFSReport):
         data.extend(self._account_transactions(crew_id))
         # collects all the records that are removed from roster 
         data.extend(self._removed_records(crew_id, data))
-        #collects all the records from salary_wfs that are to be resend for the new extperkey and the one with old extperkey is to marked as deleted
-        data.extend(self._resend_new_extperkey_data(crew_id))
+        # collects all the records from salary_wfs that are to be resend for the new extperkey 
+        # and the one with old extperkey is to marked as deleted
+        data.extend(self._resend_new_extperkey_data())
         return data
     '''
     Overridden functions END
@@ -1509,22 +1510,35 @@ class TimeEntry(WFSReport):
         return sick_hrs
 
 
-    def _resend_new_extperkey_data(self, crew_id):
-        curr_date = AbsTime(datetime.now().strftime('%d%b%Y'))
-        dict = generate_extperkey_data()
-
-       if len(dict) != 0:
-            while curr_date <= self.end_date_check:
-                if self.cached_salary_wfs.has_key(oldextperkey) and self.cached_salary_wfs[crew_id].has_key(curr_date):
-                    for rec in [r for r in self.cached_salary_wfs[crew_id][date_to_check] if r.flag == 'I']:
-                    # As new extperkey now present for these records, #create delete row for the old extperkey
+    def _resend_new_extperkey_data(self):
+        
+        '''
+        Resend all the old data with new extperkey and mark the old extperkey data as Deleted.
+        The crew having new extperkey are cached in a list like
+        [('crewid1', 'oldextperkey1', 'newextperkey1'), 
+        ('crewid12', 'oldextperkey2', 'newextperkey2'),.,.]
+        '''
+        data = []
+        end_date_check = self.report_end_date()
+        extperkey_list = self.cached_extperkey_list
+        for rec_list in extperkey_list:
+            crew_id =  rec_list[0]
+            old_extperkey = rec_list[1]
+            new_extperkey = rec_list[2]
+            date_to_check = AbsTime(datetime.now().strftime('%d%b%Y'))
+            print("######CrewList#######",crew_id,old_extperkey,new_extperkey)
+            while date_to_check <= end_date_check:
+                if self.cached_salary_wfs.has_key(crew_id) and self.cached_salary_wfs[crew_id].has_key(date_to_check) :
+                    for rec in [r for r in self.cached_salary_wfs[crew_id][date_to_check] if r.extperkey == old_extperkey and r.flag == 'I']:
+                        # As now new extperkey is present in crew_employment, 
+                        #create delete row for the old extperkey data and insert row for the new extperkey
                         delete_row_data = {
-                                'extperkey' : pre.extperkey,
-                                'paycode' : pre.wfs_paycode,
-                                'hours' : pre.amount, 
-                                'days_off' : pre.days_off,
+                                'extperkey' : rec.extperkey,
+                                'paycode' : rec.wfs_paycode,
+                                'hours' : rec.amount,
+                                'days_off' : rec.days_off,
                                 'start_dt' : abs_to_datetime(rec.work_day),
-                                'record_id' : pre.recordid,
+                                'record_id' : rec.recordid,
                                 'flag' : 'D'
                             }
                         flag = add_to_salary_wfs_t(delete_row_data, crew_id, self.runid)
@@ -1532,14 +1546,13 @@ class TimeEntry(WFSReport):
                             continue
                         row = self.format_row(delete_row_data)
                         log.info(row)
-                        log.info("# testing delete")
                         data.append(row)
                         # Create new row with 'I' flag for New Extperkey
                         insert_row_data = {
-                                'extperkey' : extperkey,
-                                'paycode' : wfs_paycode,
-                                'hours' : hours, 
-                                'days_off' : days_off,
+                                'extperkey' : new_extperkey,
+                                'paycode' : rec.wfs_paycode,
+                                'hours' : rec.amount, 
+                                'days_off' : rec.days_off,
                                 'start_dt' : abs_to_datetime(rec.work_day),
                                 'record_id' : getNextRecordId(),
                                 'flag' : 'I'
@@ -1547,8 +1560,10 @@ class TimeEntry(WFSReport):
                         add_to_salary_wfs_t(insert_row_data, crew_id, self.runid)
                         row = self.format_row(insert_row_data)
                         log.info(row)
-                        log.info("# testing insert")
                         data.append(row)
+                date_to_check = date_to_check.adddays(1)
+        
+        return data
 
     '''
     Main data extraction END
@@ -1752,20 +1767,11 @@ class TimeEntry(WFSReport):
         log.info('NORDLYS: {0} total nr of crew with account data extracted with VA/VA1'.format(len(dict_t)))
         return dict_t
    
-    def generate_extperkey_data(self):
+    def generate_extperkey_list(self):
         curr_date = AbsTime(datetime.now().strftime('%d%b%Y'))
-        oldextperkey, newextperkey = get_crew_extperkey_changed(curr_date)
-        transactions = self.cached_account_data[crew_id]
-        dict_cache = {}
-        if newextperkey != []:
-            for tnx in transactions:
-                dict_cache.setdefault(tnx.crew.id, [])
-                dict_cache[tnx.crew.id].append({
-                    'tnx'           :tnx,
-                    'newextperkey'  :newextperkey,
-                    'oldextperkey'  :oldextperkey})
-        return dict_cache
-        print(dict_cache)
+        cached_list = get_crew_extperkey_changed(curr_date,self.start)
+        log.info('NORDLYS: {0} total nr of crew with new extperkey as per todays date'.format(len(cached_list)))
+        return cached_list
    
     '''
     Cache functions END
