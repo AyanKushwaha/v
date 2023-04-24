@@ -38,7 +38,7 @@ echo " - Processing migration tasks"
 # python $CARMUSR/data/migration/$RELEASE/skcms-1234.py 2>&1 | tee $LOG_DIR/skcms-1234.log
 
 echo "  * SKCMS-2822: Bought types for Link"
-python $CARMUSR/data/migration/r27_sas2207/skcms-2822.py 2>&1 | tee $LOG_DIR/skcms-2822.log
+python $CARMUSR/data/migration/$RELEASE/skcms-2822.py 2>&1 | tee $LOG_DIR/skcms-2822.log
 
 
 # Uncomment this in case dave filters shall be modified, remember to update JIRA number
