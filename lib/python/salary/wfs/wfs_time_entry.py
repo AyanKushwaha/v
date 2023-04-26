@@ -455,11 +455,10 @@ class TimeEntry(WFSReport):
         for i in table.search("(&(crew_id={crew})(work_day>={last_month}))".format(crew=crew_id,last_month=prev_mnth_start_dt)):
 
             rec = [i.correction_id,i.crew_id.id,i.extperkey,i.wfs_paycode,i.work_day,i.amount,i.days_off]
-
             wfs_corrected_data.append(rec)
             uniq_dates.add(i.work_day)
             uniq_paycodes.add(i.wfs_paycode)
-
+        wfs_corrected_data.sort(key=lambda wfs_corrected_data:wfs_corrected_data[0]) #For sorting the entries on basis of correction id
         # if multiple records are present in table it will pick only max id record 
         for dt in uniq_dates:
             for pc in uniq_paycodes:

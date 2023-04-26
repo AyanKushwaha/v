@@ -445,7 +445,7 @@ class TimeEntryReport(WFSReport):
             wfs_corrected_data.append(rec)
             uniq_dates.add(i.work_day)
             uniq_paycodes.add(i.wfs_paycode)
-
+        wfs_corrected_data.sort(key=lambda wfs_corrected_data:wfs_corrected_data[0]) #For sorting the entries on basis of correction id
         for dt in uniq_dates:
             for pc in uniq_paycodes:
                 mx_id = -1
