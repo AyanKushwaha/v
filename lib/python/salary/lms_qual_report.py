@@ -140,8 +140,8 @@ class LMSQualReport:
         crew_emp_table = tm.table('crew_employment')
         curr_day = delta_date
 
-        assignment_filter = crew_emp_table.search("(&(crewrank={crewrank})(validfrom<={validfrom}))".format( crewrank="AP", validfrom=curr_day))
-        deassignment_filter = crew_emp_table.search("(&(crewrank={crewrank})(validto<={validto}))".format( crewrank="AP", validto=curr_day))
+        assignment_filter = crew_emp_table.search("(&(crewrank={crewrank})(validfrom={validfrom}))".format( crewrank="AP", validfrom=curr_day))
+        deassignment_filter = crew_emp_table.search("(&(crewrank={crewrank})(validto={validto}))".format( crewrank="AP", validto=curr_day))
 
         total_assignment_data = []
         total_deassignment_data = []
