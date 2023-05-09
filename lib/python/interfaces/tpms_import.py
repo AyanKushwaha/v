@@ -1,5 +1,5 @@
 import Cui
-
+from tpms_exlude_records_mail import send_email
 
 #sys.exit() #TODO
 
@@ -8,6 +8,7 @@ def main():
     import os
     import re
     import time
+    import datetime
     import carmusr.HelperFunctions as HF
     import carmensystems.rave.api as R
     import carmusr.Attributes as Attributes
@@ -22,10 +23,13 @@ def main():
 
     source_folder = os.path.join(os.environ['CARMTMP'], 'ftp', 'in')
     backup_folder = os.path.join(os.environ['CARMTMP'], 'ftp', 'tpms_import_processed')
+    exclude_folder= os.path.join(os.environ['CARMTMP'], 'ftp', 'exclude_records')
     DOCUMENT_WHITELIST = ['LC', 'PC', 'OPC', 'CRM', 'CRMC', 'PGT', 'REC']
 
     if not os.path.exists(backup_folder):
         os.makedirs(backup_folder)
+    if not os.path.exists(exclude_folder):
+        os.makedirs(exclude_folder)
 
     firstcol = 'IICMEQ_OML'  # first column in file
     remark = 'IICMEQ_REMARK'  # empty
@@ -89,6 +93,7 @@ def main():
         exam_d = _date_to_abs_time(examdate)
         now_d = _abs_time_now()
         if exam_d > now_d or (exam_d < (now_d.adddays(-90)) and (lastaction == 'NU' or lastaction == 'N')):
+            global errmsg
             errmsg = "TPMS: exam date " + str(exam_d) + " for crew " + row[staff_id] + " outside valid interval " + str(now_d.adddays(-90)) + "-" + str(now_d)
             print errmsg
             return False
@@ -204,17 +209,26 @@ def main():
                     print "TPMS EOF"
                     break
                 print "TPMS #### "*8
-                print "TPMS: ", row[act_group_name], row[qual_code], row[qual_code_type], row[staff_id], row[valid_from],row[end_date], row[exam_date]
+                print ("TPMS: ", row[act_group_name], row[qual_code], row[qual_code_type], row[staff_id], row[valid_from], row[end_date], row[exam_date])
                 if not _handle_entry(row_number, row):
                     print "TPMS EXCLUDE RECORD", row[remark]
+                    timestamp= datetime.now().strftime('%Y%m%d%H%M')
+                    file_name=exclude_folder + '/exclude_records_{}.csv'.format(timestamp)
+                    errormsg=[errmsg]
+                    header=["act_group_name" , "qual_code" , "qual_code_type","staff_id","valid_form","end_date","exam_date", "errormsg"]
+                    data = [[row[act_group_name], row[qual_code], row[qual_code_type], row[staff_id], row[valid_from], row[end_date], row[exam_date], errormsg]]
+                    with open(file_name, mode='wb+') as csv_file:
+                        writer = csv.writer(csv_file)
+                        writer.writerow(header)
+                        writer.writerows(data)
                     continue
+                
                 print "TPMS UPDATE RECORD"
                 _update_crew_document(row_number, row)
-
-
-        TM.save() 
+        
+        TM.save()
         shutil.move(f, backup_folder)
-
+        send_email()
 
 def run():
     try:
