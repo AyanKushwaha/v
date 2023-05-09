@@ -75,8 +75,12 @@ BOUGHT_F3_2 = 'BOUGHT_F3_2'
 BOUGHT_BL = 'BOUGHT_BL'
 BOUGHT_FORCED = 'BOUGHT_FORCED'
 SOLD = 'SOLD'
+#Added Bought for SAS Link
+BOUGHT_SBY = 'BOUGHT_SBY'
+BOUGHT_PROD = 'BOUGHT_PROD'
+BOUGHT_DUTY = 'BOUGHT_DUTY'
+#End for SAS Link
 BOUGHT_PR='BOUGHT_PR'
-
 
 # Actions
 IN_ADMIN   = REASONCODES["IN_ADMIN"]  #'IN Administrative'
@@ -161,6 +165,11 @@ ACTION[BOUGHT_F3_2] = [IN_CORR, OUT_CORR]
 ACTION[BOUGHT_FORCED] = []
 #ACTION[SOLD] = [IN_CORR, OUT_CORR]
 ACTION[SOLD] = []
+#Added Bought for SAS Link
+ACTION[BOUGHT_SBY] = []
+ACTION[BOUGHT_PROD] = []
+ACTION[BOUGHT_DUTY] = []
+#End for SAS Link
 ACTION[PR] = [IN_CORR, OUT_CORR]
 
 """
@@ -556,6 +565,7 @@ def updateForm(*args):
     setCrewInScriptBuffer(crewId)
     
     # This is the new faster bulk-function
+
     AccountHandler.updateAccountsForCrewInWindow([crewId],
                                                  [account],
                                                  Cui.CuiScriptBuffer)

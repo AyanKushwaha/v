@@ -221,6 +221,7 @@ def saveGeneralScenario(test_mode_params = None):
         "assignment_attr_set",
         "bases",
         "bought_days",
+        "bought_days_svs",
         "cabin_recurrent",
         "cabin_training",
         "callout_list",
