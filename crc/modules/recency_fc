@@ -27,24 +27,39 @@ import system_db_parameters;
  ***************************************************************/
 /* Constants */
 redefine export %max_days% = 90;
-export %max_a5_days% = 45;
+/*export %max_a5_days% = 45;
 export %max_a2a3_days% = 45;
-export %max_a2a5_days% = 45;
+export %max_a2a5_days% = 45;*/
+
+export %max_single_a5_days% = 45;
+export %max_single_a2a3_days% = 45;
+export %max_single_a2a5_days% = 45;
+export %max_double_a5_days% = 60;
+export %max_double_a2a3_days% = 60;
+export %max_double_a2a5_days% = 60;
 %extension_days% = 30;
 
 /* Edit this table when adding a new MFF qualification */
 /* total_landings notes whether it's the 90 or 45 day period that is considered */
-table recency_time_table(bool total_landings, String leg_ac_qual, Abstime date) =
-  total_landings,
+table recency_time_table(landing_type lt, String leg_ac_qual, Abstime date) =
+  lt,
   leg_ac_qual,
   crew.%has_ac_qln%(date,"A2"),
   crew.%has_ac_qln%(date,"A3"),
   crew.%has_ac_qln%(date,"A4"),
   crew.%has_ac_qln%(date,"A5")-> redefine export %recency_time%;
-  n, "A5", -, -, -, - -> %max_a5_days%;
+  /*n, "A5", -, -, -, - -> %max_a5_days%;
   n, "A2", y, y, n, n -> %max_a2a3_days%;
   n, "A3", y, y, n, n -> %max_a2a3_days%;
-  n, "A2", y, n, n, y -> %max_a2a5_days%;
+  n, "A2", y, n, n, y -> %max_a2a5_days%;*/
+  single_landing, "A5", -, -, -, - -> %max_single_a5_days%;
+  single_landing, "A2", y, y, n, n -> %max_single_a2a3_days%;
+  single_landing, "A3", y, y, n, n -> %max_single_a2a3_days%;
+  single_landing, "A2", y, n, n, y -> %max_single_a2a5_days%;
+  double_landing, "A5", -, -, -, - -> %max_double_a5_days%;
+  double_landing, "A2", y, y, n, n -> %max_double_a2a3_days%;
+  double_landing, "A3", y, y, n, n -> %max_double_a2a3_days%;
+  double_landing, "A2", y, n, n, y -> %max_double_a2a5_days%;
   -, -, -, -, -, - -> %max_days%;
 end
 
@@ -123,20 +138,20 @@ redefine export %expiry_date%(Abstime date, String ac_qual) =
 
 /* used for behave tests */
 export %leg_has_at_least_one_landing_of_leg_qual_for_recency% =
-  let earliest_date = %earliest_date_ac_qual%(false, leg.%qual%,leg.%start_date%);
+  let earliest_date = %earliest_date_ac_qual%(single_landing, leg.%qual%,leg.%start_date%);
   %time_for_at_least_one_landing_of_qual%(leg.%qual%, leg.%start_date%) >= earliest_date;
 
 export %leg_has_at_least_two_landings_of_leg_qual_for_recency% =
-  let earliest_date = %earliest_date_ac_qual%(false, leg.%qual%,leg.%start_date%);
+  let earliest_date = %earliest_date_ac_qual%(double_landing, leg.%qual%,leg.%start_date%);
   %time_for_at_least_two_landings_of_qual%(leg.%qual%, leg.%start_date%) >= earliest_date;
 
 /* used for behave tests */
 export %leg_has_enough_total_landings_for_recency% =
-  let earliest_date = %earliest_date_ac_qual%(true, leg.%qual%,leg.%start_date%);
+  let earliest_date = %earliest_date_ac_qual%(total_landing, leg.%qual%,leg.%start_date%);
   %time_for_enough_total_landings%(leg.%qual%, leg.%start_date%) >= earliest_date;
 
-%earliest_date_ac_qual%( bool total_landings, String leg_ac_qual, Abstime date) =
-  round_down(date,24:00) - %recency_time%(total_landings, leg_ac_qual, date)*24:00;
+%earliest_date_ac_qual%(landing_type lt, String leg_ac_qual, Abstime date) =
+  round_down(date,24:00) - %recency_time%(lt, leg_ac_qual, date)*24:00;
 
 export %nr_landings_extended_fulfilled% =
   %extension_days%*24:00 + %expiry_time_for_recency_for_acqual_at_date%(leg.%qual%, leg.%start_date%) >=
@@ -173,31 +188,32 @@ export %time_for_recency_for_acqual_at_date%(String ac_qual, Abstime date) =
 
 export %expiry_time_for_recency_for_acqual_at_date%(String ac_qual, Abstime date) =
   if crew.%ac_qln%(date, 1) = "FF" then
-      %pp_end% + %recency_time%(true, ac_qual, date) * 24:00
+      %pp_end% + %recency_time%(total_landing, ac_qual, date) * 24:00
   
   else if crew.%rank_at_date%(date) = "FR" and
         crew.%is_multi_qualified_at_date%(date) and
         (ac_qual in crew.awb_ac_quals) then
         nmax(%latest_3_simulator_landings_date%("A3", date),
              %latest_3_simulator_landings_date%("A4", date),
-             %latest_3_simulator_landings_date%("A5", date)) + %recency_time%(false, ac_qual, date) * 24:00
-  /* Recency 0-45 days: Min 1 A5 or A2/A3 landing within 45 days, Min 3 landings within 90 days*/
+             %latest_3_simulator_landings_date%("A5", date)) + %recency_time%(double_landing, ac_qual, date) * 24:00
+  /* Recency 0-45 days: Min 1 A5 or A2/A3 landing within 45 days, Min 2 Withing 60 days, Min 3 landings within 90 days*/
   else if crew.%is_multi_qualified_at_date%(date) then
     if crew.%is_a2a3_qualified_at_date%(date) or crew.%is_a2a5_qualified_at_date%(date) then
       if system_db_parameters.%two_landings_every_45_days_parameter%(date) then
-        nmin(%time_for_at_least_two_landings_of_qual%(ac_qual, date) + %recency_time%(false, ac_qual, date) * 24:00,
-         %time_for_enough_total_landings%(ac_qual, date) + %recency_time%(true, ac_qual, date) * 24:00)
+        nmin(%time_for_at_least_two_landings_of_qual%(ac_qual, date) + %recency_time%(single_landing, ac_qual, date) * 24:00,
+         %time_for_enough_total_landings%(ac_qual, date) + %recency_time%(total_landing, ac_qual, date) * 24:00)
       else
-        nmin(%time_for_at_least_one_landing_of_qual%(ac_qual, date) + %recency_time%(false, ac_qual, date) * 24:00,
-         %time_for_enough_total_landings%(ac_qual, date) + %recency_time%(true, ac_qual, date) * 24:00)
+        nmin((%time_for_at_least_one_landing_of_qual%(ac_qual, date) + %recency_time%(single_landing, ac_qual, date) * 24:00),
+             (%time_for_at_least_two_landings_of_qual%(ac_qual, date) + (%recency_time%(double_landing, ac_qual, date) * 24:00)),
+         (%time_for_enough_total_landings%(ac_qual, date) + %recency_time%(total_landing, ac_qual, date) * 24:00))
 
     else
-        nmin(%time_for_at_least_one_landing_of_qual%(ac_qual, date) + %recency_time%(false, ac_qual, date) * 24:00,
-         %time_for_enough_total_landings%(ac_qual, date) + %recency_time%(true, ac_qual, date) * 24:00)  
+        nmin(%time_for_at_least_one_landing_of_qual%(ac_qual, date) + %recency_time%(single_landing, ac_qual, date) * 24:00,
+         %time_for_enough_total_landings%(ac_qual, date) + %recency_time%(total_landing, ac_qual, date) * 24:00)  
     
   else
     /* Recency 0-90 days: Min 3 landings (OM-A 5.2.10 note 3)*/
-    %time_for_enough_total_landings%(ac_qual, date) + %recency_time%(true, ac_qual, date) * 24:00;
+    %time_for_enough_total_landings%(ac_qual, date) + %recency_time%(total_landing, ac_qual, date) * 24:00;
 
 
 export %time_for_enough_total_landings%(String ac_qual, Abstime date) =
@@ -223,13 +239,13 @@ export %time_for_enough_total_landings_single%(String ac_qual, Abstime earliest_
       sim_1_landing_3 = %sim_1_landings_date%( ac_qual, sim_1_landing_2, latest_landing),
       landing1_incl_sim= nmax(landing1, sim_1_landing_1),
       landing3_incl_sim= %third_landing_incl_1_sim%( landing1,  landing2,  landing3,  sim_1_landing_1,  sim_1_landing_2,  sim_1_landing_3);
-  if (sim_3_landing <> %abstimemin% and sim_3_landing > latest_landing -  %recency_time%(true, ac_qual, latest_landing) * 24:00) then
+  if (sim_3_landing <> %abstimemin% and sim_3_landing > latest_landing -  %recency_time%(total_landing, ac_qual, latest_landing) * 24:00) then
       if(landing3_incl_sim < sim_2_landing_1) then
        nmax(nmin(nmax(landing1_incl_sim,sim_2_landing_2),sim_2_landing_1), sim_3_landing)
       else
        nmax(landing3_incl_sim, sim_3_landing)
   
-  else if (sim_2_landing_1 <> %abstimemin% and sim_2_landing_1 > latest_landing -  %recency_time%(true, ac_qual, latest_landing) * 24:00) then
+  else if (sim_2_landing_1 <> %abstimemin% and sim_2_landing_1 > latest_landing -  %recency_time%(total_landing, ac_qual, latest_landing) * 24:00) then
       if(landing3_incl_sim > sim_2_landing_1) then
         landing3_incl_sim
       else if(landing1_incl_sim > sim_2_landing_1) then
@@ -322,12 +338,16 @@ Abstime sim_1_landing_1, Abstime sim_1_landing_2, Abstime sim_1_landing_3) =
 
 
 export %time_for_at_least_one_landing_of_qual%(String ac_qual, Abstime earliest_date) =
-
+   let landing1 = %last_landing_date%(ac_qual, earliest_date),
+      sim_1_landing_1= %last_any_landing_simulator_date%( ac_qual, earliest_date);
+  nmax(landing1, sim_1_landing_1);
+    
+/*export %time_for_at_least_one_landing_of_qual%(String ac_qual, Abstime earliest_date) =
   if ac_qual = "A3" or ac_qual = "A4" then
     nmax(%last_landing_date%("A3", earliest_date), %last_any_landing_simulator_date%("A3", earliest_date),
          %last_landing_date%("A4", earliest_date), %last_3_landing_simulator_date%("A4", earliest_date))
   else 
-    nmax(%last_landing_date%(ac_qual, earliest_date), %last_any_landing_simulator_date%(ac_qual, earliest_date));
+    nmax(%last_landing_date%(ac_qual, earliest_date), %last_any_landing_simulator_date%(ac_qual, earliest_date));*/
 
 /* Functions to calculate the time when enough landings for all valid MFF qualifications
    have been completed. They are valid only for "valid_qualifications_for_multi_qual"
@@ -416,7 +436,7 @@ export %last_landing_date%(String ac_qual, Abstime date) =
         
 %valid_simulator_landing_date%(String ac_qual, Abstime date, string type)=
  let sim_date = training.%last_simulator_date_of_type%(type, date, ac_qual);
-   if (not void(sim_date) and sim_date + %recency_time%(false, ac_qual, date) * 24:00 > date) or date = recency.%last_date% then
+   if (not void(sim_date) and sim_date + %recency_time%(single_landing, ac_qual, date) * 24:00 > date) or date = recency.%last_date% then
     true
    else
     false;
@@ -481,21 +501,21 @@ end
 
 %sim_3_landings_date%(String ac_qual, Abstime date, Abstime latest_landing_date) = 
        let sim_3_date = default(%last_3_landing_simulator_date%(ac_qual, date), %abstimemin%);
-       if( sim_3_date > latest_landing_date -  %recency_time%(true, ac_qual, date) * 24:00) then
+       if( sim_3_date > latest_landing_date -  %recency_time%(total_landing, ac_qual, date) * 24:00) then
         sim_3_date
        else
          %abstimemin%;
         
 %sim_2_landings_date%(String ac_qual, Abstime date, Abstime latest_landing_date)=  
        let sim_2_date = default(%last_2_landing_simulator_date%(ac_qual, date), %abstimemin%);
-       if( sim_2_date > latest_landing_date -  %recency_time%(true, ac_qual, date) * 24:00) then
+       if( sim_2_date > latest_landing_date -  %recency_time%(double_landing, ac_qual, date) * 24:00) then
         sim_2_date
        else
          %abstimemin%;
           
 %sim_1_landings_date%(String ac_qual, Abstime date, Abstime latest_landing_date) = 
        let sim_1_date = default(%last_1_landing_simulator_date%(ac_qual, date), %abstimemin%);
-       if( sim_1_date > latest_landing_date -  %recency_time%(true, ac_qual, date) * 24:00) then
+       if( sim_1_date > latest_landing_date -  %recency_time%(single_landing, ac_qual, date) * 24:00) then
         sim_1_date
        else
          %abstimemin%;
@@ -575,7 +595,7 @@ redefine export %expiry_date_min%(Abstime date, String type) =
 %expiry_date_for_ac_qln%(String ac_qln, Abstime date) =
    nmax(%expiry_time_for_recency_for_acqual_at_date%(ac_qln, date),
         crew.%qln_entry_date%("ACQUAL", ac_qln, date) +
-         %recency_time%(false, ac_qln, date) * 24:00
+         %recency_time%(double_landing, ac_qln, date) * 24:00
        );
 
 redefine export %extension_by_trip_for_ac_qln%(String ac_qln) =

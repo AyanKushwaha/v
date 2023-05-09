@@ -710,7 +710,7 @@ def loadPlan(script=None):
     before showing the open plan dialog
     """
     Cui.CuiSetVisible(Cui.gpc_info, 1)
-    OpenPlanSys.loadPlan()
+    #OpenPlanSys.loadPlan()
 
     if script is not None:
         exec("import %s" %(script))
