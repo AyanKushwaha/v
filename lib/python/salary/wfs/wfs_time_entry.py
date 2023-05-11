@@ -1630,19 +1630,18 @@ class TimeEntry(WFSReport):
         ('crewid12', 'oldextperkey2', 'newextperkey2'),.,.]
         '''
         data = []
-        end_date_check = self.report_end_date()
+        end_date_check = self.report_end_date_VA()
         extperkey_list = self.cached_extperkey_list
         for rec_list in extperkey_list:
             crew_id =  rec_list[0]
             old_extperkey = rec_list[1]
             new_extperkey = rec_list[2]
             date_to_check = AbsTime(datetime.now().strftime('%d%b%Y'))
-            print("######CrewList#######",crew_id,old_extperkey,new_extperkey)
             while date_to_check <= end_date_check:
                 if self.cached_salary_wfs.has_key(crew_id) and self.cached_salary_wfs[crew_id].has_key(date_to_check) :
                     for rec in [r for r in self.cached_salary_wfs[crew_id][date_to_check] if r.extperkey == old_extperkey and r.flag == 'I']:
                         # As now new extperkey is present in crew_employment, 
-                        #create delete row for the old extperkey data and insert row for the new extperkey
+                        # create delete row for the old extperkey data and insert row for the new extperkey
                         delete_row_data = {
                                 'extperkey' : rec.extperkey,
                                 'paycode' : rec.wfs_paycode,
@@ -1658,22 +1657,22 @@ class TimeEntry(WFSReport):
                         row = self.format_row(delete_row_data)
                         log.info(row)
                         data.append(row)
-                        # Create new row with 'I' flag for New Extperkey
-                        insert_row_data = {
-                                'extperkey' : new_extperkey,
-                                'paycode' : rec.wfs_paycode,
-                                'hours' : rec.amount, 
-                                'days_off' : rec.days_off,
-                                'start_dt' : abs_to_datetime(rec.work_day),
-                                'record_id' : getNextRecordId(),
-                                'flag' : 'I'
-                            }
-                        add_to_salary_wfs_t(insert_row_data, crew_id, self.runid)
-                        row = self.format_row(insert_row_data)
-                        log.info(row)
-                        data.append(row)
+                        # Create new row with 'I' flag for New Extperkey if the data is not already sent as I for new extperkey
+                        # The old crew will have paycode as per their region So paycode to be regenerated for new region
+                        paycode = self.paycode_handler.event_from_paycode(rec.wfs_paycode)
+                        country = country_from_id(crew_id, date_to_check)
+                        rank = rank_from_id(crew_id, date_to_check)
+                        paycode_new = self.paycode_handler.paycode_from_event(paycode, crew_id, country, rank)
+                        new_recs = self._insert_or_update_record(
+                            crew_id,
+                            new_extperkey,
+                            paycode_new,
+                            abs_to_datetime(date_to_check),
+                            rec.amount,
+                            rec.days_off)
+                        data.append(new_recs)
+
                 date_to_check = date_to_check.adddays(1)
-        
         return data
 
     '''
