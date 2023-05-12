@@ -962,6 +962,8 @@ class TimeEntry(WFSReport):
             accountid = tnx.account.id
             if crew_company == 'SVS' and tnx.account.id == 'SOLD':
                 accountid = 'CNLN_SOLD'
+            if tnx.account.id == 'F7' and tnx.reasoncode == 'OUT Roster' and country == 'SE' and rank=='CC':
+                accountid = 'ABS_F7_DAG_CABIN_3_1_D'
             wfs_paycode = self.paycode_handler.paycode_from_event(accountid, crew_id, country, rank)
             log.debug('NORDLYS: wfs_paycode {0} mapped from account {1}'.format(wfs_paycode, tnx.account.id))
             # Check if this transaction already has been sent
@@ -1809,13 +1811,14 @@ class TimeEntry(WFSReport):
         account_query = '(|(account=BOUGHT)(account=BOUGHT_BL)(account=BOUGHT_FORCED)(account=BOUGHT_8)(account=SOLD))'
         reasoncode_query = '(|(reasoncode=BOUGHT)(reasoncode=SOLD))'
         query_f3_f7 = '&(|(account=F3)(account=F7))(|(reasoncode=OUT Payment)(reasoncode=IN Payment Correction))'
-
-        transactions = account_entry_t.search('(&(tim>={st})(tim<={end})(|(&{account_query}{reasoncode_query})({query_f3_f7})))'.format(
+        query_f7 = '&(&(account=F7)(reasoncode=OUT Roster))'
+        transactions = account_entry_t.search('(&(tim>={st})(tim<={end})(|(&{account_query}{reasoncode_query})({query_f3_f7})({query_f7})))'.format(
             st=self.start.adddays(-7),
             end=self.end,
             account_query=account_query,
             reasoncode_query=reasoncode_query,
-            query_f3_f7=query_f3_f7
+            query_f3_f7=query_f3_f7,
+            query_f7=query_f7
         ))
         
         dict_t = {}
@@ -1824,19 +1827,32 @@ class TimeEntry(WFSReport):
             nr_days = abs(int(tnx.amount / 100))
             curr_abs = tnx.tim
 
+            country = country_from_id(tnx.crew.id, curr_abs)
+            rank = rank_from_id(tnx.crew.id, curr_abs)
             if tnx.account.id in ('F3','F7'):
                 if tnx.reasoncode == 'OUT Payment':
                     nr_days = abs(tnx.amount)
                 elif tnx.reasoncode == 'IN Payment Correction':
                     nr_days = - tnx.amount
+                elif tnx.reasoncode == 'OUT Roster':
+                     nr_days = abs(int(tnx.amount / 100))    
                 if curr_abs > self.end:
                         # Activity starts after set end date
                         break
-                dict_t[tnx.crew.id].append({
-                        'tnx_dt'        : curr_abs,
-                        'tnx'           : tnx,
-                        'days_off'      : nr_days})
-                log.info('NORDLYS: Found {0} account for crew {1} on date {2} with days_off {3}'.format(tnx.account.id,tnx.crew.id,curr_abs, nr_days))                
+                if tnx.account.id == 'F7' and tnx.reasoncode == 'OUT Roster' and country == 'SE' and rank == 'CC':
+                    for day in range(0, nr_days):
+                        dict_t[tnx.crew.id].append({
+                            'tnx_dt'        : curr_abs,
+                            'tnx'           : tnx,
+                            'days_off'      : 1})
+                        curr_abs = curr_abs.adddays(1)
+                    log.info('NORDLYS: Found {0} account for crew {1} on date {2} with days_off {3}'.format(tnx.account.id,tnx.crew.id,curr_abs, nr_days))
+                elif tnx.reasoncode == 'OUT Payment' or tnx.reasoncode == 'IN Payment Correction':
+                    dict_t[tnx.crew.id].append({
+                            'tnx_dt'        : curr_abs,
+                            'tnx'           : tnx,
+                            'days_off'      : nr_days})
+                    log.info('NORDLYS: Found {0} account for crew {1} on date {2} with days_off {3}'.format(tnx.account.id,tnx.crew.id,curr_abs, nr_days))
             else:
                 for day in range(0, nr_days):                    
                     if curr_abs > self.end:
@@ -1847,7 +1863,7 @@ class TimeEntry(WFSReport):
                         'tnx'           : tnx,
                         'days_off'      : 1})
                     curr_abs = curr_abs.adddays(1)
-
+                log.info('NORDLYS: Found {0} account for crew {1} on date {2} with days_off {3}'.format(tnx.account.id,tnx.crew.id,curr_abs, nr_days))
         log.info('NORDLYS: {0} nr of crew with account data extracted without VA/VA1'.format(len(dict_t)))
         # Time duration changed for VA and VA1 Six months back and 12 months forward for vacation balance
         self.start_date_va = self.report_start_date_VA()
