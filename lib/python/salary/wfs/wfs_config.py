@@ -83,7 +83,8 @@ PAYCODE_FROM_EVENT = {
             'CNLN_BOUGHT_FHOUR_DUTY_NO_CC'  :       'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_CC',
             'CNLN_BOUGHT_FHOUR_SB_NO_FC':      'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_CO',
             'CNLN_BOUGHT_FHOUR_SB_NO_FP':      'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_FO',
-            'CNLN_BOUGHT_FHOUR_SB_NO_CC':      'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_CC'
+            'CNLN_BOUGHT_FHOUR_SB_NO_CC':      'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_CC',
+            'ABS_F7_DAG_CABIN_3_1_D_SE' :  'SAS_SE_ABS_F7_DAG_CABIN_3_1_D'
 
         }
 
@@ -174,7 +175,8 @@ EVENT_FROM_PAYCODE = {
             'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_CC': 'CNLN_BOUGHT_FHOUR_DUTY',
             'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_CO': 'CNLN_BOUGHT_FHOUR_SB',
             'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_FO': 'CNLN_BOUGHT_FHOUR_SB',
-            'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_CC': 'CNLN_BOUGHT_FHOUR_SB'
+            'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_CC': 'CNLN_BOUGHT_FHOUR_SB',
+            'SAS_SE_ABS_F7_DAG_CABIN_3_1_D' : 'F7' 
 
 }
 
@@ -208,7 +210,8 @@ ACCOUNT_PAYCODES = (
     'SAS_SE_CMS_FD_VA_PERFORMED',
     'SAS_SE_CMS_UNPAID_VACATION',
     'SAS_DK_CNLN_SOLD_DAYOFF',   
-    'SAS_NO_CNLN_SOLD_DAYOFF'
+    'SAS_NO_CNLN_SOLD_DAYOFF',
+    'SAS_SE_ABS_F7_DAG_CABIN_3_1_D'
 )
 
 ROSTER_PAYCODES = (
@@ -306,7 +309,8 @@ EVENT_FROM_ARTICLE_PAYCODES = {
     'CNLN_PROD_SICK'    :   'CNLN_PROD_SICK',
     'CNLN_BOUGHT_FHOUR_DUTY':'CNLN_BOUGHT_FHOUR_DUTY',
     'CNLN_BOUGHT_FHOUR_SB':'CNLN_BOUGHT_FHOUR_SB',
-    'CNLN_BOUGHT_FDAY' :'CNLN_BOUGHT_FDAY'
+    'CNLN_BOUGHT_FDAY' :'CNLN_BOUGHT_FDAY',
+    'ABS_F7_DAG_CABIN_3_1' : 'ABS_F7_DAG_CABIN_3_1_D'
 	}
 
 
@@ -355,6 +359,8 @@ class PaycodeHandler:
         elif event_type in ('CNLN_BOUGHT_FHOUR_SB', 'CNLN_BOUGHT_FHOUR_DUTY'):
             rank = '_{r}'.format(r=rank) if country in ('NO', 'DK') else ''
             return PAYCODE_FROM_EVENT['{e}_{c}{r}'.format(e=event_type, c=country, r=rank)]
+        elif event_type in ('ABS_F7_DAG_CABIN_3_1_D') and country in ('SE') and rank in ('CC'):
+            return PAYCODE_FROM_EVENT['{e}_{c}'.format(e=event_type, c=country)]
         else:
             return ''
 
