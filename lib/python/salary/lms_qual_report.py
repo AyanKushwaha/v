@@ -56,6 +56,11 @@ class LMSQualReport:
         self._qualification_deltas(delta_date)
         self._crew_employment_deltas(delta_date)
         self._crew_employment_change(delta_date)
+        self._crew_qualification_add(delta_date)
+        self._crew_contract_add(delta_date, congrouptype="MFF-A2A3")
+        self._crew_contract_add(delta_date, congrouptype="MFF-A2A5")
+        self._crew_contract_valid(delta_date, congrouptype="MFF-A2A3", acqual="A3")
+        self._crew_contract_valid(delta_date, congrouptype="MFF-A2A5", acqual="A5")
         exec_end = time.time()
         exec_time = round(exec_end - exec_start, 2)
         self._info_dump(exec_time)
@@ -256,7 +261,7 @@ class LMSQualReport:
         
     def _applicable_qual(self, qual, crew_id):
         applicable_for_cc = ('MENTOR', 'PMM')
-        applicable_for_fc = ('36', '37', '38', 'A2', 'A3', 'A4','A5')
+        applicable_for_fc = ('38', 'A2', 'A3','A5', 'A2NX', 'A2A3','A2A5')
         rank = rank_from_id(crew_id, today_in_abstime())
         
         if is_cabin_crew(crew_id, rank):
@@ -274,7 +279,7 @@ class LMSQualReport:
         elif cc and qual in ('MENTOR', 'PMM'):
             name = rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
                 % (True, '', 'A', qual))[0]
-        elif not cc and qual in ('36', '37', '38', 'A2', 'A3', 'A4','A5'):
+        elif not cc and qual in ('38', 'A2', 'A3','A5', 'A2NX', 'A2A3', 'A2A5'):
             name = rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
                 % (False, '', '', qual))[0]
         return name
@@ -390,6 +395,204 @@ class LMSQualReport:
                         ))
                     # Create assignment entries
                     assignment_data = self._create_entries(crew, validfrom, validto, qual, None, "assignment_data")
+                    self.assignment_writer.write(assignment_data)
+
+
+    def _crew_qualification_add(self, delta_date):
+
+        crew_training_log_table = tm.table('crew_training_log')
+        crew_qual_table = tm.table('crew_qualification')
+
+        curr_date = delta_date
+        now = datetime.now()
+        start_time= AbsTime(now.year, now.month, now.day, 0, 0)
+        end_time= AbsTime(now.year, now.month, now.day, 24, 0)
+
+        assignment_filter = crew_training_log_table.search("(&(code={code})(tim>={start_time})(tim<{end_time}))".format(
+        code="LRP2", 
+        start_time=start_time, 
+        end_time=end_time
+        ))
+
+        # checking for assignment data from crew_training_log table 
+        for rec in assignment_filter:
+            crew = rec.crew.id
+            typ = rec.typ
+            code = rec.code
+            time = rec.tim
+            
+            if is_retired(crew) or (extperkey_from_id(crew, today_in_abstime()) in test_crew_emp_no):
+                log.info('Skipping sending update for retired crew {crew}'.format(crew=crew))
+                continue
+            
+            log.info('''Crew Training log for crew {crew} - {type} code {code} time {time} '''.format(
+                crew=crew,
+                type=typ,
+                code=code,
+                time=time
+                ))
+            
+            assignment_filter_data = crew_qual_table.search('(&(crew={crew})(validfrom<={validfrom})(qual={qual}))'.format(
+            crew=crew,
+            validfrom=curr_date,
+            qual="POSITION+A2NX"
+            ))
+            for rec in assignment_filter_data:
+                crew = rec.crew.id
+                qual = rec.qual.subtype
+                validfrom = rec.validfrom
+                validto = rec.validto
+
+                log.info('''Qualification for crew {crew} - {qual} Valid from {validfrom} Valid to {validto} '''.format(
+                crew=crew,
+                qual=qual,
+                validfrom=validfrom,
+                validto=validto
+                ))
+
+                # Create assignment entries
+                assignment_data = self._create_entries(crew, validfrom, validto, qual, None, "assignment_data")
+                self.assignment_writer.write(assignment_data)
+
+        #deassignment
+        deassignment_filter = crew_training_log_table.search("(&(code={code})(tim>={start_time})(tim<{end_time}))".format(
+        code="LRP2", 
+        start_time=start_time, 
+        end_time=end_time
+        ))
+
+        # checking for deassignment data from crew_training_log table 
+        for rec in deassignment_filter:
+            crew = rec.crew.id
+            type = rec.typ
+            code = rec.code
+            time = rec.tim
+            
+            if is_retired(crew) or (extperkey_from_id(crew, today_in_abstime()) in test_crew_emp_no):
+                log.info('Skipping sending update for retired crew {crew}'.format(crew=crew))
+                continue
+            
+            
+            deassignment_filter_data = crew_qual_table.search('(&(crew={crew})(validto>{validto})(qual={qual}))'.format(
+            crew=crew,
+            validto=curr_date,
+            qual="POSITION+A2NX"
+            ))
+
+            # checking for qualification deassignment data 
+            for rec in deassignment_filter_data:
+                crew = rec.crew.id
+                qual = rec.qual.subtype
+                validfrom = rec.validfrom
+                validto = rec.validto
+
+                if is_retired(crew) or (extperkey_from_id(crew, today_in_abstime()) in test_crew_emp_no):
+                    log.info('Skipping sending update for retired crew {crew}'.format(crew=crew))
+                    continue
+
+                    # Create & write qualification deassignment entries
+                    deassignment_data = self._create_entries(crew, validfrom, validto, qual, None, "deassignment_data")
+                    self.deassignment_writer.write(deassignment_data)
+        
+    def _crew_contract_add(self, delta_date, congrouptype):
+        curr_date=delta_date
+
+        crew_contract_set_table = tm.table('crew_contract_set')
+
+        # checking for assignment data from crew_contract_set table 
+        for ext in crew_contract_set_table.search("(congrouptype={congrouptype})".format(congrouptype=congrouptype)):
+            contract= ext.id
+            congrouptype=ext.congrouptype
+
+            log.info('''Crew contract type {contract} and contract group type {congrouptype}'''.format(contract=contract, congrouptype=congrouptype))
+
+            # checking for assignment data from crew_contract table 
+            crew_contract_table = tm.table('crew_contract')
+            for rec in crew_contract_table.search('(&(contract={contract})(validfrom={validfrom}))'.format(contract=contract, validfrom=curr_date)):
+                crew=rec.crew.id
+                validfrom=rec.validfrom
+                validto=rec.validto 
+
+                log.info('''Crew - {crew} validfrom - {validfrom} validto - {validto} '''.format(crew=crew, validfrom=validfrom, validto=validto))
+
+                assignment_data = self._create_entries(crew, validfrom, validto, "A2A3", None, "assignment_data")
+                self.assignment_writer.write(assignment_data)
+
+                #checking for deassignment data from crew_qualification table 
+                all_crew_list=[]
+                crew_list=[]
+
+                crew_qual_table = tm.table('crew_qualification')
+                for cq in crew_qual_table.search('(&(crew={crew})(validfrom<={validfrom})(validto>{validto}))'.format(crew=crew,validfrom=curr_date,validto=curr_date)):
+                    crew=cq.crew.id
+                    validfrom=cq.validfrom
+                    validto=cq.validto
+                    qual= cq.qual
+                    
+                    all_crew_list.append(crew)
+
+                for cq in crew_qual_table.search('(&(crew={crew})(qual={qual})(validfrom<={validfrom})(validto>{validto}))'.format(crew=crew,qual="POSITION+A2NX",validfrom=curr_date,validto=curr_date)):
+                    crew=cq.crew.id
+                    validfrom=cq.validfrom
+                    validto=cq.validto
+                    qual= cq.qual
+                    
+                    crew_list.append(crew)
+
+                for acl in all_crew_list:
+                    if acl not in crew_list:
+                        deassignment_data = self._create_entries(acl, validfrom, validto, "", None, "deassignment_data")
+                        self.deassignment_writer.write(deassignment_data)
+
+                
+        # checking for deassignment data from crew_contract_set table 
+        for ext in crew_contract_set_table.search("(congrouptype={congrouptype})".format(congrouptype=congrouptype)):
+            crew_contract= ext.id
+            congrouptype=ext.congrouptype
+
+            for rec in crew_contract_table.search("(&(contract={crew_contract})(validto={validto}))".format(crew_contract=crew_contract, validto=curr_date)):
+                crew=rec.crew.id
+                validfrom=rec.validfrom
+                validto=rec.validto 
+
+                deassignment_data = self._create_entries(crew, validfrom, validto, "A2A3", None, "deassignment_data")
+                self.deassignment_writer.write(deassignment_data)
+
+                for cq in crew_qual_table.search('(&(crew={crew})(validfrom<={validfrom})(validto>{validto}))'.format(crew=crew, validfrom=curr_date,validto=curr_date)):
+                    crew=cq.crew.id
+                    validfrom=cq.validfrom
+                    validto=cq.validto
+                    qual= cq.qual
+
+                    assignment_data = self._create_entries(crew, validfrom, validto, "", None, "assignment_data")
+                    self.assignment_writer.write(assignment_data)
+       
+    def _crew_contract_valid(self, delta_date, congrouptype, acqual):
+        curr_date=delta_date
+
+        crew_contract_set_table = tm.table('crew_contract_set')
+
+        # checking for assignment data from crew_contract_set table 
+        for ext in crew_contract_set_table.search("(congrouptype={congrouptype})".format(congrouptype=congrouptype)):
+            contract_id= ext.id
+            congrouptype=ext.congrouptype
+
+            log.info('''Crew contract type {contract_id} and contract group type {congrouptype}'''.format(contract_id=contract_id, congrouptype=congrouptype))
+
+            # checking for assignment data from crew_contract table 
+            crew_contract_table = tm.table('crew_contract')
+            for rec in crew_contract_table.search("(&(contract={contract})(validfrom={validfrom}))".format(contract=contract_id, validfrom=curr_date)):
+                crew=rec.crew.id
+                validfrom=rec.validfrom
+                validto=rec.validto
+
+                crew_qual_table = tm.table('crew_qualification')
+                for cq in crew_qual_table.search("&((crew={crew})(qual={qual}))".format(crew=crew, qual=acqual)):
+                    crew=cq.crew.id
+                    validfrom=cq.validfrom
+                    validto=cq.validto
+
+                    assignment_data = self._create_entries(crew, validfrom, validto, "", None, "assignment_data")
                     self.assignment_writer.write(assignment_data)
 
 
@@ -590,19 +793,19 @@ def test_mappings():
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
         % (True, 'AP', '', 'ALL'))[0] == 'DN-Cabin AP'
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
-        % (False, '', '', '36'))[0] == 'DN-Pilot 737'
-    assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
-        % (False, '', '', '37'))[0] == 'DN-Pilot 737'
-    assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
         % (False, '', '', '38'))[0] == 'DN-Pilot 737'
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
         % (False, '', '', 'A2'))[0] == 'DN-Pilot A32'
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
-        % (False, '', '', 'A3'))[0] == 'DN-Pilot A34'
+        % (False, '', '', 'A3'))[0] == 'DN-Pilot A330'
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
-        % (False, '', '', 'A4'))[0] == 'DN-Pilot A34'
+        % (False, '', '', 'A5'))[0] == 'DN-Pilot A350'
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
-        % (False, '', '', 'A5'))[0] == 'DN-Pilot A34'
+        % (False, '', '', 'A2NX'))[0] == 'DN-Pilot A32 A321NX'
+    assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
+        % (False, '', '', 'A2A3'))[0] == 'DN-Pilot A32 A330'
+    assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
+        % (False, '', '', 'A2A5'))[0] == 'DN-Pilot A32 A350'
     log.info('Mapping of CMS qualifications to LMS names OK!')
 
 
