@@ -25,7 +25,7 @@ salary_systems = {
 
 salary_perdim_article = {
     'SE': ['MEAL', 'PERDIEM_SALDO', 'PERDIEM_TAX_DAY', 'PERDIEM_TAX_DOMESTIC', 'PERDIEM_TAX_INTER'],
-    'NO': ['MEAL_C', 'MEAL_F', 'PERDIEM_SALDO', 'PERDIEM_TAX_DAY', 'PERDIEM_TAX_DOMESTIC', 'PUBL_HOLIDAY_COMP'],
+    'NO': ['MEAL_C', 'MEAL_F', 'PERDIEM_SALDO', 'PERDIEM_TAX_DAY', 'PERDIEM_TAX_DOMESTIC', 'PUBL_HOLIDAY_COMP', 'PERDIEM_WITHOUT_TAX','CREW_NIGHTS_WO_TAX'],
     'DK': ['MEAL_C', 'MEAL_F', 'PERDIEM_SALDO', 'PERDIEM_TAX', 'PERDIEM_NO_TAX'],
     'CN': ['PERDIEM_SALDO'],
     'HK': ['PERDIEM_SALDO'], 
@@ -270,8 +270,9 @@ class PerDiemRun(ECGenericRun):
                     func = getattr(self, a)
                     value = func(crew)
                     if value is not None and int(value) != 0:
-                        entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, value/ 100.0 if self.salary_article_tm[crew.salarySystem][a] != '3234' else '', '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '', ''))
-                
+                        #Commented and re-written for SKCMS-3150- Salary Article 4802 for Norwegian Crew
+                        #entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, value/ 100.0 if self.salary_article_tm[crew.salarySystem][a] != '3234' else '', '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '', ''))
+                        entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), ("4802" if self.salary_article_tm[crew.salarySystem][a]=='4802N' else self.salary_article_tm[crew.salarySystem][a]), crew.empNo, "" if self.salary_article_tm[crew.salarySystem][a] == '3234'  else value/100.0, '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '', ''))
                 for e in self.extra_articles:
                     func = getattr(self, e)
                     value = func(crew)
@@ -319,7 +320,17 @@ class PerDiemRun(ECGenericRun):
     def PERDIEM_NO_TAX(self, rec):
         # DK: 1548
         return times100(rec.getPerDiemCompensationWithoutTax())
-
+    
+    #### JIRA SKCMS-3150 ######
+    def PERDIEM_WITHOUT_TAX(self, rec):
+        # NO: 4802
+        return times100(rec.getPerDiemCompensationWithoutTax())
+    
+    def CREW_NIGHTS_WO_TAX(self, rec):
+        #NO: 4802N For count of number of nights that accounts for taxfree Perdiem
+        return times100(rec.getCountofNightswithoutTaxNO())
+        
+    ##### JIRA SKCMS-3150 ######
     def PERDIEM_TAX_DAY(self, rec):
         # NO: 4084
         # SE: 395
@@ -575,7 +586,7 @@ def createCSV(entries, release, studio, filename_prefix='Payments_CMS'):
                     # NO => N3150
                     if co == 'DK' and article in ['1530','1540', '1548', '1550'] and article[0] != 'D':
                         article = 'D' + article
-                    elif co == 'NO' and article in ['3150'] and article[0] != 'N':
+                    elif co == 'NO' and article in ['3150'] and article[0] != 'N':    ###,'4802'
                         article = 'N' + article
                     
                     if studio:
