@@ -588,8 +588,6 @@ def no_of_PR_days(self,crew_id):
         PRamount=0
         for transaction in crew_tnx:
             if(transaction['tnx_dt']>=start_month_date and transaction['tnx_dt']<end_month_date):
-                if(crew_id=='18941'):
-                    print("transaction['tnx_dt']--->{0}, transaction['tnx_dt']--->{1}".format(transaction['tnx_dt'], transaction['tnx_dt']))
                 PRamount+=transaction['PR_amount']                        
         PRperMonth.append(PRamount)
     currentCount = CalPRinCurrentMonth(PRperMonth)
