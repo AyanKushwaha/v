@@ -921,15 +921,11 @@ class TimeEntry(WFSReport):
             if planning_group == 'SVS' and tnx.account.id == 'SOLD':
                 accountid = 'CNLN_SOLD'
             wfs_paycode = self.paycode_handler.paycode_from_event(accountid, crew_id, country, rank)
-            if (accountid == 'PR'):
-                print("Inside IF PR wfs_paycode ---->{0}".format(wfs_paycode))
             log.debug('NORDLYS: wfs_paycode {0} mapped from account {1}'.format(wfs_paycode, tnx.account.id))
             # Check if this transaction already has been sent
             chk_wfs_corrected = self._check_in_wfs_corrected(crew_id, extperkey, wfs_paycode, abs_to_datetime(tnx_dt), None, days_off)
             if chk_wfs_corrected:
                 continue
-            if (crew_id=='34225'):
-                print("Inside IF PR wfs_paycode ---->{0}".format(wfs_paycode))
             new_recs = self._insert_or_update_record(crew_id, extperkey, wfs_paycode, abs_to_datetime(tnx_dt), None, days_off)
             data.extend(new_recs)
 
@@ -1655,21 +1651,16 @@ class TimeEntry(WFSReport):
                         'days_off'      : 1})
                     curr_abs = curr_abs.adddays(1)
 
-
+        #Calculation for assigned PR days 
         account_query = '(|(account=PR))'
-        reasoncode_query = '(|(reasoncode=OUT Roster))'
-        transactions_va = account_entry_t.search('(&(tim>={st})(tim<={end}){account_query}{reasoncode_query})'.format(
-            st=self.start,
+        reasoncode_query = '(|(reasoncode=OUT Roster)(reasoncode=OUT Correction))'
+        transactions_PR = account_entry_t.search('(&(tim>={st})(tim<={end}){account_query}{reasoncode_query})'.format(
+            st=self.start.adddays(-3),
             end=self.end,
             account_query=account_query,
             reasoncode_query=reasoncode_query
         ))
-        print('self.start--->'.format(self.start))
-        print('self.end--->'.format(self.end))
-        print('account_query--->'.format(account_query))
-        print('reasoncode_query--->'.format(reasoncode_query))
-        for tnx in transactions_va:
-            log.info("Transaction inside PR, tnx --->{0}".format(tnx)) 
+        for tnx in transactions_PR:
             dict_t.setdefault(tnx.crew.id, [])
             nr_days = abs(int(tnx.amount / 100))
             curr_abs = tnx.tim
