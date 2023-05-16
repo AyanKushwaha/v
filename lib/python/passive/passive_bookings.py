@@ -164,7 +164,7 @@ class GenericBookingMessage:
 class BookingMessage(GenericBookingMessage):
     def __init__(self, b):
         emp = self.get_crew_employment(b.crew.id, b.flight.udor)
-        if emp.company.id == 'SVS':
+        if emp.carrier.id == 'SVS':
             if emp.base.id=='CPH':
                 if emp.crewrank.maincat.id == 'F':
                     costcenter='00-17412'
@@ -175,7 +175,7 @@ class BookingMessage(GenericBookingMessage):
                     costcenter='00-17152'
                 else:
                     costcenter='00-17155'
-        elif emp.company.id == 'SK':
+        elif emp.carrier.id == 'SK':
             if emp.base.id=='CPH':
                 if emp.crewrank.maincat.id == 'F':
                     costcenter='00-63209'
