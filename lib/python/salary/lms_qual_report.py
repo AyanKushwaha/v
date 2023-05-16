@@ -61,6 +61,7 @@ class LMSQualReport:
         self._crew_contract_add(delta_date, congrouptype="MFF-A2A5")
         self._crew_contract_valid(delta_date, congrouptype="MFF-A2A3", acqual="A3")
         self._crew_contract_valid(delta_date, congrouptype="MFF-A2A5", acqual="A5")
+        self._crew_contract(delta_date)
         exec_end = time.time()
         exec_time = round(exec_end - exec_start, 2)
         self._info_dump(exec_time)
@@ -587,13 +588,37 @@ class LMSQualReport:
                 validto=rec.validto
 
                 crew_qual_table = tm.table('crew_qualification')
-                for cq in crew_qual_table.search("&((crew={crew})(qual={qual}))".format(crew=crew, qual=acqual)):
+                for cq in crew_qual_table.search("(&(crew={crew})(qual={qual}))".format(crew=crew, qual=acqual)):
                     crew=cq.crew.id
                     validfrom=cq.validfrom
                     validto=cq.validto
 
                     assignment_data = self._create_entries(crew, validfrom, validto, "", None, "assignment_data")
                     self.assignment_writer.write(assignment_data)
+
+    def _crew_contract(self, delta_date):        
+        curr_date=delta_date
+
+        crew_contract_set_table = tm.table('crew_contract_set')
+        for ext in crew_contract_set_table.search("(|(congrouptype={A2A3})(congrouptype={A2A5}))".format(A2A3="MFF-A2A3", A2A5="MFF-A2A5")):
+                contract_id= ext.id
+                congrouptype=ext.congrouptype
+
+                crew_contract_table = tm.table('crew_contract')
+                for rec in crew_contract_table.search("(contract={contract})".format(contract=contract_id)):
+                    crew=rec.crew.id
+                    validfrom=rec.validfrom
+                    validto=rec.validto
+
+                    crew_qual_table = tm.table('crew_qualification')
+
+                    for cq in crew_qual_table.search("(&(crew={crew})(qual={qual}))".format(crew=crew,qual="ACQUAL+A2")):
+                        crew=cq.crew.id
+                        validfrom=cq.validfrom
+                        validto=cq.validto
+
+                        assignment_data = self._create_entries(crew, validfrom, validto, "", None, "assignment_data")
+                        self.assignment_writer.write(assignment_data)
 
 
 class ReportWriter:
