@@ -31,6 +31,7 @@ class LMSQualReport:
         self._stats = {
             'total_delta_count'     : 0,
             'updated_qual_count'    : 0,
+            'updated_MFF_qual_count'     :0,
             'updated_rank_count'    : 0,
             'skipped_same_rank_count'   : 0,
             'skipped_upgrade_rank_count'    : 0,
@@ -55,6 +56,10 @@ class LMSQualReport:
 
         self._qualification_deltas(delta_date)
         self._crew_employment_deltas(delta_date)
+        # Added for SKCMS-3296
+        self._crew_qualification_A2NX(delta_date)
+        self._crew_MFF_contract(delta_date)
+        # End for SKCMS-3296
         self._crew_employment_change(delta_date)
         exec_end = time.time()
         exec_time = round(exec_end - exec_start, 2)
@@ -68,7 +73,7 @@ class LMSQualReport:
     def _qualification_deltas(self,delta_date):
         
         crew_qual_table = tm.table('crew_qualification')
-        curr_day = delta_date 
+        curr_day = delta_date
 
         assignment_filter = crew_qual_table.search("(validfrom={0})".format(curr_day))
         deassignment_filter = crew_qual_table.search("(validto={0})".format(curr_day))
@@ -86,37 +91,44 @@ class LMSQualReport:
 
             # Check if crew qualification is applicable for interface
             if self._applicable_qual(qual, crew):
-                self._stats['total_delta_count'] += 1
-                self._stats['updated_qual_count'] += 1 
-                log.info('''
-                Qualification for crew {crew} - {qual}
-                Valid from {validfrom}
-                Valid to {validto}
-                '''.format(
-                    crew=crew,
-                    qual=qual,
-                    validfrom=validfrom,
-                    validto=validto
-                    ))  
+                # In case crew is having valid MFF-A2A3 or A2A5 contract,
+                # no assigment will be send for seperate qualifications
+                MFF_contract_group = crew_MFF_congrouptype(crew,curr_day)
+                if (MFF_contract_group == "MFF-A2A3") or (MFF_contract_group == "MFF-A2A5"):
+                    log.info('Skipping sending update for MFF crew {crew}'.format(crew=crew))
+                    continue
+                else:
+                    # Assignment will be send for all valid qualifications
+                    self._stats['total_delta_count'] += 1
+                    self._stats['updated_qual_count'] += 1
+                    log.info('''
+                    Qualification for crew {crew} - {qual}
+                    Valid from {validfrom}
+                    Valid to {validto}
+                    '''.format(
+                        crew=crew,
+                        qual=qual,
+                        validfrom=validfrom,
+                        validto=validto
+                        ))
 
-                # Create deassignment entries
-                assignment_data = self._create_entries(crew, validfrom, validto, qual, None, "assignment_data")
-                self.assignment_writer.write(assignment_data)
+                    # Create assignment entries
+                    assignment_data = self._create_entries(crew, validfrom, validto, qual, None, "assignment_data")
+                    self.assignment_writer.write(assignment_data)
 
-        # checking for qualification deassignment data 
+        # Checking for qualification deassignment data
         for rec in deassignment_filter:
             crew = rec.crew.id
             qual = rec.qual.subtype
             validfrom = rec.validfrom
             validto = rec.validto
-            print rec 
 
             if is_retired(crew) or (extperkey_from_id(crew, today_in_abstime()) in test_crew_emp_no):
                 log.info('Skipping sending update for retired crew {crew}'.format(crew=crew))
                 continue
 
-            # Check if crew qualification is applicable for interface
-            if self._applicable_qual(qual, crew):
+            # Check if crew qualification is applicable for interface, A2NX added only for deassigment
+            if self._applicable_qual(qual, crew)  or qual == "A2NX":
                 self._stats['total_delta_count'] += 1
                 self._stats['updated_qual_count'] += 1 
                 log.info('''
@@ -146,7 +158,7 @@ class LMSQualReport:
         total_assignment_data = []
         total_deassignment_data = []
 
-        # checking for assignment data from crew employment table 
+        # Checking for assignment data from crew employment table
         for rec in assignment_filter:
             crew = rec.crew.id
             rank = rec.crewrank.id 
@@ -175,7 +187,7 @@ class LMSQualReport:
                 assignment_data = self._create_entries(crew, validfrom, validto, None, rank, "assignment_data")
                 total_assignment_data.append(assignment_data)
 
-        # checking deassignment data from crew employment table 
+        # Checking deassignment data from crew employment table
         for rec in deassignment_filter:
             crew = rec.crew.id
             rank = rec.crewrank.id 
@@ -256,7 +268,7 @@ class LMSQualReport:
         
     def _applicable_qual(self, qual, crew_id):
         applicable_for_cc = ('MENTOR', 'PMM')
-        applicable_for_fc = ('36', '37', '38', 'A2', 'A3', 'A4','A5')
+        applicable_for_fc = ('38', 'A2', 'A3','A5')
         rank = rank_from_id(crew_id, today_in_abstime())
         
         if is_cabin_crew(crew_id, rank):
@@ -289,6 +301,7 @@ class LMSQualReport:
         # -----
         # Total records count           : {total_deltas}
         # Qualifications count          : {updated_qual}
+        # MFF Qualification count       : {updated_MFF_qual}
         # Rank (for CC) count           : {updated_rank}
         # Skipped Same Rank count       : {skipped_srank}
         # Skipped Upgrade Rank count    : {skipped_urank}
@@ -307,6 +320,7 @@ class LMSQualReport:
         '''.format(
             total_deltas=self._stats['total_delta_count'],
             updated_qual=self._stats['updated_qual_count'],
+            updated_MFF_qual = self._stats['updated_MFF_qual_count'],
             updated_rank=self._stats['updated_rank_count'],
             skipped_srank=self._stats['skipped_same_rank_count'],
             skipped_urank=self._stats['skipped_upgrade_rank_count']//2,
@@ -323,10 +337,10 @@ class LMSQualReport:
     def _crew_employment_change(self, curr_date):
 
         crew_emp_table = tm.table('crew_employment')
-        assignment_data = crew_emp_table.search("(validfrom={0})".format(curr_date))
+        crew_data = crew_emp_table.search("(validfrom={0})".format(curr_date))
         list_crew_empchange = []
         # Checking for extperkey change from crew employment table 
-        for rec in assignment_data:
+        for rec in crew_data:
             crew = rec.crew.id
             rank = rec.crewrank.id
             extperkey = rec.extperkey 
@@ -338,11 +352,11 @@ class LMSQualReport:
                 continue
            
            # Search in crew_employment table is same crew exists with validto as either today or old date
-            deassignment_data = crew_emp_table.search('(&(crew={crew})(validto<={validto}))'.format(
+            crew_change_extperkey_data = crew_emp_table.search('(&(crew={crew})(validto<={validto}))'.format(
             crew=crew,
             validto=curr_date
             ))
-            for rec_end in deassignment_data:
+            for rec_end in crew_change_extperkey_data:
                 #If crew found in the crew_employment table having validto as either current date or less
                 if rec_end.crew.id == crew:
                     if rec_end.extperkey != extperkey:
@@ -376,8 +390,20 @@ class LMSQualReport:
                 validto = rec.validto
                 # Check if crew qualification is applicable for interface
                 if self._applicable_qual(qual, crew):
-                    self._stats['total_delta_count'] += 1
-                    self._stats['updated_qual_count'] += 1
+                    # In case crew is having valid MFF-A2A3 or MFF-A2A5 contract,
+                    # assigment will be send for DN-Pilot A32 A330/DN-Pilot A32 A350
+                    MFF_contract_group = crew_MFF_congrouptype(crew,curr_date)
+                    if (MFF_contract_group == "MFF-A2A3") or (MFF_contract_group == "MFF-A2A5"):
+                        if MFF_contract_group == "MFF-A2A3":
+                            qual = "A2A3"
+                        else:
+                            qual = "A2A5"
+                        self._stats['total_delta_count'] += 1
+                        self._stats['updated_MFF_qual_count'] += 1
+                    else:
+                        # Assignment will be send for all valid qualifications
+                        self._stats['total_delta_count'] += 1
+                        self._stats['updated_qual_count'] += 1
                     log.info('''
                     Qualification for crew {crew} - {qual}
                     Valid from {validfrom}
@@ -391,6 +417,166 @@ class LMSQualReport:
                     # Create assignment entries
                     assignment_data = self._create_entries(crew, validfrom, validto, qual, None, "assignment_data")
                     self.assignment_writer.write(assignment_data)
+
+    def _crew_qualification_A2NX(self, curr_date):
+
+        crew_training_log_t = tm.table('crew_training_log')
+        crew_qual_t = tm.table('crew_qualification')
+
+        # Checking for assignment data from crew_training_log table
+        assignment_data = crew_training_log_t.search('(&(code={code})(tim={curr_date}))'.format(
+        code="LRP2",
+        curr_date=curr_date
+        ))
+        for rec in assignment_data:
+            crew = rec.crew.id
+            typ = rec.typ
+            code = rec.code
+            time = rec.tim
+
+            if is_retired(crew) or (extperkey_from_id(crew, today_in_abstime()) in test_crew_emp_no):
+                log.info('Skipping sending update for retired crew {crew}'.format(crew=crew))
+                continue
+
+            log.info('Crew having LRP2 code {crew}'.format(crew=crew))
+            # Create assignment entries
+            assignment_data = self._create_entries(crew, validfrom, validto, "A2NX", None, "assignment_data")
+            self.assignment_writer.write(assignment_data)
+        # For  deassignment of A2NX the code in _qualification_deltas will take care, Added A2Nx in deassigment qualification check
+
+    def _crew_MFF_contract(self, curr_date):
+
+        crew_contract_t = tm.table('crew_contract')
+        crew_contract_set_t = tm.table('crew_contract_set')
+        crew_qual_t = tm.table('crew_qualification')
+        congrouptype_query = '(|(congrouptype=MFF-A2A3)(congrouptype=MFF-A2A5))'
+
+        assignment_crew_filter = crew_contract_t.search('(validfrom={validfrom})'.format(
+        validfrom=curr_date))
+        # Checking in crew_contract table for the crew who got their contarct updated on today's date
+        for rec in assignment_crew_filter:
+            crew = rec.crew.id
+            contract = rec.contract.id
+            validfrom = rec.validfrom
+            validto = rec.validto
+            log.info('Crew got contract updated on todays date: {crew} and contract id {contractid}'.format(crew=crew, contractid=contract))
+            # Checking for MFF contract in crew_contract_set table
+
+            mff_records_assign = crew_contract_set_t.search('(&(id={contract}){congrouptype_query})'.format(
+                contract=contract,
+                congrouptype_query=congrouptype_query))
+
+            for rec_congrouptype in mff_records_assign:
+                congrouptype=rec_congrouptype.congrouptype.id
+                if congrouptype == "MFF-A2A3":
+                    qual = "A2A3"
+                elif congrouptype == "MFF-A2A5":
+                    qual = "A2A5"
+                else:
+                    continue
+                #Create an assigment entry for MFF Qualification such as DN-Pilot A32 A330/DN-Pilot A32 A350
+                self._stats['total_delta_count'] += 1
+                self._stats['updated_MFF_qual_count'] += 1
+                log.info('''
+                MFF Qualification for crew {crew} - {qual}
+                Valid from {validfrom}
+                Valid to {validto}
+                '''.format(
+                    crew=crew,
+                    qual=congrouptype,
+                    validfrom=validfrom,
+                    validto=validto
+                    ))
+
+                assignment_data = self._create_entries(crew, validfrom, validto, qual, None, "assignment_data")
+                self.assignment_writer.write(assignment_data)
+
+                # Checking for deassignment data from crew_qualification table
+                for rec_qual in crew_qual_t.search('(&(crew={crew})(validto>{validto}))'.format(crew=crew,validto=curr_date)):
+                    validfrom=rec_qual.validfrom
+                    validto=rec_qual.validto
+                    qual_subtype= rec_qual.qual.subtype
+                    # Create deassigment for all qualifications except A2NX which are valid in crew_qualification table
+                    # as the assignment has been send for MFF qualification
+                    if qual_subtype != "A2NX":
+                        self._stats['total_delta_count'] += 1
+                        self._stats['updated_qual_count'] += 1
+                        log.info('''
+                        Deassigment Qualification for crew due to MFF{crew} - {qual}
+                        Valid from {validfrom}
+                        Valid to {validto}
+                        '''.format(
+                            crew=crew,
+                            qual=congrouptype,
+                            validfrom=validfrom,
+                            validto=validto
+                            ))
+                        deassignment_data = self._create_entries(crew, validfrom, validto, qual_subtype, None, "deassignment_data")
+                        self.deassignment_writer.write(deassignment_data)
+
+        # Checking for deassignment data from crew_contract table
+        deassignment_crew_filter = crew_contract_t.search('(validto={validto})'.format(validto=curr_date))
+        # Checking in crew_contract table for the crew who got their contarct updated on today's date
+        for rec in deassignment_crew_filter:
+            crew=rec.crew.id
+            contract=rec.contract.id
+            validfrom =rec.validfrom
+            validto = rec.validto
+            log.info('Crew got contract end date as todays date:{crew} and contract id {contractid}'.format(crew=crew, contractid=contract))
+
+            # Checking for MFF contract in crew_contract_set table
+            mff_records_deassign = crew_contract_set_t.search('(&(id={contract}){congrouptype_query})'.format(
+                contract=contract,
+                congrouptype_query=congrouptype_query))
+
+            for rec_congrouptype in mff_records_deassign:
+                congrouptype=rec_congrouptype.congrouptype
+                if congrouptype == "MFF-A2A3":
+                    qual = "A2A3"
+                elif congrouptype == "MFF-A2A5":
+                    qual = "A2A5"
+                else:
+                    continue
+                log.info('Crew - {crew} is having end date for MFF contract'.format(crew=crew))
+                #Create an deassigment entry for MFF Qualification such as DN-Pilot A32 A330/DN-Pilot A32 A350
+                self._stats['total_delta_count'] += 1
+                self._stats['updated_MFF_qual_count'] += 1
+                log.info('''
+                MFF Qualification deassigment for crew {crew} - {qual}
+                Valid from {validfrom}
+                Valid to {validto}
+                '''.format(
+                    crew=crew,
+                    qual=congrouptype,
+                    validfrom=validfrom,
+                    validto=validto
+                    ))
+                deassignment_data = self._create_entries(crew, validfrom, validto, qual, None, "deassignment_data")
+                self.deassignment_writer.write(deassignment_data)
+
+                # Checking for assignment data from crew_qualification table as MFF contract is ended
+                for rec_qual in crew_qual_t.search('(&(crew={crew})(validto>{validto}))'.format(crew=crew,validto=curr_date)):
+                    validfrom=rec_qual.validfrom
+                    validto=rec_qual.validto
+                    qual_subtype= rec_qual.qual.subtype
+                    # Create assigment for all qualifications except A2NX which are valid in crew_qualification table
+                    # as the MFF contract is ended
+                    if qual_subtype != "A2NX":
+                        self._stats['total_delta_count'] += 1
+                        self._stats['updated_qual_count'] += 1
+                        log.info('''
+                        Qualification assigment for crew due to MFF ended {crew} - {qual}
+                        Valid from {validfrom}
+                        Valid to {validto}
+                        '''.format(
+                            crew=crew,
+                            qual=congrouptype,
+                            validfrom=validfrom,
+                            validto=validto
+                            ))
+                        assignment_data = self._create_entries(crew, validfrom, validto, qual_subtype, None, "assignment_data")
+                        self.assignment_writer.write(assignment_data)
+
 
 
 class ReportWriter:
@@ -572,6 +758,34 @@ def extperkey_to_crew_id(crew_id_as_ext):
         dt=at_date
     ))[0]
     return crew_id
+
+
+def crew_MFF_congrouptype(crew_id,curr_date):
+    # Pick the crew contract from crew_contract table,
+    # condition is validto greater than as we are picking the valid contract for this crew
+    # and later checking in the crew_contract_set table for MFF contract
+    crew_contract_t = tm.table('crew_contract')
+    crew_contract_set_t = tm.table('crew_contract_set')
+    crew_contract_data = crew_contract_t.search('(&(crew={crew})(validto>{validto}))'.format(
+    crew=crew_id,
+    validto=curr_date
+    ))
+    # Checking for the contract of this crew in crew_contract table
+    for rec in crew_contract_data:
+        crew=rec.crew.id
+        contract=rec.contract.id
+        validfrom =rec.validfrom
+        validto = rec.validto
+        log.info('Crew having valid contract: {crew} and contract id {contractid}'.format(crew=crew, contractid=contract))
+        # Picking the congrouptype from crew_contract_set table on the basis of contract id
+        crew_MFFcontract = crew_contract_set_t.search('(id={contract})'.format(
+            contract=contract
+        ))
+        congrouptype = None
+        for rec_congroup in crew_MFFcontract:
+            if rec_congroup.congrouptype != None:
+                congrouptype = rec_congroup.congrouptype.id
+    return congrouptype
 
 
 def test_mappings():
