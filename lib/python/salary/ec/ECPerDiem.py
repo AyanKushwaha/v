@@ -457,15 +457,12 @@ class PerDiemTripManager:
                        
                         leg_date =  rec_list
                         if leg[LEG_END_DAY] == leg_date and perDiemLeg.hasMealReduction and flag_add is False:
-                            print(" REC List=", rec_list)
-                            print("Leg end date",leg[LEG_END_DAY])
                             flag_add= True
                             perDiemLeg.mealReductionAmount = (float(400000)
                             / trip[TRIP_COMPENSATION_UNIT])
                             perDiemLeg.mealReductionExchangeRate = (float(leg[LEG_MEAL_REDUCTION_EXCHANGE_RATE])
                             / leg[LEG_MEAL_REDUCTION_EXCHANGE_UNIT])
-                            print("meal_reduction amount",perDiemLeg.mealReductionAmount)
-                            print("meal red exchange rate",perDiemLeg.mealReductionExchangeRate)
+                            
                             
                     if perDiemLeg.hasMealReduction and flag_add is False:
                         perDiemLeg.mealReductionAmount = (float(leg[LEG_MEAL_REDUCTION_AMOUNT])
