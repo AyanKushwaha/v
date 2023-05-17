@@ -381,10 +381,10 @@ class LMSQualReport:
                         break
         # Fetching all qualification and rank AP for the crew with employee number i.e. extperkey change
         for rec in list_crew_empchange:
-            crew_id = rec
+            crew = rec
             crew_qual_table = tm.table('crew_qualification')
             assignment_data_qual = crew_qual_table.search('(&(crew={crew})(validto>{validto}))'.format(
-            crew=crew_id,
+            crew=crew,
             validto=curr_date
             ))
             # Creating assignment entries for all qualification belonging to a crew 
@@ -592,7 +592,7 @@ class LMSQualReport:
                         self.assignment_writer.write(assignment_data)
             # DN-CABIN AP needs to be send again if crew employee number is changed
             crew_emp_table = tm.table('crew_employment')
-            assignment_data_rank = crew_emp_table.search("(&(crew={crew})(crewrank={crewrank})(validto>{validto}))".format(crew=crew_id,crewrank="AP", validto=curr_date))
+            assignment_data_rank = crew_emp_table.search("(&(crew={crew})(crewrank={crewrank})(validto>{validto}))".format(crew=crew,crewrank="AP", validto=curr_date))
             # checking for assignment data from crew employment table
             for rec_emp in assignment_data_rank:
                 crew = rec_emp.crew.id
