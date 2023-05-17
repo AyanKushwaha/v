@@ -286,7 +286,7 @@ class LMSQualReport:
         elif cc and qual in ('MENTOR', 'PMM'):
             name = rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
                 % (True, '', 'A', qual))[0]
-        elif not cc and qual in ('36', '37', '38', 'A2', 'A3', 'A4','A5'):
+        elif not cc and qual in ('38', 'A2', 'A3','A5', 'A2NX', 'A2A3', 'A2A5'):
             name = rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
                 % (False, '', '', qual))[0]
         return name
@@ -423,17 +423,22 @@ class LMSQualReport:
         crew_training_log_t = tm.table('crew_training_log')
         crew_qual_t = tm.table('crew_qualification')
 
+        curr_date_dt = abs_to_datetime(curr_date)
+        curr_date_ext= AbsTime(curr_date_dt.year, curr_date_dt.month, curr_date_dt.day, 24, 0)
+
         # Checking for assignment data from crew_training_log table
-        assignment_data = crew_training_log_t.search('(&(code={code})(tim={curr_date}))'.format(
+        assignment_data = crew_training_log_t.search('(&(code={code})(tim>={curr_date})(tim<={curr_date_ext}))'.format(
         code="LRP2",
-        curr_date=curr_date
+        curr_date=curr_date,
+        curr_date_ext=curr_date_ext
         ))
         for rec in assignment_data:
             crew = rec.crew.id
             typ = rec.typ
             code = rec.code
             time = rec.tim
-
+            validfrom = curr_date
+            validto = curr_date
             if is_retired(crew) or (extperkey_from_id(crew, today_in_abstime()) in test_crew_emp_no):
                 log.info('Skipping sending update for retired crew {crew}'.format(crew=crew))
                 continue
@@ -498,7 +503,7 @@ class LMSQualReport:
                     qual_subtype= rec_qual.qual.subtype
                     # Create deassigment for all qualifications except A2NX which are valid in crew_qualification table
                     # as the assignment has been send for MFF qualification
-                    if qual_subtype != "A2NX":
+                    if self._applicable_qual(qual_subtype, crew) and qual_subtype != "A2NX":
                         self._stats['total_delta_count'] += 1
                         self._stats['updated_qual_count'] += 1
                         log.info('''
@@ -530,7 +535,7 @@ class LMSQualReport:
                 congrouptype_query=congrouptype_query))
 
             for rec_congrouptype in mff_records_deassign:
-                congrouptype=rec_congrouptype.congrouptype
+                congrouptype=rec_congrouptype.congrouptype.id
                 if congrouptype == "MFF-A2A3":
                     qual = "A2A3"
                 elif congrouptype == "MFF-A2A5":
@@ -561,7 +566,7 @@ class LMSQualReport:
                     qual_subtype= rec_qual.qual.subtype
                     # Create assigment for all qualifications except A2NX which are valid in crew_qualification table
                     # as the MFF contract is ended
-                    if qual_subtype != "A2NX":
+                    if self._applicable_qual(qual_subtype, crew) and qual_subtype != "A2NX":
                         self._stats['total_delta_count'] += 1
                         self._stats['updated_qual_count'] += 1
                         log.info('''
@@ -804,19 +809,19 @@ def test_mappings():
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
         % (True, 'AP', '', 'ALL'))[0] == 'DN-Cabin AP'
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
-        % (False, '', '', '36'))[0] == 'DN-Pilot 737'
-    assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
-        % (False, '', '', '37'))[0] == 'DN-Pilot 737'
-    assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
         % (False, '', '', '38'))[0] == 'DN-Pilot 737'
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
         % (False, '', '', 'A2'))[0] == 'DN-Pilot A32'
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
-        % (False, '', '', 'A3'))[0] == 'DN-Pilot A34'
+        % (False, '', '', 'A3'))[0] == 'DN-Pilot A330'
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
-        % (False, '', '', 'A4'))[0] == 'DN-Pilot A34'
+        % (False, '', '', 'A5'))[0] == 'DN-Pilot A350'
     assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
-        % (False, '', '', 'A5'))[0] == 'DN-Pilot A34'
+        % (False, '', '', 'A2NX'))[0] == 'DN-Pilot A32 A321NX'
+    assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
+        % (False, '', '', 'A2A3'))[0] == 'DN-Pilot A32 A330'
+    assert rave.eval('qualification.%%lms_qualification_name%%(%s, "%s", "%s", "%s")'
+        % (False, '', '', 'A2A5'))[0] == 'DN-Pilot A32 A350'
     log.info('Mapping of CMS qualifications to LMS names OK!')
 
 
