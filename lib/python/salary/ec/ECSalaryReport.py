@@ -25,7 +25,7 @@ salary_systems = {
 
 salary_perdim_article = {
     'SE': ['MEAL', 'PERDIEM_SALDO', 'PERDIEM_TAX_DAY', 'PERDIEM_TAX_DOMESTIC', 'PERDIEM_TAX_INTER'],
-    'NO': ['MEAL_C', 'MEAL_F', 'PERDIEM_SALDO', 'PERDIEM_TAX_DAY', 'PERDIEM_TAX_DOMESTIC', 'PUBL_HOLIDAY_COMP', 'PERDIEM_WITHOUT_TAX','CREW_NIGHTS_WO_TAX'],
+    'NO': ['MEAL_C', 'MEAL_F', 'PERDIEM_SALDO', 'PERDIEM_TAX_DAY', 'PERDIEM_TAX_DOMESTIC', 'PUBL_HOLIDAY_COMP', 'PERDIEM_WITHOUT_TAX'],
     'DK': ['MEAL_C', 'MEAL_F', 'PERDIEM_SALDO', 'PERDIEM_TAX', 'PERDIEM_NO_TAX'],
     'CN': ['PERDIEM_SALDO'],
     'HK': ['PERDIEM_SALDO'], 
@@ -272,7 +272,16 @@ class PerDiemRun(ECGenericRun):
                     if value is not None and int(value) != 0:
                         #Commented and re-written for SKCMS-3150- Salary Article 4802 for Norwegian Crew
                         #entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, value/ 100.0 if self.salary_article_tm[crew.salarySystem][a] != '3234' else '', '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '', ''))
-                        entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), ("4802" if self.salary_article_tm[crew.salarySystem][a]=='4802N' else self.salary_article_tm[crew.salarySystem][a]), crew.empNo, "" if self.salary_article_tm[crew.salarySystem][a] == '3234'  else value/100.0, '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '', ''))
+                        #This is for separate entries for perdiem w/o tax and #nights
+                        #entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), ("4802" if self.salary_article_tm[crew.salarySystem][a]=='4802N' else self.salary_article_tm[crew.salarySystem][a]), crew.empNo, "" if self.salary_article_tm[crew.salarySystem][a] == '3234'  else value/100.0, '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '', ''))
+                            if self.salary_article_tm[crew.salarySystem][a]=='4802':
+                                func_4802 = getattr(self, 'CREW_NIGHTS_WO_TAX')
+                                value_4802N = func_4802(crew)
+                                lst = [value/100.0, value_4802N/100.0]
+                                str_4802 = ','.join([str(i) for i in lst])
+                                entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo,str_4802, '','',''))                            
+                            else:
+                                entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, value/ 100.0 if self.salary_article_tm[crew.salarySystem][a] != '3234' else '', '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '', ''))
                 for e in self.extra_articles:
                     func = getattr(self, e)
                     value = func(crew)
