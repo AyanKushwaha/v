@@ -129,18 +129,26 @@ class LMSQualReport:
 
             # Check if crew qualification is applicable for interface, A2NX added only for deassigment
             if self._applicable_qual(qual, crew)  or qual == "A2NX":
-                self._stats['total_delta_count'] += 1
-                self._stats['updated_qual_count'] += 1 
-                log.info('''
-                Qualification for crew {crew} - {qual}
-                Valid from {validfrom}
-                Valid to {validto}
-                '''.format(
-                    crew=crew,
-                    qual=qual,
-                    validfrom=validfrom,
-                    validto=validto
-                    ))    
+                # In case crew is having valid MFF-A2A3 or A2A5 contract,
+                # no deassigment will be send for seperate qualifications except A2NX
+                MFF_contract_group = crew_MFF_congrouptype(crew,curr_day)
+                if ((MFF_contract_group == "MFF-A2A3") or (MFF_contract_group == "MFF-A2A5")) and qual != "A2NX":
+                    log.info('Skipping sending deassigment for MFF crew {crew}'.format(crew=crew))
+                    continue
+                else:
+                    # Deassigment will be send for all qualifications
+                    self._stats['total_delta_count'] += 1
+                    self._stats['updated_qual_count'] += 1
+                    log.info('''
+                    Qualification for crew {crew} - {qual}
+                    Valid from {validfrom}
+                    Valid to {validto}
+                    '''.format(
+                        crew=crew,
+                        qual=qual,
+                        validfrom=validfrom,
+                        validto=validto
+                        ))
     
                 # Create & write qualification deassignment entries
                 deassignment_data = self._create_entries(crew, validfrom, validto, qual, None, "deassignment_data")
@@ -497,7 +505,10 @@ class LMSQualReport:
                 self.assignment_writer.write(assignment_data)
 
                 # Checking for deassignment data from crew_qualification table
-                for rec_qual in crew_qual_t.search('(&(crew={crew})(validto>{validto}))'.format(crew=crew,validto=curr_date)):
+                for rec_qual in crew_qual_t.search('(&(crew={crew})(validfrom<{validfrom})(validto>={validto}))'.format(
+                    crew=crew,
+                    validfrom=curr_date,
+                    validto=curr_date)):
                     validfrom=rec_qual.validfrom
                     validto=rec_qual.validto
                     qual_subtype= rec_qual.qual.subtype
