@@ -89,7 +89,7 @@ class LMSQualReport:
                 log.info('Skipping sending update for retired crew {crew}'.format(crew=crew))
                 continue
 
-            # Check if crew qualification is applicable for interface
+            # Check if crew qualification is applicable for interface, A2NX is not added here
             if self._applicable_qual(qual, crew):
                 # In case crew is having valid MFF-A2A3 or A2A5 contract,
                 # no assigment will be send for seperate qualifications
@@ -389,7 +389,7 @@ class LMSQualReport:
                 validfrom = rec.validfrom
                 validto = rec.validto
                 # Check if crew qualification is applicable for interface
-                if self._applicable_qual(qual, crew):
+                if self._applicable_qual(qual, crew) or qual == "A2NX":
                     # In case crew is having valid MFF-A2A3 or MFF-A2A5 contract,
                     # assigment will be send for DN-Pilot A32 A330/DN-Pilot A32 A350
                     MFF_contract_group = crew_MFF_congrouptype(crew,curr_date)
