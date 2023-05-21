@@ -170,6 +170,8 @@ class Report(SASReport):
                     apis_countries = rave.set('leg.apis_countries_dk').members()
                 elif f.no_nsch:
                     apis_countries = rave.set('leg.apis_countries_no').members()
+                elif f.bg_all:
+                    apis_countries = rave.set('leg.apis_countries_bg').members()
                 else:
                     apis_countries = rave.set('leg.apis_countries').members()
                 if country in apis_countries:
@@ -263,6 +265,7 @@ def get_flights(startdate=None, enddate=None):
             'end_country': 'report_crewlists.%leg_end_country%',
             'no_nsch': 'report_crewlists.%leg_is_no_nsch%',
             'dk_nsch': 'report_crewlists.%leg_is_dk_nsch%',
+            'bg_all':'report_crewlists.%leg_is_bg_all%',
             'ie_neu': 'report_crewlists.%leg_is_ie_neu%'
         })
     return ri.eval('sp_crew')
