@@ -13,27 +13,23 @@ from email.mime.application import MIMEApplication
 sender_email= 'no-reply@sas.se' #''
 sender_password=''
 recipients_email=['STOOL.Archive@sas.dk','peter.yao@sas.se']
-#subject='Exclude Records CSV File'
-mail_body='This email contains a csv file attachment'
-
+timestamp = datetime.now().strftime('%Y-%m-%d_%H:%M')
+#subject='TPMS qualification update rejected by CMS {}'.format(timestamp)
+mail_body=('Hi,\nThis is an automated mail to notify TPMS qualification updates rejected by CMS at {}. \n\nBest regards,\nCMS').format(timestamp)
 
 exclude_path = os.path.join(os.environ['CARMTMP'], 'ftp', 'exclude_records')
 #timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-timestamp = datetime.now().strftime('%Y%m%d%H%M')
-csv_filepath = (exclude_path + '/exclude_records_{}.csv'.format(timestamp))
-csv_filename = '/exclude_records_{}.csv'.format(timestamp)
+csv_filepath = (exclude_path + '/TPMS_Qual_Update_Rejected_by_CMS_{}.csv'.format(timestamp))
+csv_filename = '/TPMS_Qual_Update_Rejected_by_CMS_{}.csv'.format(timestamp)
 csv_file_source = os.path.join(exclude_path, csv_filename)
 
-print(csv_filepath)
-print(csv_filename)
-print(csv_file_source)
-# os.path.join(os.environ['CARMTMP'], 'ftp', 'exclude_records')
+
 # create a MIME multipart message
 
 
 def send_email():
     msg = MIMEMultipart()
-    msg['Subject'] = 'Exclude Records CSV'
+    msg['Subject'] = 'TPMS_Qual_Update_Rejected_by_CMS_{}'.format(timestamp)
     msg['From'] = sender_email
     msg['To'] = ",".join(recipients_email)
     msg['Cc'] = ''

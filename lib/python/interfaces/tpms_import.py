@@ -209,14 +209,17 @@ def main():
                     print "TPMS EOF"
                     break
                 print "TPMS #### "*8
-                print ("TPMS: ", row[act_group_name], row[qual_code], row[qual_code_type], row[staff_id], row[valid_from], row[end_date], row[exam_date])
+                print ("TPMS: ", row[staff_id], row[qual_code_type], row[qual_code], row[act_group_name], row[exam_date] , row[valid_from], row[end_date])
                 if not _handle_entry(row_number, row):
                     print "TPMS EXCLUDE RECORD", row[remark]
-                    timestamp= datetime.now().strftime('%Y%m%d%H%M')
-                    file_name=exclude_folder + '/exclude_records_{}.csv'.format(timestamp)
-                    errormsg=[errmsg]
-                    header=["act_group_name" , "qual_code" , "qual_code_type","staff_id","valid_form","end_date","exam_date", "errormsg"]
-                    data = [[row[act_group_name], row[qual_code], row[qual_code_type], row[staff_id], row[valid_from], row[end_date], row[exam_date], errormsg]]
+                    timestamp = datetime.now().strftime('%Y-%m-%d_%H:%M')
+                    #timestamp2=datetime.()strftime('%Y-%m-%d'
+                    #t=Exam_Date.strftime('%Y-%m-%d')
+                    file_name = exclude_folder + '/TPMS_Qual_Update_Rejected_by_CMS_{}.csv'.format(timestamp)
+                    #file_name=exclude_folder + '/exclude_records_{}.csv'.format(timestamp)
+                    errormsg=errmsg
+                    header=[ "Staff_Id", "Qual_Code_Type", "Qual_Code", "Act_Group_Name", "Exam_Date", "Valid_Form", "Valid_To", "Error_Message"]
+                    data = [[row[staff_id], row[qual_code_type], row[qual_code], row[act_group_name], row[exam_date], row[valid_from], row[end_date], errormsg]]
                     with open(file_name, mode='wb+') as csv_file:
                         writer = csv.writer(csv_file)
                         writer.writerow(header)
