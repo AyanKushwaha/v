@@ -396,7 +396,7 @@ class PerDiemTripManager:
                     perDiemLeg.hasMealReduction = leg[LEG_HAS_MEAL_REDUCTION]
                     if perDiemLeg.hasMealReduction and leg_start_day == leg[LEG_END_DAY]:
                         leg_meal_date.append(leg[LEG_END_DAY])
-                        print("##leg_meal_date##", leg_meal_date)
+                        # print("##leg_meal_date##", leg_meal_date)
                     elif perDiemLeg.hasMealReduction:
                         leg_start_day = leg[LEG_END_DAY]
 
@@ -469,8 +469,6 @@ class PerDiemTripManager:
                         / trip[TRIP_COMPENSATION_UNIT])
                         perDiemLeg.mealReductionExchangeRate = (float(leg[LEG_MEAL_REDUCTION_EXCHANGE_RATE])
                         / leg[LEG_MEAL_REDUCTION_EXCHANGE_UNIT])
-                        print("IF meal_reduction amount IF",perDiemLeg.mealReductionAmount)
-                        print("IF meal red exchange rate",perDiemLeg.mealReductionExchangeRate)
                         #print("perDiemLeg.mealReductionAmount = ", perDiemLeg.mealReductionAmount)
                         #print("perDiemLeg.mealReductionExchangeRate = ", perDiemLeg.mealReductionExchangeRate)
                 else:
