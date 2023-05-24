@@ -225,7 +225,9 @@ class WorkSchedule(WFSReport):
             duty_end = duty_start
         elif duty_bag.duty.is_vacation() or duty_bag.duty.is_loa() or duty_bag.duty.is_cmp() or duty_bag.duty.is_blank_day() or duty_bag.duty.is_f36() or duty_bag.duty.is_cd():
             duty_start = start_dt + timedelta(days=day_nr)
+	    log.info('NORDLYS: Splitting activity between {st} and {end}################################'.format(st=duty_start,end=start_dt))		
             duty_end = datetime(duty_start.year, duty_start.month, duty_start.day, 8, 0)
+	    log.info('NORDLYS: Splitting activity between {st}##########################################'.format(st=duty_end))
         elif duty_bag.duty.is_gd() or duty_bag.duty.is_kd() or duty_bag.duty.is_sd():
             duty_start = start_dt + timedelta(days=day_nr)
             if(self.is_weekday(duty_start)):                
