@@ -51,8 +51,8 @@ salary_overtime_article = {
 
 CARMDATA = os.getenv("CARMDATA")
 REPORT_PATH = '/samba-share/reports/SALARY_EC/'
-RELEASE_PATH = '/opt/Carmen/CARMTMP/ftp/out/SALARY_SEIP/'
-
+#RELEASE_PATH = '/opt/Carmen/CARMDATA/carmdata/SALARY_NL/salary_month/Original_Salary_Files'
+RELEASE_PATH = '/samba-share/reports/SALARY_EC/HR/'
 # Start of salary month parameter
 startparam = 'salary.%salary_month_start_p%'
 
