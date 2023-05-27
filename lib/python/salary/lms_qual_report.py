@@ -47,7 +47,6 @@ class LMSQualReport:
     # then it  will generate report for 24May2021  
     def generate(self, crew_ids=[], delta_date=None):
         exec_start = time.time()
-        delta_date = '17May2023'
         if delta_date is None:
             delta_date = today_in_abstime()
         else:
