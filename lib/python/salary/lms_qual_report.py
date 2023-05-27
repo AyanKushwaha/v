@@ -47,6 +47,7 @@ class LMSQualReport:
     # then it  will generate report for 24May2021  
     def generate(self, crew_ids=[], delta_date=None):
         exec_start = time.time()
+        delta_date = '17May2023'
         if delta_date is None:
             delta_date = today_in_abstime()
         else:
@@ -93,7 +94,7 @@ class LMSQualReport:
             if self._applicable_qual(qual, crew):
                 # In case crew is having valid MFF-A2A3 or A2A5 contract,
                 # no assigment will be send for seperate qualifications
-                MFF_contract_group = crew_MFF_congrouptype(crew,curr_day)
+                MFF_contract_group = crew_MFF_congrouptype(crew,curr_day,True)
                 if (MFF_contract_group == "MFF-A2A3") or (MFF_contract_group == "MFF-A2A5"):
                     log.info('Skipping sending update for MFF crew {crew}'.format(crew=crew))
                     continue
@@ -131,7 +132,7 @@ class LMSQualReport:
             if self._applicable_qual(qual, crew)  or qual == "A2NX":
                 # In case crew is having valid MFF-A2A3 or A2A5 contract,
                 # no deassigment will be send for seperate qualifications except A2NX
-                MFF_contract_group = crew_MFF_congrouptype(crew,curr_day)
+                MFF_contract_group = crew_MFF_congrouptype(crew,curr_day,False)
                 if ((MFF_contract_group == "MFF-A2A3") or (MFF_contract_group == "MFF-A2A5")) and qual != "A2NX":
                     log.info('Skipping sending deassigment for MFF crew {crew}'.format(crew=crew))
                     continue
@@ -400,7 +401,7 @@ class LMSQualReport:
                 if self._applicable_qual(qual, crew) or qual == "A2NX":
                     # In case crew is having valid MFF-A2A3 or MFF-A2A5 contract,
                     # assigment will be send for DN-Pilot A32 A330/DN-Pilot A32 A350
-                    MFF_contract_group = crew_MFF_congrouptype(crew,curr_date)
+                    MFF_contract_group = crew_MFF_congrouptype(crew,curr_date,True)
                     if (MFF_contract_group == "MFF-A2A3") or (MFF_contract_group == "MFF-A2A5"):
                         if MFF_contract_group == "MFF-A2A3":
                             qual = "A2A3"
@@ -478,7 +479,6 @@ class LMSQualReport:
             mff_records_assign = crew_contract_set_t.search('(&(id={contract}){congrouptype_query})'.format(
                 contract=contract,
                 congrouptype_query=congrouptype_query))
-
             for rec_congrouptype in mff_records_assign:
                 congrouptype=rec_congrouptype.congrouptype.id
                 if congrouptype == "MFF-A2A3":
@@ -776,17 +776,26 @@ def extperkey_to_crew_id(crew_id_as_ext):
     return crew_id
 
 
-def crew_MFF_congrouptype(crew_id,curr_date):
+def crew_MFF_congrouptype(crew_id,curr_date,assignment):
     # Pick the crew contract from crew_contract table,
     # condition is validto greater than as we are picking the valid contract for this crew
     # and later checking in the crew_contract_set table for MFF contract
     crew_contract_t = tm.table('crew_contract')
     crew_contract_set_t = tm.table('crew_contract_set')
-    crew_contract_data = crew_contract_t.search('(&(crew={crew})(validto>{validto}))'.format(
-    crew=crew_id,
-    validto=curr_date
-    ))
+    # assignment condition is added so that when MFF is deassigned the deassigment of qualification 
+    # is not send for the qualification which is ended on that particular day
+    if assignment:
+        crew_contract_data = crew_contract_t.search('(&(crew={crew})(validto>{validto}))'.format(
+        crew=crew_id,
+        validto=curr_date
+        ))
+    else:
+        crew_contract_data = crew_contract_t.search('(&(crew={crew})(validto={validto}))'.format(
+        crew=crew_id,
+        validto=curr_date
+        ))
     # Checking for the contract of this crew in crew_contract table
+    congrouptype = None
     for rec in crew_contract_data:
         crew=rec.crew.id
         contract=rec.contract.id
@@ -797,7 +806,6 @@ def crew_MFF_congrouptype(crew_id,curr_date):
         crew_MFFcontract = crew_contract_set_t.search('(id={contract})'.format(
             contract=contract
         ))
-        congrouptype = None
         for rec_congroup in crew_MFFcontract:
             if rec_congroup.congrouptype != None:
                 congrouptype = rec_congroup.congrouptype.id
