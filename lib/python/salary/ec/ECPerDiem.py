@@ -588,7 +588,7 @@ class PerDiemRoster(DataClass):
     def getCountofNightswithoutTaxNO(self):
         nights =0
         for trip in self.trips:
-            nights += trip.getCountofNightswithoutTaxNO_2()
+            nights += trip.getCountofNightswithoutTaxNO_PerTrip()
         return nights
 
     def __all(trip):
@@ -1138,7 +1138,7 @@ class PerDiemTrip(DataClass):
             sum += int(comp)
         return round(sum, 2)
     
-    def getCountofNightswithoutTaxNO_2(self):
+    def getCountofNightswithoutTaxNO_PerTrip(self):
     ################skcms-3150###############
         result = 0
         if not self.legsAdjusted:
