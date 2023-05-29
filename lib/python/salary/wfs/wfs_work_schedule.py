@@ -220,7 +220,7 @@ class WorkSchedule(WFSReport):
         '''
         duty_start = None
         duty_end = None
-        if duty_bag.duty.is_freeday():
+        if duty_bag.duty.is_freeday() and not duty_bag.duty.is_vacation():
             duty_start = start_dt + timedelta(days=day_nr) 
             duty_end = duty_start
         elif duty_bag.duty.is_vacation() or duty_bag.duty.is_loa() or duty_bag.duty.is_cmp() or duty_bag.duty.is_blank_day() or duty_bag.duty.is_f36() or duty_bag.duty.is_cd():
