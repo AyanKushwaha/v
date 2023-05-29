@@ -397,9 +397,6 @@ class PerDiemTripManager:
                 if leg[LEG_HAS_AGMT_GROUP_SVS]:
                     perDiemLeg.hasMealReduction = leg[LEG_HAS_MEAL_REDUCTION]
                     if perDiemLeg.hasMealReduction and leg_start_day == leg[LEG_END_DAY]:
-                        print("leg[LEG_HAS_MEAL_REDUCTION]",leg[LEG_HAS_MEAL_REDUCTION])
-                        print("leg[LEG_END_DAY]",leg[LEG_END_DAY])
-                        print("leg_start_day",leg_start_day)
                         leg_meal_date.append(leg[LEG_END_DAY])
                         # print("##leg_meal_date##", leg_meal_date)
                     elif perDiemLeg.hasMealReduction:
