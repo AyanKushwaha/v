@@ -175,6 +175,7 @@ LEG_HAS_AGMT_GROUP_SVS = 24
 LEG_HAS_AGMT_GROUP_SKN_CC = 25
 LEG_HAS_MEAL_REDUCTION = 26
 LEG_END_DAY  = 27
+LEG_MEAL_RED_AMT_FOR_TWO_MEAL = 28
 LEG_VALUES = ('report_per_diem.%leg_start_station%',
               'report_per_diem.%leg_end_station%',
               'report_per_diem.%leg_actual_start_UTC%',
@@ -202,7 +203,8 @@ LEG_VALUES = ('report_per_diem.%leg_start_station%',
               'crew.%has_agmt_group_svs_at_date%(salary.%salary_month_start_p%)',
               'crew.%has_agmt_group_skn_cc_at_date%(salary.%salary_month_start_p%)',
               'report_per_diem.%leg_has_per_diem_meal_reduction%',
-              'leg.%end_date_UTC%')
+              'leg.%end_date_UTC%',
+              'report_per_diem.%meal_red_amt_for_two_meal%')
 
 
 class PerDiemRosterManager:
@@ -395,6 +397,9 @@ class PerDiemTripManager:
                 if leg[LEG_HAS_AGMT_GROUP_SVS]:
                     perDiemLeg.hasMealReduction = leg[LEG_HAS_MEAL_REDUCTION]
                     if perDiemLeg.hasMealReduction and leg_start_day == leg[LEG_END_DAY]:
+                        print("leg[LEG_HAS_MEAL_REDUCTION]",leg[LEG_HAS_MEAL_REDUCTION])
+                        print("leg[LEG_END_DAY]",leg[LEG_END_DAY])
+                        print("leg_start_day",leg_start_day)
                         leg_meal_date.append(leg[LEG_END_DAY])
                         # print("##leg_meal_date##", leg_meal_date)
                     elif perDiemLeg.hasMealReduction:
@@ -458,7 +463,7 @@ class PerDiemTripManager:
                         leg_date =  rec_list
                         if leg[LEG_END_DAY] == leg_date and perDiemLeg.hasMealReduction and flag_add is False:
                             flag_add= True
-                            perDiemLeg.mealReductionAmount = (float(400000)
+                            perDiemLeg.mealReductionAmount = (float(leg[LEG_MEAL_RED_AMT_FOR_TWO_MEAL]/2.0)
                             / trip[TRIP_COMPENSATION_UNIT])
                             perDiemLeg.mealReductionExchangeRate = (float(leg[LEG_MEAL_REDUCTION_EXCHANGE_RATE])
                             / leg[LEG_MEAL_REDUCTION_EXCHANGE_UNIT])
