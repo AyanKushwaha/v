@@ -360,7 +360,7 @@ class LMSQualReport:
                 continue
            
            # Search in crew_employment table is same crew exists with validto as either today or old date
-            crew_change_extperkey_data = crew_emp_table.search('(&(crew={crew})(validto<={validto}))'.format(
+            crew_change_extperkey_data = crew_emp_table.search('(&(crew={crew})(validto={validto}))'.format(
             crew=crew,
             validto=curr_date
             ))
