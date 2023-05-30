@@ -987,13 +987,15 @@ class TimeEntryReport(WFSReport):
         account_query = '(|(account=BOUGHT)(account=BOUGHT_BL)(account=BOUGHT_FORCED)(account=BOUGHT_8)(account=SOLD))'
         reasoncode_query = '(|(reasoncode=BOUGHT)(reasoncode=SOLD))'
         query_f3_f7 = '&(|(account=F3)(account=F7))(|(reasoncode=OUT Payment)(reasoncode=IN Payment Correction))'
+        query_pr = '&(|(account=PR))(|(reasoncode=OUT Roster)(reasoncode=OUT Correction))'
 
-        transactions = account_entry_t.search('(&(tim>={st})(tim<={end})(|(&{account_query}{reasoncode_query})({query_f3_f7})))'.format(
+        transactions = account_entry_t.search('(&(tim>={st})(tim<={end})(|(&{account_query}{reasoncode_query})({query_f3_f7})({query_pr})))'.format(
             st=self.start.adddays(-7),
             end=self.end,
             account_query=account_query,
             reasoncode_query=reasoncode_query,
-            query_f3_f7=query_f3_f7
+            query_f3_f7=query_f3_f7,
+            query_pr=query_pr
         ))
         
         dict_t = {}
@@ -1025,29 +1027,6 @@ class TimeEntryReport(WFSReport):
                         'tnx'           : tnx,
                         'days_off'      : 1})
                     curr_abs = curr_abs.adddays(1)
-        #Calculation for assigned PR days 
-        account_query = '(|(account=PR))'
-        reasoncode_query = '(|(reasoncode=OUT Roster)(reasoncode=OUT Correction))'
-        transactions_PR = account_entry_t.search('(&(tim>={st})(tim<={end}){account_query}{reasoncode_query})'.format(
-            st=self.start.adddays(-3),
-            end=self.end,
-            account_query=account_query,
-            reasoncode_query=reasoncode_query
-        ))
-        for tnx in transactions_PR:
-            log.info("Transaction inside PR, tnx --->{0}".format(tnx)) 
-            dict_t.setdefault(tnx.crew.id, [])
-            nr_days = abs(int(tnx.amount / 100))
-            curr_abs = tnx.tim
-            for day in range(0, nr_days):
-                if curr_abs >  self.end:
-                    # Activity starts after set end date
-                    break
-                dict_t[tnx.crew.id].append({
-                    'tnx_dt'        : curr_abs,
-                    'tnx'           : tnx,
-                    'days_off'      : 1})
-                curr_abs = curr_abs.adddays(1)
 
         log.info('NORDLYS: {0} nr of crew with account data extracted without VA/VA1'.format(len(dict_t)))
         return dict_t

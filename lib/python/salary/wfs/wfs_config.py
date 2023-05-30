@@ -148,7 +148,10 @@ EVENT_FROM_PAYCODE = {
             'SAS_DK_CNLN_PROD_SICK'         :'CNLN_PROD_SICK',
             'SAS_NO_CNLN_PROD_WEEKDAY'      :'CNLN_PROD_WEEKDAY',
             'SAS_NO_CNLN_PROD_WEEKEND_HOLIDAY':'CNLN_PROD_WEEKEND',
-            'SAS_NO_CNLN_PROD_SICK'         :'CNLN_PROD_SICK'  
+            'SAS_NO_CNLN_PROD_SICK'         :'CNLN_PROD_SICK',
+            'SAS_SE_ABS_PR_LOA_D'           :'PR_SE_FC',
+            'SAS_NO_ABS_PR_LOA_D'           :'PR_NO_FC',
+            'SAS_DK_ABS_PR_LOA_D'           :'PR_DK_FC'   
 }
 
 ACCOUNT_PAYCODES = (
@@ -181,7 +184,10 @@ ACCOUNT_PAYCODES = (
     'SAS_SE_CMS_FD_VA_PERFORMED',
     'SAS_SE_CMS_UNPAID_VACATION',
     'SAS_DK_CNLN_SOLD_DAYOFF',   
-    'SAS_NO_CNLN_SOLD_DAYOFF'
+    'SAS_NO_CNLN_SOLD_DAYOFF',
+    'SAS_SE_ABS_PR_LOA_D',
+    'SAS_NO_ABS_PR_LOA_D',
+    'SAS_DK_ABS_PR_LOA_D'
 )
 
 ROSTER_PAYCODES = (
