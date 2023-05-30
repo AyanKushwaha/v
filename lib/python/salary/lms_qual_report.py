@@ -429,8 +429,6 @@ class LMSQualReport:
     def _crew_qualification_A2NX(self, curr_date):
 
         crew_training_log_t = tm.table('crew_training_log')
-        crew_qual_t = tm.table('crew_qualification')
-
         curr_date_dt = abs_to_datetime(curr_date)
         curr_date_ext= AbsTime(curr_date_dt.year, curr_date_dt.month, curr_date_dt.day, 24, 0)
 
