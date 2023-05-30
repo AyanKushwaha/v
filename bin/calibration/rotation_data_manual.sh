@@ -25,7 +25,7 @@ echo "$@"
 
 echo "Starting Mirador"
 
-$CARMUSR/bin/startMirador.sh --script -s carmusr.calibration.util.data_transfer_from_cms_manual
+$CARMUSR/bin/startMirador.sh --script -s carmusr.calibration.util.data_transfer_from_cms_manual --pmp=350 --hours_to_op=72
 echo "Mirador ended."
 
 echo "Script finished"
