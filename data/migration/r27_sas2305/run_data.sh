@@ -38,6 +38,8 @@ echo " - Processing migration tasks"
 # python $CARMUSR/data/migration/$RELEASE/skcms-1234.py 2>&1 | tee $LOG_DIR/skcms-1234.log
 echo "  * SKCMS-3223: Link Meal: 2 meals on same day should cost 80kr and not 2x50kr"
 python $CARMUSR/data/migration/$RELEASE/skcms-3223.py 2>&1 | tee $LOG_DIR/skcms-3223.log
+echo "  * SKCMS-3097: EC: Adding new paycodes for PR"
+python $CARMUSR/data/migration/$RELEASE/skcms-3097.py 2>&1 | tee $LOG_DIR/skcms-3097.log
 # Uncomment this in case dave filters shall be modified, remember to update JIRA number
 #echo "  * SKCMS-XXXX: Importing crc/etable/dave_filter/*.etab into database"
 #$CARMUSR/bin/admin/setup/setup_filters.sh -c -d | tee -a $LOG_DIR/SKCMS-XXXX.log

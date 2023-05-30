@@ -1812,13 +1812,16 @@ class TimeEntry(WFSReport):
         reasoncode_query = '(|(reasoncode=BOUGHT)(reasoncode=SOLD))'
         query_f3_f7 = '&(|(account=F3)(account=F7))(|(reasoncode=OUT Payment)(reasoncode=IN Payment Correction))'
         query_f7 = '&(&(account=F7)(reasoncode=OUT Roster))'
-        transactions = account_entry_t.search('(&(tim>={st})(tim<={end})(|(&{account_query}{reasoncode_query})({query_f3_f7})({query_f7})))'.format(
+        query_pr = '&(|(account=PR))(|(reasoncode=OUT Roster)(reasoncode=OUT Correction))
+        transactions = account_entry_t.search('(&(tim>={st})(tim<={end})(|(&{account_query}{reasoncode_query})({query_f3_f7})({query_f7})({query_pr})))'.format(
+
             st=self.start.adddays(-7),
             end=self.end,
             account_query=account_query,
             reasoncode_query=reasoncode_query,
             query_f3_f7=query_f3_f7,
-            query_f7=query_f7
+            query_f7=query_f7,
+            query_pr=query_pr
         ))
         
         dict_t = {}

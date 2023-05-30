@@ -84,7 +84,11 @@ PAYCODE_FROM_EVENT = {
             'CNLN_BOUGHT_FHOUR_SB_NO_FC':      'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_CO',
             'CNLN_BOUGHT_FHOUR_SB_NO_FP':      'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_FO',
             'CNLN_BOUGHT_FHOUR_SB_NO_CC':      'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_CC',
-            'ABS_F7_DAG_CABIN_3_1_D_SE' :  'SAS_SE_ABS_F7_DAG_CABIN_3_1_D'
+            'ABS_F7_DAG_CABIN_3_1_D_SE' :  'SAS_SE_ABS_F7_DAG_CABIN_3_1_D',
+            'CNLN_PROD_SICK_NO' :   'SAS_NO_CNLN_PROD_SICK',
+            'PR_SE_FC' : 'SAS_SE_ABS_PR_LOA_D',
+            'PR_NO_FC' : 'SAS_NO_ABS_PR_LOA_D',
+            'PR_DK_FC' : 'SAS_DK_ABS_PR_LOA_D'
 
         }
 
@@ -176,7 +180,11 @@ EVENT_FROM_PAYCODE = {
             'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_CO': 'CNLN_BOUGHT_FHOUR_SB',
             'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_FO': 'CNLN_BOUGHT_FHOUR_SB',
             'SAS_NO_CNLN_BOUGHT_FHOUR_DUTY_SB_CC': 'CNLN_BOUGHT_FHOUR_SB',
-            'SAS_SE_ABS_F7_DAG_CABIN_3_1_D' : 'F7' 
+            'SAS_SE_ABS_F7_DAG_CABIN_3_1_D' : 'F7',
+            'SAS_NO_CNLN_PROD_SICK'         :'CNLN_PROD_SICK',
+            'SAS_SE_ABS_PR_LOA_D'           :'PR_SE_FC',
+            'SAS_NO_ABS_PR_LOA_D'           :'PR_NO_FC',
+            'SAS_DK_ABS_PR_LOA_D'           :'PR_DK_FC'
 
 }
 
@@ -209,9 +217,12 @@ ACCOUNT_PAYCODES = (
     'SAS_SE_CMS_CC_VA_PERFORMED',
     'SAS_SE_CMS_FD_VA_PERFORMED',
     'SAS_SE_CMS_UNPAID_VACATION',
-    'SAS_DK_CNLN_SOLD_DAYOFF',   
+    'SAS_DK_CNLN_SOLD_DAYOFF', 
     'SAS_NO_CNLN_SOLD_DAYOFF',
-    'SAS_SE_ABS_F7_DAG_CABIN_3_1_D'
+    'SAS_SE_ABS_F7_DAG_CABIN_3_1_D',
+    'SAS_SE_ABS_PR_LOA_D',
+    'SAS_NO_ABS_PR_LOA_D',
+    'SAS_DK_ABS_PR_LOA_D'
 )
 
 ROSTER_PAYCODES = (
@@ -310,7 +321,8 @@ EVENT_FROM_ARTICLE_PAYCODES = {
     'CNLN_BOUGHT_FHOUR_DUTY':'CNLN_BOUGHT_FHOUR_DUTY',
     'CNLN_BOUGHT_FHOUR_SB':'CNLN_BOUGHT_FHOUR_SB',
     'CNLN_BOUGHT_FDAY' :'CNLN_BOUGHT_FDAY',
-    'ABS_F7_DAG_CABIN_3_1' : 'ABS_F7_DAG_CABIN_3_1_D'
+    'ABS_F7_DAG_CABIN_3_1' : 'ABS_F7_DAG_CABIN_3_1_D',
+    'ABS_PR_LOA_D'  :   'ABS_PR_LOA_D'
 	}
 
 
@@ -361,6 +373,8 @@ class PaycodeHandler:
             return PAYCODE_FROM_EVENT['{e}_{c}{r}'.format(e=event_type, c=country, r=rank)]
         elif event_type in ('ABS_F7_DAG_CABIN_3_1_D') and country in ('SE') and rank in ('CC'):
             return PAYCODE_FROM_EVENT['{e}_{c}'.format(e=event_type, c=country)]
+        elif (event_type =='PR' and rank == 'FC'):
+            return PAYCODE_FROM_EVENT['{e}_{c}_{r}'.format(e=event_type, c=country, r=rank)]
         else:
             return ''
 
