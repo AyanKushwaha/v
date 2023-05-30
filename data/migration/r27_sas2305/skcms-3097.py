@@ -52,7 +52,7 @@ def fixit(dc, *a, **k):
 
     ops.append(fixrunner.createOp('salary_article', 'N', {
         'extsys': 'NO',
-        'extartid':'3056A',
+        'extartid':'3056T',
         'validfrom': int(AbsTime('01Jan2023 00:00')),
         'validto':  int(AbsTime('31DEC2035 00:00')),
         'intartid': 'ABS_PR_LOA_D',
@@ -61,7 +61,7 @@ def fixit(dc, *a, **k):
 
     ops.append(fixrunner.createOp('salary_article', 'N', {
         'extsys': 'SE',
-        'extartid':'5025A',
+        'extartid':'5025T',
         'validfrom': int(AbsTime('01Jan2023 00:00')),
         'validto':  int(AbsTime('31DEC2035 00:00')),
         'intartid': 'ABS_PR_LOA_D',
@@ -69,7 +69,7 @@ def fixit(dc, *a, **k):
     }))
     ops.append(fixrunner.createOp('salary_article', 'N', {
         'extsys': 'S3',
-        'extartid':'5025A',
+        'extartid':'5025T',
         'validfrom': int(AbsTime('01Jan2023 00:00')),
         'validto':  int(AbsTime('31DEC2035 00:00')),
         'intartid': 'ABS_PR_LOA_D',
@@ -78,7 +78,7 @@ def fixit(dc, *a, **k):
 
     ops.append(fixrunner.createOp('salary_article', 'N', {
         'extsys': 'DK',
-        'extartid':'3056A',
+        'extartid':'3056T',
         'validfrom': int(AbsTime('01Jan2023 00:00')),
         'validto':  int(AbsTime('31DEC2035 00:00')),
         'intartid': 'ABS_PR_LOA_D',
