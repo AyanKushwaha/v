@@ -12,7 +12,7 @@ from email.mime.application import MIMEApplication
 
 sender_email= 'no-reply@sas.se' #''
 sender_password=''
-recipients_email=['STOOL.Archive@sas.dk','peter.yao@sas.se']
+recipients_email=['arun.rag@sas.dk','vaibhav.kaushal@sas.dk']
 timestamp = datetime.now().strftime('%Y-%m-%d_%H:%M')
 #subject='TPMS qualification update rejected by CMS {}'.format(timestamp)
 mail_body=('Hi,\nThis is an automated mail to notify TPMS qualification updates rejected by CMS at {}. \n\nBest regards,\nCMS').format(timestamp)
