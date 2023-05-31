@@ -45,6 +45,7 @@ import oma16_defs;
 import oma16;
 import system_db_parameters;
 import crew_pos;
+import qualification;
 
 /****************************************************************
  * Section 1: Block time rules
@@ -91,7 +92,8 @@ export rule (on) caa_cockpit_crew_has_req_ac_block_hours_for_airport =
         crew.%is_pilot% and
         leg.%in_pp% and
         not leg.%is_deadhead% and
-        %leg_requires_min_blockhours_check%;
+        %leg_requires_min_blockhours_check% and
+        rule_exceptions.%rule_on%(leg.%activity_scheduled_start_time_UTC%);
   %crew_has_enough_lifetime_blockhours_for_acfamily_at_arrival%;
   startdate  = leg.%start_UTC%;
   severity = first(leg(trip), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
@@ -101,16 +103,29 @@ export rule (on) caa_cockpit_crew_has_req_ac_block_hours_for_airport =
   planner "This rule is used to prohibit flight crew members to fly to"
           "specific airports with a need of minimum BLHs on aircraft type."
           "1) The flight crew member should have minimum 1000 BLH on aircraft"
-          " type before flying to GZP (OPS-Info 7.2 20131122) (JIRA SASCMS-6437).";
+          " type before flying to GZP (OPS-Info 7.2 20131122) (JIRA SASCMS-6437)"
+          "2) FC must have 1000 blh and FP to have 500 blh on aircraft type"
+             "before flying to SMI";
 end
 
 %leg_requires_min_blockhours_check% =
   %min_blockhours_required_by_arrival_airport% > 00:00;
 
 table min_blockhours_for_airport_table =
-  leg.%end_station% -> %min_blockhours_required_by_arrival_airport%;
-  "GZP" -> 1000:00;
-   -    -> 00:00;
+  crew.%rank% = "FC",
+    crew_pos.%assigned_pos% = 1,
+      leg.%is_lifus%,
+        crew.%rank% = "FP",
+          (crew.%airport_qual_validto_max%(qualification.%place%("SMI"), leg.%end_hb%) >= leg.%end_hb%),
+             leg.%end_station% -> 
+                %min_blockhours_required_by_arrival_airport%;
+                    
+  TRUE,     -,     -, FALSE,     -, "GZP" -> 1000:00;
+  FALSE,    -,     -, TRUE ,     -, "GZP" -> 1000:00;
+  TRUE,  TRUE, FALSE, FALSE, FALSE, "SMI" -> 1000:00;
+  TRUE, FALSE, FALSE, FALSE, FALSE, "SMI" -> 500:00;
+  FALSE,    -,     -, TRUE , FALSE, "SMI" -> 500:00;
+      -, -,-,-, -, -    -> 00:00;
 end
   
 %crew_has_enough_lifetime_blockhours_for_acfamily_at_arrival% =

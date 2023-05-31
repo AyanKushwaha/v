@@ -37,16 +37,11 @@ echo " - Processing migration tasks"
 # echo "  * SKCMS-1234:  Link CC SCC course set up"
 # python $CARMUSR/data/migration/$RELEASE/skcms-1234.py 2>&1 | tee $LOG_DIR/skcms-1234.log
 
-echo "  * SKCMS-3209:  Changes required for CM Manpower RHEL8 Migration"
-python $CARMUSR/data/migration/$RELEASE/SKCMS-3209.py 2>&1 | tee $LOG_DIR/SKCMS-3209.log
-echo "  * SKCMS-3223: Link Meal: 2 meals on same day should cost 80kr and not 2x50kr"
-python $CARMUSR/data/migration/$RELEASE/skcms-3223.py 2>&1 | tee $LOG_DIR/skcms-3223.log
+
 # Uncomment this in case dave filters shall be modified, remember to update JIRA number
 #echo "  * SKCMS-XXXX: Importing crc/etable/dave_filter/*.etab into database"
 #$CARMUSR/bin/admin/setup/setup_filters.sh -c -d | tee -a $LOG_DIR/SKCMS-XXXX.log
 
-echo "  * SKCMS-3209: Importing crc/etable/dave_filter/*.etab into database"
-$CARMUSR/bin/admin/setup/setup_filters.sh -c -d | tee -a $LOG_DIR/SKCMS-3209.log
 
 echo "********************************************"
 echo "Migration finished"
