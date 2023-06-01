@@ -75,7 +75,10 @@ class LMSQualReport:
         crew_qual_table = tm.table('crew_qualification')
         curr_day = delta_date
 
-        assignment_filter = crew_qual_table.search("(validfrom={0})".format(curr_day))
+        #assignment_filter = crew_qual_table.search("(validto>{0})".format(curr_day))
+        assignment_filter = crew_qual_table.search("(&(validto>{validto})(validfrom<{validfrom}))".format(
+            validto=curr_day,
+            validfrom=curr_day))
         deassignment_filter = crew_qual_table.search("(validto={0})".format(curr_day))
 
         # checking for assignment qualification data 
@@ -127,8 +130,11 @@ class LMSQualReport:
                 log.info('Skipping sending update for retired crew {crew}'.format(crew=crew))
                 continue
 
-            # Check if crew qualification is applicable for interface, A2NX added only for deassigment
-            if self._applicable_qual(qual, crew)  or qual == "A2NX":
+            # Check if crew qualification is applicable for interface, A2NX added only for deassigment for pilots
+            rank = rank_from_id(crew, curr_day)
+            is_cc = is_cabin_crew(crew, rank)
+
+            if self._applicable_qual(qual, crew) or (qual == "A2NX" and not is_cc):
                 # In case crew is having valid MFF-A2A3 or A2A5 contract,
                 # no deassigment will be send for seperate qualifications except A2NX
                 MFF_contract_group = crew_MFF_congrouptype(crew,curr_day,False)
@@ -260,6 +266,7 @@ class LMSQualReport:
             'qualificationID'   : self._map_to_LMS_name(crew, qual=qual, rank=rank),
             'priority'          : 1
         }
+        
         if report_flag == "assignment_data":
             assignment_data = base_data
             assignment_data['assignmentDate'] = report_formatted_date(validfrom)
@@ -273,7 +280,7 @@ class LMSQualReport:
     def _applicable_qual(self, qual, crew_id):
 
         applicable_for_cc = ('MENTOR', 'PMM','A2', 'AL','38')
-        applicable_for_fc = ('38', 'A2', 'A3','A5')
+        applicable_for_fc = ('38', 'A2', 'A3','A5', 'A2NX')
         rank = rank_from_id(crew_id, today_in_abstime())
         
         if is_cabin_crew(crew_id, rank):
@@ -281,7 +288,8 @@ class LMSQualReport:
         else:
             return qual in applicable_for_fc
 
-    def _map_to_LMS_name(self, crew_id, qual=None, rank=None): 
+    def _map_to_LMS_name(self, crew_id, qual=None, rank=None):
+
         name = ''
         rank = rank_from_id(crew_id, today_in_abstime()) if rank is None else rank
         cc = is_cabin_crew(crew_id, rank)
@@ -425,6 +433,36 @@ class LMSQualReport:
                     # Create assignment entries
                     assignment_data = self._create_entries(crew, validfrom, validto, qual, None, "assignment_data")
                     self.assignment_writer.write(assignment_data)
+            # DN-CABIN AP needs to be send again if crew employee number is changed
+            crew_emp_table = tm.table('crew_employment')
+            assignment_data_rank = crew_emp_table.search("(&(crew={crew})(crewrank={crewrank})(validto>{validto}))".format(crew=crew,crewrank="AP", validto=curr_date))
+            # checking for assignment data from crew employment table
+            for rec_emp in assignment_data_rank:
+                crew = rec_emp.crew.id
+                rank = rec_emp.crewrank.id
+                validfrom = rec_emp.validfrom
+                validto = rec_emp.validto
+
+                if is_retired(crew) or (extperkey_from_id(crew, today_in_abstime()) in test_crew_emp_no):
+                    log.info('Skipping sending update for retired crew {crew}'.format(crew=crew))
+                    continue
+                # Only cabin crew applicable for rank based qualifications to LMS
+                if is_cabin_crew(crew, rank):
+                    self._stats['total_delta_count'] += 1
+                    self._stats['updated_rank_count'] += 1
+                    log.info('''
+                    New cabin crew {crew} - {rank}
+                    Valid from {validfrom}
+                    Valid to {validto}
+                    '''.format(
+                        crew=crew,
+                        rank=rank,
+                        validfrom=validfrom,
+                        validto=validto
+                        ))
+                    assignment_data = self._create_entries(crew, validfrom, validto, None, rank, "assignment_data")
+                    self.assignment_writer.write(assignment_data)
+
 
     def _crew_qualification_A2NX(self, curr_date):
 
@@ -462,8 +500,11 @@ class LMSQualReport:
         crew_qual_t = tm.table('crew_qualification')
         congrouptype_query = '(|(congrouptype=MFF-A2A3)(congrouptype=MFF-A2A5))'
 
-        assignment_crew_filter = crew_contract_t.search('(validfrom={validfrom})'.format(
-        validfrom=curr_date))
+        #assignment_crew_filter = crew_contract_t.search('(validto>{validfrom})'.format(
+        #validfrom=curr_date))
+        assignment_crew_filter = crew_contract_t.search("(&(validto>{validto})(validfrom<{validfrom}))".format(
+            validto=curr_date,
+            validfrom=curr_date))
         # Checking in crew_contract table for the crew who got their contarct updated on today's date
         for rec in assignment_crew_filter:
             crew = rec.crew.id
@@ -589,36 +630,6 @@ class LMSQualReport:
                             ))
                         assignment_data = self._create_entries(crew, validfrom, validto, qual_subtype, None, "assignment_data")
                         self.assignment_writer.write(assignment_data)
-            # DN-CABIN AP needs to be send again if crew employee number is changed
-            crew_emp_table = tm.table('crew_employment')
-            assignment_data_rank = crew_emp_table.search("(&(crew={crew})(crewrank={crewrank})(validto>{validto}))".format(crew=crew,crewrank="AP", validto=curr_date))
-            # checking for assignment data from crew employment table
-            for rec_emp in assignment_data_rank:
-                crew = rec_emp.crew.id
-                rank = rec_emp.crewrank.id
-                validfrom = rec_emp.validfrom
-                validto = rec_emp.validto
-
-                if is_retired(crew) or (extperkey_from_id(crew, today_in_abstime()) in test_crew_emp_no):
-                    log.info('Skipping sending update for retired crew {crew}'.format(crew=crew))
-                    continue
-                # Only cabin crew applicable for rank based qualifications to LMS
-                if is_cabin_crew(crew, rank):
-                    self._stats['total_delta_count'] += 1
-                    self._stats['updated_rank_count'] += 1
-                    log.info('''
-                    New cabin crew {crew} - {rank}
-                    Valid from {validfrom}
-                    Valid to {validto}
-                    '''.format(
-                        crew=crew,
-                        rank=rank,
-                        validfrom=validfrom,
-                        validto=validto
-                        ))
-                    assignment_data = self._create_entries(crew, validfrom, validto, None, rank, "assignment_data")
-                    self.assignment_writer.write(assignment_data)
-
 
 class ReportWriter:
     def __init__(self):
