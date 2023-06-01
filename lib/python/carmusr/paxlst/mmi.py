@@ -236,6 +236,7 @@ def get_leg_info():
         'dk_nsch': 'report_crewlists.%leg_is_dk_nsch%',
         'no_nsch': 'report_crewlists.%leg_is_no_nsch%',
         'ie_neu': 'report_crewlists.%leg_is_ie_neu%',
+        'bg_all': 'report_crewlists.%leg_is_bg_all%',
         }, FCMEntry).eval(rave.selected(rave.Level.atom()))
 
 
@@ -274,6 +275,8 @@ def get_valid_countries(leg):
             valid_countries = rave.set('leg.apis_countries_dk').members()
         elif leg.no_nsch:
             valid_countries = rave.set('leg.apis_countries_no').members()
+        elif leg.bg_all:
+            valid_countries = rave.set('leg.apis_countries_bg').members()
         else:
             valid_countries = rave.set('leg.apis_countries').members()
     return valid_countries
