@@ -469,7 +469,7 @@ class FlightActualTriggerInclDomestic(FlightTimeTrigger):
             for mbd in minutesBefore.split(','):
                 if float(mbd) > 0:
                     raise errors.ChannelConfigError("Configuration error. Can't look into the future.")
-        super(FlightActualTriggerInclDomestic, self).__init__(minutesBefore, offset, configFile=configFile,
+        super(self.__class__, self).__init__(minutesBefore, offset, configFile=configFile,
                 isDeparture=isDeparture, outputClass=outputClass,
                 destCountry=destCountry, depCountry=depCountry, name=name)
 
@@ -1122,39 +1122,6 @@ class CrewManifestRequestBuilderSpcNorway:
         }
         request = reports.ReportRequest(self.__report, reportArgs, delta=True)
         return (request, reports.ReportRequestContentType(), None)
-
-      
-class CrewManifestRequestBuilderInclDomestic:
-    """
-    Generates report request string for departure and arrival flights for all flights including domestic flights
-    SKCMS-3352
-    """
-
-    def __init__(self, destCountry=None, logger=None,
-            report='report_sources.report_server.rs_crew_manifest', fileName=None):
-        self.__destCountry = destCountry
-        self.__logger = logger
-        self.__report = report
-        self.__fileName = fileName
-
-    def makeReportRequest(self, flight):
-        # Prepare request for the new report handler
-        schema =os.environ['DB_SCHEMA']
-        url =os.environ['DB_URL']
-        dc = DaveConnector(url, schema)
-        origsuffix = flight['origsuffix']
-        if origsuffix is None:
-            origsuffix = ''
-
-        self.__report = 'report_sources.report_server.rs_crew_manifest'
-        reportArgs = {
-            'fd': flight['fd'],
-            'origsuffix': origsuffix,
-            'udor': carmentime.fromCarmenTime(flight['udor']*1440).strftime("%Y%m%d"),
-            'adep': flight['adep'],
-            'country': self.__destCountry,
-            'fileName': self.__fileName,
-            }
 
 # functions =============================================================={{{1
 
