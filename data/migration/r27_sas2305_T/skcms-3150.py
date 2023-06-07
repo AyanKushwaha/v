@@ -25,7 +25,7 @@ def fixit(dc, *a, **k):
         'extartid':    '4802',
         'validfrom':   validfrom,
         'validto':     validto,
-        'intartid':    'PERDIEM_WITHOUT_TAX',
+        'intartid':    'PERDIEM_NO_WO_TAX',
         'note':        ''
     }))
 

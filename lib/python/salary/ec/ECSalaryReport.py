@@ -25,7 +25,7 @@ salary_systems = {
 
 salary_perdim_article = {
     'SE': ['MEAL', 'PERDIEM_SALDO', 'PERDIEM_TAX_DAY', 'PERDIEM_TAX_DOMESTIC', 'PERDIEM_TAX_INTER'],
-    'NO': ['MEAL_C', 'MEAL_F', 'PERDIEM_SALDO', 'PERDIEM_TAX_DAY', 'PERDIEM_TAX_DOMESTIC', 'PUBL_HOLIDAY_COMP', 'PERDIEM_WITHOUT_TAX'],
+    'NO': ['MEAL_C', 'MEAL_F', 'PERDIEM_SALDO', 'PERDIEM_TAX_DAY', 'PERDIEM_TAX_DOMESTIC', 'PUBL_HOLIDAY_COMP', 'PERDIEM_NO_WO_TAX'],
     'DK': ['MEAL_C', 'MEAL_F', 'PERDIEM_SALDO', 'PERDIEM_TAX', 'PERDIEM_NO_TAX'],
     'CN': ['PERDIEM_SALDO'],
     'HK': ['PERDIEM_SALDO'], 
@@ -269,30 +269,21 @@ class PerDiemRun(ECGenericRun):
                 for a in salary_perdim_article[crew.salarySystem]:
                     func = getattr(self, a)
                     value = func(crew)
-                    if value is not None and int(value) != 0:
+                    str1 = ''+','+''
+                    val1 = value if type(value).__name__!='list' else value[0]
+                    if value is not None and int(val1)!=0:
+                        entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, '' if self.salary_article_tm[crew.salarySystem][a] == '3234' else value /100.0 if self.salary_article_tm[crew.salarySystem][a] != '4802' else ','.join([str(i) for i in value]), str1 if self.salary_article_tm[crew.salarySystem][a]!='4802' else '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '',''))
                         #Commented and re-written for SKCMS-3150- Salary Article 4802 for Norwegian Crew
                         #entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, value/ 100.0 if self.salary_article_tm[crew.salarySystem][a] != '3234' else '', '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '', ''))
-                        #This is for separate entries for perdiem w/o tax and #nights
-                        #entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), ("4802" if self.salary_article_tm[crew.salarySystem][a]=='4802N' else self.salary_article_tm[crew.salarySystem][a]), crew.empNo, "" if self.salary_article_tm[crew.salarySystem][a] == '3234'  else value/100.0, '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '', ''))
-                            if self.salary_article_tm[crew.salarySystem][a]=='4802':
-                                func_4802 = getattr(self, 'CREW_NIGHTS_WO_TAX')
-                                value_4802N = func_4802(crew)
-                                lst = [value/100.0, value_4802N/100.0]
-                                str_4802 = ','.join([str(i) for i in lst])
-                                entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo,str_4802, '','',''))                            
-                            else:
-                                entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, value/ 100.0 if self.salary_article_tm[crew.salarySystem][a] != '3234' else '', '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '', ''))
                 for e in self.extra_articles:
                     func = getattr(self, e)
                     value = func(crew)
                     if value is not None and int(value) != 0:
-                        entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, value/ 100.0 if self.salary_article_tm[crew.salarySystem][a] != '3234' else '', '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '', ''))
-            
+                        entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, value/ 100.0 if self.salary_article_tm[crew.salarySystem][a] != '3234' else '', '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '', ''))        
             else:
                 log.debug("No salary system for crew {0}".format(crew.crewId))
         return entries
     
-
     def MEAL_C(self, rec):
         # DK: 1540, positive in normal cases
         # NO: 3705, positive in normal cases
@@ -330,16 +321,12 @@ class PerDiemRun(ECGenericRun):
         # DK: 1548
         return times100(rec.getPerDiemCompensationWithoutTax())
     
-    #### JIRA SKCMS-3150 ######
-    def PERDIEM_WITHOUT_TAX(self, rec):
-        # NO: 4802
-        return times100(rec.getPerDiemCompensationWithoutTax())
-    
-    def CREW_NIGHTS_WO_TAX(self, rec):
-        #NO: 4802N For count of number of nights that accounts for taxfree Perdiem
-        return times100(rec.getCountofNightswithoutTaxNO())
-        
-    ##### JIRA SKCMS-3150 ######
+    def PERDIEM_NO_WO_TAX(self, rec):
+        value_1 = times100(rec.getPerDiemCompensationWithoutTax())
+        value_2 = times100(rec.getCountofNightswithoutTaxNO())
+        lst = [value_1/100.0, value_2/100.0]
+        return lst
+            
     def PERDIEM_TAX_DAY(self, rec):
         # NO: 4084
         # SE: 395
