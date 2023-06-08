@@ -344,7 +344,6 @@ class OvertimeRosterManager:
 
     def getOvertimeRosters(self):
         overtimeRosters = []
-
         if self.crewlist:
             try:
                 import Cui
@@ -374,19 +373,16 @@ class OvertimeRosterManager:
         # if instance of carmstd.rave.Context  else is string (or something else)
         rosters, = self.context.eval(roster_iteration) if hasattr(self.context, "eval") else \
             R.eval(self.context, roster_iteration)
-
         ### Or using bag-interface - and in this case with a simple roster-filter (where-clause)
         # for r in R.context(self.context).bag().iterators.roster_set('report_common.%crew_id% = "16159"'):
         #     roster = list(R.eval(r, *ROSTER_VALUES))
         #     duties = [(0,)+R.eval(d,*DUTY_VALUES) for d in r.iterators.duty_set(duty_iterator_where)]
         #     rx = self.createRoster(tuple([0]+[(duties)]+roster))
-
         for rosterItem in rosters:
             for r in rosterItem:
                 if self.crewlist is None or str(r) in self.crewlist:
                     overtimeRosters.append(self.createRoster(rosterItem))
                     break
-
         return overtimeRosters
 
     def createRoster(self, rosterItem):
@@ -684,11 +680,13 @@ class OvertimeRoster(DataClass):
 
     # Salary code SE: 351
     def getSCCAll(self):
+        # print ("here in overtime-->", self.sCC)
+        # print ("here sccnopurser-->", self.sCCNoPurser)
         if self.sCC:
-            if self.sCCNoPurser:
-                return self.sCCNoPurser + self.sCC
-            else:
-                return self.sCC
+            # if self.sCCNoPurser:
+            #     return self.sCCNoPurser + self.sCC
+            # else:
+            return self.sCC
         else:
             return self.sCCNoPurser
 
@@ -855,7 +853,6 @@ def create_writeln(fd):
 
 
 def writeovertimecalc(fd, salmon, crewlist):
-
     om = OvertimeRosterManager('default_context', crewlist=crewlist)
     for crew in om.getOvertimeRosters():
         fd.write("Crew %s (%s %s)  %s:\n" % (crew.crewId, crew.firstName, crew.lastName, salmon))
@@ -949,7 +946,7 @@ def writeovertimecalc(fd, salmon, crewlist):
         if (crew.getMDCLongHaul() or RelTime(0)) > RelTime(0):
             fd.write("    MDC LH           : %6s\n" % (crew.getMDCLongHaul() or RelTime(0)))
         if (crew.getSCC() or RelTime(0)) > RelTime(0):
-            fd.write("    SCC              : %6s\n" % (crew.getSCC() or RelTime(0)))
+            fd.write("    SCC             : %6s\n" % (crew.getSCC() or RelTime(0)))
         if (crew.getSCCNOP() or RelTime(0)) > RelTime(0):
             fd.write("    SCC (no purser)  : %6s\n" % (crew.getSCCNOP() or RelTime(0)))
         if crew.getSCCSVS():
