@@ -221,7 +221,8 @@ end
 */
 export rule ind_max_fdp_with_extension_in_month_cc =
   valid trip.%check_rules% and
-        trip.%is_short_haul% and      
+        trip.%is_short_haul% and
+        not crew.%is_svs% and
         duty.%in_pp_extended% and
         duty_period.%is_on_duty% and
         duty_period.%is_last_duty_period_on_start_day% and
@@ -244,6 +245,33 @@ end
 %num_extension_duties_in_month% =
     accumulators.%extended_shorthaul_duties_in_period%(duty.%start_month_start%,
                                              duty.%start_month_end%);
+
+export rule ind_max_fdp_with_extension_in_7_days_cc =
+  valid trip.%check_rules% and
+        trip.%is_short_haul% and
+        crew.%is_svs% and
+        duty.%in_pp_extended% and
+        duty_period.%is_on_duty% and
+        duty_period.%is_last_duty_period_on_start_day% and
+        oma16.%is_extended_fdp%;
+        
+  %num_extension_duties_in_prev_7_days% <= 1 +
+                rule_exceptions.%overshoot_int%(duty.%start_UTC%);
+  startdate = duty.%start_UTC%;
+  severity = first(leg(duty), %severity_filter_int%(leg.%start_hb%,%duty_lh_region%));
+  failobject = duty.%failobject_start%;
+  failtext(Int value, Int limit) =
+    rules.%failtext_int%(format_time(duty.%start_month_start%,
+                                     "(CCR) Coll: Max FDP extension duties in %b"),
+                         value,limit);
+  remark "Coll: Max FDP extension duties in 7 days for CC",
+  planner "The rule checks that the number of FDP extensions in a 7 days "
+          "month is less than maximum allowed.";
+end
+
+%num_extension_duties_in_prev_7_days% =
+        accumulators.%extended_shorthaul_duties_in_period%(duty.%end_UTC% - 24:00 * 7,
+                                             duty.%end_UTC%);
 
 
 /*
@@ -1203,7 +1231,8 @@ end
    Moved from rules_studio_ccr_cc to rules_indust_ccr_cc during SKCMS-1774 */
 
 export rule ind_max_duty_time_2_months_skn_skd_cc =
-  valid %ind_max_duty_time_2_months_skn_skd_cc_valid%;
+  valid %ind_max_duty_time_2_months_skn_skd_cc_valid% and
+    not crew.%is_svs%;
 
   %duty_time_2_months_skn_skd_cc_scheduled% <= duty_time.%max_duty_time_2_months_skn_skd_cc_planned%
                                                 + rule_exceptions.%overshoot_rel%(wop.%start_utc%);
@@ -1920,6 +1949,7 @@ rule ind_min_rest_after_4_or_3_prod_days =
         (wop.%in_pp% or %_next_duty_in_pp%) and
         %wop_day_limit% and
         is_last(duty(wop)) and
+        not trip.%has_agmt_group_fpu_cc% and
         freedays.%valid_freedays_after_duty% and
         not last(duty(wop),duty.%has_no_duty_time_contribution%) and
         crew.%in_variable_group_duty_end% and
