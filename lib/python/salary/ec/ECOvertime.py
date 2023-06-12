@@ -679,16 +679,15 @@ class OvertimeRoster(DataClass):
         return self.sCCSVS
 
     # Salary code SE: 351
+    ## SKCMS-3095
     def getSCCAll(self):
-        # print ("here in overtime-->", self.sCC)
-        # print ("here sccnopurser-->", self.sCCNoPurser)
-        if self.sCC:
+        #if self.sCC:
             # if self.sCCNoPurser:
             #     return self.sCCNoPurser + self.sCC
             # else:
-            return self.sCC
-        else:
-            return self.sCCNoPurser
+        return self.sCC
+        #else:
+        #    return self.sCCNoPurser
 
     # Salary code DK: 325, SE: 348, NO: 3143
     def getLossRestLow(self):
