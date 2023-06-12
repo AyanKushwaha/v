@@ -132,7 +132,7 @@ class TimeEntry(WFSReport):
         is_split_link = False
         split_count_link = 1
 
-        last_overtime_date = {"crew":crew_id,"date":self.report_start_date()}
+        last_overtime_date = {"crew":crew_id,"date":self.start}
 
         for roster_bag in rave.context(SingleCrewFilter(crew_id).context()).bag().chain_set():
             for trip_bag in roster_bag.iterators.trip_set(): 
@@ -335,7 +335,7 @@ class TimeEntry(WFSReport):
                         # Check general overtime
                         general_ot_hrs = default_reltime(duty_bag.report_overtime.overtime_7_calendar_days_ot())
                     
-                        if general_ot_hrs > RelTime('0:00') and (last_overtime_date['crew'] == crew_id and last_overtime_date['date'].adddays(6) < duty_start_day):
+                        if general_ot_hrs > RelTime('0:00') and (last_overtime_date['crew'] == crew_id):
                             last_overtime_date['crew'] = crew_id
                             last_overtime_date['date'] = duty_start_day
 
