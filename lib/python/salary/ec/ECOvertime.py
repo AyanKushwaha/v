@@ -679,16 +679,15 @@ class OvertimeRoster(DataClass):
         return self.sCCSVS
 
     # Salary code SE: 351
+    ## SKCMS-3095
     def getSCCAll(self):
-        # print ("here in overtime-->", self.sCC)
-        # print ("here sccnopurser-->", self.sCCNoPurser)
-        if self.sCC:
+        #if self.sCC:
             # if self.sCCNoPurser:
             #     return self.sCCNoPurser + self.sCC
             # else:
-            return self.sCC
-        else:
-            return self.sCCNoPurser
+        return self.sCC
+        #else:
+        #    return self.sCCNoPurser
 
     # Salary code DK: 325, SE: 348, NO: 3143
     def getLossRestLow(self):
@@ -946,7 +945,7 @@ def writeovertimecalc(fd, salmon, crewlist):
         if (crew.getMDCLongHaul() or RelTime(0)) > RelTime(0):
             fd.write("    MDC LH           : %6s\n" % (crew.getMDCLongHaul() or RelTime(0)))
         if (crew.getSCC() or RelTime(0)) > RelTime(0):
-            fd.write("    SCC             : %6s\n" % (crew.getSCC() or RelTime(0)))
+            fd.write("    SCC              : %6s\n" % (crew.getSCC() or RelTime(0)))
         if (crew.getSCCNOP() or RelTime(0)) > RelTime(0):
             fd.write("    SCC (no purser)  : %6s\n" % (crew.getSCCNOP() or RelTime(0)))
         if crew.getSCCSVS():
