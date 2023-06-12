@@ -945,7 +945,7 @@ def writeovertimecalc(fd, salmon, crewlist):
         if (crew.getMDCLongHaul() or RelTime(0)) > RelTime(0):
             fd.write("    MDC LH           : %6s\n" % (crew.getMDCLongHaul() or RelTime(0)))
         if (crew.getSCC() or RelTime(0)) > RelTime(0):
-            fd.write("    SCC             : %6s\n" % (crew.getSCC() or RelTime(0)))
+            fd.write("    SCC              : %6s\n" % (crew.getSCC() or RelTime(0)))
         if (crew.getSCCNOP() or RelTime(0)) > RelTime(0):
             fd.write("    SCC (no purser)  : %6s\n" % (crew.getSCCNOP() or RelTime(0)))
         if crew.getSCCSVS():
