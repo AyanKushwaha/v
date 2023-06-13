@@ -75,7 +75,7 @@ class LMSQualReport:
         crew_qual_table = tm.table('crew_qualification')
         curr_day = delta_date
 
-        assignment_filter = crew_qual_table.search("(validto>{0})".format(curr_day))
+        assignment_filter = crew_qual_table.search("(validto={0})".format(curr_day))
         deassignment_filter = crew_qual_table.search("(validto={0})".format(curr_day))
 
         # checking for assignment qualification data 
