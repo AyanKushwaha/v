@@ -75,10 +75,7 @@ class LMSQualReport:
         crew_qual_table = tm.table('crew_qualification')
         curr_day = delta_date
 
-        #assignment_filter = crew_qual_table.search("(validto>{0})".format(curr_day))
-        assignment_filter = crew_qual_table.search("(&(validto>{validto})(validfrom<{validfrom}))".format(
-            validto=curr_day,
-            validfrom=curr_day))
+        assignment_filter = crew_qual_table.search("(validto>{0})".format(curr_day))
         deassignment_filter = crew_qual_table.search("(validto={0})".format(curr_day))
 
         # checking for assignment qualification data 
@@ -280,7 +277,7 @@ class LMSQualReport:
     def _applicable_qual(self, qual, crew_id):
 
         applicable_for_cc = ('MENTOR', 'PMM','A2', 'AL','38')
-        applicable_for_fc = ('38', 'A2', 'A3','A5', 'A2NX')
+        applicable_for_fc = ('38', 'A2', 'A3','A5')
         rank = rank_from_id(crew_id, today_in_abstime())
         
         if is_cabin_crew(crew_id, rank):
@@ -500,11 +497,8 @@ class LMSQualReport:
         crew_qual_t = tm.table('crew_qualification')
         congrouptype_query = '(|(congrouptype=MFF-A2A3)(congrouptype=MFF-A2A5))'
 
-        #assignment_crew_filter = crew_contract_t.search('(validto>{validfrom})'.format(
-        #validfrom=curr_date))
-        assignment_crew_filter = crew_contract_t.search("(&(validto>{validto})(validfrom<{validfrom}))".format(
-            validto=curr_date,
-            validfrom=curr_date))
+        assignment_crew_filter = crew_contract_t.search('(validto>{validfrom})'.format(
+        validfrom=curr_date))
         # Checking in crew_contract table for the crew who got their contarct updated on today's date
         for rec in assignment_crew_filter:
             crew = rec.crew.id
