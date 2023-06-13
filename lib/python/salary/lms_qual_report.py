@@ -497,7 +497,7 @@ class LMSQualReport:
         crew_qual_t = tm.table('crew_qualification')
         congrouptype_query = '(|(congrouptype=MFF-A2A3)(congrouptype=MFF-A2A5))'
 
-        assignment_crew_filter = crew_contract_t.search('(validto>{validfrom})'.format(
+        assignment_crew_filter = crew_contract_t.search('(validfrom={validfrom})'.format(
         validfrom=curr_date))
         # Checking in crew_contract table for the crew who got their contarct updated on today's date
         for rec in assignment_crew_filter:
