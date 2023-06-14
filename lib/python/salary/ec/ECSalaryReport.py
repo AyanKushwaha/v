@@ -269,12 +269,23 @@ class PerDiemRun(ECGenericRun):
                 for a in salary_perdim_article[crew.salarySystem]:
                     func = getattr(self, a)
                     value = func(crew)
-                    str1 = ''+','+''
-                    val1 = value if type(value).__name__!='list' else value[0]
-                    if value is not None and int(val1)!=0:
-                        entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, '' if self.salary_article_tm[crew.salarySystem][a] == '3234' else value /100.0 if self.salary_article_tm[crew.salarySystem][a] != '4802' else ','.join([str(i) for i in value]), str1 if self.salary_article_tm[crew.salarySystem][a]!='4802' else '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '',''))
+                    value_4802 = value if type(value).__name__!='list' else value[0]
+                    if value is not None and int(value_4802)!=0:
+                        #new one
+                        #entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, value/ 100.0 if self.salary_article_tm[crew.salarySystem][a] not in ['4802', '3234'] else str(value[0]/100.0)+','+ str(value[1]/100.0) if self.salary_article_tm[crew.salarySystem][a] == '4802' else '', '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '',''))
                         #Commented and re-written for SKCMS-3150- Salary Article 4802 for Norwegian Crew
                         #entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, value/ 100.0 if self.salary_article_tm[crew.salarySystem][a] != '3234' else '', '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '', ''))
+                        #streamlined
+                        #entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo))   # 4 values appended
+                        generic_values = [crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo]
+                        if self.salary_article_tm[crew.salarySystem][a] not in ['4802', '3234']:
+                            article_values = [value/ 100.0,'','',''] #appended value, n and units
+                        elif self.salary_article_tm[crew.salarySystem][a] == '4802':
+                            article_values = [value[0] /100.0, value[1] /100.0,'','']
+                        else:
+                            article_values = ['', value/150000.0,'','']
+                        consolidated_lst = generic_values + article_values
+                        entries[crew.salarySystem].append(consolidated_lst)
                 for e in self.extra_articles:
                     func = getattr(self, e)
                     value = func(crew)
@@ -322,9 +333,9 @@ class PerDiemRun(ECGenericRun):
         return times100(rec.getPerDiemCompensationWithoutTax())
     
     def PERDIEM_NO_WO_TAX(self, rec):
-        value_1 = times100(rec.getPerDiemCompensationWithoutTax())
-        value_2 = times100(rec.getCountofNightswithoutTaxNO())
-        lst = [value_1/100.0, value_2/100.0]
+        value_getpcwotax = times100(rec.getPerDiemCompensationWithoutTax())    # This value gives Perdiem Norway without Tax
+        value_getnonig = times100(rec.getCountofNightswithoutTaxNO())        # This value corresponds to number of nights corresponding to this value
+        lst = [value_getpcwotax, value_getnonig]
         return lst
             
     def PERDIEM_TAX_DAY(self, rec):
@@ -586,7 +597,7 @@ def createCSV(entries, release, studio, filename_prefix='Payments_CMS'):
                         article = 'N' + article
                     
                     if studio:
-                        f.write("{0},{1},{2},{3},{4},{5},{6}".format(homeCurrency, start, article, empNo ,value, units, os.linesep ))
+                        f.write("{0},{1},{2},{3},{4},{5},{6}{7}".format(homeCurrency, start, article, empNo,value, n, units, os.linesep ))
                     else:
                         f.write("{0},{1},{2},{3},{4},{5},{6},{7}{8}".format(homeCurrency, start, article, empNo ,value, n, units , o, os.linesep ))
             if release:
