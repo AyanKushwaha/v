@@ -504,7 +504,7 @@ class LMSQualReport:
                 self.assignment_writer.write(assignment_data)
 
                 # Checking for deassignment data from crew_qualification table
-                for rec_qual in crew_qual_t.search('(&(crew={crew})(validfrom<{validfrom})(validto>={validto}))'.format(
+                for rec_qual in crew_qual_t.search('(&(crew={crew})(validfrom<{validfrom})(validto>{validto}))'.format(
                     crew=crew,
                     validfrom=curr_date,
                     validto=curr_date)):
