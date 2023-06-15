@@ -279,11 +279,11 @@ class PerDiemRun(ECGenericRun):
                         #entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo))   # 4 values appended
                         generic_values = [crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo]
                         if self.salary_article_tm[crew.salarySystem][a] not in ['4802', '3234']:
-                            article_values = [value/ 100.0,'','',''] #appended value, n and units
+                            article_values = [value/ 100.0,'','',''] #appended value, n, units and o
                         elif self.salary_article_tm[crew.salarySystem][a] == '4802':
-                            article_values = [value[0] /100.0, value[1] /100.0,'','']
+                            article_values = [value[0] /100.0,'' ,value[1] /100.0,'']
                         else:
-                            article_values = ['', value/150000.0,'','']
+                            article_values = ['', '', value/ 150000.0,'']
                         consolidated_lst = generic_values + article_values
                         entries[crew.salarySystem].append(consolidated_lst)
                 for e in self.extra_articles:
@@ -597,9 +597,9 @@ def createCSV(entries, release, studio, filename_prefix='Payments_CMS'):
                         article = 'N' + article
                     
                     if studio:
-                        f.write("{0},{1},{2},{3},{4},{5},{6}{7}".format(homeCurrency, start, article, empNo,value, n, units, os.linesep ))
+                        f.write("{0},{1},{2},{3},{4},{5},{6}".format(homeCurrency, start, article, empNo,value, units, os.linesep))
                     else:
-                        f.write("{0},{1},{2},{3},{4},{5},{6},{7}{8}".format(homeCurrency, start, article, empNo ,value, n, units , o, os.linesep ))
+                        f.write("{0},{1},{2},{3},{4},{5},{6},{7},{8}".format(homeCurrency, start, article, empNo ,value, n, units , o, os.linesep ))
             if release:
                 csv_file_not_dated = filename_prefix + '_' + co + '.csv'
                 copyfile(REPORT_PATH + csv_file, RELEASE_PATH + csv_file_not_dated)
