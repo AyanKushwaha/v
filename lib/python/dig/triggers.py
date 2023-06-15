@@ -461,6 +461,58 @@ class FlightScheduledTriggerSpc(FlightTimeTrigger):
             ])
         return self._services.getDaveConnector().runSearch(sSearch)
 
+class FlightActualTriggerInclDomestic(FlightTimeTrigger):
+    """Trigger n minutes after actual departure."""
+    def __init__(self, minutesBefore=None, offset="0", isDeparture="True", configFile=None,
+            outputClass=None, destCountry=None, depCountry=None, name=None):
+        if minutesBefore:
+            for mbd in minutesBefore.split(','):
+                if float(mbd) > 0:
+                    raise errors.ChannelConfigError("Configuration error. Can't look into the future.")
+        super(self.__class__, self).__init__(minutesBefore, offset, configFile=configFile,
+                isDeparture=isDeparture, outputClass=outputClass,
+                destCountry=destCountry, depCountry=depCountry, name=name)
+
+    def _filterFlights(self, flights, mbd, destCountry, depCountry, fromTime, toTime, exceptionHandle=None):
+        # Remove any flights already reported for the given trigger criteria.
+        # If destCountry or depCountry is specified, also remove flights with
+        # other dest/departure country.
+        # if onlyOperatedBySAS is specified, also remove flights with other employer, flight_leg.aco != "SK"
+        result = []
+        now = self._services.now()
+        skip1 = 0
+        skip2 = 0
+        skip3 = 0
+        for f in flights:
+            if destCountry or depCountry:
+                if not self._matchesDepartureOrDestinationCountries(f, destCountry, depCountry):
+                    skip1 += 1
+                    continue
+            if self._reportedFlightsContains(f, mbd):
+                self._services.logger.debug("Already reported flight: udor %s, fd %s, adep %s (%s minutes before %s)" % (
+                    self._makeFlightKey(f,mbd) + (self._dep_arr,)))
+                skip2 += 1
+                continue
+            if self._onlyOperatedBySAS == "True":
+                if ((not f['aco'] == "SK") and (not f['aco'] == "SVS")):
+                    self._services.logger.debug("Excluded flight not operated by SAS: aco %s, fd %sss, adep %s" % (f['aco'], f['fd'], f['adep']))
+                    skip3 += 1
+                    continue
+
+            result.append(f)
+        return result
+
+    def _getFlights(self, fromTime, toTime, destCountry=None):
+        """Use actual time (ATD)."""
+        # Use off-block time if departure, in-block time if arrival.
+        act_time = ('aibt', 'aobt')[bool(self._isDeparture)]
+        sSearch = DaveSearch('flight_leg', [
+                (act_time, '>', '%d' % fromTime),
+                (act_time, '<', '%d' % toTime),
+            ])
+        return self._services.getDaveConnector().runSearch(sSearch)
+
+
 # FlightActualTimeTrigger ================================================{{{2
 class FlightActualTimeTrigger(FlightTimeTrigger):
     """Trigger at actual departure. Note cannot use minutes before here."""
@@ -1070,8 +1122,6 @@ class CrewManifestRequestBuilderSpcNorway:
         }
         request = reports.ReportRequest(self.__report, reportArgs, delta=True)
         return (request, reports.ReportRequestContentType(), None)
-
-      
 
 # functions =============================================================={{{1
 
