@@ -151,9 +151,11 @@ class TimeEntryReport(WFSReport):
                         # Not possible to evaluate anything without rank and country
                         log.info('NORDLYS: Rank or country not found')
                         continue
-                    #if actual_rank in EXCLUDED_RANKS:
-                        #log.info('NORDLYS: Skipping  crew {e} with excluded rank {r}'.format(e=extperkey, r=actual_rank))
-                        #continue
+                    duty_start = duty_bag.duty.start_hb()
+                    actual_rank = actual_rank_from_id(crew_id, duty_start)
+                    if actual_rank in EXCLUDED_RANKS:
+                        log.info('NORDLYS: Skipping  crew {e} with excluded rank {r}'.format(e=extperkey, r=actual_rank))
+                        continue
                     event_data = self._event_data_template()
                     duty_start = duty_bag.duty.start_hb()
                     duty_end = duty_bag.duty.end_hb()
@@ -670,7 +672,7 @@ class TimeEntryReport(WFSReport):
         curr_abs = start_dt
                
         if duty_bag.report_overtime.has_il7_in_hb_interval(curr_abs, curr_abs + RelTime('24:00')) and not duty_bag.duty.is_flight_duty():
-           log.info('NORDLYS: Found IL7 day for temporary crew {crew} at {dt}'.format(crew=crew_id, dt=curr_abs)) 
+            log.info('NORDLYS: Found IL7 day for temporary crew {crew} at {dt}'.format(crew=crew_id, dt=curr_abs)) 
         else:
             tmp_hrs = default_reltime(duty_bag.report_overtime.temporary_crew_hours_per_calendar_day(curr_abs))
             if tmp_hrs > RelTime('00:00'):
@@ -682,6 +684,14 @@ class TimeEntryReport(WFSReport):
                 tmp_hrs = hrs1 - hrs2 
                 tmp_hrs_list.append((curr_abs, tmp_hrs))
                 log.info('NORDLYS: Found Privately traded DK duty having {hrs} on {dt}'.format(hrs=tmp_hrs, dt=curr_abs))
+            elif tmp_hrs == RelTime('00:00') and default_reltime(duty_bag.report_overtime.active_duty_hrs())== RelTime('00:00'):
+                tmp_hrs = duty_bag.duty.end_hb()-duty_bag.duty.start_hb()
+                tmp_hrs_list.append((curr_abs, tmp_hrs))
+                log.info('NORDLYS: Found temporary hrs {hrs} on {dt} by end_hb and start_hb'.format(hrs=tmp_hrs, dt=curr_abs))
+            elif tmp_hrs == RelTime('00:00'):
+                tmp_hrs = default_reltime(duty_bag.report_overtime.active_duty_hrs())
+                tmp_hrs_list.append((curr_abs, tmp_hrs))
+                log.info('NORDLYS: Found temporary hrs {hrs} on {dt} by active duty hrs'.format(hrs=tmp_hrs, dt=curr_abs))
 
         return tmp_hrs_list
 
