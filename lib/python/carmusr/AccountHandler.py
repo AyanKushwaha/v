@@ -215,30 +215,30 @@ REMOVE_LOOKUP_MAP = {
     (n, n, F0): y,
 
     (y, y, F3): y,
-    (y, n, F3): y,
+    (y, n, F3): n,
     (n, y, F3): y,
     (n, n, F3): y,
 
     (y, y, F3S): y,
-    (y, n, F3S): y,
+    (y, n, F3S): n,
     (n, y, F3S): y,
     (n, n, F3S): y,
 
     # F32 similar to F3
     (y, y, F32): y,
-    (y, n, F32): y,
+    (y, n, F32): n,
     (n, y, F32): y,
     (n, n, F32): y,
 
     # F35 similar to F3
     (y, y, F35): y,
-    (y, n, F35): y,
+    (y, n, F35): n,
     (n, y, F35): y,
     (n, n, F35): y,
 
     # F7 similar to F3
     (y, y, F7): y,
-    (y, n, F7): y,
+    (y, n, F7): n,
     (n, y, F7): y,
     (n, n, F7): y,
 
@@ -249,7 +249,7 @@ REMOVE_LOOKUP_MAP = {
 
     # F38 same as F7
     (y, y, F38): y,
-    (y, n, F38): y,
+    (y, n, F38): n,
     (n, y, F38): y,
     (n, n, F38): y,
 
@@ -269,12 +269,12 @@ REMOVE_LOOKUP_MAP = {
     (n, n, F16): y,
 
     (y, y, F31): y,
-    (y, n, F31): y,
+    (y, n, F31): n,
     (n, y, F31): y,
     (n, n, F31): y,
 
     (y, y, F33): y,
-    (y, n, F33): y,
+    (y, n, F33): n,
     (n, y, F33): y,
     (n, n, F33): y,
 
