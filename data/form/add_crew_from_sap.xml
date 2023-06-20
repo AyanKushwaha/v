@@ -1,0 +1,192 @@
+<views>
+<head>
+
+<title>Add new employees</title>
+
+<on-opened>
+  setEventEnabled("on-selection-changed", "true");
+  setEventEnabled(on-changed, true);
+</on-opened>
+
+<script><![CDATA[
+def item_validation(key, item):
+  if key in ['region']:
+    if item in ['QA', 'SKD', 'SKI', 'SKJ', 'SKK', 'SKN', 'SKS']:
+      return True
+  elif key in ['rank']:
+    if item in ['AA', 'AH', 'AP', 'AS', 'FA', 'FC', 'FE', 'FO', 'FP', 'FR', 'FS']:
+      return True
+  elif key in ['contract']:
+    return True
+  elif key in ['employmentdate']:
+    days = list(range(1, 31))
+    dayStrs = list()
+    result = False
+    for n in days:
+      dayStrs.append(str(n))
+    if item[:2] in dayStrs:
+      result = True
+    if item[2:5] in ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']:
+      result = True
+    if len(item[-4:]) == 4:
+      result = True 
+    return result
+  elif item != 'NULL':
+    return True
+  else:
+    return False
+
+def validate(context, crew):
+  res = True
+  for key in crew:
+    valid = item_validation(str(key), str(crew[key]))
+    if not valid:
+      tmp = 'Crew: ' + crew['empno'] + ' Failed: ' + str(crew[key])
+      context.action('print', tmp)
+      res = False
+  return res
+
+def insert_crew(context, crew, row):
+  context.action('insertRow',
+                'crew_table',
+                'id=%s' % crew['id'],
+                'empno=%s' % crew['empno'],
+                'name=%s' % crew['name'],
+                'forenames=%s' % crew['forenames'],
+                'bcity=%s' % crew['bcity'],
+                'bcountry=%s' % crew['bcountry'],
+                'employmentdate=%s' % crew['employmentdate']);
+  context.action('promoteAll', 'crew');
+  context.action('commitModel');
+
+def insert_employment_contract(context, crew, row):
+  context.action('insertRow',
+            'crew_employment_table',
+            'crew=%s' % crew['id'],
+            'validfrom=%s 00:00' % crew['employmentdate'],
+            'validto=31DEC2035 00:00',
+            'carrier=SK',
+            'company=SK',
+            'base=%s' % crew['homebase'],
+            'crewrank=%s' % crew['rank'],
+            'titlerank=%s' % crew['rank'],
+            'region=%s' % crew['region'],
+            'civicstation=%s' % crew['homebase'],
+            'station=%s' % crew['homebase'],
+            'country=%s' % crew['employmentcountry'],
+            'extperkey=%s' % crew['empno'],
+            'planning_group=%s' % crew['region']);
+
+  if not crew['contract']:
+    crew['contract'] = ''
+
+  context.action('insertRow',
+                'crew_contract_table',
+                'crew=%s' % crew['id'],
+                'validfrom=%s 00:00' % crew['employmentdate'],
+                'validto=31DEC2035 00:00',
+                'contract=%s' % crew['contract'],
+                'cyclestart=0');
+  context.action('promoteAll', 'crew_employment');
+  context.action('promoteAll', 'crew_contract');
+  context.action('commitModel');
+
+def delete_from_tmp_crew(context, crew, row):
+  context.action('selectTableRow', 'new_crew_tbl', row);
+  context.action("deleteRow", "new_crew_tbl");
+  context.action('commitAllTables');
+  context.action('refreshModel');
+  context.action('refreshClient');
+]]></script>
+
+<action name="save" args=""><![CDATA[
+context.action('progress', 'true');
+crewCount = 0
+for row in range(int(context.sm.resolve("${tmp_new_crew_tbl._rowcount}"))):
+  crew = dict(
+    empno = context.sm.resolve("${tmp_new_crew_tbl[%d,empno]}" % row),
+    id = context.sm.resolve("${tmp_new_crew_tbl[%d,id]}" % row),
+    name = context.sm.resolve("${tmp_new_crew_tbl[%d,name]}" % row),
+    forenames = context.sm.resolve("${tmp_new_crew_tbl[%d,forenames]}" % row),
+    bcity = context.sm.resolve("${tmp_new_crew_tbl[%d,bcity]}" % row),
+    bcountry = context.sm.resolve("${tmp_new_crew_tbl[%d,bcountry]}" % row),
+    employmentdate = context.sm.resolve("${tmp_new_crew_tbl[%d,employmentdate]}" % row),
+    employmentcountry = context.sm.resolve("${tmp_new_crew_tbl[%d,employmentcountry]}" % row),
+    region = context.sm.resolve("${tmp_new_crew_tbl[%d,region]}" % row),
+    homebase = context.sm.resolve("${tmp_new_crew_tbl[%d,homebase]}" % row),
+    rank = context.sm.resolve("${tmp_new_crew_tbl[%d,rank]}" % row),
+    contract = context.sm.resolve("${tmp_new_crew_tbl[%d,contract]}" % row)
+  )
+  if validate(context, crew):
+    crewCount += 1
+    insert_crew(context, crew, row)
+    insert_employment_contract(context, crew, row)
+    delete_from_tmp_crew(context, crew, row)
+    for inner_row in range(int(context.sm.resolve("${crew_unknown._rowcount}"))):
+      extperkey = context.sm.resolve("${crew_unknown[%d,extperkey]}" % inner_row);
+      if extperkey == crew['empno']:
+        context.action("selectTableRow", "crew_unknown_table", inner_row);
+        context.action("setTableValue", "crew_unknown", inner_row, "corrected", "true");
+        context.action('commitModel');
+        context.action('refreshModel');
+        context.action('refreshClient');
+
+context.action('setValue', 'output', "Number of crew updated: %d" % crewCount )
+context.action('progress', 'false');
+    
+]]></action>
+
+<action name="reload" args=""><![CDATA[
+context.action("reloadForm", "add_crew_from_sap.xml");
+]]></action>
+
+<action name="delete_selected_row" args=""><![CDATA[
+context.action("deleteRow", "new_crew_tbl");
+]]></action>
+
+</head>
+
+<table id="crew_table" source="crew" visible="false" style.height="100"/>
+<table id="crew_employment_table" source="crew_employment" visible="false" style.height="100"/>
+<table id="crew_contract_table" source="crew_contract" visible="false" style.height="100"/>
+<table id="crew_unknown_table" source="crew_unknown" visible="false" style.height="100"/>
+<vbox label="Information" style.border="soft" style.width="1000">
+  <text-field id="info_text" value="If crew is already present in the global crew table, you will get a conflict. Just press OK to continue."/>
+</vbox>
+<vbox label="New crew" style.border="soft" style.width="1000">
+  <text-field label="Result" id="output" value=""/>
+  <table id="new_crew_tbl" source="tmp_new_crew_tbl" style.height="400">
+    <columninfo column="empno" label="Empno" visible="true" editable="false"/>
+    <columninfo column="id" label="ID" visible="true" editable="true"/>
+    <columninfo column="name" label="Name" visible="true" editable="false"/>
+    <columninfo column="forenames" label="Forenames" visible="true" editable="false"/>
+    <columninfo column="bcity" label="Birth city" visible="true" editable="true"/>
+    <columninfo column="bcountry" label="Birth country" visible="true" editable="false"/>
+    <columninfo column="employmentdate" label="Employment date" visible="true" editable="true" date.format="ddMmmyyyy"/>
+    <columninfo column="employmentcountry" label="Employment country" visible="true" editable="true"/>
+    <columninfo column="region" label="Region" visible="true" editable="true"/>
+    <columninfo column="homebase" label="Homebase" visible="true" editable="true"/>
+    <columninfo column="rank" label="Rank" visible="true" editable="true"/>
+    <columninfo column="contract" label="Contract" visible="true" editable="true"/>
+  </table>
+
+</vbox>
+
+  <button label="Save">
+    <on-click>
+      save();
+    </on-click>
+  </button>
+
+  <button label="Reload form">
+    <on-click>
+      reload();
+    </on-click>
+  </button>
+
+  <button label="Delete selected row">
+    <on-click>
+      delete_selected_row();
+    </on-click>
+  </button>
+</views>

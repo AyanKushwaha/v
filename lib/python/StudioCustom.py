@@ -142,6 +142,7 @@ if os.path.expandvars("$PRODUCT").lower() == "cct":
   IMPORT_SK_UNPROTECTED('report_sources.hidden.OrderedMeals')
   IMPORT_SK_UNPROTECTED('carmusr.tracking.Transport as Transport')
   IMPORT_SK_UNPROTECTED('carmusr.AccumulatorsTable as AccumulatorsTable')
+  IMPORT_SK_UNPROTECTED('carmusr.tracking.AddCrewFromSAP as AddCrewFromSAP')
   IMPORT_SK_UNPROTECTED('carmusr.tracking.CfhExtension as CfhExtension')
   IMPORT_SK_UNPROTECTED('carmusr.tracking.FlightProperties as FlightProperties')
   IMPORT_SK_UNPROTECTED('carmusr.tracking.Publish as Publish')
