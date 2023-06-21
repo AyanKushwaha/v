@@ -222,8 +222,8 @@ def main():
                     continue
                 print "Going to update Crew Docs"
                 _update_crew_document(row_number, row)
-        with open(exc_file_name, mode='wb+') as csv_file:
-            writer = csv.writer(csv_file)
+        with open(exc_file_name, mode='wb+') as exc_csv_file:
+            writer = csv.writer(exc_csv_file)
             writer.writerow(header)
             for each_row in exc_data_list:
                 writer.writerows(each_row)
