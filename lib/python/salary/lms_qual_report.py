@@ -130,8 +130,7 @@ class LMSQualReport:
             # Check if crew qualification is applicable for interface, A2NX added only for deassigment for pilots
             rank = rank_from_id(crew, curr_day)
             is_cc = is_cabin_crew(crew, rank)
-
-            if self._applicable_qual(qual, crew) or (qual == "A2NX" and not is_cc):
+            if self._applicable_qual(qual, crew)  or (qual == "A2NX" and not is_cc):
                 # In case crew is having valid MFF-A2A3 or A2A5 contract,
                 # no deassigment will be send for seperate qualifications except A2NX
                 MFF_contract_group = crew_MFF_congrouptype(crew,curr_day,False)
