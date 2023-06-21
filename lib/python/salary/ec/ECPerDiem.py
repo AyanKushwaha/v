@@ -613,6 +613,12 @@ class PerDiemRoster(DataClass):
         for trip in self.trips:
             days += trip.getTripDaysTaxNorway()
         return int(days)
+    
+    def getCountofNightswithoutTaxNO(self):
+        nights =0
+        for trip in self.trips:
+            nights += trip.getCountofNightswithoutTaxNO_PerTrip()
+        return nights
 
     def __all(trip):
         return True
@@ -769,8 +775,6 @@ class PerDiemTrip(DataClass):
             #We only need to adjust once if trip or legs doesn't change
             self.legsAdjusted = True
 
-
-
     #Finds the leg for upwards adjustment
     def findForUpAdjust(self):
         return reduce(PerDiemUtil.largestAndLongest, self.legs)
@@ -838,7 +842,7 @@ class PerDiemTrip(DataClass):
             return 1
         else:
             return 0
-                
+
     def getTaxDeductNorwayBefore2019(self):
         """
         Calculates tax deductable amount according Norwegian rules
@@ -954,7 +958,6 @@ class PerDiemTrip(DataClass):
         """
         Calculates tax deductable amount according Norwegian rules
         """
-        #print "getTaxDeductNorway"
         if self.startDayTaxSKN < AbsTime("1JAN2019"):
             return self.getTaxDeductNorwayBefore2019()
             
@@ -1051,7 +1054,6 @@ class PerDiemTrip(DataClass):
                     result = self.getCompensationSumHomeCurrency() * 0.5
                 else:
                     result = 0
-
         return round(result, 2)
 
     def getTaxDeductSweden(self):
@@ -1164,6 +1166,38 @@ class PerDiemTrip(DataClass):
         for comp in compPerTrip:
             sum += int(comp)
         return round(sum, 2)
+    
+    def getCountofNightswithoutTaxNO_PerTrip(self):
+    ################skcms-3150###############
+        result = 0
+        if not self.legsAdjusted:
+            self.adjustPerDiem()
+        for leg in self.legs:
+            leg.clearTaxDeductCalcInfo()
+        if self.tripTimeTax >= RelTime(24, 0):
+            #print ">24h: "
+            def getdaysfromMultipleLegs(legs, first, end):
+                legs[end - 1].dispTaxDeductLast = True
+                sum = 0
+                if end == len(legs): # Last period of trip
+                    length = self.endUTCtax - legs[first].startUTC
+                elif first == 0:
+                    length = legs[end].startUTC - self.startUTCtax
+                else:
+                    length = legs[end].startUTC - legs[first].startUTC
+                    
+                if first == 0 and end == len(legs):
+                    days = self.getTripDaysTaxNorway()
+                    length = RelTime(24, 0) * days
+                else:
+                    (hours, days) = math.modf(length / RelTime(24, 0))
+                    if days < 0: return 0
+                    if hours * 24 >= 6: days += 1
+                    elif days < 1: return 0
+                return days
+            result = getdaysfromMultipleLegs(self.legs, 0, len(self.legs))
+        return result
+    ################# SKCMS-3150 ######################
 
 class PerDiemLeg(DataClass):
     """
