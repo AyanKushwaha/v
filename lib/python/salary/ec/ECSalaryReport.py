@@ -271,12 +271,8 @@ class PerDiemRun(ECGenericRun):
                     value = func(crew)
                     value_4802 = value if type(value).__name__!='list' else value[0]
                     if value is not None and int(value_4802)!=0:
-                        #new one
-                        #entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, value/ 100.0 if self.salary_article_tm[crew.salarySystem][a] not in ['4802', '3234'] else str(value[0]/100.0)+','+ str(value[1]/100.0) if self.salary_article_tm[crew.salarySystem][a] == '4802' else '', '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '',''))
-                        #Commented and re-written for SKCMS-3150- Salary Article 4802 for Norwegian Crew
+                        #Commented below code and re-written for SKCMS-3150- Salary Article 4802 for Norwegian Crew
                         #entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, value/ 100.0 if self.salary_article_tm[crew.salarySystem][a] != '3234' else '', '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '', ''))
-                        #streamlined
-                        #entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo))   # 4 values appended
                         generic_values = [crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo]
                         if self.salary_article_tm[crew.salarySystem][a] not in ['4802', '3234']:
                             article_values = [value/ 100.0,'','',''] #appended value, n, units and o
