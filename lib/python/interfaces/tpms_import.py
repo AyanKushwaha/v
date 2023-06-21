@@ -17,6 +17,7 @@ def main():
     from datetime import datetime, timedelta, date
 
     from AbsTime import AbsTime
+    from AbsDate import AbsDate
     from modelserver import EntityNotFoundError
 
     from tm import TM
@@ -94,7 +95,7 @@ def main():
         now_d = _abs_time_now()
         if exam_d > now_d or (exam_d < (now_d.adddays(-90)) and (lastaction == 'NU' or lastaction == 'N')):
             global errmsg
-            errmsg = "TPMS: exam date " + str(exam_d) + " for crew " + row[staff_id] + " outside valid interval " + str(now_d.adddays(-90)) + "-" + str(now_d)
+            errmsg = "TPMS: Exam date " + str(AbsDate(exam_d)) + " for crew " + row[staff_id] + " outside valid interval " + str(AbsDate(now_d.adddays(-90))) + "-" + str(AbsDate(now_d))
             print errmsg
             return False
         else:
@@ -203,32 +204,29 @@ def main():
                 raise ValueError("Unable to find TPMS header")
             header = csv_file.readline()
             fieldnames = [tag[1:-1] for tag in header.strip().split(';')]
-
+            exc_data_list = []
+            header=[ "Staff_Id", "Qual_Code_Type", "Qual_Code", "Act_Group", "Exam_Date", "Valid_From", "Valid_To", "Error_Message"]
+            exc_data_list.append(header)
+            timestamp = datetime.now().strftime('%Y-%m-%d_%H:%M')
+            exc_file_name = exclude_folder + '/TPMS_Qual_Update_Rejected_by_CMS_{}.csv'.format(timestamp)
             for row_number, row in enumerate(csv.DictReader(csv_file, fieldnames=fieldnames, delimiter=';')):
                 if row[firstcol]=='### eof ###':
                     print "TPMS EOF"
                     break
-                print "TPMS #### "*8
                 print ("TPMS: ", row[staff_id], row[qual_code_type], row[qual_code], row[act_group_name], row[exam_date] , row[valid_from], row[end_date])
                 if not _handle_entry(row_number, row):
-                    print "TPMS EXCLUDE RECORD", row[remark]
-                    timestamp = datetime.now().strftime('%Y-%m-%d_%H:%M')
-                    #timestamp2=datetime.()strftime('%Y-%m-%d'
-                    #t=Exam_Date.strftime('%Y-%m-%d')
-                    file_name = exclude_folder + '/TPMS_Qual_Update_Rejected_by_CMS_{}.csv'.format(timestamp)
-                    #file_name=exclude_folder + '/exclude_records_{}.csv'.format(timestamp)
+                    print "TPMS EXCLUDE RECORD - ", row[remark]
                     errormsg=errmsg
-                    header=[ "Staff_Id", "Qual_Code_Type", "Qual_Code", "Act_Group_Name", "Exam_Date", "Valid_Form", "Valid_To", "Error_Message"]
                     data = [[row[staff_id], row[qual_code_type], row[qual_code], row[act_group_name], row[exam_date], row[valid_from], row[end_date], errormsg]]
-                    with open(file_name, mode='wb+') as csv_file:
-                        writer = csv.writer(csv_file)
-                        writer.writerow(header)
-                        writer.writerows(data)
+                    exc_data_list.append(data)
                     continue
-                
-                print "TPMS UPDATE RECORD"
+                print "Going to update Crew Docs"
                 _update_crew_document(row_number, row)
-        
+        with open(exc_file_name, mode='wb+') as exc_csv_file:
+            writer = csv.writer(exc_csv_file)
+            writer.writerow(header)
+            for each_row in exc_data_list:
+                writer.writerows(each_row)
         TM.save()
         shutil.move(f, backup_folder)
         send_email()
