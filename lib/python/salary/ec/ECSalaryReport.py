@@ -260,6 +260,8 @@ class PerDiemRun(ECGenericRun):
         self.run_info(report_type='PerdiemRun')
         rosters = self.rosters(rave_expr=self.rave_expr, roster_manager='perdiem', crew_ids=self.crew_ids)
         log.debug("Perdiem rosters length is: {0}".format(len(rosters)))
+        log.debug("Raw format for rosters")
+        #log.debug(rosters.getPublHolidayComp())
         # entries { 'salary_system_country': [(Currency Code,Issue Date,Type,User ID,Value,Reference ID,Number of units,Operation)] }
         # definition: {'COUNTRY_CODE' :[(Currency Code: DKK, Issue Date: 27/07/2020, Type: 2020, User ID: 1525, Value: 500.00, Notes  : 100006037,,)]}
         # example: {'DK': [(DKK,27/07/2020,2020,1525,500.00,100006037,,)]}

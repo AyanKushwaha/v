@@ -7,10 +7,14 @@ from AbsDate import AbsDate
 from RelTime import RelTime
 from AbsTime import AbsTime
 
+
 # from utils.RaveData import DataClass
 
 import math
 
+import logging
+logging.basicConfig()
+log = logging.getLogger('ECPSalaryReport')
 
 ROSTER_CREW_ID = 0
 ROSTER_FIRST_NAME = 1
@@ -85,6 +89,7 @@ TRIP_START_DAY_TAX_SKN = 35
 TRIP_END_DAY_TAX_SKN = 36
 TRIP_EXTRA_COMPENSATION_SKN_PH = 37
 TRIP_HAS_AGMT_GROUP_SKN_CC = 38
+TRIP_DAYS = 39
 TRIP_VALUES = ('report_per_diem.%trip_per_diem_entitled%',
                'report_per_diem.%trip_per_diem_time%',
                'report_per_diem.%trip_per_diem_time_tax%',
@@ -122,7 +127,8 @@ TRIP_VALUES = ('report_per_diem.%trip_per_diem_entitled%',
                'crew.%has_agmt_group_svs_at_date%(trip.%end_day%)',
                'report_per_diem.%trip_start_day_tax_skn%',
                'report_per_diem.%trip_end_day_tax_skn%',
-               'report_per_diem.%trip_extra_compensation_skn_ph%')
+               'report_per_diem.%trip_extra_compensation_skn_ph%',
+               'report_per_diem.%trip_days%')
 
 DUTY_PER_DIEM_ALLOCATED = 0
 DUTY_PER_DIEM_REST_TIME = 1
@@ -221,6 +227,7 @@ class PerDiemRosterManager:
     def getPerDiemRosters(self):
 
         perDiemRosters = []
+        perDiemRosters_extra_ph = []
         if self.crewlist:
             try:
                 import Cui
@@ -235,17 +242,35 @@ class PerDiemRosterManager:
         tripIterator = r.iter('iterators.trip_set',
                               ('report_per_diem.%trip_per_diem_entitled%',
                                'report_per_diem.%in_salary_period%'))
+        tripIterator_ph = r.iter('iterators.trip_set',
+                              ('report_per_diem.%trip_per_diem_entitled%',
+                               'report_per_diem.%in_salary_period_ph%'))
         tripSequence = self.tripManager.getTripSequence(tripIterator)
+        tripSequence_ph = self.tripManager.getTripSequence(tripIterator_ph)
         rosterSequence = self.getRosterSequence(tripSequence)
+        rosterSequence_ph = self.getRosterSequence(tripSequence_ph)
 
         # if instance of carmstd.rave.Context  else is string (or something else)
         rosters, = self.context.eval(rosterSequence) if hasattr(self.context, "eval") else \
             r.eval(self.context, rosterSequence)
+        rosters_ph, = self.context.eval(rosterSequence_ph) if hasattr(self.context, "eval") else \
+            r.eval(self.context, rosterSequence_ph)
 
+        
+        extra_rosters = [x for x in rosters_ph if x not in rosters]
+        print("testing - comments by sachin sharma")
+        #print(extra_rosters[0])
+        #extra_rosters = []
+        month_crossing_rosters = []
+        if len(extra_rosters) > 0:
+            for rosterItem in extra_rosters:
+                if self.crewlist is None or rosterItem[ROSTER_CREW_ID + 1] in self.crewlist:
+                    perDiemRosters_extra_ph.append(self.createRoster(rosterItem, month_crossing_rosters))
+            month_crossing_rosters = perDiemRosters_extra_ph
         for rosterItem in rosters:
             if self.crewlist is None or rosterItem[ROSTER_CREW_ID + 1] in self.crewlist:
-                perDiemRosters.append(self.createRoster(rosterItem))
-
+                perDiemRosters.append(self.createRoster(rosterItem, month_crossing_rosters))
+ 
         return perDiemRosters
 
     def getRosterSequence(self, tripSequence):
@@ -253,10 +278,12 @@ class PerDiemRosterManager:
         return r.foreach(self.roster_iterator,
                          *(ROSTER_VALUES + (tripSequence,)))
 
-    def createRoster(self, rosterItem):
+    def createRoster(self, rosterItem, month_crossing_rosters):
 
         roster = rosterItem[1:-1]
-
+        #roster_ph_former = rosters_ph
+        border_rosters = []
+        roster_ph_latter = month_crossing_rosters
         perDiemRoster = PerDiemRoster()
         perDiemRoster.crewId = roster[ROSTER_CREW_ID]
         perDiemRoster.empNo = roster[ROSTER_CREW_EMPNO]
@@ -274,12 +301,18 @@ class PerDiemRosterManager:
         perDiemRoster.excluded = roster[ROSTER_EXCLUDED]
         perDiemRoster.homeCurrency = roster[ROSTER_HOME_CURRENCY]
         perDiemRoster.salarySystem = roster[ROSTER_SALARY_SYSTEM]
-        perDiemRoster.trips = []
-        
+        perDiemRoster.trips = [] 
+        perDiemRoster.trips_ph = []
         trips = rosterItem[-1]
         for tripItem in trips:
             perDiemRoster.trips.append(self.tripManager.createTrip(tripItem))
 
+        if len(roster_ph_latter)>0:
+            for rosterItem in  roster_ph_latter:
+                temp = rosterItem[-1]
+                for tripItem in temp:
+                    perDiemRoster.trips_ph.append(self.tripManager.createTrip(tripItem))
+                        
         return perDiemRoster
         
 
@@ -313,7 +346,12 @@ class PerDiemTripManager:
     
 
     def createTrip(self, tripItem):
+        log.debug(tripItem)
         trip = tripItem[1:-1]
+        #trip_strt = tripItem[0] # only for SKNPH
+        #log.debug(trip_strt)
+        #log.debug('sachin1234')
+        #trip_lst = tripItem[-1] # only for SKNPH
         duties = tripItem[-1]
 
         perDiemTrip = PerDiemTrip()
@@ -349,6 +387,10 @@ class PerDiemTripManager:
         perDiemTrip.startDayTaxSKN = trip[TRIP_START_DAY_TAX_SKN]
         perDiemTrip.endDayTaxSKN = trip[TRIP_END_DAY_TAX_SKN]
         perDiemTrip.extraCompensationSKNPH = trip[TRIP_EXTRA_COMPENSATION_SKN_PH]
+        #perDiemTrip.extraCompensationSKNPH_strt_trip = trip_strt[TRIP_EXTRA_COMPENSATION_SKN_PH]
+        #perDiemTrip.extraCompensationSKNPH_lst_trip = trip_lst[TRIP_EXTRA_COMPENSATION_SKN_PH]
+        #perDiemTrip.extraCompensationSKNPH_strt_trip_days = trip_strt[TRIP_DAYS]
+        #perDiemTrip.extraCompensationSKNPH_lst_trip_days = trip_lst[TRIP_DAYS]
         
         if not trip[TRIP_PER_DIEM_EXTRA] == '':
             perDiemTrip.perDiemExtra = [int(perDiemExtra) / 4.0 for perDiemExtra in trip[TRIP_PER_DIEM_EXTRA].split(',')]
@@ -538,6 +580,7 @@ class PerDiemRoster(DataClass):
         contactEmail = None #string
         contactDepartment = None #string
         trips = [] #list of PerDiemTrips
+        trips_ph = [] # list of PerDiem Trips which includes month crossing trips
         excluded = False
         homeCurrency = None #string
         salarySystem = None #string
@@ -657,8 +700,13 @@ class PerDiemRoster(DataClass):
 
     def getPublHolidayComp(self):
         total = 0
-        for trip in self.trips:
+        
+        #for trip in self.trips:
+        #    total += trip.getPublHolidayCompPerTrip()
+        for trip in self.trips_ph:
             total += trip.getPublHolidayCompPerTrip()
+        #for trip in self.trips_ph_l:
+        #    total += trip.getPublHolidayCompPerTrip()
         return round(total, 2)
 
 class PerDiemTrip(DataClass):
@@ -705,6 +753,10 @@ class PerDiemTrip(DataClass):
         self.perDiemExtraExchangeRate = None # Comma separated string of Integers
         self.perDiemExtraExchangeUnit = None # Comma separated string of Integers
         self.perDiemExtraType = None # Comma separated string of Strings
+        #self.extraCompensationSKNPH_strt_trip = None # Comma separated String of 1 and ''
+        #self.extraCompensationSKNPH_lst_trip = None # Comma separated string of Strings
+        #self.extraCompensationSKNPH_strt_trip_days = None # integer value for count of days
+        #self.extraCompensationSKNPH_lst_trip_days = None # integer value for count of days
 
     def getAdjustedLegs(self):
         self.adjustPerDiem()
