@@ -151,11 +151,9 @@ class TimeEntryReport(WFSReport):
                         # Not possible to evaluate anything without rank and country
                         log.info('NORDLYS: Rank or country not found')
                         continue
-                    duty_start = duty_bag.duty.start_hb()
-                    actual_rank = actual_rank_from_id(crew_id, duty_start)
-                    if actual_rank in EXCLUDED_RANKS:
-                        log.info('NORDLYS: Skipping  crew {e} with excluded rank {r}'.format(e=extperkey, r=actual_rank))
-                        continue
+                    # if actual_rank in EXCLUDED_RANKS:
+                    #     log.info('NORDLYS: Skipping  crew {e} with excluded rank {r}'.format(e=extperkey, r=actual_rank))
+                    #     continue
                     event_data = self._event_data_template()
                     duty_start = duty_bag.duty.start_hb()
                     duty_end = duty_bag.duty.end_hb()
@@ -232,8 +230,12 @@ class TimeEntryReport(WFSReport):
                         else:
                             log.info('NORDLYS: Found normal duty for temporary crew {crew} at {dt}'.format(crew=crew_id, dt=duty_start_day)) 
                             nonMidData = self._temporary_non_mid_hours(duty_bag, duty_start_day, tmp_paycode, crew_id, extperkey)
-                            if nonMidData:
-                                non_mid_tmp_hrs.extend(nonMidData)
+                            actual_rank = actual_rank_from_id(crew_id, duty_start_day)
+                            if actual_rank in EXCLUDED_RANKS:
+                                log.info('NORDLYS: Skipping crew {e} with excluded rank {r} on {d}'.format(e=extperkey, r=actual_rank, d=duty_start_day))
+                            else:
+                                if nonMidData:
+                                    non_mid_tmp_hrs.extend(nonMidData)
 
                     if monthly_ot[abs_to_datetime(duty_start_day).month]['val'] == None:
                         month = abs_to_datetime(duty_start_day).month
@@ -684,14 +686,14 @@ class TimeEntryReport(WFSReport):
                 tmp_hrs = hrs1 - hrs2 
                 tmp_hrs_list.append((curr_abs, tmp_hrs))
                 log.info('NORDLYS: Found Privately traded DK duty having {hrs} on {dt}'.format(hrs=tmp_hrs, dt=curr_abs))
-            elif tmp_hrs == RelTime('00:00') and default_reltime(duty_bag.report_overtime.active_duty_hrs())== RelTime('00:00'):
-                tmp_hrs = duty_bag.duty.end_hb()-duty_bag.duty.start_hb()
-                tmp_hrs_list.append((curr_abs, tmp_hrs))
-                log.info('NORDLYS: Found temporary hrs {hrs} on {dt} by end_hb and start_hb'.format(hrs=tmp_hrs, dt=curr_abs))
-            elif tmp_hrs == RelTime('00:00'):
-                tmp_hrs = default_reltime(duty_bag.report_overtime.active_duty_hrs())
-                tmp_hrs_list.append((curr_abs, tmp_hrs))
-                log.info('NORDLYS: Found temporary hrs {hrs} on {dt} by active duty hrs'.format(hrs=tmp_hrs, dt=curr_abs))
+            # elif tmp_hrs == RelTime('00:00') and default_reltime(duty_bag.report_overtime.active_duty_hrs())== RelTime('00:00'):
+            #     tmp_hrs = duty_bag.duty.end_hb()-duty_bag.duty.start_hb()
+            #     tmp_hrs_list.append((curr_abs, tmp_hrs))
+            #     log.info('NORDLYS: Found temporary hrs {hrs} on {dt} by end_hb and start_hb'.format(hrs=tmp_hrs, dt=curr_abs))
+            # elif tmp_hrs == RelTime('00:00'):
+            #     tmp_hrs = default_reltime(duty_bag.report_overtime.active_duty_hrs())
+            #     tmp_hrs_list.append((curr_abs, tmp_hrs))
+            #     log.info('NORDLYS: Found temporary hrs {hrs} on {dt} by active duty hrs'.format(hrs=tmp_hrs, dt=curr_abs))
 
         return tmp_hrs_list
 
