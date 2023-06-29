@@ -54,7 +54,7 @@ listA320LH = []
 
 LANDING_DICT = {}
 # FLOWN AND LANDINGS
-for ac_qual in ('A330','A340','A350','A320','B737','F50','MD80','Q400','CRJ'):
+for ac_qual in ('A330','A340','A350','A320','B737','F50','MD80','Q400','CRJ','EMJ'):
     LANDING_DICT['accumulators.last_flown_' +
                  ac_qual.lower()] = ('FLOWN', ac_qual)
     LANDING_DICT['accumulators.last_landing_' +
