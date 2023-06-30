@@ -40,9 +40,9 @@ salary_supervis_article = {
     'JP': []
 }
 salary_overtime_article = {
-    'DK': ['SCC', 'SCCSVS', 'SNGL_SLIP_LONGHAUL'],
-    'NO': ['SCC', 'SCCSVS', 'MDCSH', 'SCCNOP', 'MDCLH', 'SNGL_SLIP_LONGHAUL'],
-    'SE': ['SNGL_SLIP_LONGHAUL', 'SCC'],
+    'DK': ['SCC', 'SCCSVS', 'SNGL_SLIP_LONGHAUL','ABS_PR_LOA_D'],
+    'NO': ['SCC', 'SCCSVS', 'MDCSH', 'SCCNOP', 'MDCLH', 'SNGL_SLIP_LONGHAUL','ABS_PR_LOA_D'],
+    'SE': ['SNGL_SLIP_LONGHAUL', 'SCC','ABS_PR_LOA_D'],
     'HK': [], 
     'CN': [],
     'JP': []
@@ -445,7 +445,7 @@ class OvertimeRun(ECGenericRun):
         self.crew_ids = crew_ids
         self.rave_expr = 'not salary.%crew_excluded% and not salary.%ec_rank_excluded%'
         log.debug("OvertimeRun config with firstdate: {0}  and lastdate: {1}".format(report_first_absdate, report_last_absdate))
-
+        self.cached_PR_data = self.generate_PR_acc_data()
     def run(self):
         self.run_info(report_type='OvertimeRun')
         rosters = self.rosters(rave_expr=self.rave_expr, roster_manager='overtime', crew_ids=self.crew_ids)
@@ -495,15 +495,57 @@ class OvertimeRun(ECGenericRun):
             return times100(rec.getSnglSlipLonghaul())
         else:
             return 0
-
+    def ABS_PR_LOA_D(self, rec):
+        check=0
+        check=no_of_PR_days(self, rec.crewId)
+        return check
+    
     def SCCNOP(self, rec):
         if rec.isCC4EXNG:
             return 0
         return hours100(rec.getSCCNOP())
-
-
+    
+    #Caching Data
+    def generate_PR_acc_data(self):
+        startMonth = datetime.now().replace(month=1)
+        endMonth=startMonth.replace(month=self.end.month)
+        start_month_date=datetime(startMonth.year, startMonth.month, 1).strftime('%d%b%Y  %H:%M')
+        end_month_date = datetime(startMonth.year, endMonth.month, 1).strftime('%d%b%Y  %H:%M')
+        reasoncode_query = '(|(reasoncode=OUT Roster)(reasoncode=OUT Correction))'
+        accountName= 'PR'
+        PR_Transactions = TM.account_entry.search("(&(tim>{start_date})(tim<{end_date})(account={account}){reasoncode})".format(
+            start_date=start_month_date,
+            end_date=end_month_date,
+            account=accountName,
+            reasoncode=reasoncode_query
+        ))
+        tnx_dict = {}
+        for tnx in PR_Transactions:
+            tnx_dict.setdefault(tnx.crew.id, [])
+            tnx_dict[tnx.crew.id].append({
+                'tnx_dt' :  tnx.tim,
+                'PR_amount' : tnx.amount
+            })
+        return(tnx_dict)
 
 # Utility functions
+
+#PR calculation for current month:- Only 3 PR days can be allocated for a certain month, 
+# rest are carry forwarded to next month
+def CalPRinCurrentMonth(PRperMonth):
+    rem = 0
+    count = 0
+    for i in PRperMonth:
+        val=-i
+        val+=rem
+        if(val>300):
+            rem = val-300
+            if (rem >0):
+                count=300
+        else:
+            count=val
+            rem = 0
+    return count
 
 def times100(value):
     """ Return integer where value is multiplicated with 100 """
@@ -526,6 +568,32 @@ def minutes100(value):
         return 0
     (hhh, mm) = value.split()
     return 6000 * hhh + 100 * mm
+
+#Calculates PR days allocated per crew
+def no_of_PR_days(self,crew_id):
+    format = "%d%b%Y %H:%M:%S:%f"
+    startMonth=datetime.now().replace(month=1)
+    endMonth=startMonth.replace(month=self.end.month)
+    PRperMonth = []
+    crew_tnx=[]
+    try:
+        crew_tnx=self.cached_PR_data[crew_id]
+    except KeyError as ke:
+        print('Key Not Found in Employee Dictionary:', ke)
+    for i in range(endMonth.month - startMonth.month):
+        monthStart = startMonth.month + i
+        ae_tim = datetime(startMonth.year, monthStart, 1).strftime(format)
+        start_month_date = AbsTime(ae_tim[:15])
+        monthEnd = startMonth.month + i +1
+        tim = datetime(startMonth.year, monthEnd, 1).strftime(format)
+        end_month_date = AbsTime(tim[:15])
+        PRamount=0
+        for transaction in crew_tnx:
+            if(transaction['tnx_dt']>=start_month_date and transaction['tnx_dt']<end_month_date):
+                PRamount+=transaction['PR_amount']                        
+        PRperMonth.append(PRamount)
+    currentCount = CalPRinCurrentMonth(PRperMonth)
+    return currentCount
 
 def get_article_table(pstart, pend):
     tm_articles = {
