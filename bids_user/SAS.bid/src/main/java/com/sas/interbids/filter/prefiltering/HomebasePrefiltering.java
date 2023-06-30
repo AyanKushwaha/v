@@ -49,7 +49,7 @@ public class HomebasePrefiltering implements TripFilterInterface,
 		stationandregion.put("SVG","SKN");
 		stationandregion.put("TRD","SKN");
 		stationandregion.put("STO","SKS");
-		
+		stationandregion.put("BGO","SKN");
 
 
 		if (tripAttribute == null) {
