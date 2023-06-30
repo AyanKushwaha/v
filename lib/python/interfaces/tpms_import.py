@@ -206,7 +206,6 @@ def main():
             fieldnames = [tag[1:-1] for tag in header.strip().split(';')]
             exc_data_list = []
             header=[ "Staff_Id", "Qual_Code_Type", "Qual_Code", "Act_Group", "Exam_Date", "Valid_From", "Valid_To", "Error_Message"]
-            exc_data_list.append(header)
             timestamp = datetime.now().strftime('%Y-%m-%d_%H:%M')
             exc_file_name = exclude_folder + '/TPMS_Qual_Update_Rejected_by_CMS_{}.csv'.format(timestamp)
             for row_number, row in enumerate(csv.DictReader(csv_file, fieldnames=fieldnames, delimiter=';')):
