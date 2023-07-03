@@ -199,7 +199,7 @@ class BookingMessage(GenericBookingMessage):
                 costcenter = '00-65109'
         phone = self.get_crew_phone(b.crew.id, b.flight.udor)
         GenericBookingMessage.__init__(self, 
-            name="%s %s" % (b.crew.name, b.crew.forenames),
+            name="%s/%s" % (b.crew.name, b.crew.forenames),
             empno=emp.extperkey,
             rank=emp.crewrank.id,
             flight=b.flight.fd,

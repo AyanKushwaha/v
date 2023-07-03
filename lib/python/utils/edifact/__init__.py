@@ -495,6 +495,7 @@ class MRZ(BasicEncoding):
     class Decoding(TranslationDict):
         additionals = set((
             u'\N{SPACE}',
+            u'\N{SOLIDUS}',
             u'\N{LESS-THAN SIGN}',
         ))
 
@@ -1481,16 +1482,16 @@ class EDIFACT(object):
 
 # decoding_map.update(
 #     {
-#         0x00a1: ord('!'), # ¡
-#         0x00a2: ord('c'), # ¢
-#         0x00a3: ord('#'), # £
-#         0x00a4: ord('o'), # ¤
-#         0x00a5: ord('Y'), # ¥
-#         0x00a6: ord('|'), # ¦
-#         0x00a7: ord('S'), # §
-#         0x00a8: ord('"'), # ¨
-#         0x00a9: ord('c'), # ©
-#         0x00aa: ord('a'), # ª
+#         0x00a1: ord('!'), # ï¿½
+#         0x00a2: ord('c'), # ï¿½
+#         0x00a3: ord('#'), # ï¿½
+#         0x00a4: ord('o'), # ï¿½
+#         0x00a5: ord('Y'), # ï¿½
+#         0x00a6: ord('|'), # ï¿½
+#         0x00a7: ord('S'), # ï¿½
+#         0x00a8: ord('"'), # ï¿½
+#         0x00a9: ord('c'), # ï¿½
+#         0x00aa: ord('a'), # ï¿½
 #     })
 
 #for x, y in xlate_latin.iteritems():
