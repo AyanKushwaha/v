@@ -6,15 +6,13 @@ import carmensystems.rave.api as r
 from AbsDate import AbsDate
 from RelTime import RelTime
 from AbsTime import AbsTime
+from datetime import datetime
+from datetime import timedelta
 
 
 # from utils.RaveData import DataClass
 
 import math
-
-import logging
-logging.basicConfig()
-log = logging.getLogger('ECPSalaryReport')
 
 ROSTER_CREW_ID = 0
 ROSTER_FIRST_NAME = 1
@@ -227,7 +225,7 @@ class PerDiemRosterManager:
     def getPerDiemRosters(self):
 
         perDiemRosters = []
-        perDiemRosters_extra_ph = []
+        perDiemRosters_next_month_cross = []
         if self.crewlist:
             try:
                 import Cui
@@ -242,35 +240,31 @@ class PerDiemRosterManager:
         tripIterator = r.iter('iterators.trip_set',
                               ('report_per_diem.%trip_per_diem_entitled%',
                                'report_per_diem.%in_salary_period%'))
-        tripIterator_ph = r.iter('iterators.trip_set',
+        tripIterator_next_month_cross = r.iter('iterators.trip_set',
                               ('report_per_diem.%trip_per_diem_entitled%',
-                               'report_per_diem.%in_salary_period_ph%'))
+                               'report_per_diem.%in_salary_period_next_month_cross%'))
         tripSequence = self.tripManager.getTripSequence(tripIterator)
-        tripSequence_ph = self.tripManager.getTripSequence(tripIterator_ph)
+        tripSequence_next_month_cross = self.tripManager.getTripSequence(tripIterator_next_month_cross)
         rosterSequence = self.getRosterSequence(tripSequence)
-        rosterSequence_ph = self.getRosterSequence(tripSequence_ph)
+        rosterSequence_next_month_cross = self.getRosterSequence(tripSequence_next_month_cross)
 
         # if instance of carmstd.rave.Context  else is string (or something else)
         rosters, = self.context.eval(rosterSequence) if hasattr(self.context, "eval") else \
-            r.eval(self.context, rosterSequence)
-        rosters_ph, = self.context.eval(rosterSequence_ph) if hasattr(self.context, "eval") else \
-            r.eval(self.context, rosterSequence_ph)
-
-        
-        extra_rosters = [x for x in rosters_ph if x not in rosters]
-        print("testing - comments by sachin sharma")
-        #print(extra_rosters[0])
-        #extra_rosters = []
-        month_crossing_rosters = []
-        if len(extra_rosters) > 0:
-            for rosterItem in extra_rosters:
-                if self.crewlist is None or rosterItem[ROSTER_CREW_ID + 1] in self.crewlist:
-                    perDiemRosters_extra_ph.append(self.createRoster(rosterItem, month_crossing_rosters))
-            month_crossing_rosters = perDiemRosters_extra_ph
+            r.eval(self.context, rosterSequence)        
+        rosters_next_month_cross, = self.context.eval(rosterSequence_next_month_cross) if hasattr(self.context, "eval") else \
+            r.eval(self.context, rosterSequence_next_month_cross)
+        #this list of perDiemRosters_next_month_cross is created for Public Holiday Compensation, see SKCMS-3240
+        for rosterItem in rosters_next_month_cross:
+            if self.crewlist is None or rosterItem[ROSTER_CREW_ID + 1] in self.crewlist:
+                perDiemRosters_next_month_cross.append(self.createRoster(rosterItem))                                
         for rosterItem in rosters:
             if self.crewlist is None or rosterItem[ROSTER_CREW_ID + 1] in self.crewlist:
-                perDiemRosters.append(self.createRoster(rosterItem, month_crossing_rosters))
- 
+                perDiemRosters.append(self.createRoster(rosterItem))
+        for rosterItem in perDiemRosters:
+            for rosterItem_next in perDiemRosters_next_month_cross:
+                if rosterItem.empNo == rosterItem_next.empNo and rosterItem.crewId==rosterItem_next.crewId:
+                    exclusive = [x for x in rosterItem_next.trips if x not in rosterItem.trips]
+                    rosterItem.trips_next_month_cross = exclusive
         return perDiemRosters
 
     def getRosterSequence(self, tripSequence):
@@ -278,12 +272,8 @@ class PerDiemRosterManager:
         return r.foreach(self.roster_iterator,
                          *(ROSTER_VALUES + (tripSequence,)))
 
-    def createRoster(self, rosterItem, month_crossing_rosters):
-
+    def createRoster(self, rosterItem):
         roster = rosterItem[1:-1]
-        #roster_ph_former = rosters_ph
-        border_rosters = []
-        roster_ph_latter = month_crossing_rosters
         perDiemRoster = PerDiemRoster()
         perDiemRoster.crewId = roster[ROSTER_CREW_ID]
         perDiemRoster.empNo = roster[ROSTER_CREW_EMPNO]
@@ -301,21 +291,13 @@ class PerDiemRosterManager:
         perDiemRoster.excluded = roster[ROSTER_EXCLUDED]
         perDiemRoster.homeCurrency = roster[ROSTER_HOME_CURRENCY]
         perDiemRoster.salarySystem = roster[ROSTER_SALARY_SYSTEM]
-        perDiemRoster.trips = [] 
-        perDiemRoster.trips_ph = []
+        perDiemRoster.trips = []
+        perDiemRoster.trips_next_month_cross = []
         trips = rosterItem[-1]
         for tripItem in trips:
             perDiemRoster.trips.append(self.tripManager.createTrip(tripItem))
-
-        if len(roster_ph_latter)>0:
-            for rosterItem in  roster_ph_latter:
-                temp = rosterItem[-1]
-                for tripItem in temp:
-                    perDiemRoster.trips_ph.append(self.tripManager.createTrip(tripItem))
-                        
         return perDiemRoster
         
-
 class PerDiemTripManager:
     """
     A class that creates and holds PerDiemTrips.
@@ -346,14 +328,8 @@ class PerDiemTripManager:
     
 
     def createTrip(self, tripItem):
-        log.debug(tripItem)
         trip = tripItem[1:-1]
-        #trip_strt = tripItem[0] # only for SKNPH
-        #log.debug(trip_strt)
-        #log.debug('sachin1234')
-        #trip_lst = tripItem[-1] # only for SKNPH
         duties = tripItem[-1]
-
         perDiemTrip = PerDiemTrip()
         perDiemTrip.perDiemTrip = trip[TRIP_ENTITLED]
         perDiemTrip.tripTime = trip[TRIP_TIME]
@@ -387,10 +363,6 @@ class PerDiemTripManager:
         perDiemTrip.startDayTaxSKN = trip[TRIP_START_DAY_TAX_SKN]
         perDiemTrip.endDayTaxSKN = trip[TRIP_END_DAY_TAX_SKN]
         perDiemTrip.extraCompensationSKNPH = trip[TRIP_EXTRA_COMPENSATION_SKN_PH]
-        #perDiemTrip.extraCompensationSKNPH_strt_trip = trip_strt[TRIP_EXTRA_COMPENSATION_SKN_PH]
-        #perDiemTrip.extraCompensationSKNPH_lst_trip = trip_lst[TRIP_EXTRA_COMPENSATION_SKN_PH]
-        #perDiemTrip.extraCompensationSKNPH_strt_trip_days = trip_strt[TRIP_DAYS]
-        #perDiemTrip.extraCompensationSKNPH_lst_trip_days = trip_lst[TRIP_DAYS]
         
         if not trip[TRIP_PER_DIEM_EXTRA] == '':
             perDiemTrip.perDiemExtra = [int(perDiemExtra) / 4.0 for perDiemExtra in trip[TRIP_PER_DIEM_EXTRA].split(',')]
@@ -580,7 +552,8 @@ class PerDiemRoster(DataClass):
         contactEmail = None #string
         contactDepartment = None #string
         trips = [] #list of PerDiemTrips
-        trips_ph = [] # list of PerDiem Trips which includes month crossing trips
+        trips_prior_month_cross = [] # list of PerDiem Trips which crosses consecutive months
+        trips_next_month_cross = []
         excluded = False
         homeCurrency = None #string
         salarySystem = None #string
@@ -697,17 +670,40 @@ class PerDiemRoster(DataClass):
     
     def isExcludedFromSalaryFiles(self):
         return self.excluded
-
+    
     def getPublHolidayComp(self):
-        total = 0
-        
-        #for trip in self.trips:
-        #    total += trip.getPublHolidayCompPerTrip()
-        for trip in self.trips_ph:
-            total += trip.getPublHolidayCompPerTrip()
-        #for trip in self.trips_ph_l:
-        #    total += trip.getPublHolidayCompPerTrip()
-        return round(total, 2)
+        sum=0
+        if len(self.trips)>0:
+            if datetime.strptime(self.trips[0].startUTC.getValue()[2:5],'%b').month != datetime.strptime(self.trips[0].endUTC.getValue()[2:5],'%b').month:
+                first_arr = self.trips[0].getPublHolidayCompPerTrip_raw()
+                dates = []
+                tmp_dttime_strt = datetime(int(self.trips[0].startUTC.getValue()[5:9]), datetime.strptime(self.trips[0].startUTC.getValue()[2:5], '%b').month, int(self.trips[0].startUTC.getValue()[0:2]), int(self.trips[0].startUTC.getValue()[10:12]), int(self.trips[0].startUTC.getValue()[13:15]))                
+                tmp_dttime_end = datetime(int(self.trips[0].endUTC.getValue()[5:9]), datetime.strptime(self.trips[0].endUTC.getValue()[2:5], '%b').month, int(self.trips[0].endUTC.getValue()[0:2]), int(self.trips[0].endUTC.getValue()[10:12]), int(self.trips[0].endUTC.getValue()[13:15]))
+                while tmp_dttime_strt <= tmp_dttime_end:
+                    dates.append(tmp_dttime_strt)
+                    tmp_dttime_strt = tmp_dttime_strt + timedelta(days=1)
+                prior_month = dates[0].month
+                if len(first_arr)==len(dates):
+                    for comp, date in zip(first_arr, dates):
+                        if date.month != prior_month:
+                            sum += int(comp)
+        if self.trips_next_month_cross:
+            if datetime.strptime(self.trips_next_month_cross[0].startUTC.getValue()[2:5],'%b').month != datetime.strptime(self.trips_next_month_cross[0].endUTC.getValue()[2:5],'%b').month:
+                last_arr = self.trips_next_month_cross[0].getPublHolidayCompPerTrip_raw()
+                dates = []
+                tmp_dttime_strt = datetime(int(self.trips_next_month_cross[0].startUTC.getValue()[5:9]), datetime.strptime(self.trips_next_month_cross[0].startUTC.getValue()[2:5], '%b').month, int(self.trips_next_month_cross[0].startUTC.getValue()[0:2]), int(self.trips_next_month_cross[0].startUTC.getValue()[10:12]), int(self.trips_next_month_cross[0].startUTC.getValue()[13:15]))
+                tmp_dttime_end = datetime(int(self.trips_next_month_cross[0].endUTC.getValue()[5:9]), datetime.strptime(self.trips_next_month_cross[0].endUTC.getValue()[2:5], '%b').month, int(self.trips_next_month_cross[0].endUTC.getValue()[0:2]), int(self.trips_next_month_cross[0].endUTC.getValue()[10:12]), int(self.trips_next_month_cross[0].endUTC.getValue()[13:15]))
+                while tmp_dttime_strt <= tmp_dttime_end:
+                    dates.append(tmp_dttime_strt)
+                    tmp_dttime_strt += timedelta(days=1)
+                next_month = dates[-1].month
+                if len(last_arr)==len(dates):
+                    for comp, date in zip(last_arr, dates):
+                        if date.month != next_month:
+                            sum += int(comp)
+        for trip in self.trips[1:]:
+            sum += trip.getPublHolidayCompPerTrip()
+        return round(sum, 2)
 
 class PerDiemTrip(DataClass):
     """
@@ -753,10 +749,7 @@ class PerDiemTrip(DataClass):
         self.perDiemExtraExchangeRate = None # Comma separated string of Integers
         self.perDiemExtraExchangeUnit = None # Comma separated string of Integers
         self.perDiemExtraType = None # Comma separated string of Strings
-        #self.extraCompensationSKNPH_strt_trip = None # Comma separated String of 1 and ''
-        #self.extraCompensationSKNPH_lst_trip = None # Comma separated string of Strings
-        #self.extraCompensationSKNPH_strt_trip_days = None # integer value for count of days
-        #self.extraCompensationSKNPH_lst_trip_days = None # integer value for count of days
+
 
     def getAdjustedLegs(self):
         self.adjustPerDiem()
@@ -1216,6 +1209,11 @@ class PerDiemTrip(DataClass):
         for comp in compPerTrip:
             sum += int(comp)
         return round(sum, 2)
+    
+    def getPublHolidayCompPerTrip_raw(self):
+        compPerTrip = self.extraCompensationSKNPH.split(",")
+        return compPerTrip
+    
 
 class PerDiemLeg(DataClass):
     """
