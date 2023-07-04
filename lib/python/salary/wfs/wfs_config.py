@@ -69,7 +69,11 @@ PAYCODE_FROM_EVENT = {
             'CNLN_PROD_SICK_DK' :   'SAS_DK_CNLN_PROD_SICK',
             'CNLN_PROD_WEEKDAY_NO': 'SAS_NO_CNLN_PROD_WEEKDAY',
             'CNLN_PROD_WEEKEND_NO':   'SAS_NO_CNLN_PROD_WEEKEND_HOLIDAY',
-            'CNLN_PROD_SICK_NO' :   'SAS_NO_CNLN_PROD_SICK'
+            'CNLN_PROD_SICK_NO' :   'SAS_NO_CNLN_PROD_SICK',
+            'ABS_CARE_FC_BSC_D_DK': 'SAS_DK_ABS_CARE_FC_BSC_D',
+            'WT_CARE_FC_BSC_D_DK': 'SAS_DK_WT_CARE_FC_BSC_D',
+            'WT_CARE_CC_ASC_D_DK': 'SAS_DK_WT_CARE_CC_ASC_D',
+            'WT_CARE_FD_ASC_D_DK': 'SAS_DK_WT_CARE_FD_ASC_D'
         }
 
 EVENT_FROM_PAYCODE = {
@@ -205,7 +209,11 @@ ROSTER_PAYCODES = (
     'SAS_DK_CNLN_PROD_SICK',
     'SAS_NO_CNLN_PROD_WEEKDAY',
     'SAS_NO_CNLN_PROD_WEEKEND_HOLIDAY',
-    'SAS_NO_CNLN_PROD_SICK'
+    'SAS_NO_CNLN_PROD_SICK',
+    'SAS_DK_ABS_CARE_FC_BSC_D',
+    'SAS_DK_WT_CARE_FC_BSC_D',
+    'SAS_DK_WT_CARE_CC_ASC_D',
+    'SAS_DK_WT_CARE_FD_ASC_D'
 
 )
 
@@ -256,7 +264,10 @@ EVENT_FROM_ARTICLE_PAYCODES = {
     'CNLN_OT_50_PLUS'   :   'CNLN_OT_50_PLUS',
     'CNLN_PROD_WEEKDAY' :   'CNLN_PROD_WEEKDAY',
     'CNLN_PROD_WEEKEND': 'CNLN_PROD_WEEKEND',
-    'CNLN_PROD_SICK'    :   'CNLN_PROD_SICK'
+    'CNLN_PROD_SICK'    :   'CNLN_PROD_SICK',
+    'CARE_FC_BSC_D': 'CARE_FC_BSC_D',
+    'CARE_CC_ASC_D': 'CARE_CC_ASC_D',
+    'CARE_FD_ASC_D': 'CARE_FD_ASC_D'
 	}
 
 
@@ -300,6 +311,18 @@ class PaycodeHandler:
         elif event_type in ('F7',):
             rank = '_{r}'.format(r=rank) if country in ('NO', 'DK', 'SE') else ''
             return PAYCODE_FROM_EVENT['{e}_{c}{r}'.format(e=event_type, c=country, r=rank)]
+        elif event_type in ('ABS_CARE'):
+            rank = '_{r}'.format(r=rank) if country in ('DK') else ''
+            return PAYCODE_FROM_EVENT['{e}_{r}_{t}_{c}'.format(e=event_type, c=country, r="FC", t="BSC_D")]
+        elif (event_type == 'WT_CARE' and rank == 'CC'):
+            rank = '{r}'.format(r=rank) if country in ('DK') else ''
+            return PAYCODE_FROM_EVENT['{e}_{r}_{t}_{c}'.format(e=event_type, c=country, r=rank, t="ASC_D")]
+        elif (event_type == 'WT_CARE' and rank == 'FC'):
+            rank = '{r}'.format(r=rank) if country in ('DK') else ''
+            return PAYCODE_FROM_EVENT['{e}_{r}_{t}_{c}'.format(e=event_type, c=country, r=rank, t="BSC_D")]
+        elif (event_type == 'WT_CARE' and rank == 'FD'):
+            rank = '{r}'.format(r=rank) if country in ('DK') else ''
+            return PAYCODE_FROM_EVENT['{e}_{r}_{t}_{c}'.format(e=event_type, c=country, r=rank, t="ASC_D")]
         else:
             return ''
 

@@ -1513,20 +1513,20 @@ class TimeEntry(WFSReport):
         curr_date = AbsTime(datetime.now().strftime('%d%b%Y'))
         dict = generate_extperkey_data()
 
-       if len(dict) != 0:
+        if len(dict) != 0:
             while curr_date <= self.end_date_check:
                 if self.cached_salary_wfs.has_key(oldextperkey) and self.cached_salary_wfs[crew_id].has_key(curr_date):
                     for rec in [r for r in self.cached_salary_wfs[crew_id][date_to_check] if r.flag == 'I']:
                     # As new extperkey now present for these records, #create delete row for the old extperkey
                         delete_row_data = {
-                                'extperkey' : pre.extperkey,
-                                'paycode' : pre.wfs_paycode,
-                                'hours' : pre.amount, 
-                                'days_off' : pre.days_off,
-                                'start_dt' : abs_to_datetime(rec.work_day),
-                                'record_id' : pre.recordid,
-                                'flag' : 'D'
-                            }
+                            'extperkey' : pre.extperkey,
+                            'paycode' : pre.wfs_paycode,
+                            'hours' : pre.amount, 
+                            'days_off' : pre.days_off,
+                            'start_dt' : abs_to_datetime(rec.work_day),
+                            'record_id' : pre.recordid,
+                            'flag' : 'D'
+                        }
                         flag = add_to_salary_wfs_t(delete_row_data, crew_id, self.runid)
                         if flag == 0:
                             continue
@@ -1536,14 +1536,14 @@ class TimeEntry(WFSReport):
                         data.append(row)
                         # Create new row with 'I' flag for New Extperkey
                         insert_row_data = {
-                                'extperkey' : extperkey,
-                                'paycode' : wfs_paycode,
-                                'hours' : hours, 
-                                'days_off' : days_off,
-                                'start_dt' : abs_to_datetime(rec.work_day),
-                                'record_id' : getNextRecordId(),
-                                'flag' : 'I'
-                            }
+                            'extperkey' : extperkey,
+                            'paycode' : wfs_paycode,
+                            'hours' : hours, 
+                            'days_off' : days_off,
+                            'start_dt' : abs_to_datetime(rec.work_day),
+                            'record_id' : getNextRecordId(),
+                            'flag' : 'I'
+                        }
                         add_to_salary_wfs_t(insert_row_data, crew_id, self.runid)
                         row = self.format_row(insert_row_data)
                         log.info(row)
