@@ -208,92 +208,98 @@ y = True
 n = False
 
 REMOVE_LOOKUP_MAP = {
-    # (is_published, is_bought, account) : do_remove
-    (y, y, F0): y,
-    (y, n, F0): n,
-    (n, y, F0): y,
-    (n, n, F0): y,
+    # (is_published, is_bought, account, Pilot) : do_remove
+    (y, y, F0, y): y,
+    (y, n, F0, y): n,
+    (n, y, F0, n): y,
+    (n, n, F0, n): y,
 
-    (y, y, F3): y,
-    (y, n, F3): n,
-    (n, y, F3): y,
-    (n, n, F3): y,
+    (y, y, F3, y): y,
+    (y, n, F3, y): n,
+    (n, y, F3, n): y,
+    (n, n, F3, n): y,
 
-    (y, y, F3S): y,
-    (y, n, F3S): n,
-    (n, y, F3S): y,
-    (n, n, F3S): y,
+    (y, y, F3S, y): y,
+    (y, n, F3S, y): n,
+    (n, y, F3S, n): y,
+    (n, n, F3S, n): y,
 
     # F32 similar to F3
-    (y, y, F32): y,
-    (y, n, F32): n,
-    (n, y, F32): y,
-    (n, n, F32): y,
+    (y, y, F32, y): y,
+    (y, n, F32, y): n,
+    (n, y, F32, n): y,
+    (n, n, F32, n): y,
 
     # F35 similar to F3
-    (y, y, F35): y,
-    (y, n, F35): n,
-    (n, y, F35): y,
-    (n, n, F35): y,
+    (y, y, F35, y): y,
+    (y, n, F35, y): n,
+    (n, y, F35, n): y,
+    (n, n, F35, n): y,
 
     # F7 similar to F3
-    (y, y, F7): y,
-    (y, n, F7): n,
-    (n, y, F7): y,
-    (n, n, F7): y,
+    (y, y, F7, y): y,
+    (y, n, F7, y): n,
+    (n, y, F7, n): y,
+    (n, n, F7, n): y,
 
-    (y, y, F7S): y,
-    (y, n, F7S): y,
-    (n, y, F7S): y,
-    (n, n, F7S): y,
+    (y, y, F7S, y): y,
+    (y, n, F7S, y): y,
+    (n, y, F7S, n): y,
+    (n, n, F7S, n): y,
+
+    # F7 for CC
+    (y, y, F7, y): y,
+    (y, y, F7, y): y,
+    (y, y, F7, n): y,
+    (y, y, F7, n): y,
 
     # F38 same as F7
-    (y, y, F38): y,
-    (y, n, F38): n,
-    (n, y, F38): y,
-    (n, n, F38): y,
+    (y, y, F38, y): y,
+    (y, n, F38, y): n,
+    (n, y, F38, n): y,
+    (n, n, F38, n): y,
 
-    (y, y, F9): y,
-    (y, n, F9): n,
-    (n, y, F9): y,
-    (n, n, F9): y,
+    (y, y, F9, y): y,
+    (y, n, F9, y): n,
+    (n, y, F9, n): y,
+    (n, n, F9, n): y,
 
-    (y, y, F15): y,
-    (y, n, F15): n,
-    (n, y, F15): y,
-    (n, n, F15): y,
+    (y, y, F15, y): y,
+    (y, n, F15, y): n,
+    (n, y, F15, n): y,
+    (n, n, F15, n): y,
 
-    (y, y, F16): y,
-    (y, n, F16): n,
-    (n, y, F16): y,
-    (n, n, F16): y,
+    (y, y, F16, y): y,
+    (y, n, F16, y): n,
+    (n, y, F16, y): y,
+    (n, n, F16, y): y,
 
-    (y, y, F31): y,
-    (y, n, F31): n,
-    (n, y, F31): y,
-    (n, n, F31): y,
+    (y, y, F31, y): y,
+    (y, n, F31, y): n,
+    (n, y, F31, n): y,
+    (n, n, F31, n): y,
 
-    (y, y, F33): y,
-    (y, n, F33): n,
-    (n, y, F33): y,
-    (n, n, F33): y,
+    (y, y, F33, y): y,
+    (y, n, F33, y): n,
+    (n, y, F33, n): y,
+    (n, n, F33, n): y,
 
-    (y, y, F36): y,
-    (y, n, F36): n,
-    (n, y, F36): y,
-    (n, n, F36): y,
+    (y, y, F36, y): y,
+    (y, n, F36, y): n,
+    (n, y, F36, n): y,
+    (n, n, F36, n): y,
 
     # F89 similar to F36
-    (y, y, F89): y,
-    (y, n, F89): n,
-    (n, y, F89): y,
-    (n, n, F89): y,
+    (y, y, F89, y): y,
+    (y, n, F89, y): n,
+    (n, y, F89, n): y,
+    (n, n, F89, n): y,
 
     # For PR
-    (y, y, PR): y,
-    (y, n, PR): n,
-    (n, y, PR): y,
-    (n, n, PR): y,
+    (y, y, PR, y): y,
+    (y, n, PR, y): n,
+    (n, y, PR, n): y,
+    (n, n, PR, n): y,
 }
 
 
@@ -317,7 +323,7 @@ def get_is_saved(entry):
     return is_saved
 
 
-def get_do_remove(is_pub, is_bought, account):
+def get_do_remove(is_pub, is_bought, account, Pilot):
     app = get_app()
 
     if app in [PRE, CCR]:
@@ -328,7 +334,7 @@ def get_do_remove(is_pub, is_bought, account):
         return True
     # else account is F-account
 
-    lookup_tuplet = (is_pub, is_bought, account)
+    lookup_tuplet = (is_pub, is_bought, account, Pilot)
     return REMOVE_LOOKUP_MAP[lookup_tuplet]
 
 
@@ -409,6 +415,9 @@ def updateAccountsForCrewInWindow(crewid_list, account_list, currentArea=Cui.Cui
     for crew_id in crewid_list:
         crew_object = _get_crew_object(crew_id)
         for entry in TM.crew[(crew_id,)].referers('account_entry', 'crew'):  # get entries for crew
+            rave_check_pilot = 'crew.%is_pilot%'
+            check_pilot = 'TRUE'
+
             try:
                 entry_start = entry.tim
                 if entry.man or not (ppstart < entry_start <= ppend):
@@ -416,6 +425,9 @@ def updateAccountsForCrewInWindow(crewid_list, account_list, currentArea=Cui.Cui
                 # Have to catch possible missing reference
                 nr_entries += 1
                 account = str(entry.getRefI('account'))
+                if(account == 'F7'):
+                    check_pilot = crew_object.eval(rave_check_pilot)
+                    print("check_pilot",check_pilot)
                 if account not in account_list:
                     continue
                 nr_active += 1
@@ -440,8 +452,10 @@ def updateAccountsForCrewInWindow(crewid_list, account_list, currentArea=Cui.Cui
 
                     is_published = entry.published and get_is_saved(entry) and get_is_in_published_period(entry.tim)
                     is_bought = get_is_bought(crew_id, entry)
-
-                    if get_do_remove(is_published, is_bought, account):
+                    print("is_published",is_published)
+                    print("is_bought",is_bought)
+                    print("account",account)
+                    if get_do_remove(is_published, is_bought, account, check_pilot):
                         entry.remove()
                         need_reload = True
                 else:
