@@ -19,14 +19,14 @@ def startCrewAdditionForm(formname="CrewAddition"):
 
 def openCrewAdditionForm():
     CMS_ROOT = os.getenv('CARMUSR')
-
+    
     crewTable = NewCrewTempTable()
     crewTable.removeAll()
 
     for crew_unknown in TM.crew_unknown:
         if str(crew_unknown.corrected) in ['false', '0']:
             crew = next(TM.crew.search('(&(empno=%s))' % str(crew_unknown.extperkey)), None)
-            
+
             if not crew:
                 createTemporaryTable(int(crew_unknown.extperkey), crewTable)
                 tmpCrew = createTemporaryCrew(crew_unknown)
@@ -37,9 +37,11 @@ def openCrewAdditionForm():
 def createCrewEntry(tmpCrew):
     crewEntry = next(TM.tmp_new_crew_tbl.search('(&(empno=%s))' % tmpCrew.get('empno', '')), None)
     if crewEntry:
+        crewEntry.id = tmpCrew.get('empno', '')
         crewEntry.name = tmpCrew.get('name', '')
         crewEntry.forenames = tmpCrew.get('forenames', '')
         crewEntry.bcountry = tmpCrew.get('country', '')
+
 
 
 def createTemporaryTable(extperkey, crewTable):
