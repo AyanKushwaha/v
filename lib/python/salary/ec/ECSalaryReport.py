@@ -334,7 +334,7 @@ class PerDiemRun(ECGenericRun):
     
     def PERDIEM_NO_WO_TAX(self, rec):
         value_getpcwotax = times100(rec.getPerDiemCompensationWithoutTax())    # This value gives Perdiem Norway without Tax
-        value_getnonig = times100(rec.getCountofNightswithoutTaxNO())        # This value corresponds to number of nights corresponding to this value
+        value_getnonig = times100(rec.getCountofNightswithoutTaxSKN())        # This value corresponds to number of nights corresponding to this value
         lst = [value_getpcwotax, value_getnonig]
         return lst
             
