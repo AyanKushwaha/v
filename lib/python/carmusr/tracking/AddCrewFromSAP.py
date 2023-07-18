@@ -41,6 +41,8 @@ def createCrewEntry(tmpCrew):
         crewEntry.name = tmpCrew.get('name', '')
         crewEntry.forenames = tmpCrew.get('forenames', '')
         crewEntry.bcountry = tmpCrew.get('country', '')
+        crewEntry.homebase = tmpCrew.get('homebase', '')
+        crewEntry.rank = tmpCrew.get('rank', '')
 
 
 
