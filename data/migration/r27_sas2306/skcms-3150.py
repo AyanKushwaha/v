@@ -26,7 +26,7 @@ def fixit(dc, *a, **k):
         'validfrom':   validfrom,
         'validto':     validto,
         'intartid':    'PERDIEM_NO_WO_TAX',
-        'note':        ''
+        'note':        'PerDiem Without Tax for NO'
     }))
 
     return ops   
