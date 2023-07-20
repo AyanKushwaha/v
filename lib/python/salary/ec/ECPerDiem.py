@@ -693,23 +693,16 @@ class PerDiemTrip(DataClass):
         if not self.legsAdjusted:
             self.adjustPerDiem()
         for leg in self.legs:
-            print(leg.flight)
-            print('This is not CD duty')
-            sum += leg.getCompensationHomeCurrency() 
+            sum += leg.getCompensationHomeCurrency()
         sum += self.getExtraCompensationSumHomeCurrency()
-        print(sum)
-        print("---")
         return round(sum, 2)
 
     def getExtraCompensationSumHomeCurrency(self):
         sum = 0
         for i in xrange(len(self.perDiemExtra)):
-            if self.tripTimeTax >= RelTime(24, 0):
-                if self.coursePerDiem==False:
-                    if self.perDiemExtraType[i] in ('EX', 'PH'):
-                        print('Perdiem type verified')
-                        print('Course PerDiem is Zero')
-                        sum += self.perDiemExtra[i] * self.perDiemExtraCompensation[i] * self.perDiemExtraExchangeRate[i] / self.perDiemExtraExchangeUnit[i]
+            if self.coursePerDiem==False:
+                if self.perDiemExtraType[i] in ('EX', 'PH'):
+                    sum += self.perDiemExtra[i] * self.perDiemExtraCompensation[i] * self.perDiemExtraExchangeRate[i] / self.perDiemExtraExchangeUnit[i]
         return sum
 
     def getMealReductionSumHomeCurrency(self):
@@ -943,9 +936,9 @@ class PerDiemTrip(DataClass):
             
         for leg in self.legs:
             leg.clearTaxDeductCalcInfo()
-        #print "Trip: ", str(self.startUTC),"-", str(self.endUTC), "   ", str(self.tripTimeTax)
+        #print "Trip-3150: ", str(self.startUTC),"-", str(self.endUTC), "   ", str(self.tripTimeTax)
+        #if self.tripTimeTax >= RelTime(24, 0) or (1 if 'CD' in [leg.flight for leg in self.legs] else 0):
         if self.tripTimeTax >= RelTime(24, 0):
-            print("When the trip time is greater than 24 Hrs")
             #print ">24h: "
             def handleMultipleLegs(legs, first, end):
                 legs[end - 1].dispTaxDeductLast = True
@@ -991,19 +984,15 @@ class PerDiemTrip(DataClass):
             #print "END Per diem tax NO"
                 
         elif self.layoverTaxDeductNo: # 2A, 3: if at least 5:00 between 22-06 and stop, or covering all of 22-06
-            print("This is 11")
             #print "Is layover: "
             if self.hasInternationalStopTax:
                 result = self.getCompensationSumHomeCurrency()
-                print("This is 11-1")
                 for leg in self.legs: leg.setTaxDeductCalcInfoAll(False)
             else:
                 #Only used for domestic trips, therefore last leg is used
                 result = self.defaultTaxDeductDomestic
-                print("This is 11-2")
                 self.legs[-1].setTaxDeductCalcInfo(1, self.defaultTaxDeductDomestic, True)
         else: # 2B
-            print("This is 22")
             #print "Is short: "
             leg = reduce(PerDiemUtil.longestStop, self.legs)
             
@@ -1013,37 +1002,27 @@ class PerDiemTrip(DataClass):
             
             #print self.defaultTaxDeductDomestic, self.defaultTaxDeductDomesticLow1, self.defaultTaxDeductDomesticLow2, self.defaultTaxDeductDomesticLow3
             if leg.actualStopTime >= STOP_LONG: # 2B3
-                print("This is 22-1")
                 if self.hasInternationalStopTax:
                     result = self.getCompensationSumHomeCurrency()
-                    print("This is 22-1-1")
                     self.legs[-1].setTaxDeductCalcInfo(1, self.getCompensationSumHomeCurrency(), False)
                 else:
                     result = self.defaultTaxDeductDomesticLow1
-                    print("This is 22-1-2")
                     self.legs[-1].setTaxDeductCalcInfo(1, self.defaultTaxDeductDomesticLow1, True)
             elif leg.actualStopTime > STOP_MEDIUM and not self.hasInternationalStopTax: # 2B2
-                print("This is 22-2")
                 result = self.defaultTaxDeductDomesticLow2
                 self.legs[-1].setTaxDeductCalcInfo(1, self.defaultTaxDeductDomesticLow2, True)
             elif leg.actualStopTime > STOP_SHORT:
-                print("This is 22-3")
                 if self.hasInternationalStopTax:
-                    print("This is 22-3-1")
                     self.legs[-1].setTaxDeductCalcInfo(2.0 / 3.0, self.getCompensationSumHomeCurrency(), False)
                     result = self.getCompensationSumHomeCurrency() * (2.0 / 3.0)
                 else:
-                    print("This is 22-3-2")
                     result = self.defaultTaxDeductDomesticLow3
                     self.legs[-1].setTaxDeductCalcInfo(1, self.defaultTaxDeductDomesticLow3, True)
             else:
-                print("This is 22-4")
                 if self.hasInternationalStopTax:
-                    print("This is 22-4-1")
                     self.legs[-1].setTaxDeductCalcInfo(0.5, self.getCompensationSumHomeCurrency(), False)
                     result = self.getCompensationSumHomeCurrency() * 0.5
                 else:
-                    print("This is 22-4-2")
                     result = 0
         return round(result, 2)
 
