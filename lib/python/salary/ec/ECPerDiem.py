@@ -693,16 +693,18 @@ class PerDiemTrip(DataClass):
         if not self.legsAdjusted:
             self.adjustPerDiem()
         for leg in self.legs:
-            sum += leg.getCompensationHomeCurrency()
+                if not leg.isPerDiemExtra:
+                    sum += leg.getCompensationHomeCurrency()
+
         sum += self.getExtraCompensationSumHomeCurrency()
+
         return round(sum, 2)
 
     def getExtraCompensationSumHomeCurrency(self):
         sum = 0
         for i in xrange(len(self.perDiemExtra)):
-            if self.coursePerDiem==False:
-                if self.perDiemExtraType[i] in ('EX', 'PH'):
-                    sum += self.perDiemExtra[i] * self.perDiemExtraCompensation[i] * self.perDiemExtraExchangeRate[i] / self.perDiemExtraExchangeUnit[i]
+            if self.perDiemExtraType[i] in ('EX', 'PH'):
+                sum += self.perDiemExtra[i] * self.perDiemExtraCompensation[i] * self.perDiemExtraExchangeRate[i] / self.perDiemExtraExchangeUnit[i]
         return sum
 
     def getMealReductionSumHomeCurrency(self):
