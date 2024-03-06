@@ -23,7 +23,7 @@ from salary.wfs.wfs_report import (abs_to_datetime, extperkey_from_id, country_f
 from salary.wfs.wfs_config import PaycodeHandler
 import time
 
-HEADERS = ('EMPLOYEE_ID', 'PAY_CODE', 'WORK_DT', 'HOURS', 'DAYS_OFF')
+HEADERS = ('EMPLOYEE_ID', 'PAY_CODE', 'WORK_DT', 'HOURS', 'DAYS_OFF','Test')
 EXCLUDED_RANKS=['AA']
 
 logging.basicConfig()
