@@ -1,6 +1,5 @@
 """
-Per Diem Evaluation and Operations module.
-Testing
+Per Diem Evaluation and Operations modle.
 """
 
 import carmensystems.rave.api as r
