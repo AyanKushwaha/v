@@ -26,6 +26,7 @@ salary_systems = {
 salary_perdim_article = {
     'SE': ['MEAL', 'PERDIEM_SALDO', 'PERDIEM_TAX_DAY', 'PERDIEM_TAX_DOMESTIC', 'PERDIEM_TAX_INTER','TestPaycode'],
     'NO': ['MEAL_C', 'MEAL_F', 'PERDIEM_SALDO', 'PERDIEM_TAX_DAY', 'PERDIEM_TAX_DOMESTIC', 'PUBL_HOLIDAY_COMP'],
+
     'DK': ['MEAL_C', 'MEAL_F', 'PERDIEM_SALDO', 'PERDIEM_TAX', 'PERDIEM_NO_TAX'],
     'CN': ['PERDIEM_SALDO'],
     'HK': ['PERDIEM_SALDO'], 
@@ -40,9 +41,9 @@ salary_supervis_article = {
     'JP': []
 }
 salary_overtime_article = {
-    'DK': ['SCC', 'SCCSVS', 'SNGL_SLIP_LONGHAUL'],
-    'NO': ['SCC', 'SCCSVS', 'MDCSH', 'SCCNOP', 'MDCLH', 'SNGL_SLIP_LONGHAUL'],
-    'SE': ['SNGL_SLIP_LONGHAUL', 'SCC'],
+    'DK': ['SCC', 'SCCSVS', 'SNGL_SLIP_LONGHAUL','ABS_PR_LOA_D'],
+    'NO': ['SCC', 'SCCSVS', 'MDCSH', 'SCCNOP', 'MDCLH', 'SNGL_SLIP_LONGHAUL','ABS_PR_LOA_D'],
+    'SE': ['SNGL_SLIP_LONGHAUL', 'SCC','ABS_PR_LOA_D'],
     'HK': [], 
     'CN': [],
     'JP': []
@@ -269,20 +270,28 @@ class PerDiemRun(ECGenericRun):
                 for a in salary_perdim_article[crew.salarySystem]:
                     func = getattr(self, a)
                     value = func(crew)
-                    if value is not None and int(value) != 0:
-                        entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, value/ 100.0 if self.salary_article_tm[crew.salarySystem][a] != '3234' else '', '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '', ''))
-                
+                    value_4802 = value if type(value).__name__!='list' else value[0]
+                    if value is not None and int(value_4802)!=0:
+                        #Commented below code and re-written for SKCMS-3150- Salary Article 4802 for Norwegian Crew
+                        #entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, value/ 100.0 if self.salary_article_tm[crew.salarySystem][a] != '3234' else '', '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '', ''))
+                        generic_values = [crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo]
+                        if self.salary_article_tm[crew.salarySystem][a] not in ['4802', '3234']:
+                            article_values = [value/ 100.0,'','',''] #appended value, n, units and o
+                        elif self.salary_article_tm[crew.salarySystem][a] == '4802':
+                            article_values = [value[0] /100.0,'' ,value[1] /100.0,'']
+                        else:
+                            article_values = ['', '', value/ 150000.0,'']
+                        consolidated_lst = generic_values + article_values
+                        entries[crew.salarySystem].append(consolidated_lst)
                 for e in self.extra_articles:
                     func = getattr(self, e)
                     value = func(crew)
                     if value is not None and int(value) != 0:
-                        entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, value/ 100.0 if self.salary_article_tm[crew.salarySystem][a] != '3234' else '', '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '', ''))
-            
+                        entries[crew.salarySystem].append((crew.homeCurrency, self.start.strftime('%d/%m/%Y'), self.salary_article_tm[crew.salarySystem][a], crew.empNo, value/ 100.0 if self.salary_article_tm[crew.salarySystem][a] != '3234' else '', '', value/ 150000.0 if self.salary_article_tm[crew.salarySystem][a] == '3234' else '', ''))        
             else:
                 log.debug("No salary system for crew {0}".format(crew.crewId))
         return entries
     
-
     def MEAL_C(self, rec):
         # DK: 1540, positive in normal cases
         # NO: 3705, positive in normal cases
@@ -319,7 +328,13 @@ class PerDiemRun(ECGenericRun):
     def PERDIEM_NO_TAX(self, rec):
         # DK: 1548
         return times100(rec.getPerDiemCompensationWithoutTax())
-
+    
+    def PERDIEM_NO_WO_TAX(self, rec):
+        value_getpcwotax = times100(rec.getPerDiemCompensationWithoutTax())    # This value gives Perdiem Norway without Tax
+        value_getnonig = times100(rec.getCountofNightswithoutTaxSKN())        # This value corresponds to number of nights corresponding to this value
+        lst = [value_getpcwotax, value_getnonig]
+        return lst
+            
     def PERDIEM_TAX_DAY(self, rec):
         # NO: 4084
         # SE: 395
@@ -445,7 +460,7 @@ class OvertimeRun(ECGenericRun):
         self.crew_ids = crew_ids
         self.rave_expr = 'not salary.%crew_excluded% and not salary.%ec_rank_excluded%'
         log.debug("OvertimeRun config with firstdate: {0}  and lastdate: {1}".format(report_first_absdate, report_last_absdate))
-
+        self.cached_PR_data = self.generate_PR_acc_data()
     def run(self):
         self.run_info(report_type='OvertimeRun')
         rosters = self.rosters(rave_expr=self.rave_expr, roster_manager='overtime', crew_ids=self.crew_ids)
@@ -495,15 +510,57 @@ class OvertimeRun(ECGenericRun):
             return times100(rec.getSnglSlipLonghaul())
         else:
             return 0
-
+    def ABS_PR_LOA_D(self, rec):
+        check=0
+        check=no_of_PR_days(self, rec.crewId)
+        return check
+    
     def SCCNOP(self, rec):
         if rec.isCC4EXNG:
             return 0
         return hours100(rec.getSCCNOP())
-
-
+    
+    #Caching Data
+    def generate_PR_acc_data(self):
+        startMonth = datetime.now().replace(month=1)
+        endMonth=startMonth.replace(month=self.end.month)
+        start_month_date=datetime(startMonth.year, startMonth.month, 1).strftime('%d%b%Y  %H:%M')
+        end_month_date = datetime(startMonth.year, endMonth.month, 1).strftime('%d%b%Y  %H:%M')
+        reasoncode_query = '(|(reasoncode=OUT Roster)(reasoncode=OUT Correction))'
+        accountName= 'PR'
+        PR_Transactions = TM.account_entry.search("(&(tim>{start_date})(tim<{end_date})(account={account}){reasoncode})".format(
+            start_date=start_month_date,
+            end_date=end_month_date,
+            account=accountName,
+            reasoncode=reasoncode_query
+        ))
+        tnx_dict = {}
+        for tnx in PR_Transactions:
+            tnx_dict.setdefault(tnx.crew.id, [])
+            tnx_dict[tnx.crew.id].append({
+                'tnx_dt' :  tnx.tim,
+                'PR_amount' : tnx.amount
+            })
+        return(tnx_dict)
 
 # Utility functions
+
+#PR calculation for current month:- Only 3 PR days can be allocated for a certain month, 
+# rest are carry forwarded to next month
+def CalPRinCurrentMonth(PRperMonth):
+    rem = 0
+    count = 0
+    for i in PRperMonth:
+        val=-i
+        val+=rem
+        if(val>300):
+            rem = val-300
+            if (rem >0):
+                count=300
+        else:
+            count=val
+            rem = 0
+    return count
 
 def times100(value):
     """ Return integer where value is multiplicated with 100 """
@@ -526,6 +583,32 @@ def minutes100(value):
         return 0
     (hhh, mm) = value.split()
     return 6000 * hhh + 100 * mm
+
+#Calculates PR days allocated per crew
+def no_of_PR_days(self,crew_id):
+    format = "%d%b%Y %H:%M:%S:%f"
+    startMonth=datetime.now().replace(month=1)
+    endMonth=startMonth.replace(month=self.end.month)
+    PRperMonth = []
+    crew_tnx=[]
+    try:
+        crew_tnx=self.cached_PR_data[crew_id]
+    except KeyError as ke:
+        print('Key Not Found in Employee Dictionary:', ke)
+    for i in range(endMonth.month - startMonth.month):
+        monthStart = startMonth.month + i
+        ae_tim = datetime(startMonth.year, monthStart, 1).strftime(format)
+        start_month_date = AbsTime(ae_tim[:15])
+        monthEnd = startMonth.month + i +1
+        tim = datetime(startMonth.year, monthEnd, 1).strftime(format)
+        end_month_date = AbsTime(tim[:15])
+        PRamount=0
+        for transaction in crew_tnx:
+            if(transaction['tnx_dt']>=start_month_date and transaction['tnx_dt']<end_month_date):
+                PRamount+=transaction['PR_amount']                        
+        PRperMonth.append(PRamount)
+    currentCount = CalPRinCurrentMonth(PRperMonth)
+    return currentCount
 
 def get_article_table(pstart, pend):
     tm_articles = {
@@ -575,11 +658,11 @@ def createCSV(entries, release, studio, filename_prefix='Payments_CMS'):
                     # NO => N3150
                     if co == 'DK' and article in ['1530','1540', '1548', '1550'] and article[0] != 'D':
                         article = 'D' + article
-                    elif co == 'NO' and article in ['3150'] and article[0] != 'N':
+                    elif co == 'NO' and article in ['3150'] and article[0] != 'N':    ###,'4802'
                         article = 'N' + article
                     
                     if studio:
-                        f.write("{0},{1},{2},{3},{4},{5},{6}".format(homeCurrency, start, article, empNo ,value, units, os.linesep ))
+                        f.write("{0},{1},{2},{3},{4},{5},{6}".format(homeCurrency, start, article, empNo,value, units, os.linesep))
                     else:
                         f.write("{0},{1},{2},{3},{4},{5},{6},{7}{8}".format(homeCurrency, start, article, empNo ,value, n, units , o, os.linesep ))
             if release:
