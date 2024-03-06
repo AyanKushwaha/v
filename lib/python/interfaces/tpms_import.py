@@ -1,5 +1,5 @@
 import Cui
-
+from tpms_exlude_records_mail import send_email
 
 #sys.exit() #TODO
 
@@ -8,6 +8,7 @@ def main():
     import os
     import re
     import time
+    import datetime
     import carmusr.HelperFunctions as HF
     import carmensystems.rave.api as R
     import carmusr.Attributes as Attributes
@@ -16,16 +17,20 @@ def main():
     from datetime import datetime, timedelta, date
 
     from AbsTime import AbsTime
+    from AbsDate import AbsDate
     from modelserver import EntityNotFoundError
 
     from tm import TM
 
     source_folder = os.path.join(os.environ['CARMTMP'], 'ftp', 'in')
     backup_folder = os.path.join(os.environ['CARMTMP'], 'ftp', 'tpms_import_processed')
+    exclude_folder= os.path.join(os.environ['CARMTMP'], 'ftp', 'exclude_records')
     DOCUMENT_WHITELIST = ['LC', 'PC', 'OPC', 'CRM', 'CRMC', 'PGT', 'REC']
 
     if not os.path.exists(backup_folder):
         os.makedirs(backup_folder)
+    if not os.path.exists(exclude_folder):
+        os.makedirs(exclude_folder)
 
     firstcol = 'IICMEQ_OML'  # first column in file
     remark = 'IICMEQ_REMARK'  # empty
@@ -89,7 +94,8 @@ def main():
         exam_d = _date_to_abs_time(examdate)
         now_d = _abs_time_now()
         if exam_d > now_d or (exam_d < (now_d.adddays(-90)) and (lastaction == 'NU' or lastaction == 'N')):
-            errmsg = "TPMS: exam date " + str(exam_d) + " for crew " + row[staff_id] + " outside valid interval " + str(now_d.adddays(-90)) + "-" + str(now_d)
+            global errmsg
+            errmsg = "TPMS: Exam date " + str(AbsDate(exam_d)) + " for crew " + row[staff_id] + " outside valid interval " + str(AbsDate(now_d.adddays(-90))) + "-" + str(AbsDate(now_d))
             print errmsg
             return False
         else:
@@ -198,23 +204,31 @@ def main():
                 raise ValueError("Unable to find TPMS header")
             header = csv_file.readline()
             fieldnames = [tag[1:-1] for tag in header.strip().split(';')]
-
+            exc_data_list = []
+            header=[ "Staff_Id", "Qual_Code_Type", "Qual_Code", "Act_Group", "Exam_Date", "Valid_From", "Valid_To", "Error_Message"]
+            timestamp = datetime.now().strftime('%Y-%m-%d_%H:%M')
+            exc_file_name = exclude_folder + '/TPMS_Qual_Update_Rejected_by_CMS_{}.csv'.format(timestamp)
             for row_number, row in enumerate(csv.DictReader(csv_file, fieldnames=fieldnames, delimiter=';')):
                 if row[firstcol]=='### eof ###':
                     print "TPMS EOF"
                     break
-                print "TPMS #### "*8
-                print "TPMS: ", row[act_group_name], row[qual_code], row[qual_code_type], row[staff_id], row[valid_from],row[end_date], row[exam_date]
+                print ("TPMS: ", row[staff_id], row[qual_code_type], row[qual_code], row[act_group_name], row[exam_date] , row[valid_from], row[end_date])
                 if not _handle_entry(row_number, row):
-                    print "TPMS EXCLUDE RECORD", row[remark]
+                    print "TPMS EXCLUDE RECORD - ", row[remark]
+                    errormsg=errmsg
+                    data = [[row[staff_id], row[qual_code_type], row[qual_code], row[act_group_name], row[exam_date], row[valid_from], row[end_date], errormsg]]
+                    exc_data_list.append(data)
                     continue
-                print "TPMS UPDATE RECORD"
+                print "Going to update Crew Docs"
                 _update_crew_document(row_number, row)
-
-
-        TM.save() 
+        with open(exc_file_name, mode='wb+') as exc_csv_file:
+            writer = csv.writer(exc_csv_file)
+            writer.writerow(header)
+            for each_row in exc_data_list:
+                writer.writerows(each_row)
+        TM.save()
         shutil.move(f, backup_folder)
-
+        send_email()
 
 def run():
     try:
