@@ -24,7 +24,7 @@ from salary.wfs.wfs_config import PaycodeHandler
 import time
 
 HEADERS = ('EMPLOYEE_ID', 'PAY_CODE', 'WORK_DT', 'HOURS', 'DAYS_OFF')
-EXCLUDED_RANKS=['AA']
+EXCLUDED_RANKS=['A_A']
 
 logging.basicConfig()
 log = logging.getLogger('wfs_time_entry')
