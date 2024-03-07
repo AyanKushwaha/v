@@ -613,12 +613,6 @@ class PerDiemRoster(DataClass):
         for trip in self.trips:
             days += trip.getTripDaysTaxNorway()
         return int(days)
-    
-    def getCountofNightswithoutTaxSKN(self):
-        nights =0
-        for trip in self.trips:
-            nights += trip.getCountofNightswithoutTaxSKNPerTrip()
-        return nights
 
     def __all(trip):
         return True
@@ -722,8 +716,8 @@ class PerDiemTrip(DataClass):
         if not self.legsAdjusted:
             self.adjustPerDiem()
         for leg in self.legs:
-                if not leg.isPerDiemExtra:
-                    sum += leg.getCompensationHomeCurrency()
+            if not leg.isPerDiemExtra:
+                sum += leg.getCompensationHomeCurrency()
 
         sum += self.getExtraCompensationSumHomeCurrency()
 
@@ -774,6 +768,8 @@ class PerDiemTrip(DataClass):
                 allocatedPerDiem = self.sumAllocatedPerDiem()
             #We only need to adjust once if trip or legs doesn't change
             self.legsAdjusted = True
+
+
 
     #Finds the leg for upwards adjustment
     def findForUpAdjust(self):
@@ -842,7 +838,7 @@ class PerDiemTrip(DataClass):
             return 1
         else:
             return 0
-
+                
     def getTaxDeductNorwayBefore2019(self):
         """
         Calculates tax deductable amount according Norwegian rules
@@ -958,6 +954,7 @@ class PerDiemTrip(DataClass):
         """
         Calculates tax deductable amount according Norwegian rules
         """
+        #print "getTaxDeductNorway"
         if self.startDayTaxSKN < AbsTime("1JAN2019"):
             return self.getTaxDeductNorwayBefore2019()
             
@@ -967,8 +964,7 @@ class PerDiemTrip(DataClass):
             
         for leg in self.legs:
             leg.clearTaxDeductCalcInfo()
-        #print "Trip-3150: ", str(self.startUTC),"-", str(self.endUTC), "   ", str(self.tripTimeTax)
-        #if self.tripTimeTax >= RelTime(24, 0) or (1 if 'CD' in [leg.flight for leg in self.legs] else 0):
+        #print "Trip: ", str(self.startUTC),"-", str(self.endUTC), "   ", str(self.tripTimeTax)
         if self.tripTimeTax >= RelTime(24, 0):
             #print ">24h: "
             def handleMultipleLegs(legs, first, end):
@@ -1055,6 +1051,7 @@ class PerDiemTrip(DataClass):
                     result = self.getCompensationSumHomeCurrency() * 0.5
                 else:
                     result = 0
+
         return round(result, 2)
 
     def getTaxDeductSweden(self):
@@ -1167,15 +1164,6 @@ class PerDiemTrip(DataClass):
         for comp in compPerTrip:
             sum += int(comp)
         return round(sum, 2)
-    
-    def getCountofNightswithoutTaxSKNPerTrip(self):
-        result=0
-        if not self.legsAdjusted:
-            self.adjustPerDiem()
-        for leg in self.legs:
-            leg.clearTaxDeductCalcInfo()
-        result = self.getTripDaysTaxNorway()
-        return result
 
 class PerDiemLeg(DataClass):
     """

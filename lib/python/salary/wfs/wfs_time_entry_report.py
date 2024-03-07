@@ -24,7 +24,7 @@ from salary.wfs.wfs_config import PaycodeHandler
 import time
 
 HEADERS = ('EMPLOYEE_ID', 'PAY_CODE', 'WORK_DT', 'HOURS', 'DAYS_OFF')
-EXCLUDED_RANKS=['AA','AH']
+EXCLUDED_RANKS=['AA']
 
 logging.basicConfig()
 log = logging.getLogger('wfs_time_entry')
@@ -132,15 +132,16 @@ class TimeEntryReport(WFSReport):
         is_split_link = False
         split_count_link = 1
         
-        last_overtime_date = {"crew":crew_id,"date": self.start}
+        last_overtime_date = {"crew":crew_id,"date": self.report_start_date()}
+
         for roster_bag in rave.context(SingleCrewFilter(crew_id).context()).bag().chain_set():
             for trip_bag in roster_bag.iterators.trip_set(): 
                 trip_start_day = trip_bag.trip.start_day()
                 extperkey = extperkey_from_id(crew_id, trip_start_day)
                 rank = rank_from_id(crew_id, trip_start_day)
-                log.debug('NORDLYS: Crew {e} has rank {r}'.format(e=extperkey, r=rank))
-                actual_rank = actual_rank_from_id(crew_id, trip_start_day)
-                log.debug('NORDLYS: Crew {e} has actual rank {r}'.format(e=extperkey, r=actual_rank))
+                #log.debug('NORDLYS: Crew {e} has rank {r}'.format(e=extperkey, r=rank))
+                #actual_rank = actual_rank_from_id(crew_id, trip_start_day)
+                #log.debug('NORDLYS: Crew {e} has actual rank {r}'.format(e=extperkey, r=actual_rank))
                 country = country_from_id(crew_id, trip_start_day)
                 for duty_bag in trip_bag.iterators.duty_set(where=where_filter):
                     mid_hrs_link = []
@@ -150,9 +151,9 @@ class TimeEntryReport(WFSReport):
                         # Not possible to evaluate anything without rank and country
                         log.info('NORDLYS: Rank or country not found')
                         continue
-                    if actual_rank in EXCLUDED_RANKS:
-                        log.info('NORDLYS: Skipping  crew {e} with excluded rank {r}'.format(e=extperkey, r=actual_rank))
-                        continue
+                    #if actual_rank in EXCLUDED_RANKS:
+                        #log.info('NORDLYS: Skipping  crew {e} with excluded rank {r}'.format(e=extperkey, r=actual_rank))
+                        #continue
                     event_data = self._event_data_template()
                     duty_start = duty_bag.duty.start_hb()
                     duty_end = duty_bag.duty.end_hb()
@@ -318,7 +319,7 @@ class TimeEntryReport(WFSReport):
                     # Check general overtime
                         general_ot_hrs = default_reltime(duty_bag.report_overtime.overtime_7_calendar_days_ot())
 
-                        if general_ot_hrs > RelTime('0:00') and (last_overtime_date['crew'] == crew_id):
+                        if general_ot_hrs > RelTime('0:00') and (last_overtime_date['crew'] == crew_id and last_overtime_date['date'].adddays(6) < duty_start_day):
                             last_overtime_date['crew'] = crew_id
                             last_overtime_date['date'] = duty_start_day
 
@@ -669,7 +670,7 @@ class TimeEntryReport(WFSReport):
         curr_abs = start_dt
                
         if duty_bag.report_overtime.has_il7_in_hb_interval(curr_abs, curr_abs + RelTime('24:00')) and not duty_bag.duty.is_flight_duty():
-            log.info('NORDLYS: Found IL7 day for temporary crew {crew} at {dt}'.format(crew=crew_id, dt=curr_abs)) 
+           log.info('NORDLYS: Found IL7 day for temporary crew {crew} at {dt}'.format(crew=crew_id, dt=curr_abs)) 
         else:
             tmp_hrs = default_reltime(duty_bag.report_overtime.temporary_crew_hours_per_calendar_day(curr_abs))
             if tmp_hrs > RelTime('00:00'):
@@ -1080,15 +1081,13 @@ class TimeEntryReport(WFSReport):
         reasoncode_query = '(|(reasoncode=BOUGHT)(reasoncode=SOLD))'
         query_f3_f7 = '&(|(account=F3)(account=F7))(|(reasoncode=OUT Payment)(reasoncode=IN Payment Correction))'
         query_f7 = '&(&(account=F7)(reasoncode=OUT Roster))'
-        query_pr = '&(|(account=PR))(|(reasoncode=OUT Roster)(reasoncode=OUT Correction))'
-        transactions = account_entry_t.search('(&(tim>={st})(tim<={end})(|(&{account_query}{reasoncode_query})({query_f3_f7})({query_f7})({query_pr})))'.format(
+        transactions = account_entry_t.search('(&(tim>={st})(tim<={end})(|(&{account_query}{reasoncode_query})({query_f3_f7})({query_f7})))'.format(
             st=self.start.adddays(-7),
             end=self.end,
             account_query=account_query,
             reasoncode_query=reasoncode_query,
             query_f3_f7=query_f3_f7,
-            query_f7=query_f7,
-            query_pr=query_pr
+            query_f7=query_f7
         ))
         
         dict_t = {}
