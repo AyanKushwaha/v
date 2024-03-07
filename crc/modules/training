@@ -1172,7 +1172,8 @@ export %recurrent_refresher_reqd%(String type, Abstime date) =
     %recurrent_emg_performed_CC%(type, date)
   else
     any(duty(roster), %reqd_recurrent_pgt%)
-    where (duty.%start_hb% < date and 
+    where (duty.%start_hb% < date and
+    	   duty.%start_hb% >= %now_round_up% and
            trip.%is_ground_duty%)
     or %recurrent_performed_by_training_log%(type,date,"");
     
@@ -1358,6 +1359,7 @@ end
   any(duty(roster), %reqd_recurrent_sim%(type))
   where (duty.%start_hb% < date and
          duty.%start_hb% >= earliest_assignment_def and
+	 duty.%start_hb% >= %now_round_up% and
          %duty_is_own_sim%)
   or %_recurrent_performed_by_training_log%(type,date,"", earliest_assignment_def);    /*ok for duty as well */
 
@@ -1555,6 +1557,7 @@ export %leg_is_opc_not_Z% =
 %recurrent_crm_performed%(String type, Abstime date) =
   any(duty(roster), duty.%is_crm%)
   where (duty.%start_hb% < date and
+  	duty.%start_hb% >= %now_round_up% and
          trip.%is_crm%)
   or %recurrent_performed_by_training_log%(type,date,"");
 
@@ -1564,6 +1567,7 @@ export %leg_is_opc_not_Z% =
 export %recurrent_crmc_performed%(String type, Abstime date) =
   any(duty(roster), duty.%is_crmc%)
   where (duty.%start_hb% < date and
+  	duty.%start_hb% >= %now_round_up% and
          trip.%is_crmc%)
   or %recurrent_performed_by_training_log%(type,date,"");
 
@@ -2570,6 +2574,11 @@ export %is_lcp_last_ilc% =
     %is_lcp_on_ilc% and
     default(is_last(leg(trip))
             where (leg.%is_active_flight%), true);
+    
+export %is_lcs_last_lc_or_ilc% =
+    %is_lcs_on_lc_or_ilc% and
+    default(is_last(leg(trip))
+            where (leg.%is_active_flight%), true);
 
 %_is_instr_first_zftt_lifus% =
     default(leg.%is_zftt_lifus_instructor%, true) and
@@ -2602,12 +2611,17 @@ export %is_lcp_last_ilc% =
   
 export %is_lcp_on_lc% = %_is_lcp_on_lc_or_ilc%("LC");
 export %is_lcp_on_ilc% = %_is_lcp_on_lc_or_ilc%("ILC");
+export %is_lcs_on_lc_or_ilc% = (%_is_lcs_on_lc_or_ilc%("LC") or %_is_lcs_on_lc_or_ilc%("ILC") or %_is_lcs_on_lc_or_ilc%("LC AP-POS")); 
 
 /* redefined in training_gpc */
 export %is_lcp_on_ilc_for_new_capt% = false;
 
 %_is_lcp_on_lc_or_ilc%(String type) =
     crew.%is_line_check_pilot%(leg.%start_utc%) and
+    leg.%has_training_attr_any_crew%(type);
+    
+%_is_lcs_on_lc_or_ilc%(String type) =
+    crew.%is_lcs%(leg.%start_utc%) and
     leg.%has_training_attr_any_crew%(type);
   
 export %is_first_lifus% =   
@@ -3363,11 +3377,17 @@ table acceptable_companion(String main_cat, String type, String code, Abstime da
   /* Simulator types */
   "F", "Skill test", -, - -> crew.%is_tre_instr%(code, date), 
                           "TRE";
-  "F", "PC/OPC", -, -     -> crew.%is_tre_instr%(code, date) or
+  "F", "PC", -, -         -> crew.%is_tre_instr%(code, date) or
                              crew.%is_sup_instr%(code, date) or
                              crew.%is_sfe_instr%(code, date) or
                              crew.%is_ol_instr_ac_qual%(code, date), 
                           "TRE, SFE, SUP, OL";
+  "F", "OPC", -, -         -> crew.%is_tre_instr%(code, date) or
+                              crew.%is_sup_instr%(code, date) or
+                              crew.%is_sfe_instr%(code, date) or
+                              crew.%is_ol_instr_ac_qual%(code, date) or
+                              crew.%is_tri_instr%(code, date),                              
+                          "TRI, TRE, SFE, SUP, OL";
   "F", "Supervision", -, - -> crew.%is_sup_instr_qualgroup%(code, date),
                            "SUP";
   "F", "FFS TRI", -, -     -> crew.%is_tri_instr%(code, date), 
@@ -3434,8 +3454,10 @@ export %sim_type_for_qual_check% =
     "Skill test"
   else if leg.%is_sim_instr_supervis% then
     "Supervision"
-  else if leg.%is_pc_or_opc% then 
-    "PC/OPC"
+  else if any (equal_legs, %leg_is_pc%) then 
+    "PC" 
+  else if leg.%is_opc% then
+    "OPC"
   else if leg.%is_ffs% then
     %ffs_type_for_qual_check%
   else
