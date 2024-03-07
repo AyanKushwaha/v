@@ -1,5 +1,6 @@
 """
-Per Diem Evaluation and Ooooooooperrrrrrrrrrrrrationsssssssssssssssssssssss module.
+Per Diem Evaluation and Operations module.
+5555
 """
 
 import carmensystems.rave.api as r
