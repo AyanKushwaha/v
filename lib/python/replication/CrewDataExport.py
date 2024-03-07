@@ -480,10 +480,6 @@ class CrewElement(XMLElement):
                         return 'CC RP'
                     else:
                         return 'CC' + ' ' + region + ' ' + contracttype
-                elif region == 'SVS' and (base == 'BGO' or base == 'OSL'):
-                    return 'CC SKN ' + contracttype
-                elif region == 'SVS' and base == 'CPH':
-                    return 'CC SKD ' + contracttype
         return None
     
     def _merge_adjacent_items(self, lst, key):

@@ -132,7 +132,7 @@ class TimeEntry(WFSReport):
         is_split_link = False
         split_count_link = 1
 
-        last_overtime_date = {"crew":crew_id,"date":self.start}
+        last_overtime_date = {"crew":crew_id,"date":self.report_start_date()}
 
         for roster_bag in rave.context(SingleCrewFilter(crew_id).context()).bag().chain_set():
             for trip_bag in roster_bag.iterators.trip_set(): 
@@ -335,7 +335,7 @@ class TimeEntry(WFSReport):
                         # Check general overtime
                         general_ot_hrs = default_reltime(duty_bag.report_overtime.overtime_7_calendar_days_ot())
                     
-                        if general_ot_hrs > RelTime('0:00') and (last_overtime_date['crew'] == crew_id):
+                        if general_ot_hrs > RelTime('0:00') and (last_overtime_date['crew'] == crew_id and last_overtime_date['date'].adddays(6) < duty_start_day):
                             last_overtime_date['crew'] = crew_id
                             last_overtime_date['date'] = duty_start_day
 
@@ -1806,16 +1806,13 @@ class TimeEntry(WFSReport):
         reasoncode_query = '(|(reasoncode=BOUGHT)(reasoncode=SOLD))'
         query_f3_f7 = '&(|(account=F3)(account=F7))(|(reasoncode=OUT Payment)(reasoncode=IN Payment Correction))'
         query_f7 = '&(&(account=F7)(reasoncode=OUT Roster))'
-        query_pr = '&(|(account=PR))(|(reasoncode=OUT Roster)(reasoncode=OUT Correction))'
-
-        transactions = account_entry_t.search('(&(tim>={st})(tim<={end})(|(&{account_query}{reasoncode_query})({query_f3_f7})({query_f7})({query_pr})))'.format(
+        transactions = account_entry_t.search('(&(tim>={st})(tim<={end})(|(&{account_query}{reasoncode_query})({query_f3_f7})({query_f7})))'.format(
             st=self.start.adddays(-7),
             end=self.end,
             account_query=account_query,
             reasoncode_query=reasoncode_query,
             query_f3_f7=query_f3_f7,
-            query_f7=query_f7,
-            query_pr=query_pr
+            query_f7=query_f7
         ))
         
         dict_t = {}

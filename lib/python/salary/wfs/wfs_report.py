@@ -27,7 +27,7 @@ ARCHIVE_PATH = "/samba-share/reports/SALARY_WFS/"
 RELEASE_PATH = '/opt/Carmen/CARMTMP/ftp/out/SALARY_SEIP/'
 seq_salary_rec_wfs = 'seq_salary_rec_wfs'
 seq_salary_run_wfs = 'seq_salary_run_wfs'
-crew_exclusion_list = ['92741','92742','92589','92462','92510','94706','24567']
+crew_exclusion_list = ['92742','92589','92462','92510','94706']
 
 logging.basicConfig()
 log = logging.getLogger('wfs_report')
