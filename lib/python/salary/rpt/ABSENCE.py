@@ -1,5 +1,6 @@
 """
 Absence transactions
+Testing
 """
 
 from salary.rpt import EmailReport
